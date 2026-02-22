@@ -1,0 +1,614 @@
+{
+  "info": {
+    "name": "Fincas NestJS API",
+    "description": "Colección de endpoints para la API REST de Fincas con NestJS, Convex y S3. Todos los endpoints usan cookies para autenticación.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "base_url",
+      "value": "http://localhost:3001",
+      "type": "string"
+    },
+    {
+      "key": "convex_url",
+      "value": "https://adventurous-octopus-651.convex.cloud",
+      "type": "string"
+    },
+    {
+      "key": "convex_site_url",
+      "value": "https://adventurous-octopus-651.convex.site",
+      "type": "string"
+    }
+  ],
+  "item": [
+    {
+      "name": "Autenticación",
+      "item": [
+        {
+          "name": "Registrar Usuario",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "if (pm.response.code === 200 || pm.response.code === 201) {",
+                  "    // Las cookies se guardan automáticamente por Postman",
+                  "    const response = pm.response.json();",
+                  "    console.log('Usuario registrado:', response.user);",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"test@example.com\",\n  \"password\": \"password123\",\n  \"name\": \"Usuario de Prueba\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/auth/register",
+              "host": ["{{base_url}}"],
+              "path": ["api", "auth", "register"]
+            },
+            "description": "Registrar nuevo usuario. Las cookies se establecen automáticamente en la respuesta."
+          }
+        },
+        {
+          "name": "Iniciar Sesión",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "if (pm.response.code === 200 || pm.response.code === 201) {",
+                  "    // Las cookies se guardan automáticamente por Postman",
+                  "    const response = pm.response.json();",
+                  "    console.log('Sesión iniciada:', response.user);",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"test@example.com\",\n  \"password\": \"password123\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/auth/login",
+              "host": ["{{base_url}}"],
+              "path": ["api", "auth", "login"]
+            },
+            "description": "Iniciar sesión con email y contraseña. Las cookies se establecen automáticamente."
+          }
+        },
+        {
+          "name": "Obtener Usuario Actual",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/auth/me",
+              "host": ["{{base_url}}"],
+              "path": ["api", "auth", "me"]
+            },
+            "description": "Obtener información del usuario autenticado. Requiere cookies de sesión."
+          }
+        },
+        {
+          "name": "Obtener Sesión",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/auth/session",
+              "host": ["{{base_url}}"],
+              "path": ["api", "auth", "session"]
+            },
+            "description": "Obtener la sesión actual. Requiere cookies de sesión."
+          }
+        },
+        {
+          "name": "Cerrar Sesión",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/auth/logout",
+              "host": ["{{base_url}}"],
+              "path": ["api", "auth", "logout"]
+            },
+            "description": "Cerrar sesión. Limpia las cookies de sesión."
+          }
+        },
+        {
+          "name": "Cerrar Sesión (sign-out)",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/auth/sign-out",
+              "host": ["{{base_url}}"],
+              "path": ["api", "auth", "sign-out"]
+            },
+            "description": "Alias de logout para compatibilidad con Better Auth."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Fincas",
+      "item": [
+        {
+          "name": "Listar Fincas",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/fincas?limit=20&location=Girardot&minCapacity=10",
+              "host": ["{{base_url}}"],
+              "path": ["api", "fincas"],
+              "query": [
+                {
+                  "key": "limit",
+                  "value": "20",
+                  "description": "Número de resultados"
+                },
+                {
+                  "key": "location",
+                  "value": "Girardot",
+                  "description": "Filtrar por ubicación"
+                },
+                {
+                  "key": "minCapacity",
+                  "value": "10",
+                  "description": "Capacidad mínima"
+                },
+                {
+                  "key": "cursor",
+                  "value": "",
+                  "description": "Cursor para paginación",
+                  "disabled": true
+                },
+                {
+                  "key": "type",
+                  "value": "",
+                  "description": "FINCA, CASA_CAMPESTRE, VILLA, etc.",
+                  "disabled": true
+                },
+                {
+                  "key": "category",
+                  "value": "",
+                  "description": "ECONOMICA, ESTANDAR, PREMIUM, etc.",
+                  "disabled": true
+                },
+                {
+                  "key": "maxPrice",
+                  "value": "",
+                  "description": "Precio máximo",
+                  "disabled": true
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Buscar Fincas",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/fincas/search?q=piscina&limit=10",
+              "host": ["{{base_url}}"],
+              "path": ["api", "fincas", "search"],
+              "query": [
+                {
+                  "key": "q",
+                  "value": "piscina",
+                  "description": "Término de búsqueda"
+                },
+                {
+                  "key": "limit",
+                  "value": "10",
+                  "description": "Número de resultados"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Obtener Finca por ID",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/fincas/:id",
+              "host": ["{{base_url}}"],
+              "path": ["api", "fincas", ":id"],
+              "variable": [
+                {
+                  "key": "id",
+                  "value": "property_id_here"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Obtener Finca por Código",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/fincas/code/:code",
+              "host": ["{{base_url}}"],
+              "path": ["api", "fincas", "code", ":code"],
+              "variable": [
+                {
+                  "key": "code",
+                  "value": "FINCA001"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Crear Finca",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "title",
+                  "value": "Finca La Esperanza",
+                  "type": "text"
+                },
+                {
+                  "key": "description",
+                  "value": "Hermosa finca con piscina y zona de parrilla",
+                  "type": "text"
+                },
+                {
+                  "key": "location",
+                  "value": "Girardot",
+                  "type": "text"
+                },
+                {
+                  "key": "capacity",
+                  "value": "15",
+                  "type": "text"
+                },
+                {
+                  "key": "lat",
+                  "value": "4.3007",
+                  "type": "text"
+                },
+                {
+                  "key": "lng",
+                  "value": "-74.8006",
+                  "type": "text"
+                },
+                {
+                  "key": "priceBase",
+                  "value": "500000",
+                  "type": "text"
+                },
+                {
+                  "key": "priceBaja",
+                  "value": "400000",
+                  "type": "text"
+                },
+                {
+                  "key": "priceMedia",
+                  "value": "450000",
+                  "type": "text"
+                },
+                {
+                  "key": "priceAlta",
+                  "value": "550000",
+                  "type": "text"
+                },
+                {
+                  "key": "priceEspeciales",
+                  "value": "700000",
+                  "type": "text"
+                },
+                {
+                  "key": "code",
+                  "value": "FINCA001",
+                  "type": "text"
+                },
+                {
+                  "key": "category",
+                  "value": "ESTANDAR",
+                  "type": "text"
+                },
+                {
+                  "key": "type",
+                  "value": "FINCA",
+                  "type": "text"
+                },
+                {
+                  "key": "features",
+                  "value": "Piscina",
+                  "type": "text"
+                },
+                {
+                  "key": "features",
+                  "value": "Parrilla",
+                  "type": "text"
+                },
+                {
+                  "key": "images",
+                  "type": "file",
+                  "src": []
+                },
+                {
+                  "key": "images",
+                  "type": "file",
+                  "src": []
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{base_url}}/api/fincas",
+              "host": ["{{base_url}}"],
+              "path": ["api", "fincas"]
+            },
+            "description": "Crear nueva finca con imágenes. Sube imágenes usando el campo 'images' (múltiples archivos permitidos, máximo 10MB cada uno)."
+          }
+        },
+        {
+          "name": "Actualizar Finca",
+          "request": {
+            "method": "PUT",
+            "header": [],
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "title",
+                  "value": "Finca La Esperanza Actualizada",
+                  "type": "text"
+                },
+                {
+                  "key": "priceBase",
+                  "value": "550000",
+                  "type": "text"
+                },
+                {
+                  "key": "images",
+                  "type": "file",
+                  "src": []
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{base_url}}/api/fincas/:id",
+              "host": ["{{base_url}}"],
+              "path": ["api", "fincas", ":id"],
+              "variable": [
+                {
+                  "key": "id",
+                  "value": "property_id_here"
+                }
+              ]
+            },
+            "description": "Actualizar finca existente. Puedes incluir nuevas imágenes."
+          }
+        },
+        {
+          "name": "Subir Video a Finca",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "video",
+                  "type": "file",
+                  "src": []
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{base_url}}/api/fincas/:id/video",
+              "host": ["{{base_url}}"],
+              "path": ["api", "fincas", ":id", "video"],
+              "variable": [
+                {
+                  "key": "id",
+                  "value": "property_id_here"
+                }
+              ]
+            },
+            "description": "Subir un video a una finca. Formatos permitidos: mp4, webm, mov. Tamaño máximo: 100MB"
+          }
+        },
+        {
+          "name": "Eliminar Finca",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/fincas/:id",
+              "host": ["{{base_url}}"],
+              "path": ["api", "fincas", ":id"],
+              "variable": [
+                {
+                  "key": "id",
+                  "value": "property_id_here"
+                }
+              ]
+            },
+            "description": "Elimina la finca y todos sus archivos asociados de S3 (imágenes y videos)."
+          }
+        },
+        {
+          "name": "Agregar Imagen",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "image",
+                  "type": "file",
+                  "src": []
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{base_url}}/api/fincas/:id/images",
+              "host": ["{{base_url}}"],
+              "path": ["api", "fincas", ":id", "images"],
+              "variable": [
+                {
+                  "key": "id",
+                  "value": "property_id_here"
+                }
+              ]
+            },
+            "description": "Agregar una imagen a una finca existente. Formatos: jpg, jpeg, png, webp. Máximo 10MB."
+          }
+        },
+        {
+          "name": "Eliminar Imagen",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/fincas/images/:imageId",
+              "host": ["{{base_url}}"],
+              "path": ["api", "fincas", "images", ":imageId"],
+              "variable": [
+                {
+                  "key": "imageId",
+                  "value": "image_id_here"
+                }
+              ]
+            },
+            "description": "Eliminar una imagen específica de una finca. También elimina el archivo de S3."
+          }
+        },
+        {
+          "name": "Agregar Característica",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Jacuzzi\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/fincas/:id/features",
+              "host": ["{{base_url}}"],
+              "path": ["api", "fincas", ":id", "features"],
+              "variable": [
+                {
+                  "key": "id",
+                  "value": "property_id_here"
+                }
+              ]
+            },
+            "description": "Agregar una característica a una finca."
+          }
+        },
+        {
+          "name": "Eliminar Característica",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/fincas/features/:featureId",
+              "host": ["{{base_url}}"],
+              "path": ["api", "fincas", "features", ":featureId"],
+              "variable": [
+                {
+                  "key": "featureId",
+                  "value": "feature_id_here"
+                }
+              ]
+            },
+            "description": "Eliminar una característica de una finca."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Reservas",
+      "item": [
+        {
+          "name": "Listar Reservas",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"path\": \"bookings:list\",\n  \"args\": {\n    \"status\": \"PENDING\",\n    \"limit\": 50\n  }\n}"
+            },
+            "url": {
+              "raw": "{{convex_url}}/api/runQuery",
+              "host": ["{{convex_url}}"],
+              "path": ["api", "runQuery"]
+            },
+            "description": "Usa el endpoint directo de Convex para reservas. Nota: Este endpoint requiere autenticación con Convex."
+          }
+        },
+        {
+          "name": "Crear Reserva",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"path\": \"bookings:create\",\n  \"args\": {\n    \"propertyId\": \"property_id_here\",\n    \"nombreCompleto\": \"Juan Pérez\",\n    \"cedula\": \"1234567890\",\n    \"celular\": \"3001234567\",\n    \"correo\": \"juan@example.com\",\n    \"fechaEntrada\": 1735689600000,\n    \"fechaSalida\": 1735862400000,\n    \"numeroNoches\": 2,\n    \"numeroPersonas\": 10,\n    \"precioTotal\": 1000000,\n    \"temporada\": \"ALTA\"\n  }\n}"
+            },
+            "url": {
+              "raw": "{{convex_url}}/api/runMutation",
+              "host": ["{{convex_url}}"],
+              "path": ["api", "runMutation"]
+            },
+            "description": "Crear una nueva reserva. Nota: Las fechas deben estar en milisegundos (timestamp). Este endpoint requiere autenticación con Convex."
+          }
+        }
+      ]
+    }
+  ]
+}

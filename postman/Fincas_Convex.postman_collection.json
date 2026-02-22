@@ -1,0 +1,654 @@
+{
+  "info": {
+    "name": "Fincas Convex API",
+    "description": "Colección de endpoints para probar la API de Fincas con Convex y Better Auth",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "convex_url",
+      "value": "https://your-deployment.convex.cloud",
+      "type": "string"
+    },
+    {
+      "key": "convex_site_url",
+      "value": "https://your-deployment.convex.site",
+      "type": "string"
+    },
+    {
+      "key": "auth_token",
+      "value": "",
+      "type": "string"
+    }
+  ],
+  "item": [
+    {
+      "name": "Autenticación",
+      "item": [
+        {
+          "name": "Registrar Usuario",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "if (pm.response.code === 200) {",
+                  "    const response = pm.response.json();",
+                  "    if (response.token) {",
+                  "        pm.collectionVariables.set('auth_token', response.token);",
+                  "    }",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"test@example.com\",\n  \"password\": \"password123\",\n  \"name\": \"Usuario de Prueba\"\n}"
+            },
+            "url": {
+              "raw": "{{convex_site_url}}/api/auth/sign-up",
+              "host": ["{{convex_site_url}}"],
+              "path": ["api", "auth", "sign-up"]
+            }
+          }
+        },
+        {
+          "name": "Iniciar Sesión",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "if (pm.response.code === 200) {",
+                  "    const response = pm.response.json();",
+                  "    if (response.token) {",
+                  "        pm.collectionVariables.set('auth_token', response.token);",
+                  "    }",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"test@example.com\",\n  \"password\": \"password123\"\n}"
+            },
+            "url": {
+              "raw": "{{convex_site_url}}/api/auth/sign-in/email",
+              "host": ["{{convex_site_url}}"],
+              "path": ["api", "auth", "sign-in", "email"]
+            }
+          }
+        },
+        {
+          "name": "Obtener Sesión",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{auth_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{convex_site_url}}/api/auth/session",
+              "host": ["{{convex_site_url}}"],
+              "path": ["api", "auth", "session"]
+            }
+          }
+        },
+        {
+          "name": "Cerrar Sesión",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{auth_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{convex_site_url}}/api/auth/sign-out",
+              "host": ["{{convex_site_url}}"],
+              "path": ["api", "auth", "sign-out"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Fincas",
+      "item": [
+        {
+          "name": "Listar Fincas",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{auth_token}}",
+                "disabled": true
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"path\": \"fincas:list\",\n  \"args\": {\n    \"limit\": 20,\n    \"location\": \"Girardot\",\n    \"minCapacity\": 10\n  }\n}"
+            },
+            "url": {
+              "raw": "{{convex_url}}/api/runQuery",
+              "host": ["{{convex_url}}"],
+              "path": ["api", "runQuery"]
+            },
+            "description": "Lista todas las fincas con filtros opcionales"
+          }
+        },
+        {
+          "name": "Obtener Finca por ID",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"path\": \"fincas:getById\",\n  \"args\": {\n    \"id\": \"property_id_here\"\n  }\n}"
+            },
+            "url": {
+              "raw": "{{convex_url}}/api/runQuery",
+              "host": ["{{convex_url}}"],
+              "path": ["api", "runQuery"]
+            }
+          }
+        },
+        {
+          "name": "Obtener Finca por Código",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"path\": \"fincas:getByCode\",\n  \"args\": {\n    \"code\": \"FINCA001\"\n  }\n}"
+            },
+            "url": {
+              "raw": "{{convex_url}}/api/runQuery",
+              "host": ["{{convex_url}}"],
+              "path": ["api", "runQuery"]
+            }
+          }
+        },
+        {
+          "name": "Buscar Fincas",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"path\": \"fincas:search\",\n  \"args\": {\n    \"query\": \"piscina\",\n    \"limit\": 10\n  }\n}"
+            },
+            "url": {
+              "raw": "{{convex_url}}/api/runQuery",
+              "host": ["{{convex_url}}"],
+              "path": ["api", "runQuery"]
+            }
+          }
+        },
+        {
+          "name": "Crear Finca",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{auth_token}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"path\": \"fincas:create\",\n  \"args\": {\n    \"title\": \"Finca La Esperanza\",\n    \"description\": \"Hermosa finca con piscina y zona de parrilla\",\n    \"location\": \"Girardot\",\n    \"capacity\": 15,\n    \"lat\": 4.3007,\n    \"lng\": -74.8006,\n    \"priceBase\": 500000,\n    \"priceBaja\": 400000,\n    \"priceMedia\": 450000,\n    \"priceAlta\": 550000,\n    \"priceEspeciales\": 700000,\n    \"code\": \"FINCA001\",\n    \"category\": \"ESTANDAR\",\n    \"type\": \"FINCA\",\n    \"images\": [\n      \"https://example.com/image1.jpg\",\n      \"https://example.com/image2.jpg\"\n    ],\n    \"features\": [\n      \"Piscina\",\n      \"Parrilla\",\n      \"WiFi\",\n      \"Parqueadero\"\n    ]\n  }\n}"
+            },
+            "url": {
+              "raw": "{{convex_url}}/api/runMutation",
+              "host": ["{{convex_url}}"],
+              "path": ["api", "runMutation"]
+            }
+          }
+        },
+        {
+          "name": "Actualizar Finca",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{auth_token}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"path\": \"fincas:update\",\n  \"args\": {\n    \"id\": \"property_id_here\",\n    \"title\": \"Finca La Esperanza Actualizada\",\n    \"priceBase\": 550000\n  }\n}"
+            },
+            "url": {
+              "raw": "{{convex_url}}/api/runMutation",
+              "host": ["{{convex_url}}"],
+              "path": ["api", "runMutation"]
+            }
+          }
+        },
+        {
+          "name": "Eliminar Finca",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{auth_token}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"path\": \"fincas:remove\",\n  \"args\": {\n    \"id\": \"property_id_here\"\n  }\n}"
+            },
+            "url": {
+              "raw": "{{convex_url}}/api/runMutation",
+              "host": ["{{convex_url}}"],
+              "path": ["api", "runMutation"]
+            }
+          }
+        },
+        {
+          "name": "Agregar Imagen",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{auth_token}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"path\": \"fincas:addImage\",\n  \"args\": {\n    \"propertyId\": \"property_id_here\",\n    \"url\": \"https://example.com/new-image.jpg\",\n    \"order\": 0\n  }\n}"
+            },
+            "url": {
+              "raw": "{{convex_url}}/api/runMutation",
+              "host": ["{{convex_url}}"],
+              "path": ["api", "runMutation"]
+            }
+          }
+        },
+        {
+          "name": "Eliminar Imagen",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{auth_token}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"path\": \"fincas:removeImage\",\n  \"args\": {\n    \"imageId\": \"image_id_here\"\n  }\n}"
+            },
+            "url": {
+              "raw": "{{convex_url}}/api/runMutation",
+              "host": ["{{convex_url}}"],
+              "path": ["api", "runMutation"]
+            }
+          }
+        },
+        {
+          "name": "Agregar Característica",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{auth_token}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"path\": \"fincas:addFeature\",\n  \"args\": {\n    \"propertyId\": \"property_id_here\",\n    \"name\": \"Jacuzzi\"\n  }\n}"
+            },
+            "url": {
+              "raw": "{{convex_url}}/api/runMutation",
+              "host": ["{{convex_url}}"],
+              "path": ["api", "runMutation"]
+            }
+          }
+        },
+        {
+          "name": "Eliminar Característica",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{auth_token}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"path\": \"fincas:removeFeature\",\n  \"args\": {\n    \"featureId\": \"feature_id_here\"\n  }\n}"
+            },
+            "url": {
+              "raw": "{{convex_url}}/api/runMutation",
+              "host": ["{{convex_url}}"],
+              "path": ["api", "runMutation"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Reservas",
+      "item": [
+        {
+          "name": "Crear Reserva",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{auth_token}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"path\": \"bookings:create\",\n  \"args\": {\n    \"propertyId\": \"property_id_here\",\n    \"nombreCompleto\": \"Juan Pérez\",\n    \"cedula\": \"1234567890\",\n    \"celular\": \"3001234567\",\n    \"correo\": \"juan@example.com\",\n    \"fechaEntrada\": 1735689600000,\n    \"fechaSalida\": 1735862400000,\n    \"numeroNoches\": 2,\n    \"numeroPersonas\": 10,\n    \"precioTotal\": 1000000,\n    \"temporada\": \"ALTA\"\n  }\n}"
+            },
+            "url": {
+              "raw": "{{convex_url}}/api/runMutation",
+              "host": ["{{convex_url}}"],
+              "path": ["api", "runMutation"]
+            },
+            "description": "Nota: Las fechas deben estar en milisegundos (timestamp)"
+          }
+        },
+        {
+          "name": "Listar Reservas",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{auth_token}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"path\": \"bookings:list\",\n  \"args\": {\n    \"status\": \"PENDING\"\n  }\n}"
+            },
+            "url": {
+              "raw": "{{convex_url}}/api/runQuery",
+              "host": ["{{convex_url}}"],
+              "path": ["api", "runQuery"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Conocimiento (RAG)",
+      "description": "Base de conocimiento vectorizada: listar, subir, buscar y indexar fincas",
+      "item": [
+        {
+          "name": "Listar documentos RAG",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{auth_token}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"path\": \"knowledge:list\",\n  \"args\": {\n    \"paginationOpts\": { \"numItems\": 20, \"cursor\": null }\n  }\n}"
+            },
+            "url": { "raw": "{{convex_url}}/api/runQuery", "host": ["{{convex_url}}"], "path": ["api", "runQuery"] }
+          }
+        },
+        {
+          "name": "Buscar en conocimiento (semántico)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{auth_token}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"path\": \"knowledge:search\",\n  \"args\": {\n    \"query\": \"fincas con piscina en Girardot\",\n    \"limit\": 5\n  }\n}"
+            },
+            "url": { "raw": "{{convex_url}}/api/runAction", "host": ["{{convex_url}}"], "path": ["api", "runAction"] }
+          }
+        },
+        {
+          "name": "Añadir texto al conocimiento",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{auth_token}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"path\": \"knowledge:addText\",\n  \"args\": {\n    \"title\": \"Normas de temporada alta\",\n    \"text\": \"En temporada alta (diciembre-enero) la estancia mínima es de 6 noches. No aplican descuentos.\",\n    \"category\": \"normas\"\n  }\n}"
+            },
+            "url": { "raw": "{{convex_url}}/api/runAction", "host": ["{{convex_url}}"], "path": ["api", "runAction"] }
+          }
+        },
+        {
+          "name": "Indexar fincas en RAG",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{auth_token}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"path\": \"knowledge:indexFincas\",\n  \"args\": {\n    \"limit\": 50\n  }\n}"
+            },
+            "url": { "raw": "{{convex_url}}/api/runAction", "host": ["{{convex_url}}"], "path": ["api", "runAction"] }
+          },
+          "description": "Indexa las fincas de la BD en la base vectorial para búsqueda semántica"
+        },
+        {
+          "name": "Eliminar documento RAG",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{auth_token}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"path\": \"knowledge:deleteFile\",\n  \"args\": {\n    \"entryId\": \"entry_id_from_list\"\n  }\n}"
+            },
+            "url": { "raw": "{{convex_url}}/api/runMutation", "host": ["{{convex_url}}"], "path": ["api", "runMutation"] }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Conversaciones (WhatsApp)",
+      "description": "Inbox y escalación: listar conversaciones, pasar a humano/IA, resolver",
+      "item": [
+        {
+          "name": "Listar conversaciones",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"path\": \"conversations:list\",\n  \"args\": {\n    \"status\": \"ai\",\n    \"limit\": 20\n  }\n}"
+            },
+            "url": { "raw": "{{convex_url}}/api/runQuery", "host": ["{{convex_url}}"], "path": ["api", "runQuery"] }
+          }
+        },
+        {
+          "name": "Escalar a humano",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"path\": \"conversations:escalateToHuman\",\n  \"args\": {\n    \"conversationId\": \"conversation_id_here\"\n  }\n}"
+            },
+            "url": { "raw": "{{convex_url}}/api/runMutation", "host": ["{{convex_url}}"], "path": ["api", "runMutation"] }
+          },
+          "description": "La IA deja de responder; un agente debe atender desde YCloud"
+        },
+        {
+          "name": "Volver a IA",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"path\": \"conversations:setToAiPublic\",\n  \"args\": {\n    \"conversationId\": \"conversation_id_here\"\n  }\n}"
+            },
+            "url": { "raw": "{{convex_url}}/api/runMutation", "host": ["{{convex_url}}"], "path": ["api", "runMutation"] }
+          }
+        },
+        {
+          "name": "Marcar como resuelta",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"path\": \"conversations:resolveConversation\",\n  \"args\": {\n    \"conversationId\": \"conversation_id_here\"\n  }\n}"
+            },
+            "url": { "raw": "{{convex_url}}/api/runMutation", "host": ["{{convex_url}}"], "path": ["api", "runMutation"] }
+          }
+        },
+        {
+          "name": "Listar mensajes de una conversación",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"path\": \"messages:listRecent\",\n  \"args\": {\n    \"conversationId\": \"conversation_id_here\",\n    \"limit\": 50\n  }\n}"
+            },
+            "url": { "raw": "{{convex_url}}/api/runQuery", "host": ["{{convex_url}}"], "path": ["api", "runQuery"] }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Usuario",
+      "item": [
+        {
+          "name": "Obtener Usuario Actual",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{auth_token}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"path\": \"auth:getCurrentUser\",\n  \"args\": {}\n}"
+            },
+            "url": {
+              "raw": "{{convex_url}}/api/runQuery",
+              "host": ["{{convex_url}}"],
+              "path": ["api", "runQuery"]
+            }
+          }
+        }
+      ]
+    }
+  ]
+}
