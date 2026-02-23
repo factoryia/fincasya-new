@@ -194,11 +194,77 @@ export const processInboundMessage = internalAction({
 
       if (replyText) {
         try {
-          await ctx.runAction(internal.ycloud.sendWhatsAppMessage, {
-            to: args.phone,
-            text: replyText,
-            wamid: args.wamid,
-          });
+          const tag = "[CONTRACT_PDF:";
+          const idx = replyText.indexOf(tag);
+          const jsonStart = idx >= 0 ? replyText.indexOf("{", idx) : -1;
+          let jsonEnd = -1;
+          if (jsonStart >= 0) {
+            let depth = 0;
+            for (let i = jsonStart; i < replyText.length; i++) {
+              const c = replyText[i];
+              if (c === "{") depth++;
+              else if (c === "}") {
+                depth--;
+                if (depth === 0) {
+                  jsonEnd = i + 1;
+                  break;
+                }
+              }
+            }
+          }
+          const jsonStr =
+            jsonEnd > 0 ? replyText.slice(jsonStart, jsonEnd) : null;
+          if (jsonStr) {
+            try {
+              const parsed = JSON.parse(jsonStr) as Record<string, unknown>;
+              const blockStart = replyText.indexOf(tag);
+              const blockEnd =
+                jsonEnd > 0
+                  ? replyText.indexOf("]", jsonEnd) + 1
+                  : replyText.length;
+              const paymentMessageText = (
+                (blockStart > 0 ? replyText.slice(0, blockStart) : "") +
+                (blockEnd < replyText.length ? replyText.slice(blockEnd) : "")
+              )
+                .replace(/\n\s*\n/g, "\n")
+                .trim();
+              await ctx.runAction(
+                internal.contractPdf.sendContractPdfAndPaymentMethods,
+                {
+                  to: args.phone,
+                  wamid: args.wamid,
+                  contractData: {
+                    finca: String(parsed.finca ?? ""),
+                    ubicacion: String(parsed.ubicacion ?? ""),
+                    nombre: String(parsed.nombre ?? ""),
+                    cedula: String(parsed.cedula ?? ""),
+                    celular: String(parsed.celular ?? ""),
+                    correo: String(parsed.correo ?? ""),
+                    entrada: String(parsed.entrada ?? ""),
+                    salida: String(parsed.salida ?? ""),
+                    noches: Number(parsed.noches) || 0,
+                    precioTotal: Number(parsed.precioTotal) || 0,
+                  },
+                  paymentMessageText:
+                    paymentMessageText ||
+                    "MÉTODOS DE PAGO: Abono 50% para confirmar. Saldo 50% al recibir la finca. Nequi, PSE, transferencia o datos bancarios. ¿Te envío los datos bancarios? 💳✨",
+                }
+              );
+            } catch (parseErr) {
+              console.error("CONTRACT_PDF parse/send error:", parseErr);
+              await ctx.runAction(internal.ycloud.sendWhatsAppMessage, {
+                to: args.phone,
+                text: replyText,
+                wamid: args.wamid,
+              });
+            }
+          } else {
+            await ctx.runAction(internal.ycloud.sendWhatsAppMessage, {
+              to: args.phone,
+              text: replyText,
+              wamid: args.wamid,
+            });
+          }
         } catch (e) {
           console.error("YCloud send error:", e);
         }
@@ -320,7 +386,7 @@ ${singleFincaHint}
 
 **Si en el contexto hay VARIAS fincas para la ubicación que pide el usuario:** menciona 3-5 opciones con nombre y precio (o "consultar"), no solo una. Ejemplo: "En Melgar tengo: Villa Hermosa 20 pax ($500k/noche), Quinta Tramontini ($500k), Casa Chimbi ($500k)... ¿Cuál te interesa?" No digas que "solo hay una" si la lista tiene más.
 
-**RESERVA:** Si ofreciste varias fincas, NUNCA pidas nombre/cédula/celular/correo hasta que el usuario ELIJA una ("¿Cuál te gustaría reservar?"). **Fechas:** "Del 20 al 21" = 1 NOCHE (entrada 20, salida 21). Si la finca pide mínimo 2 noches, di: "Del 20 al 21 es 1 noche; la mínima es 2 noches. ¿Te sirve del 20 al 22?" Cuando tenga finca elegida + todos los datos, responde con contrato de prueba (finca, arrendatario, fechas, total) y métodos de pago (abono 50%, saldo 50%, Nequi/PSE/transferencia).
+**RESERVA:** Si ofreciste varias fincas, NUNCA pidas nombre/cédula/celular/correo hasta que el usuario ELIJA una ("¿Cuál te gustaría reservar?"). **Fechas:** "Del 20 al 21" = 1 NOCHE (entrada 20, salida 21). Si la finca pide mínimo 2 noches, di: "Del 20 al 21 es 1 noche; la mínima es 2 noches. ¿Te sirve del 20 al 22?" Cuando tenga finca elegida + todos los datos, incluye el bloque [CONTRACT_PDF:{...}] con los datos del contrato y el mensaje visible con confirmación + métodos de pago (abono 50%, saldo 50%, Nequi/PSE/transferencia); el sistema enviará el contrato en PDF y luego el mensaje.
 
 Responde SIEMPRE como Hernán, Consultor de FincasYa.com (nunca escribas FincasYa.cloud ni otra variante), en español. USA EMOJIS. Usa el RAG y el catálogo de fincas para datos; no inventes. Máximo 2-4 líneas por mensaje cuando sea posible.`;
 }
