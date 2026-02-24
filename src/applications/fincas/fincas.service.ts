@@ -66,21 +66,44 @@ export class FincasService {
     }
   }
 
-  async create(createDto: CreateFincaDto, images?: Express.Multer.File[]) {
+  async create(
+    createDto: CreateFincaDto,
+    images?: Express.Multer.File[],
+    video?: Express.Multer.File,
+  ) {
     try {
-      // Subir imágenes a S3 si existen
       let imageUrls: string[] = [];
       if (images && images.length > 0) {
         imageUrls = await this.s3Service.uploadImages(images);
       }
 
-      // Crear la finca con las URLs de las imágenes
-      const fincaData = {
-        ...createDto,
+      let videoUrl: string | undefined;
+      if (video) {
+        videoUrl = await this.s3Service.uploadVideo(video);
+      }
+
+      const { catalogIds, ...rest } = createDto;
+      const base = rest.priceBase ?? 0;
+      const fincaData: Record<string, unknown> = {
+        ...rest,
+        priceBaja: rest.priceBaja ?? base,
+        priceMedia: rest.priceMedia ?? base,
+        priceAlta: rest.priceAlta ?? base,
         images: imageUrls,
+        ...(videoUrl && { video: videoUrl }),
+        ...(catalogIds?.length && { catalogIds }),
       };
 
-      return await this.convexService.mutation('fincas:create', fincaData);
+      const propertyId = await this.convexService.mutation('fincas:create', fincaData);
+
+      if (catalogIds && catalogIds.length > 0) {
+        const metaSync = (await this.convexService.action('metaCatalog:syncPropertyToCatalogs', {
+          propertyId,
+        } as Record<string, unknown>)) as { synced: number };
+        return { id: propertyId, metaSync };
+      }
+
+      return { id: propertyId };
     } catch (error) {
       throw new BadRequestException(error.message);
     }
@@ -228,6 +251,10 @@ export class FincasService {
 
   async removeImage(imageId: string) {
     try {
+      const image = await this.convexService.query('fincas:getImageById', { imageId });
+      if (image?.url) {
+        await this.s3Service.deleteFile(image.url).catch(() => {});
+      }
       return await this.convexService.mutation('fincas:removeImage', { imageId });
     } catch (error) {
       throw new BadRequestException(error.message);

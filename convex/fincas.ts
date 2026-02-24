@@ -1,5 +1,6 @@
 import { v } from "convex/values";
 import { query, mutation } from "./_generated/server";
+import { internal } from "./_generated/api";
 
 // ============ QUERIES ============
 
@@ -149,6 +150,7 @@ export const getById = query({
     return {
       ...property,
       images: sortedImages.map((img) => img.url),
+      imageItems: sortedImages.map((img) => ({ id: img._id, url: img.url })),
       features: features.map((f) => f.name),
       additionalCosts,
       pricing: sortedPricing.map((p) => {
@@ -399,9 +401,21 @@ export const create = mutation({
         })
       )
     ),
+    /** IDs: Convex _id (m977...) o Meta whatsappCatalogId (26198995209693859). */
+    catalogIds: v.optional(v.array(v.string())),
   },
   handler: async (ctx, args) => {
     const now = Date.now();
+
+    if (args.code) {
+      const existingByCode = await ctx.db
+        .query("properties")
+        .withIndex("by_code", (q) => q.eq("code", args.code!))
+        .first();
+      if (existingByCode) {
+        throw new Error(`Ya existe una finca con el código "${args.code}". El código debe ser único.`);
+      }
+    }
 
     const propertyId = await ctx.db.insert("properties", {
       title: args.title,
@@ -471,6 +485,22 @@ export const create = mutation({
       );
     }
 
+    // Catálogos WhatsApp: acepta Convex _id o Meta whatsappCatalogId
+    if (args.catalogIds && args.catalogIds.length > 0) {
+      const allCatalogs = await ctx.db.query("whatsappCatalogs").collect();
+      for (const rawId of args.catalogIds) {
+        const catalog = allCatalogs.find((c) => c._id === rawId || c.whatsappCatalogId === rawId);
+        if (!catalog) continue;
+        await ctx.db.insert("propertyWhatsAppCatalog", {
+          propertyId,
+          catalogId: catalog._id,
+          productRetailerId: propertyId,
+          createdAt: now,
+          updatedAt: now,
+        });
+      }
+    }
+
     return propertyId;
   },
 });
@@ -530,6 +560,10 @@ export const update = mutation({
     await ctx.db.patch(id, {
       ...updates,
       updatedAt: Date.now(),
+    });
+
+    await ctx.scheduler.runAfter(0, internal.metaCatalog.syncPropertyToAllCatalogs, {
+      propertyId: id,
     });
 
     return id;
@@ -685,7 +719,7 @@ export const removeTemporada = mutation({
 });
 
 /**
- * Eliminar una finca
+ * Eliminar una finca. Antes borra relaciones en BD; luego programa acción que elimina el producto en cada catálogo de Meta.
  */
 export const remove = mutation({
   args: { id: v.id("properties") },
@@ -695,40 +729,57 @@ export const remove = mutation({
       throw new Error("Propiedad no encontrada");
     }
 
-    // Eliminar imágenes relacionadas
+    const catalogLinks = await ctx.db
+      .query("propertyWhatsAppCatalog")
+      .withIndex("by_property", (q) => q.eq("propertyId", args.id))
+      .collect();
+
+    const metaItems: { whatsappCatalogId: string; retailer_id: string }[] = [];
+    for (const link of catalogLinks) {
+      const catalog = await ctx.db.get(link.catalogId);
+      if (catalog) {
+        metaItems.push({
+          whatsappCatalogId: catalog.whatsappCatalogId,
+          retailer_id: link.productRetailerId,
+        });
+      }
+    }
+
+    for (const link of catalogLinks) {
+      await ctx.db.delete(link._id);
+    }
+
     const images = await ctx.db
       .query("propertyImages")
       .withIndex("by_property", (q) => q.eq("propertyId", args.id))
       .collect();
-
     await Promise.all(images.map((img) => ctx.db.delete(img._id)));
 
-    // Eliminar características relacionadas
     const features = await ctx.db
       .query("propertyFeatures")
       .withIndex("by_property", (q) => q.eq("propertyId", args.id))
       .collect();
-
     await Promise.all(features.map((f) => ctx.db.delete(f._id)));
 
-    // Eliminar costos adicionales relacionados
     const additionalCosts = await ctx.db
       .query("additionalCosts")
       .withIndex("by_property", (q) => q.eq("propertyId", args.id))
       .collect();
-
     await Promise.all(additionalCosts.map((cost) => ctx.db.delete(cost._id)));
 
-    // Eliminar temporadas/precios relacionados
     const pricing = await ctx.db
       .query("propertyPricing")
       .withIndex("by_property", (q) => q.eq("propertyId", args.id))
       .collect();
-
     await Promise.all(pricing.map((p) => ctx.db.delete(p._id)));
 
-    // Eliminar la propiedad
     await ctx.db.delete(args.id);
+
+    if (metaItems.length > 0) {
+      await ctx.scheduler.runAfter(0, internal.metaCatalog.deleteFromMetaCatalogs, {
+        items: metaItems,
+      });
+    }
 
     return { success: true };
   },
@@ -751,6 +802,14 @@ export const addImage = mutation({
     });
 
     return imageId;
+  },
+});
+
+/** Obtener imagen por ID (para eliminar de S3 antes de borrar de BD). */
+export const getImageById = query({
+  args: { imageId: v.id("propertyImages") },
+  handler: async (ctx, args) => {
+    return await ctx.db.get(args.imageId);
   },
 });
 

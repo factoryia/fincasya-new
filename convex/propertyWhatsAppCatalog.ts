@@ -1,5 +1,6 @@
 import { v } from "convex/values";
 import { query, mutation } from "./_generated/server";
+import { internal } from "./_generated/api";
 import type { Id } from "./_generated/dataModel";
 
 /**
@@ -67,7 +68,7 @@ export const getPropertyIdsInAnyCatalog = query({
   },
 });
 
-/** Añadir o actualizar: esta finca en este catálogo con este product_retailer_id. */
+/** Añadir o actualizar: esta finca en este catálogo con este product_retailer_id. Sincroniza con Meta. */
 export const setPropertyInCatalog = mutation({
   args: {
     propertyId: v.id("properties"),
@@ -76,6 +77,8 @@ export const setPropertyInCatalog = mutation({
   },
   handler: async (ctx, args) => {
     const now = Date.now();
+    const catalog = await ctx.db.get(args.catalogId);
+    if (!catalog) throw new Error("Catálogo no encontrado");
     const existing = await ctx.db
       .query("propertyWhatsAppCatalog")
       .withIndex("by_property_and_catalog", (q) =>
@@ -87,19 +90,30 @@ export const setPropertyInCatalog = mutation({
         productRetailerId: args.productRetailerId,
         updatedAt: now,
       });
+      await ctx.scheduler.runAfter(0, internal.metaCatalog.syncProductToMetaCatalog, {
+        whatsappCatalogId: catalog.whatsappCatalogId,
+        propertyId: args.propertyId,
+        method: "UPDATE",
+      });
       return existing._id;
     }
-    return await ctx.db.insert("propertyWhatsAppCatalog", {
+    const rowId = await ctx.db.insert("propertyWhatsAppCatalog", {
       propertyId: args.propertyId,
       catalogId: args.catalogId,
       productRetailerId: args.productRetailerId,
       createdAt: now,
       updatedAt: now,
     });
+    await ctx.scheduler.runAfter(0, internal.metaCatalog.syncProductToMetaCatalog, {
+      whatsappCatalogId: catalog.whatsappCatalogId,
+      propertyId: args.propertyId,
+      method: "CREATE",
+    });
+    return rowId;
   },
 });
 
-/** Quitar una finca de un catálogo. */
+/** Quitar una finca de un catálogo. Borra también el producto en Meta. */
 export const removePropertyFromCatalog = mutation({
   args: {
     propertyId: v.id("properties"),
@@ -112,14 +126,23 @@ export const removePropertyFromCatalog = mutation({
         q.eq("propertyId", args.propertyId).eq("catalogId", args.catalogId)
       )
       .unique();
-    if (row) await ctx.db.delete(row._id);
+    if (row) {
+      const catalog = await ctx.db.get(row.catalogId);
+      if (catalog) {
+        await ctx.scheduler.runAfter(0, internal.metaCatalog.deleteFromMetaCatalogs, {
+          items: [
+            { whatsappCatalogId: catalog.whatsappCatalogId, retailer_id: row.productRetailerId },
+          ],
+        });
+      }
+      await ctx.db.delete(row._id);
+    }
     return args.propertyId;
   },
 });
 
 /**
- * Reemplazar todos los catálogos de una finca. Útil desde el front: enviar lista de { catalogId, productRetailerId }.
- * catalogId aquí es el _id de whatsappCatalogs (Convex).
+ * Reemplazar todos los catálogos de una finca. Sincroniza con Meta (CREATE por cada catálogo).
  */
 export const setPropertyCatalogs = mutation({
   args: {
@@ -137,8 +160,16 @@ export const setPropertyCatalogs = mutation({
       .query("propertyWhatsAppCatalog")
       .withIndex("by_property", (q) => q.eq("propertyId", args.propertyId))
       .collect();
+    const toDeleteFromMeta: { whatsappCatalogId: string; retailer_id: string }[] = [];
     for (const e of existing) {
+      const catalog = await ctx.db.get(e.catalogId);
+      if (catalog) toDeleteFromMeta.push({ whatsappCatalogId: catalog.whatsappCatalogId, retailer_id: e.productRetailerId });
       await ctx.db.delete(e._id);
+    }
+    if (toDeleteFromMeta.length > 0) {
+      await ctx.scheduler.runAfter(0, internal.metaCatalog.deleteFromMetaCatalogs, {
+        items: toDeleteFromMeta,
+      });
     }
     for (const entry of args.entries) {
       const catalog = await ctx.db.get(entry.catalogId);
@@ -149,6 +180,11 @@ export const setPropertyCatalogs = mutation({
         productRetailerId: entry.productRetailerId,
         createdAt: now,
         updatedAt: now,
+      });
+      await ctx.scheduler.runAfter(0, internal.metaCatalog.syncProductToMetaCatalog, {
+        whatsappCatalogId: catalog.whatsappCatalogId,
+        propertyId: args.propertyId,
+        method: "CREATE",
       });
     }
     return args.propertyId;

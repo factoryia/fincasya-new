@@ -34,6 +34,7 @@
     "class-validator": "^0.14.1",
     "convex": "^1.20.0",
     "cookie-parser": "^1.4.7",
+    "dotenv": "^16.4.5",
     "form-data": "^3.0.1",
     "multer": "^1.4.5-lts.1",
     "rxjs": "^7.8.2",

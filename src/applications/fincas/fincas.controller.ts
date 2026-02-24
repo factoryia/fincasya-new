@@ -15,7 +15,7 @@ import {
   MaxFileSizeValidator,
   FileTypeValidator,
 } from '@nestjs/common';
-import { FilesInterceptor, FileInterceptor } from '@nestjs/platform-express';
+import { FilesInterceptor, FileInterceptor, FileFieldsInterceptor } from '@nestjs/platform-express';
 import { memoryStorage } from 'multer';
 import { FincasService } from './fincas.service';
 import { CreateFincaDto, PricingItemDto } from './dto/create-finca.dto';
@@ -55,16 +55,23 @@ export class FincasController {
 
   @Post()
   @UseInterceptors(
-    FilesInterceptor('images', 20, {
-      storage: memoryStorage(),
-      limits: { fileSize: 10 * 1024 * 1024 }, // 10MB por imagen
-    }),
+    FileFieldsInterceptor(
+      [
+        { name: 'images', maxCount: 20 },
+        { name: 'video', maxCount: 1 },
+      ],
+      {
+        storage: memoryStorage(),
+        limits: { fileSize: 100 * 1024 * 1024 }, // 100MB para video
+      },
+    ),
   )
   async create(
     @Body() createDto: CreateFincaDto,
-    @UploadedFiles() images?: Express.Multer.File[],
+    @UploadedFiles()
+    files?: { images?: Express.Multer.File[]; video?: Express.Multer.File[] },
   ) {
-    return this.fincasService.create(createDto, images);
+    return this.fincasService.create(createDto, files?.images, files?.video?.[0]);
   }
 
   @Post('import')

@@ -1,5 +1,5 @@
 import { v } from "convex/values";
-import { query, mutation } from "./_generated/server";
+import { query, mutation, internalMutation } from "./_generated/server";
 import type { Id } from "./_generated/dataModel";
 
 /**
@@ -103,6 +103,46 @@ export const remove = mutation({
     }
     await ctx.db.delete(args.id);
     return args.id;
+  },
+});
+
+/**
+ * Sincroniza catálogos desde Meta a la tabla whatsappCatalogs.
+ * Crea los que no existen; actualiza nombre de los que ya existen por whatsappCatalogId.
+ */
+export const syncFromMeta = internalMutation({
+  args: {
+    catalogs: v.array(
+      v.object({
+        id: v.string(),
+        name: v.string(),
+      })
+    ),
+  },
+  handler: async (ctx, args) => {
+    const now = Date.now();
+    const existing = await ctx.db.query("whatsappCatalogs").collect();
+    const byMetaId = new Map(existing.map((c) => [c.whatsappCatalogId, c]));
+
+    for (let i = 0; i < args.catalogs.length; i++) {
+      const cat = args.catalogs[i];
+      const row = byMetaId.get(cat.id);
+      if (row) {
+        if (row.name !== cat.name) {
+          await ctx.db.patch(row._id, { name: cat.name, updatedAt: now });
+        }
+      } else {
+        await ctx.db.insert("whatsappCatalogs", {
+          name: cat.name,
+          whatsappCatalogId: cat.id,
+          isDefault: i === 0,
+          order: i,
+          createdAt: now,
+          updatedAt: now,
+        });
+      }
+    }
+    return args.catalogs.length;
   },
 });
 

@@ -22,20 +22,18 @@ export class S3Service {
   }
 
   async uploadFile(file: Express.Multer.File, folder: string = 'uploads'): Promise<string> {
-    if (!file) {
+    if (!file || !file.buffer) {
       throw new BadRequestException('No file provided');
     }
-
-    const fileExtension = file.originalname.split('.').pop();
-    const fileName = `${folder}/${randomUUID()}.${fileExtension}`;
+    const ext = file.originalname?.split('.').pop() || 'bin';
+    const fileName = `${folder}/${randomUUID()}.${ext}`;
 
     try {
       const command = new PutObjectCommand({
         Bucket: this.bucketName,
         Key: fileName,
         Body: file.buffer,
-        ContentType: file.mimetype,
-        ACL: 'public-read',
+        ContentType: file.mimetype || 'application/octet-stream',
       });
 
       await this.s3Client.send(command);
@@ -78,26 +76,25 @@ export class S3Service {
   }
 
   async uploadVideo(file: Express.Multer.File): Promise<string> {
-    // Validar que sea un video
-    if (!file.mimetype.startsWith('video/')) {
-      throw new BadRequestException('File must be a video');
+    const ext = file?.originalname?.toLowerCase().split('.').pop();
+    const videoExts = ['mp4', 'webm', 'mov'];
+    const isVideo =
+      file?.mimetype?.startsWith('video/') || (ext && videoExts.includes(ext));
+    if (!isVideo) {
+      throw new BadRequestException('File must be a video (mp4, webm, mov)');
     }
-
     return this.uploadFile(file, 'videos');
   }
 
   async uploadImage(file: Express.Multer.File): Promise<string> {
-    // Validar que sea una imagen
-    if (!file.mimetype.startsWith('image/')) {
+    if (!file?.mimetype?.startsWith('image/')) {
       throw new BadRequestException('File must be an image');
     }
-
     return this.uploadFile(file, 'images');
   }
 
   async uploadImages(files: Express.Multer.File[]): Promise<string[]> {
-    // Validar que todos sean imágenes
-    const invalidFiles = files.filter((file) => !file.mimetype.startsWith('image/'));
+    const invalidFiles = files.filter((file) => !file?.mimetype?.startsWith('image/'));
     if (invalidFiles.length > 0) {
       throw new BadRequestException('All files must be images');
     }

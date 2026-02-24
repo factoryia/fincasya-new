@@ -1,3 +1,7 @@
+// Cargar variables de entorno antes que nada (NestJS no las carga por defecto)
+require('dotenv').config({ path: require('path').resolve(process.cwd(), '.env.local') });
+require('dotenv').config({ path: require('path').resolve(process.cwd(), '.env') });
+
 import { NestFactory } from '@nestjs/core';
 import { ValidationPipe } from '@nestjs/common';
 import { AppModule } from './applications/app.module';
