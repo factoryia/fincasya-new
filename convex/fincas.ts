@@ -410,7 +410,7 @@ export const create = mutation({
     if (args.code) {
       const existingByCode = await ctx.db
         .query("properties")
-        .withIndex("by_code", (q) => q.eq("code", args.code!))
+        .withIndex("by_code", (q) => q.eq("code", args.code))
         .first();
       if (existingByCode) {
         throw new Error(`Ya existe una finca con el código "${args.code}". El código debe ser único.`);

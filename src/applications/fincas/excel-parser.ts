@@ -213,7 +213,7 @@ export function parseExcelToFincas(buffer: Buffer): CreateFincaDto[] {
   const workbook = XLSX.read(buffer, { type: 'buffer' });
   const sheetName = workbook.SheetNames[0];
   const sheet = workbook.Sheets[sheetName];
-  const data = XLSX.utils.sheet_to_json(sheet, { defval: null }) as Record<string, unknown>[];
+  const data = XLSX.utils.sheet_to_json(sheet, { defval: null });
 
   if (data.length === 0) return [];
 
@@ -364,7 +364,7 @@ export function parseExcelToFincas(buffer: Buffer): CreateFincaDto[] {
         });
       }
 
-      const entry = temporadasMap.get(temporadaName)!;
+      const entry = temporadasMap.get(temporadaName);
       const condicionTipo = col.condicion ?? 'General';
 
       // Actualizar reglas si esta columna tiene el texto completo de la temporada

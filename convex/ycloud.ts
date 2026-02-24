@@ -517,11 +517,11 @@ Mes actual: ${month + 1}, año: ${year}.`,
       const parsed = JSON.parse(raw) as Record<string, unknown>;
       const intent = parsed.intent as string | undefined;
       if (intent === "single_finca" && typeof parsed.fincaName === "string" && parsed.fincaName.trim()) {
-        return { intent: "single_finca", fincaName: (parsed.fincaName as string).trim() };
+        return { intent: "single_finca", fincaName: (parsed.fincaName).trim() };
       }
       if (intent === "more_options") return { intent: "more_options" };
       if (intent === "search_catalog" && typeof parsed.location === "string" && parsed.location.trim()) {
-        const loc = (parsed.location as string).replace(/[^\wáéíóúñ\s]/gi, "").trim();
+        const loc = (parsed.location).replace(/[^\wáéíóúñ\s]/gi, "").trim();
         if (loc.length >= 2) {
           return {
             intent: "search_catalog",
@@ -915,7 +915,7 @@ export const sendWhatsAppCatalogList = internalAction({
               },
             },
           };
-    if (args.wamid) (body as Record<string, unknown>).context = { message_id: args.wamid };
+    if (args.wamid) (body).context = { message_id: args.wamid };
     const res = await fetch("https://api.ycloud.com/v2/whatsapp/messages/sendDirectly", {
       method: "POST",
       headers: { "Content-Type": "application/json", "X-API-Key": apiKey },

@@ -13,7 +13,7 @@ COPY convex ./convex
 # (Opcional) Generar tipos de Convex (_generated) en CI si hay CONVEX_DEPLOYMENT
 ARG CONVEX_DEPLOYMENT
 ENV CONVEX_DEPLOYMENT=${CONVEX_DEPLOYMENT}
-RUN if [ -n \"$CONVEX_DEPLOYMENT\" ]; then bunx convex codegen; else echo \"Skipping convex codegen (no CONVEX_DEPLOYMENT)\"; fi
+RUN sh -c 'if [ -n "$CONVEX_DEPLOYMENT" ]; then bunx convex codegen; else echo "Skipping convex codegen (no CONVEX_DEPLOYMENT)"; fi'
 
 RUN bun run build
 

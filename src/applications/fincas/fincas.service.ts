@@ -292,7 +292,7 @@ export class FincasService {
 
     for (const dto of payloads) {
       try {
-        await this.create(dto as CreateFincaDto);
+        await this.create(dto);
         created++;
         details.push(`✅ ${dto.title}`);
       } catch (err: unknown) {

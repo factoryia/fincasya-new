@@ -1,6 +1,6 @@
 import { BadGatewayException, Injectable, UnauthorizedException } from '@nestjs/common';
 import { ConvexHttpClient } from 'convex/browser';
-import { api } from '../../../../convex/_generated/api';
+import { api } from '../../../convex-api-stub';
 
 @Injectable()
 export class ConvexService {

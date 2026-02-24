@@ -32,7 +32,7 @@ export const list = query({
       : args.status
       ? await ctx.db.query("bookings").withIndex("by_status", (q) => q.eq("status", args.status!)).collect()
       : args.userId
-      ? await ctx.db.query("bookings").withIndex("by_user", (q) => q.eq("userId", args.userId!)).collect()
+      ? await ctx.db.query("bookings").withIndex("by_user", (q) => q.eq("userId", args.userId)).collect()
       : await ctx.db.query("bookings").collect();
 
     // Aplicar cursor si existe (filtrar manualmente después de obtener los resultados)

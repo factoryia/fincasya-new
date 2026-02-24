@@ -177,7 +177,7 @@ export const seedCatalogProductos = mutation({
     const existing = await ctx.db
       .query("propertyWhatsAppCatalog")
       .withIndex("by_property_and_catalog", (q) =>
-        q.eq("propertyId", PROPERTY_ID).eq("catalogId", catalog!._id)
+        q.eq("propertyId", PROPERTY_ID).eq("catalogId", catalog._id)
       )
       .unique();
     if (!existing) {
