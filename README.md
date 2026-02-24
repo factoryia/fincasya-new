@@ -204,6 +204,7 @@ Better Auth está configurado con:
 - Sesiones en Convex
 - Rutas HTTP en `/api/auth/[...all]`
 
+
 ## Documentación
 
 - [Convex Documentation](https://docs.convex.dev)
