@@ -8,7 +8,7 @@ import {
   Min,
   ValidateNested,
 } from 'class-validator';
-import { Type, Transform } from 'class-transformer';
+import { Type, Transform, plainToInstance } from 'class-transformer';
 
 export enum PropertyType {
   FINCA = 'FINCA',
@@ -121,6 +121,12 @@ export class CreateFincaDto {
   @IsString()
   video?: string;
 
+  // Campo presente en multipart pero gestionado por el interceptor, no por el DTO.
+  // Se marca opcional y se limpia para que no rompa el whitelist.
+  @IsOptional()
+  @Transform(() => undefined)
+  images?: unknown;
+
   /** IDs de catálogos WhatsApp. En multipart puede llegar como JSON string o array. */
   @IsOptional()
   @IsArray()
@@ -139,12 +145,8 @@ export class CreateFincaDto {
     if (!value) return [];
     const arr = typeof value === 'string' ? JSON.parse(value || '[]') : value;
     if (!Array.isArray(arr)) return [];
-    const allowed = ['nombre', 'fechaDesde', 'fechaHasta', 'valorUnico', 'condiciones', 'activa', 'reglas', 'order'];
-    return arr.map((o: Record<string, unknown>) => {
-      const out: Record<string, unknown> = {};
-      for (const k of allowed) if (o[k] !== undefined) out[k] = o[k];
-      return out;
-    });
+    // Convertir explícitamente cada item a instancia de PricingItemDto
+    return plainToInstance(PricingItemDto, arr);
   })
   @Type(() => PricingItemDto)
   pricing?: PricingItemDto[];

@@ -130,17 +130,26 @@ export class FincasController {
 
   @Put(':id')
   @UseInterceptors(
-    FilesInterceptor('images', 20, {
-      storage: memoryStorage(),
-      limits: { fileSize: 10 * 1024 * 1024 }, // 10MB por imagen
-    }),
+    FileFieldsInterceptor(
+      [
+        { name: 'images', maxCount: 20 },
+        { name: 'video', maxCount: 1 },
+      ],
+      {
+        storage: memoryStorage(),
+        limits: {
+          fileSize: 100 * 1024 * 1024, // 100MB para video / 10MB típico imágenes
+        },
+      },
+    ),
   )
   async update(
     @Param('id') id: string,
     @Body() updateDto: UpdateFincaDto,
-    @UploadedFiles() images?: Express.Multer.File[],
+    @UploadedFiles()
+    files?: { images?: Express.Multer.File[]; video?: Express.Multer.File[] },
   ) {
-    return this.fincasService.update(id, updateDto, images);
+    return this.fincasService.update(id, updateDto, files?.images, files?.video?.[0]);
   }
 
   @Delete(':id')

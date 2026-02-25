@@ -74,6 +74,21 @@ export class AuthController {
           }
         });
       }
+      // Asegurarnos de eliminar las cookies locales de Better Auth
+      const incomingCookies = req.headers.cookie;
+      if (incomingCookies) {
+        const cookieNames = incomingCookies.split(';').map((c) => c.trim().split('=')[0]);
+        cookieNames.forEach((name) => {
+          if (name.startsWith('better-auth.')) {
+            res.clearCookie(name, {
+              path: '/',
+              httpOnly: true,
+              secure: true,
+              sameSite: 'lax',
+            });
+          }
+        });
+      }
       return res.json(result.data || result);
     } catch (error: any) {
       return res.status(400).json({ message: error.message });

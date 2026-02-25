@@ -101,7 +101,11 @@ function buildMetaPayload(prop: PropForCatalog, propertyId: Id<"properties">): R
   };
   const images = prop.images?.filter(Boolean) ?? [];
   if (images.length > 0) {
-    payload.image = images.map((url) => ({ url, tag: [] }));
+    // Campo principal que espera Meta para el catálogo: enlace de imagen.
+    payload.image_url = images[0];
+    if (images.length > 1) {
+      payload.additional_image_urls = images.slice(1);
+    }
   }
   if (prop.video) {
     payload.video = [{ url: prop.video, tag: [] }];

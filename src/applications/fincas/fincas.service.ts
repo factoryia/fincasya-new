@@ -82,7 +82,7 @@ export class FincasService {
         videoUrl = await this.s3Service.uploadVideo(video);
       }
 
-      const { catalogIds, ...rest } = createDto;
+      const { catalogIds, pricing, ...rest } = createDto;
       const base = rest.priceBase ?? 0;
       const fincaData: Record<string, unknown> = {
         ...rest,
@@ -93,6 +93,32 @@ export class FincasService {
         ...(videoUrl && { video: videoUrl }),
         ...(catalogIds?.length && { catalogIds }),
       };
+
+      // Convex no soporta instancias de clases, solo objetos planos.
+      // Normalizamos pricing a plain objects antes de enviarlo.
+      if (pricing && Array.isArray(pricing)) {
+        fincaData.pricing = pricing.map((p) => {
+          const {
+            nombre,
+            fechaDesde,
+            fechaHasta,
+            valorUnico,
+            condiciones,
+            activa,
+            reglas,
+            order,
+          } = p;
+          const out: Record<string, unknown> = { nombre };
+          if (fechaDesde !== undefined) out.fechaDesde = fechaDesde;
+          if (fechaHasta !== undefined) out.fechaHasta = fechaHasta;
+          if (valorUnico !== undefined) out.valorUnico = valorUnico;
+          if (condiciones !== undefined) out.condiciones = condiciones;
+          if (activa !== undefined) out.activa = activa;
+          if (reglas !== undefined) out.reglas = reglas;
+          if (order !== undefined) out.order = order;
+          return out;
+        });
+      }
 
       const propertyId = await this.convexService.mutation('fincas:create', fincaData);
 
@@ -124,22 +150,73 @@ export class FincasService {
       }
 
       // Actualizar la finca
-      const updateData: any = { ...updateDto };
-      if (imageUrls.length > 0) {
-        // Agregar las nuevas imágenes a las existentes
-        // Primero obtenemos la finca actual para mantener las imágenes existentes
-        const currentFinca = await this.getById(id);
-        const existingImages = currentFinca.images || [];
-        updateData.images = [...existingImages, ...imageUrls];
-      }
+      // No enviamos campos que el validator de fincas:update no acepta (pricing, catalogIds, features, images).
+      const { pricing, catalogIds, features, ...rest } = updateDto as any;
+      const updateData: any = { ...rest };
       if (videoUrl) {
         updateData.video = videoUrl;
       }
 
-      return await this.convexService.mutation('fincas:update', {
+      const result = await this.convexService.mutation('fincas:update', {
         id,
         ...updateData,
       });
+
+      // Si se enviaron catalogIds en el update, sincronizar con Meta Catalog (pero sin pasarlos a Convex).
+      if (catalogIds && Array.isArray(catalogIds) && catalogIds.length > 0) {
+        await this.convexService.action('metaCatalog:syncPropertyToCatalogs', {
+          propertyId: id,
+        } as Record<string, unknown>);
+      }
+
+      // Agregar nuevas imágenes a través de la mutación dedicada de Convex.
+      if (imageUrls.length > 0) {
+        const currentFinca = await this.getById(id);
+        const existingImages: string[] = currentFinca.images || [];
+        const baseOrder = existingImages.length;
+
+        await Promise.all(
+          imageUrls.map((url, index) =>
+            this.convexService.mutation('fincas:addImage', {
+              propertyId: id,
+              url,
+              order: baseOrder + index,
+            } as Record<string, unknown>),
+          ),
+        );
+      }
+
+      // Si se envió pricing en el update, usar la mutación dedicada setPricing.
+      if (pricing && Array.isArray(pricing)) {
+        const normalized = pricing.map((p: any) => {
+          const {
+            nombre,
+            fechaDesde,
+            fechaHasta,
+            valorUnico,
+            condiciones,
+            activa,
+            reglas,
+            order,
+          } = p;
+          const out: Record<string, unknown> = { nombre };
+          if (fechaDesde !== undefined) out.fechaDesde = fechaDesde;
+          if (fechaHasta !== undefined) out.fechaHasta = fechaHasta;
+          if (valorUnico !== undefined) out.valorUnico = valorUnico;
+          if (condiciones !== undefined) out.condiciones = condiciones;
+          if (activa !== undefined) out.activa = activa;
+          if (reglas !== undefined) out.reglas = reglas;
+          if (order !== undefined) out.order = order;
+          return out;
+        });
+
+        await this.convexService.mutation('fincas:setPricing', {
+          propertyId: id,
+          pricing: normalized,
+        } as Record<string, unknown>);
+      }
+
+      return result;
     } catch (error) {
       throw new BadRequestException(error.message);
     }
