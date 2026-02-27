@@ -34,8 +34,11 @@ http.route({
         customerProfile?: { name?: string };
         type?: string;
         text?: { body?: string };
+        image?: { link?: string; caption?: string };
+        audio?: { link?: string };
+        video?: { link?: string; caption?: string };
+        document?: { link?: string; caption?: string; filename?: string };
       };
-      // Si YCloud envía eventos outbound (mensaje enviado por el negocio), podemos marcar como "human"
       direction?: string;
     };
 
@@ -47,13 +50,34 @@ http.route({
       const eventId = parsed.id ?? `evt_${Date.now()}`;
       const phone = evt.from ?? "";
       const name = (evt.customerProfile?.name ?? "").trim() || phone;
-      const text =
-        evt.type === "text" && evt.text?.body
-          ? String(evt.text.body).trim()
-          : "";
       const wamid = evt.wamid ?? evt.id;
 
-      if (phone && text) {
+      let content = "";
+      let msgType: "text" | "image" | "audio" | "video" | "document" = "text";
+      let mediaUrl = "";
+
+      if (evt.type === "text" && evt.text?.body) {
+        content = String(evt.text.body).trim();
+        msgType = "text";
+      } else if (evt.type === "image" && evt.image?.link) {
+        content = (evt.image.caption ?? "").trim() || "[Imagen]";
+        msgType = "image";
+        mediaUrl = evt.image.link;
+      } else if (evt.type === "audio" && evt.audio?.link) {
+        content = "[Audio]";
+        msgType = "audio";
+        mediaUrl = evt.audio.link;
+      } else if (evt.type === "video" && evt.video?.link) {
+        content = (evt.video.caption ?? "").trim() || "[Video]";
+        msgType = "video";
+        mediaUrl = evt.video.link;
+      } else if (evt.type === "document" && evt.document?.link) {
+        content = (evt.document.caption ?? evt.document.filename ?? "").trim() || "[Documento]";
+        msgType = "document";
+        mediaUrl = evt.document.link;
+      }
+
+      if (phone && (content || mediaUrl)) {
         const dedupe = await ctx.runMutation(
           internal.ycloud.recordProcessedEvent,
           { eventId }
@@ -65,8 +89,10 @@ http.route({
             eventId,
             phone,
             name,
-            text,
+            text: content,
             wamid,
+            type: msgType,
+            mediaUrl: mediaUrl || undefined,
           });
         }
       }

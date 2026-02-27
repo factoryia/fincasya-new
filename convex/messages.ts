@@ -6,13 +6,28 @@ export const insertUserMessage = internalMutation({
     conversationId: v.id("conversations"),
     content: v.string(),
     createdAt: v.number(),
+    type: v.optional(
+      v.union(
+        v.literal("text"),
+        v.literal("image"),
+        v.literal("audio"),
+        v.literal("video"),
+        v.literal("document")
+      )
+    ),
+    mediaUrl: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
     await ctx.db.insert("messages", {
       conversationId: args.conversationId,
       sender: "user",
       content: args.content,
+      type: args.type ?? "text",
+      mediaUrl: args.mediaUrl,
       createdAt: args.createdAt,
+    });
+    await ctx.db.patch(args.conversationId, {
+      lastMessageAt: args.createdAt,
     });
   },
 });
@@ -33,7 +48,7 @@ export const insertAssistantMessage = internalMutation({
   },
 });
 
-/** Insertar mensaje del asistente con soporte para media (imagen, audio, documento). */
+/** Insertar mensaje del asistente con soporte para media (imagen, audio, video, documento). */
 export const insertAssistantMessageWithMedia = internalMutation({
   args: {
     conversationId: v.id("conversations"),
@@ -43,6 +58,7 @@ export const insertAssistantMessageWithMedia = internalMutation({
         v.literal("text"),
         v.literal("image"),
         v.literal("audio"),
+        v.literal("video"),
         v.literal("document")
       )
     ),

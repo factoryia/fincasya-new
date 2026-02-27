@@ -290,12 +290,13 @@ export default defineSchema({
     conversationId: v.id("conversations"),
     sender: v.union(v.literal("user"), v.literal("assistant")),
     content: v.string(),
-    /** Tipo de mensaje: texto (default), imagen, audio, documento */
+    /** Tipo de mensaje: texto (default), imagen, audio, video, documento */
     type: v.optional(
       v.union(
         v.literal("text"),
         v.literal("image"),
         v.literal("audio"),
+        v.literal("video"),
         v.literal("document")
       )
     ),

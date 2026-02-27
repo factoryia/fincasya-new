@@ -100,6 +100,16 @@ export const processInboundMessage = internalAction({
     name: v.string(),
     text: v.string(),
     wamid: v.optional(v.string()),
+    type: v.optional(
+      v.union(
+        v.literal("text"),
+        v.literal("image"),
+        v.literal("audio"),
+        v.literal("video"),
+        v.literal("document")
+      )
+    ),
+    mediaUrl: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
     const contactId: Id<"contacts"> = await ctx.runMutation(
@@ -117,6 +127,8 @@ export const processInboundMessage = internalAction({
       conversationId,
       content: args.text,
       createdAt: now,
+      type: args.type,
+      mediaUrl: args.mediaUrl,
     });
 
     const conv = await ctx.runQuery(api.conversations.getById, {
