@@ -1,4 +1,11 @@
-import { IsOptional, IsNumber, IsString, IsEnum, Min } from 'class-validator';
+import {
+  IsOptional,
+  IsNumber,
+  IsString,
+  IsEnum,
+  Min,
+  IsBoolean,
+} from 'class-validator';
 import { Type } from 'class-transformer';
 import { PropertyType, PropertyCategory } from './create-finca.dto';
 
@@ -36,4 +43,9 @@ export class ListFincasDto {
   @IsNumber()
   @Min(0)
   maxPrice?: number;
+
+  @IsOptional()
+  @Type(() => Boolean)
+  @IsBoolean()
+  isFavorite?: boolean;
 }

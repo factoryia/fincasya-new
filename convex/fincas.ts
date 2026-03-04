@@ -1,6 +1,6 @@
-import { v } from "convex/values";
-import { query, mutation } from "./_generated/server";
-import { internal } from "./_generated/api";
+import { v } from 'convex/values';
+import { query, mutation } from './_generated/server';
+import { internal } from './_generated/api';
 
 // ============ QUERIES ============
 
@@ -10,70 +10,92 @@ import { internal } from "./_generated/api";
 export const list = query({
   args: {
     limit: v.optional(v.number()),
-    cursor: v.optional(v.id("properties")),
+    cursor: v.optional(v.id('properties')),
     location: v.optional(v.string()),
     type: v.optional(
       v.union(
-        v.literal("FINCA"),
-        v.literal("CASA_CAMPESTRE"),
-        v.literal("VILLA"),
-        v.literal("HACIENDA"),
-        v.literal("QUINTA"),
-        v.literal("APARTAMENTO"),
-        v.literal("CASA")
-      )
+        v.literal('FINCA'),
+        v.literal('CASA_CAMPESTRE'),
+        v.literal('VILLA'),
+        v.literal('HACIENDA'),
+        v.literal('QUINTA'),
+        v.literal('APARTAMENTO'),
+        v.literal('CASA'),
+      ),
     ),
     category: v.optional(
       v.union(
-        v.literal("ECONOMICA"),
-        v.literal("ESTANDAR"),
-        v.literal("PREMIUM"),
-        v.literal("LUJO"),
-        v.literal("ECOTURISMO"),
-        v.literal("CON_PISCINA"),
-        v.literal("CERCA_BOGOTA"),
-        v.literal("GRUPOS_GRANDES"),
-        v.literal("VIP")
-      )
+        v.literal('ECONOMICA'),
+        v.literal('ESTANDAR'),
+        v.literal('PREMIUM'),
+        v.literal('LUJO'),
+        v.literal('ECOTURISMO'),
+        v.literal('CON_PISCINA'),
+        v.literal('CERCA_BOGOTA'),
+        v.literal('GRUPOS_GRANDES'),
+        v.literal('VIP'),
+      ),
     ),
     minCapacity: v.optional(v.number()),
     maxPrice: v.optional(v.number()),
+    isFavorite: v.optional(v.boolean()),
   },
   handler: async (ctx, args) => {
     const limit = args.limit ?? 20;
-    
+
     // Aplicar filtros con índices y obtener todas las propiedades
     const allPropertiesQuery = args.location
-      ? ctx.db.query("properties").withIndex("by_location", (q) => q.eq("location", args.location!))
+      ? ctx.db
+          .query('properties')
+          .withIndex('by_location', (q) => q.eq('location', args.location!))
       : args.type
-      ? ctx.db.query("properties").withIndex("by_type", (q) => q.eq("type", args.type!))
-      : args.category
-      ? ctx.db.query("properties").withIndex("by_category", (q) => q.eq("category", args.category!))
-      : args.minCapacity
-      ? ctx.db.query("properties").withIndex("by_capacity", (q) => q.gte("capacity", args.minCapacity!))
-      : ctx.db.query("properties");
-    
+        ? ctx.db
+            .query('properties')
+            .withIndex('by_type', (q) => q.eq('type', args.type!))
+        : args.category
+          ? ctx.db
+              .query('properties')
+              .withIndex('by_category', (q) => q.eq('category', args.category!))
+          : args.minCapacity
+            ? ctx.db
+                .query('properties')
+                .withIndex('by_capacity', (q) =>
+                  q.gte('capacity', args.minCapacity!),
+                )
+            : ctx.db.query('properties');
+
     const allProperties = await allPropertiesQuery.collect();
 
     // Solo mostrar fincas visibles (visible !== false; undefined = visible por compatibilidad)
     const visibleOnly = allProperties.filter(
-      (p: { visible?: boolean }) => p.visible !== false
+      (p: { visible?: boolean }) => p.visible !== false,
     );
 
     // Aplicar cursor si existe (filtrar manualmente después de obtener los resultados)
     let filtered = visibleOnly;
     if (args.cursor) {
-      filtered = filtered.filter((p: typeof allProperties[number]) => p._id > args.cursor!);
+      filtered = filtered.filter(
+        (p: (typeof allProperties)[number]) => p._id > args.cursor!,
+      );
     }
 
     // Aplicar filtros adicionales que no tienen índice
     if (args.minCapacity && !args.location && !args.type && !args.category) {
       // Ya se aplicó con índice, no necesita filtrar de nuevo
     } else if (args.minCapacity) {
-      filtered = filtered.filter((p: typeof allProperties[number]) => p.capacity >= args.minCapacity!);
+      filtered = filtered.filter(
+        (p: (typeof allProperties)[number]) => p.capacity >= args.minCapacity!,
+      );
     }
     if (args.maxPrice) {
-      filtered = filtered.filter((p: typeof allProperties[number]) => p.priceBase <= args.maxPrice!);
+      filtered = filtered.filter(
+        (p: (typeof allProperties)[number]) => p.priceBase <= args.maxPrice!,
+      );
+    }
+    if (args.isFavorite !== undefined) {
+      filtered = filtered.filter(
+        (p: (typeof allProperties)[number]) => p.isFavorite === args.isFavorite,
+      );
     }
 
     // Determinar si hay más resultados
@@ -82,84 +104,93 @@ export const list = query({
 
     // Obtener imágenes, características, temporadas (pricing) y relaciones con catálogos de Meta para cada propiedad
     const propertiesWithDetails = await Promise.all(
-      propertiesToReturn.map(async (property: typeof allProperties[number]) => {
-        const images = await ctx.db
-          .query("propertyImages")
-          .withIndex("by_property", (q) => q.eq("propertyId", property._id))
-          .collect();
+      propertiesToReturn.map(
+        async (property: (typeof allProperties)[number]) => {
+          const images = await ctx.db
+            .query('propertyImages')
+            .withIndex('by_property', (q) => q.eq('propertyId', property._id))
+            .collect();
 
-        const features = await ctx.db
-          .query("propertyFeatures")
-          .withIndex("by_property", (q) => q.eq("propertyId", property._id))
-          .collect();
+          const features = await ctx.db
+            .query('propertyFeatures')
+            .withIndex('by_property', (q) => q.eq('propertyId', property._id))
+            .collect();
 
-        const pricingRows = await ctx.db
-          .query("propertyPricing")
-          .withIndex("by_property", (q) => q.eq("propertyId", property._id))
-          .collect();
-        const sortedPricing = pricingRows.sort((a, b) => (a.order ?? 999) - (b.order ?? 999));
+          const pricingRows = await ctx.db
+            .query('propertyPricing')
+            .withIndex('by_property', (q) => q.eq('propertyId', property._id))
+            .collect();
+          const sortedPricing = pricingRows.sort(
+            (a, b) => (a.order ?? 999) - (b.order ?? 999),
+          );
 
-        const catalogLinks = await ctx.db
-          .query("propertyWhatsAppCatalog")
-          .withIndex("by_property", (q) => q.eq("propertyId", property._id))
-          .collect();
-        const catalogs = await Promise.all(catalogLinks.map((link) => ctx.db.get(link.catalogId)));
+          const catalogLinks = await ctx.db
+            .query('propertyWhatsAppCatalog')
+            .withIndex('by_property', (q) => q.eq('propertyId', property._id))
+            .collect();
+          const catalogs = await Promise.all(
+            catalogLinks.map((link) => ctx.db.get(link.catalogId)),
+          );
 
-        // Ordenar imágenes por el campo order
-        const sortedImages = images.sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+          // Ordenar imágenes por el campo order
+          const sortedImages = images.sort(
+            (a, b) => (a.order ?? 0) - (b.order ?? 0),
+          );
 
-        return {
-          ...property,
-          visible: property.visible ?? true,
-          reservable: property.reservable ?? true,
-          images: sortedImages.map((img) => img.url),
-          features: features.map((f) => f.name),
-          pricing: sortedPricing.map((p) => {
-            let condicionesParsed: unknown;
-            if (p.condiciones) {
-              try {
-                condicionesParsed = JSON.parse(p.condiciones);
-              } catch {
-                condicionesParsed = undefined;
+          return {
+            ...property,
+            visible: property.visible ?? true,
+            reservable: property.reservable ?? true,
+            images: sortedImages.map((img) => img.url),
+            features: features.map((f) => f.name),
+            pricing: sortedPricing.map((p) => {
+              let condicionesParsed: unknown;
+              if (p.condiciones) {
+                try {
+                  condicionesParsed = JSON.parse(p.condiciones);
+                } catch {
+                  condicionesParsed = undefined;
+                }
               }
-            }
-            let reglasParsed: unknown;
-            if (p.reglas) {
-              try {
-                reglasParsed = JSON.parse(p.reglas);
-              } catch {
-                reglasParsed = undefined;
+              let reglasParsed: unknown;
+              if (p.reglas) {
+                try {
+                  reglasParsed = JSON.parse(p.reglas);
+                } catch {
+                  reglasParsed = undefined;
+                }
               }
-            }
-            return {
-              id: p._id,
-              nombre: p.nombre,
-              fechaDesde: p.fechaDesde,
-              fechaHasta: p.fechaHasta,
-              valorUnico: p.valorUnico,
-              condiciones: condicionesParsed,
-              activa: p.activa ?? true,
-              reglas: reglasParsed,
-              order: p.order,
-            };
-          }),
-          metaCatalogs: catalogLinks.map((link, index) => {
-            const catalog = catalogs[index];
-            return {
-              catalogId: link.catalogId,
-              productRetailerId: link.productRetailerId,
-              whatsappCatalogId: catalog?.whatsappCatalogId ?? null,
-              catalogName: catalog?.name ?? null,
-            };
-          }),
-        };
-      })
+              return {
+                id: p._id,
+                nombre: p.nombre,
+                fechaDesde: p.fechaDesde,
+                fechaHasta: p.fechaHasta,
+                valorUnico: p.valorUnico,
+                condiciones: condicionesParsed,
+                activa: p.activa ?? true,
+                reglas: reglasParsed,
+                order: p.order,
+              };
+            }),
+            metaCatalogs: catalogLinks.map((link, index) => {
+              const catalog = catalogs[index];
+              return {
+                catalogId: link.catalogId,
+                productRetailerId: link.productRetailerId,
+                whatsappCatalogId: catalog?.whatsappCatalogId ?? null,
+                catalogName: catalog?.name ?? null,
+              };
+            }),
+          };
+        },
+      ),
     );
 
     // Obtener el cursor para la siguiente página
-    const nextCursor = hasMore && propertiesWithDetails.length > 0 
-      ? propertiesWithDetails[propertiesWithDetails.length - 1]._id 
-      : undefined;
+    const nextCursor =
+      hasMore && propertiesWithDetails.length > 0
+        ? propertiesWithDetails[propertiesWithDetails.length - 1]._id
+        : undefined;
 
     return {
       properties: propertiesWithDetails,
@@ -173,7 +204,7 @@ export const list = query({
  * Obtener una finca por ID
  */
 export const getById = query({
-  args: { id: v.id("properties") },
+  args: { id: v.id('properties') },
   handler: async (ctx, args) => {
     const property = await ctx.db.get(args.id);
     if (!property) {
@@ -181,25 +212,27 @@ export const getById = query({
     }
 
     const images = await ctx.db
-      .query("propertyImages")
-      .withIndex("by_property", (q) => q.eq("propertyId", args.id))
+      .query('propertyImages')
+      .withIndex('by_property', (q) => q.eq('propertyId', args.id))
       .collect();
 
     const features = await ctx.db
-      .query("propertyFeatures")
-      .withIndex("by_property", (q) => q.eq("propertyId", args.id))
+      .query('propertyFeatures')
+      .withIndex('by_property', (q) => q.eq('propertyId', args.id))
       .collect();
 
     const additionalCosts = await ctx.db
-      .query("additionalCosts")
-      .withIndex("by_property", (q) => q.eq("propertyId", args.id))
+      .query('additionalCosts')
+      .withIndex('by_property', (q) => q.eq('propertyId', args.id))
       .collect();
 
     const pricing = await ctx.db
-      .query("propertyPricing")
-      .withIndex("by_property", (q) => q.eq("propertyId", args.id))
+      .query('propertyPricing')
+      .withIndex('by_property', (q) => q.eq('propertyId', args.id))
       .collect();
-    const sortedPricing = pricing.sort((a, b) => (a.order ?? 999) - (b.order ?? 999));
+    const sortedPricing = pricing.sort(
+      (a, b) => (a.order ?? 999) - (b.order ?? 999),
+    );
 
     // Ordenar imágenes por el campo order
     const sortedImages = images.sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
@@ -250,8 +283,8 @@ export const getByCode = query({
   args: { code: v.string() },
   handler: async (ctx, args) => {
     const property = await ctx.db
-      .query("properties")
-      .withIndex("by_code", (q) => q.eq("code", args.code))
+      .query('properties')
+      .withIndex('by_code', (q) => q.eq('code', args.code))
       .first();
 
     if (!property) {
@@ -259,13 +292,13 @@ export const getByCode = query({
     }
 
     const images = await ctx.db
-      .query("propertyImages")
-      .withIndex("by_property", (q) => q.eq("propertyId", property._id))
+      .query('propertyImages')
+      .withIndex('by_property', (q) => q.eq('propertyId', property._id))
       .collect();
 
     const features = await ctx.db
-      .query("propertyFeatures")
-      .withIndex("by_property", (q) => q.eq("propertyId", property._id))
+      .query('propertyFeatures')
+      .withIndex('by_property', (q) => q.eq('propertyId', property._id))
       .collect();
 
     // Ordenar imágenes por el campo order
@@ -280,9 +313,42 @@ export const getByCode = query({
 });
 
 const SEARCH_STOPWORDS = new Set([
-  "estoy", "buscando", "en", "una", "para", "el", "la", "los", "las", "que", "más", "mas", "personas",
-  "grupo", "amigos", "dame", "buen", "precio", "este", "fin", "de", "semana", "viene",
-  "o", "y", "con", "del", "al", "por", "necesito", "quiero", "ver", "opciones", "me", "gusta", "gustan",
+  'estoy',
+  'buscando',
+  'en',
+  'una',
+  'para',
+  'el',
+  'la',
+  'los',
+  'las',
+  'que',
+  'más',
+  'mas',
+  'personas',
+  'grupo',
+  'amigos',
+  'dame',
+  'buen',
+  'precio',
+  'este',
+  'fin',
+  'de',
+  'semana',
+  'viene',
+  'o',
+  'y',
+  'con',
+  'del',
+  'al',
+  'por',
+  'necesito',
+  'quiero',
+  'ver',
+  'opciones',
+  'me',
+  'gusta',
+  'gustan',
 ]);
 
 /**
@@ -298,25 +364,27 @@ export const search = query({
     const limit = args.limit ?? 20;
     const input = args.query
       .toLowerCase()
-      .replace(/[^\wáéíóúñ\s]/g, " ")
-      .replace(/\s+/g, " ")
+      .replace(/[^\wáéíóúñ\s]/g, ' ')
+      .replace(/\s+/g, ' ')
       .trim();
-    const words = input.split(" ").filter((w) => w.length >= 2 && !SEARCH_STOPWORDS.has(w));
+    const words = input
+      .split(' ')
+      .filter((w) => w.length >= 2 && !SEARCH_STOPWORDS.has(w));
     const searchTerms = words.length > 0 ? words : [input.slice(0, 50)];
 
-    const allProperties = await ctx.db.query("properties").collect();
+    const allProperties = await ctx.db.query('properties').collect();
 
     const lower = (s: string) => s.toLowerCase();
     const matchesTerm = (p: (typeof allProperties)[number], term: string) =>
       lower(p.title).includes(term) ||
-      lower(p.description ?? "").includes(term) ||
+      lower(p.description ?? '').includes(term) ||
       lower(p.location).includes(term) ||
       (p.code && lower(p.code).includes(term));
     const countMatches = (p: (typeof allProperties)[number]) =>
       searchTerms.filter((term) => matchesTerm(p, term)).length;
 
     const visibleProperties = allProperties.filter(
-      (p: { visible?: boolean }) => p.visible !== false
+      (p: { visible?: boolean }) => p.visible !== false,
     );
     const filtered = visibleProperties
       .filter((p) => searchTerms.some((term) => matchesTerm(p, term)))
@@ -326,15 +394,15 @@ export const search = query({
     const propertiesWithDetails = await Promise.all(
       filtered.map(async (property) => {
         const images = await ctx.db
-          .query("propertyImages")
-          .withIndex("by_property", (q) => q.eq("propertyId", property._id))
+          .query('propertyImages')
+          .withIndex('by_property', (q) => q.eq('propertyId', property._id))
           .first();
 
         return {
           ...property,
           image: images?.url,
         };
-      })
+      }),
     );
 
     return propertiesWithDetails;
@@ -353,7 +421,7 @@ export const searchAvailableByLocationAndDates = query({
     fechaSalida: v.number(),
     limit: v.optional(v.number()),
     minCapacity: v.optional(v.number()),
-    excludePropertyIds: v.optional(v.array(v.id("properties"))),
+    excludePropertyIds: v.optional(v.array(v.id('properties'))),
     sortByPrice: v.optional(v.boolean()),
   },
   handler: async (ctx, args) => {
@@ -362,33 +430,39 @@ export const searchAvailableByLocationAndDates = query({
     if (!locLower) return [];
 
     const inCatalogIds = new Set(
-      (await ctx.db.query("propertyWhatsAppCatalog").collect()).map((r) => r.propertyId)
+      (await ctx.db.query('propertyWhatsAppCatalog').collect()).map(
+        (r) => r.propertyId,
+      ),
     );
     const excludeSet = new Set(args.excludePropertyIds ?? []);
-    const all = await ctx.db.query("properties").collect();
+    const all = await ctx.db.query('properties').collect();
     let byLocation = all.filter(
       (p) =>
         p.visible !== false &&
         p.location.toLowerCase().includes(locLower) &&
         inCatalogIds.has(p._id) &&
-        !excludeSet.has(p._id)
+        !excludeSet.has(p._id),
     );
     if (args.minCapacity != null) {
       byLocation = byLocation.filter((p) => p.capacity >= args.minCapacity!);
     }
 
-    const result: Array<{ _id: (typeof all)[number]["_id"]; title: string; priceBase?: number }> = [];
+    const result: Array<{
+      _id: (typeof all)[number]['_id'];
+      title: string;
+      priceBase?: number;
+    }> = [];
 
     for (const p of byLocation) {
       const bookings = await ctx.db
-        .query("bookings")
-        .withIndex("by_property", (q) => q.eq("propertyId", p._id))
+        .query('bookings')
+        .withIndex('by_property', (q) => q.eq('propertyId', p._id))
         .collect();
       const overlap = bookings.some(
         (b) =>
-          b.status !== "CANCELLED" &&
+          b.status !== 'CANCELLED' &&
           b.fechaEntrada < args.fechaSalida &&
-          b.fechaSalida > args.fechaEntrada
+          b.fechaSalida > args.fechaEntrada,
       );
       if (!overlap) {
         result.push({ _id: p._id, title: p.title, priceBase: p.priceBase });
@@ -423,27 +497,27 @@ export const create = mutation({
     code: v.optional(v.string()),
     category: v.optional(
       v.union(
-        v.literal("ECONOMICA"),
-        v.literal("ESTANDAR"),
-        v.literal("PREMIUM"),
-        v.literal("LUJO"),
-        v.literal("ECOTURISMO"),
-        v.literal("CON_PISCINA"),
-        v.literal("CERCA_BOGOTA"),
-        v.literal("GRUPOS_GRANDES"),
-        v.literal("VIP")
-      )
+        v.literal('ECONOMICA'),
+        v.literal('ESTANDAR'),
+        v.literal('PREMIUM'),
+        v.literal('LUJO'),
+        v.literal('ECOTURISMO'),
+        v.literal('CON_PISCINA'),
+        v.literal('CERCA_BOGOTA'),
+        v.literal('GRUPOS_GRANDES'),
+        v.literal('VIP'),
+      ),
     ),
     type: v.optional(
       v.union(
-        v.literal("FINCA"),
-        v.literal("CASA_CAMPESTRE"),
-        v.literal("VILLA"),
-        v.literal("HACIENDA"),
-        v.literal("QUINTA"),
-        v.literal("APARTAMENTO"),
-        v.literal("CASA")
-      )
+        v.literal('FINCA'),
+        v.literal('CASA_CAMPESTRE'),
+        v.literal('VILLA'),
+        v.literal('HACIENDA'),
+        v.literal('QUINTA'),
+        v.literal('APARTAMENTO'),
+        v.literal('CASA'),
+      ),
     ),
     images: v.optional(v.array(v.string())),
     features: v.optional(v.array(v.string())),
@@ -459,28 +533,32 @@ export const create = mutation({
           activa: v.optional(v.boolean()),
           reglas: v.optional(v.string()),
           order: v.optional(v.number()),
-        })
-      )
+        }),
+      ),
     ),
     /** IDs: Convex _id (m977...) o Meta whatsappCatalogId (26198995209693859). */
     catalogIds: v.optional(v.array(v.string())),
     visible: v.optional(v.boolean()),
     reservable: v.optional(v.boolean()),
+    isFavorite: v.optional(v.boolean()),
+    priceOriginal: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
     const now = Date.now();
 
     if (args.code) {
       const existingByCode = await ctx.db
-        .query("properties")
-        .withIndex("by_code", (q) => q.eq("code", args.code))
+        .query('properties')
+        .withIndex('by_code', (q) => q.eq('code', args.code))
         .first();
       if (existingByCode) {
-        throw new Error(`Ya existe una finca con el código "${args.code}". El código debe ser único.`);
+        throw new Error(
+          `Ya existe una finca con el código "${args.code}". El código debe ser único.`,
+        );
       }
     }
 
-    const propertyId = await ctx.db.insert("properties", {
+    const propertyId = await ctx.db.insert('properties', {
       title: args.title,
       description: args.description,
       location: args.location,
@@ -493,13 +571,15 @@ export const create = mutation({
       priceAlta: args.priceAlta,
       priceEspeciales: args.priceEspeciales,
       code: args.code,
-      category: args.category ?? "ESTANDAR",
-      type: args.type ?? "FINCA",
+      category: args.category ?? 'ESTANDAR',
+      type: args.type ?? 'FINCA',
       rating: 0,
       reviewsCount: 0,
       video: args.video,
       visible: args.visible ?? true,
       reservable: args.reservable ?? true,
+      isFavorite: args.isFavorite ?? false,
+      priceOriginal: args.priceOriginal,
       createdAt: now,
       updatedAt: now,
     });
@@ -508,12 +588,12 @@ export const create = mutation({
     if (args.images && args.images.length > 0) {
       await Promise.all(
         args.images.map((url, index) =>
-          ctx.db.insert("propertyImages", {
+          ctx.db.insert('propertyImages', {
             propertyId,
             url,
             order: index,
-          })
-        )
+          }),
+        ),
       );
     }
 
@@ -521,11 +601,11 @@ export const create = mutation({
     if (args.features && args.features.length > 0) {
       await Promise.all(
         args.features.map((name) =>
-          ctx.db.insert("propertyFeatures", {
+          ctx.db.insert('propertyFeatures', {
             propertyId,
             name,
-          })
-        )
+          }),
+        ),
       );
     }
 
@@ -533,7 +613,7 @@ export const create = mutation({
     if (args.pricing && args.pricing.length > 0) {
       await Promise.all(
         args.pricing.map((p, index) =>
-          ctx.db.insert("propertyPricing", {
+          ctx.db.insert('propertyPricing', {
             propertyId,
             nombre: p.nombre,
             fechaDesde: p.fechaDesde,
@@ -545,18 +625,20 @@ export const create = mutation({
             order: p.order ?? index,
             createdAt: now,
             updatedAt: now,
-          })
-        )
+          }),
+        ),
       );
     }
 
     // Catálogos WhatsApp: acepta Convex _id o Meta whatsappCatalogId
     if (args.catalogIds && args.catalogIds.length > 0) {
-      const allCatalogs = await ctx.db.query("whatsappCatalogs").collect();
+      const allCatalogs = await ctx.db.query('whatsappCatalogs').collect();
       for (const rawId of args.catalogIds) {
-        const catalog = allCatalogs.find((c) => c._id === rawId || c.whatsappCatalogId === rawId);
+        const catalog = allCatalogs.find(
+          (c) => c._id === rawId || c.whatsappCatalogId === rawId,
+        );
         if (!catalog) continue;
-        await ctx.db.insert("propertyWhatsAppCatalog", {
+        await ctx.db.insert('propertyWhatsAppCatalog', {
           propertyId,
           catalogId: catalog._id,
           productRetailerId: propertyId,
@@ -575,7 +657,7 @@ export const create = mutation({
  */
 export const update = mutation({
   args: {
-    id: v.id("properties"),
+    id: v.id('properties'),
     title: v.optional(v.string()),
     description: v.optional(v.string()),
     location: v.optional(v.string()),
@@ -590,38 +672,40 @@ export const update = mutation({
     code: v.optional(v.string()),
     category: v.optional(
       v.union(
-        v.literal("ECONOMICA"),
-        v.literal("ESTANDAR"),
-        v.literal("PREMIUM"),
-        v.literal("LUJO"),
-        v.literal("ECOTURISMO"),
-        v.literal("CON_PISCINA"),
-        v.literal("CERCA_BOGOTA"),
-        v.literal("GRUPOS_GRANDES"),
-        v.literal("VIP")
-      )
+        v.literal('ECONOMICA'),
+        v.literal('ESTANDAR'),
+        v.literal('PREMIUM'),
+        v.literal('LUJO'),
+        v.literal('ECOTURISMO'),
+        v.literal('CON_PISCINA'),
+        v.literal('CERCA_BOGOTA'),
+        v.literal('GRUPOS_GRANDES'),
+        v.literal('VIP'),
+      ),
     ),
     type: v.optional(
       v.union(
-        v.literal("FINCA"),
-        v.literal("CASA_CAMPESTRE"),
-        v.literal("VILLA"),
-        v.literal("HACIENDA"),
-        v.literal("QUINTA"),
-        v.literal("APARTAMENTO"),
-        v.literal("CASA")
-      )
+        v.literal('FINCA'),
+        v.literal('CASA_CAMPESTRE'),
+        v.literal('VILLA'),
+        v.literal('HACIENDA'),
+        v.literal('QUINTA'),
+        v.literal('APARTAMENTO'),
+        v.literal('CASA'),
+      ),
     ),
     video: v.optional(v.string()),
     visible: v.optional(v.boolean()),
     reservable: v.optional(v.boolean()),
+    isFavorite: v.optional(v.boolean()),
+    priceOriginal: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
     const { id, ...updates } = args;
     const property = await ctx.db.get(id);
 
     if (!property) {
-      throw new Error("Propiedad no encontrada");
+      throw new Error('Propiedad no encontrada');
     }
 
     await ctx.db.patch(id, {
@@ -629,9 +713,13 @@ export const update = mutation({
       updatedAt: Date.now(),
     });
 
-    await ctx.scheduler.runAfter(0, internal.metaCatalog.syncPropertyToAllCatalogs, {
-      propertyId: id,
-    });
+    await ctx.scheduler.runAfter(
+      0,
+      internal.metaCatalog.syncPropertyToAllCatalogs,
+      {
+        propertyId: id,
+      },
+    );
 
     return id;
   },
@@ -642,7 +730,7 @@ export const update = mutation({
  */
 export const setPricing = mutation({
   args: {
-    propertyId: v.id("properties"),
+    propertyId: v.id('properties'),
     pricing: v.array(
       v.object({
         nombre: v.string(),
@@ -653,18 +741,18 @@ export const setPricing = mutation({
         activa: v.optional(v.boolean()),
         reglas: v.optional(v.string()),
         order: v.optional(v.number()),
-      })
+      }),
     ),
   },
   handler: async (ctx, args) => {
     const property = await ctx.db.get(args.propertyId);
     if (!property) {
-      throw new Error("Propiedad no encontrada");
+      throw new Error('Propiedad no encontrada');
     }
 
     const existing = await ctx.db
-      .query("propertyPricing")
-      .withIndex("by_property", (q) => q.eq("propertyId", args.propertyId))
+      .query('propertyPricing')
+      .withIndex('by_property', (q) => q.eq('propertyId', args.propertyId))
       .collect();
 
     for (const p of existing) {
@@ -674,7 +762,7 @@ export const setPricing = mutation({
     const now = Date.now();
     for (let i = 0; i < args.pricing.length; i++) {
       const p = args.pricing[i];
-      await ctx.db.insert("propertyPricing", {
+      await ctx.db.insert('propertyPricing', {
         propertyId: args.propertyId,
         nombre: p.nombre,
         fechaDesde: p.fechaDesde,
@@ -698,7 +786,7 @@ export const setPricing = mutation({
  */
 export const addTemporada = mutation({
   args: {
-    propertyId: v.id("properties"),
+    propertyId: v.id('properties'),
     nombre: v.string(),
     fechaDesde: v.optional(v.string()),
     fechaHasta: v.optional(v.string()),
@@ -711,17 +799,17 @@ export const addTemporada = mutation({
   handler: async (ctx, args) => {
     const property = await ctx.db.get(args.propertyId);
     if (!property) {
-      throw new Error("Propiedad no encontrada");
+      throw new Error('Propiedad no encontrada');
     }
 
     const existing = await ctx.db
-      .query("propertyPricing")
-      .withIndex("by_property", (q) => q.eq("propertyId", args.propertyId))
+      .query('propertyPricing')
+      .withIndex('by_property', (q) => q.eq('propertyId', args.propertyId))
       .collect();
     const nextOrder = args.order ?? existing.length;
 
     const now = Date.now();
-    const id = await ctx.db.insert("propertyPricing", {
+    const id = await ctx.db.insert('propertyPricing', {
       propertyId: args.propertyId,
       nombre: args.nombre,
       fechaDesde: args.fechaDesde,
@@ -744,7 +832,7 @@ export const addTemporada = mutation({
  */
 export const updateTemporada = mutation({
   args: {
-    pricingId: v.id("propertyPricing"),
+    pricingId: v.id('propertyPricing'),
     nombre: v.optional(v.string()),
     fechaDesde: v.optional(v.string()),
     fechaHasta: v.optional(v.string()),
@@ -758,7 +846,7 @@ export const updateTemporada = mutation({
     const { pricingId, ...updates } = args;
     const row = await ctx.db.get(pricingId);
     if (!row) {
-      throw new Error("Temporada no encontrada");
+      throw new Error('Temporada no encontrada');
     }
 
     await ctx.db.patch(pricingId, {
@@ -774,11 +862,11 @@ export const updateTemporada = mutation({
  * Eliminar una temporada de una finca
  */
 export const removeTemporada = mutation({
-  args: { pricingId: v.id("propertyPricing") },
+  args: { pricingId: v.id('propertyPricing') },
   handler: async (ctx, args) => {
     const row = await ctx.db.get(args.pricingId);
     if (!row) {
-      throw new Error("Temporada no encontrada");
+      throw new Error('Temporada no encontrada');
     }
     await ctx.db.delete(args.pricingId);
     return { success: true };
@@ -789,16 +877,16 @@ export const removeTemporada = mutation({
  * Eliminar una finca. Antes borra relaciones en BD; luego programa acción que elimina el producto en cada catálogo de Meta.
  */
 export const remove = mutation({
-  args: { id: v.id("properties") },
+  args: { id: v.id('properties') },
   handler: async (ctx, args) => {
     const property = await ctx.db.get(args.id);
     if (!property) {
-      throw new Error("Propiedad no encontrada");
+      throw new Error('Propiedad no encontrada');
     }
 
     const catalogLinks = await ctx.db
-      .query("propertyWhatsAppCatalog")
-      .withIndex("by_property", (q) => q.eq("propertyId", args.id))
+      .query('propertyWhatsAppCatalog')
+      .withIndex('by_property', (q) => q.eq('propertyId', args.id))
       .collect();
 
     const metaItems: { whatsappCatalogId: string; retailer_id: string }[] = [];
@@ -817,35 +905,39 @@ export const remove = mutation({
     }
 
     const images = await ctx.db
-      .query("propertyImages")
-      .withIndex("by_property", (q) => q.eq("propertyId", args.id))
+      .query('propertyImages')
+      .withIndex('by_property', (q) => q.eq('propertyId', args.id))
       .collect();
     await Promise.all(images.map((img) => ctx.db.delete(img._id)));
 
     const features = await ctx.db
-      .query("propertyFeatures")
-      .withIndex("by_property", (q) => q.eq("propertyId", args.id))
+      .query('propertyFeatures')
+      .withIndex('by_property', (q) => q.eq('propertyId', args.id))
       .collect();
     await Promise.all(features.map((f) => ctx.db.delete(f._id)));
 
     const additionalCosts = await ctx.db
-      .query("additionalCosts")
-      .withIndex("by_property", (q) => q.eq("propertyId", args.id))
+      .query('additionalCosts')
+      .withIndex('by_property', (q) => q.eq('propertyId', args.id))
       .collect();
     await Promise.all(additionalCosts.map((cost) => ctx.db.delete(cost._id)));
 
     const pricing = await ctx.db
-      .query("propertyPricing")
-      .withIndex("by_property", (q) => q.eq("propertyId", args.id))
+      .query('propertyPricing')
+      .withIndex('by_property', (q) => q.eq('propertyId', args.id))
       .collect();
     await Promise.all(pricing.map((p) => ctx.db.delete(p._id)));
 
     await ctx.db.delete(args.id);
 
     if (metaItems.length > 0) {
-      await ctx.scheduler.runAfter(0, internal.metaCatalog.deleteFromMetaCatalogs, {
-        items: metaItems,
-      });
+      await ctx.scheduler.runAfter(
+        0,
+        internal.metaCatalog.deleteFromMetaCatalogs,
+        {
+          items: metaItems,
+        },
+      );
     }
 
     return { success: true };
@@ -857,12 +949,12 @@ export const remove = mutation({
  */
 export const addImage = mutation({
   args: {
-    propertyId: v.id("properties"),
+    propertyId: v.id('properties'),
     url: v.string(),
     order: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
-    const imageId = await ctx.db.insert("propertyImages", {
+    const imageId = await ctx.db.insert('propertyImages', {
       propertyId: args.propertyId,
       url: args.url,
       order: args.order ?? 0,
@@ -874,7 +966,7 @@ export const addImage = mutation({
 
 /** Obtener imagen por ID (para eliminar de S3 antes de borrar de BD). */
 export const getImageById = query({
-  args: { imageId: v.id("propertyImages") },
+  args: { imageId: v.id('propertyImages') },
   handler: async (ctx, args) => {
     return await ctx.db.get(args.imageId);
   },
@@ -884,7 +976,7 @@ export const getImageById = query({
  * Eliminar imagen de una finca
  */
 export const removeImage = mutation({
-  args: { imageId: v.id("propertyImages") },
+  args: { imageId: v.id('propertyImages') },
   handler: async (ctx, args) => {
     await ctx.db.delete(args.imageId);
     return { success: true };
@@ -896,11 +988,11 @@ export const removeImage = mutation({
  */
 export const addFeature = mutation({
   args: {
-    propertyId: v.id("properties"),
+    propertyId: v.id('properties'),
     name: v.string(),
   },
   handler: async (ctx, args) => {
-    const featureId = await ctx.db.insert("propertyFeatures", {
+    const featureId = await ctx.db.insert('propertyFeatures', {
       propertyId: args.propertyId,
       name: args.name,
     });
@@ -913,7 +1005,7 @@ export const addFeature = mutation({
  * Eliminar característica de una finca
  */
 export const removeFeature = mutation({
-  args: { featureId: v.id("propertyFeatures") },
+  args: { featureId: v.id('propertyFeatures') },
   handler: async (ctx, args) => {
     await ctx.db.delete(args.featureId);
     return { success: true };

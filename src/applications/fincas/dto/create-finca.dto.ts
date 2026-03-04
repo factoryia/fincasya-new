@@ -109,7 +109,9 @@ export class CreateFincaDto {
   @IsOptional()
   @IsBoolean()
   @Transform(({ value }) =>
-    value === undefined || value === null ? true : value === true || value === 'true' || value === 1
+    value === undefined || value === null
+      ? true
+      : value === true || value === 'true' || value === 1,
   )
   visible?: boolean;
 
@@ -117,9 +119,26 @@ export class CreateFincaDto {
   @IsOptional()
   @IsBoolean()
   @Transform(({ value }) =>
-    value === undefined || value === null ? true : value === true || value === 'true' || value === 1
+    value === undefined || value === null
+      ? true
+      : value === true || value === 'true' || value === 1,
   )
   reservable?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  @Transform(({ value }) =>
+    value === undefined || value === null
+      ? false
+      : value === true || value === 'true' || value === 1,
+  )
+  isFavorite?: boolean;
+
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  @Transform(({ value }) => toNumber(value))
+  priceOriginal?: number;
 
   /** En multipart envía varias: -F "features=Piscina" -F "features=BBQ" o JSON string. */
   @IsOptional()
@@ -128,7 +147,8 @@ export class CreateFincaDto {
   @Transform(({ value }) => {
     if (!value) return [];
     if (Array.isArray(value)) return value;
-    if (typeof value === 'string') return value.includes('[') ? JSON.parse(value) : [value];
+    if (typeof value === 'string')
+      return value.includes('[') ? JSON.parse(value) : [value];
     return [];
   })
   features?: string[];
@@ -148,7 +168,8 @@ export class CreateFincaDto {
   @IsArray()
   @IsString({ each: true })
   @Transform(({ value }) => {
-    if (typeof value === 'string') return value ? (value.includes('[') ? JSON.parse(value) : [value]) : [];
+    if (typeof value === 'string')
+      return value ? (value.includes('[') ? JSON.parse(value) : [value]) : [];
     return Array.isArray(value) ? value : [];
   })
   catalogIds?: string[];
@@ -196,7 +217,9 @@ export class PricingItemDto {
   @IsOptional()
   @IsBoolean()
   @Transform(({ value }) =>
-    value === undefined || value === null ? undefined : value === true || value === 'true' || value === 1
+    value === undefined || value === null
+      ? undefined
+      : value === true || value === 'true' || value === 1,
   )
   activa?: boolean;
 

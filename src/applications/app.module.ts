@@ -4,9 +4,17 @@ import { CatalogsModule } from './catalogs/catalogs.module';
 import { FincasModule } from './fincas/fincas.module';
 import { InboxModule } from './inbox/inbox.module';
 import { KnowledgeModule } from './knowledge/knowledge.module';
+import { UsersModule } from './users/users.module';
 
 @Module({
-  imports: [AuthModule, CatalogsModule, FincasModule, InboxModule, KnowledgeModule],
+  imports: [
+    AuthModule,
+    CatalogsModule,
+    FincasModule,
+    InboxModule,
+    KnowledgeModule,
+    UsersModule,
+  ],
   controllers: [],
   providers: [],
 })
