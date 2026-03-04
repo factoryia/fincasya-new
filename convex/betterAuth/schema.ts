@@ -22,6 +22,12 @@ export const tables = {
     userId: v.optional(v.union(v.null(), v.string())),
     /** Rol del usuario: "user" (por defecto) o "admin". Usuarios sin rol se tratan como "user". */
     role: v.optional(v.union(v.literal("user"), v.literal("admin"))),
+    /** Documento de identidad (campo extra usado en la app). */
+    documentId: v.optional(v.string()),
+    /** Teléfono del usuario (campo extra usado en la app). */
+    phone: v.optional(v.string()),
+    /** Cargo o posición del usuario (campo extra usado en la app). */
+    position: v.optional(v.string()),
   })
     .index("email_name", ["email","name"])
     .index("name", ["name"])

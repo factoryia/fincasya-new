@@ -32,10 +32,13 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
             | {
                 data: {
                   createdAt: number;
+                  documentId?: string;
                   email: string;
                   emailVerified: boolean;
                   image?: null | string;
                   name: string;
+                  phone?: string;
+                  position?: string;
                   role?: "user" | "admin";
                   updatedAt: number;
                   userId?: null | string;
@@ -114,6 +117,9 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
                     | "updatedAt"
                     | "userId"
                     | "role"
+                    | "documentId"
+                    | "phone"
+                    | "position"
                     | "_id";
                   operator?:
                     | "lt"
@@ -303,6 +309,9 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
                     | "updatedAt"
                     | "userId"
                     | "role"
+                    | "documentId"
+                    | "phone"
+                    | "position"
                     | "_id";
                   operator?:
                     | "lt"
@@ -553,10 +562,13 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
                 model: "user";
                 update: {
                   createdAt?: number;
+                  documentId?: string;
                   email?: string;
                   emailVerified?: boolean;
                   image?: null | string;
                   name?: string;
+                  phone?: string;
+                  position?: string;
                   role?: "user" | "admin";
                   updatedAt?: number;
                   userId?: null | string;
@@ -572,6 +584,9 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
                     | "updatedAt"
                     | "userId"
                     | "role"
+                    | "documentId"
+                    | "phone"
+                    | "position"
                     | "_id";
                   operator?:
                     | "lt"
@@ -788,10 +803,13 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
                 model: "user";
                 update: {
                   createdAt?: number;
+                  documentId?: string;
                   email?: string;
                   emailVerified?: boolean;
                   image?: null | string;
                   name?: string;
+                  phone?: string;
+                  position?: string;
                   role?: "user" | "admin";
                   updatedAt?: number;
                   userId?: null | string;
@@ -807,6 +825,9 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
                     | "updatedAt"
                     | "userId"
                     | "role"
+                    | "documentId"
+                    | "phone"
+                    | "position"
                     | "_id";
                   operator?:
                     | "lt"
