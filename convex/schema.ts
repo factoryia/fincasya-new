@@ -16,6 +16,8 @@ export default defineSchema({
     lat: v.number(),
     lng: v.number(),
     priceBase: v.number(),
+    /** Precio original antes de descuentos/promos (legacy, usado para catálogos). */
+    priceOriginal: v.optional(v.number()),
     priceBaja: v.number(),
     priceMedia: v.number(),
     priceAlta: v.number(),
@@ -50,8 +52,8 @@ export default defineSchema({
     visible: v.optional(v.boolean()),
     /** Si true, se puede reservar desde la página web. */
     reservable: v.optional(v.boolean()),
+    /** Bandera legacy para favoritos (para compatibilidad con documentos existentes). */
     isFavorite: v.optional(v.boolean()),
-    priceOriginal: v.optional(v.number()),
     createdAt: v.number(),
     updatedAt: v.number(),
   })

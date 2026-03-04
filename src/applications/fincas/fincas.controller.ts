@@ -15,6 +15,7 @@ import {
   MaxFileSizeValidator,
   FileTypeValidator,
   UseGuards,
+  Header,
 } from '@nestjs/common';
 import { FilesInterceptor, FileInterceptor, FileFieldsInterceptor } from '@nestjs/platform-express';
 import { memoryStorage } from 'multer';
@@ -41,6 +42,14 @@ export class FincasController {
   ) {
     const limitNum = limit ? parseInt(limit, 10) : undefined;
     return this.fincasService.search(query, limitNum);
+  }
+
+  /** Feed de catálogo en CSV para Meta/Commerce Manager. URL para configurar como "origen de datos" del catálogo. */
+  @Get('feed')
+  @Header('Content-Type', 'text/csv; charset=utf-8')
+  @Header('Content-Disposition', 'attachment; filename="catalog.csv"')
+  async getCatalogFeed(): Promise<string> {
+    return this.fincasService.getCatalogFeedCsv();
   }
 
   @Get(':id')
