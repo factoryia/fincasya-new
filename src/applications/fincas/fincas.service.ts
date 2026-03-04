@@ -66,6 +66,52 @@ export class FincasService {
     }
   }
 
+  /**
+   * Lista de fincas para feed de catálogo (Meta/WhatsApp). Solo incluye las que tienen al menos una imagen.
+   */
+  async getCatalogFeedRows(): Promise<
+    { id: string; title: string; description: string; link: string; image_link: string; additional_image_link: string; price: string; availability: string; condition: string }[]
+  > {
+    const baseUrl = (process.env.CATALOG_PRODUCT_BASE_URL || process.env.FRONTEND_URL || process.env.SITE_URL || 'https://fincasya.cloud').replace(/\/$/, '');
+    const result = await this.convexService.query('fincas:list', { limit: 2000 });
+    const rows: { id: string; title: string; description: string; link: string; image_link: string; additional_image_link: string; price: string; availability: string; condition: string }[] = [];
+    for (const p of result.properties || []) {
+      const images = (p as { images?: string[] }).images ?? [];
+      if (images.length === 0) continue;
+      const id = String((p as { _id: string })._id);
+      const title = ((p as { title?: string }).title ?? 'Finca').slice(0, 200);
+      const description = ((p as { description?: string }).description ?? '').slice(0, 9999).replace(/<[^>]*>/g, '');
+      const priceBase = (p as { priceBase?: number }).priceBase ?? 0;
+      rows.push({
+        id,
+        title,
+        description,
+        link: `${baseUrl}/fincas/${id}`,
+        image_link: images[0],
+        additional_image_link: images.slice(1).join(','),
+        price: `${priceBase} COP`,
+        availability: 'in stock',
+        condition: 'new',
+      });
+    }
+    return rows;
+  }
+
+  /** Genera el CSV del catálogo para Meta (columnas requeridas: id, title, description, link, image_link, price, availability, condition). */
+  async getCatalogFeedCsv(): Promise<string> {
+    const rows = await this.getCatalogFeedRows();
+    const escape = (s: string) => {
+      const t = String(s ?? '').replace(/"/g, '""');
+      return /[",\n\r]/.test(t) ? `"${t}"` : t;
+    };
+    const headers = ['id', 'title', 'description', 'link', 'image_link', 'additional_image_link', 'price', 'availability', 'condition'];
+    const lines = [headers.join(',')];
+    for (const r of rows) {
+      lines.push([r.id, r.title, r.description, r.link, r.image_link, r.additional_image_link, r.price, r.availability, r.condition].map(escape).join(','));
+    }
+    return '\uFEFF' + lines.join('\r\n');
+  }
+
   async create(
     createDto: CreateFincaDto,
     images?: Express.Multer.File[],
