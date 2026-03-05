@@ -673,7 +673,13 @@
                   "key": "icon",
                   "type": "file",
                   "src": [],
-                  "description": "Archivo SVG del icono (máx 2MB)"
+                  "description": "Archivo SVG del icono (máx 2MB, opcional)"
+                },
+                {
+                  "key": "emoji",
+                  "value": "🏊",
+                  "type": "text",
+                  "description": "Emoji de la feature (opcional)"
                 }
               ]
             },
@@ -682,7 +688,7 @@
               "host": ["{{base_url}}"],
               "path": ["api", "features"]
             },
-            "description": "Crear una feature individual con nombre y archivo SVG. Requiere rol Admin."
+            "description": "Crear una feature individual. Los campos (nombre, emoji, icono SVG) son opcionales. Requiere rol Admin."
           }
         },
         {
@@ -697,7 +703,7 @@
                   "key": "icons",
                   "type": "file",
                   "src": [],
-                  "description": "Archivos SVG (máx 50 archivos, 2MB c/u). El nombre de la feature se toma del nombre del archivo sin la extensión .svg"
+                  "description": "Archivos SVG (máx 1000 archivos, 2MB c/u). El nombre de la feature se toma del nombre del archivo sin la extensión .svg"
                 }
               ]
             },
@@ -728,6 +734,12 @@
                   "type": "file",
                   "src": [],
                   "description": "Nuevo archivo SVG (opcional, reemplaza el anterior)"
+                },
+                {
+                  "key": "emoji",
+                  "value": "🏊",
+                  "type": "text",
+                  "description": "Nuevo emoji (opcional)"
                 }
               ]
             },
@@ -742,7 +754,7 @@
                 }
               ]
             },
-            "description": "Actualizar nombre y/o icono SVG de una feature. Si se sube un nuevo icono, el anterior se elimina de S3. Requiere rol Admin."
+            "description": "Actualizar nombre, emoji y/o icono SVG de una feature. Si se sube un nuevo icono, el anterior se elimina de S3. Requiere rol Admin."
           }
         },
         {

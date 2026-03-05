@@ -21,6 +21,10 @@ export const list = query({
         v.literal('QUINTA'),
         v.literal('APARTAMENTO'),
         v.literal('CASA'),
+        v.literal('CASA_PRIVADA'),
+        v.literal('CASA_EN_CONJUNTO_CERRADO'),
+        v.literal('VILLA_PRIVADA'),
+        v.literal('CONDOMINIO'),
       ),
     ),
     category: v.optional(
@@ -41,7 +45,7 @@ export const list = query({
     isFavorite: v.optional(v.boolean()),
   },
   handler: async (ctx, args) => {
-    const limit = args.limit ?? 20;
+    const limit = args.limit ?? 1000;
 
     // Aplicar filtros con índices y obtener todas las propiedades
     const allPropertiesQuery = args.location
@@ -62,7 +66,10 @@ export const list = query({
                 .withIndex('by_capacity', (q) =>
                   q.gte('capacity', args.minCapacity!),
                 )
-            : ctx.db.query('properties');
+            : ctx.db
+                .query('properties')
+                .withIndex('by_createdAt')
+                .order('desc');
 
     const allProperties = await allPropertiesQuery.collect();
 
@@ -121,9 +128,13 @@ export const list = query({
             features.map(async (f) => {
               if (f.featureId) {
                 const catalog = await ctx.db.get(f.featureId);
-                return { name: f.name, iconUrl: catalog?.iconUrl ?? null };
+                return {
+                  name: f.name,
+                  iconUrl: catalog?.iconUrl ?? null,
+                  emoji: catalog?.emoji ?? null,
+                };
               }
-              return { name: f.name, iconUrl: null };
+              return { name: f.name, iconUrl: null, emoji: null };
             }),
           );
 
@@ -237,9 +248,13 @@ export const getById = query({
       features.map(async (f) => {
         if (f.featureId) {
           const catalog = await ctx.db.get(f.featureId);
-          return { name: f.name, iconUrl: catalog?.iconUrl ?? null };
+          return {
+            name: f.name,
+            iconUrl: catalog?.iconUrl ?? null,
+            emoji: catalog?.emoji ?? null,
+          };
         }
-        return { name: f.name, iconUrl: null };
+        return { name: f.name, iconUrl: null, emoji: null };
       }),
     );
 
@@ -328,9 +343,13 @@ export const getByCode = query({
       features.map(async (f) => {
         if (f.featureId) {
           const catalog = await ctx.db.get(f.featureId);
-          return { name: f.name, iconUrl: catalog?.iconUrl ?? null };
+          return {
+            name: f.name,
+            iconUrl: catalog?.iconUrl ?? null,
+            emoji: catalog?.emoji ?? null,
+          };
         }
-        return { name: f.name, iconUrl: null };
+        return { name: f.name, iconUrl: null, emoji: null };
       }),
     );
 
@@ -550,6 +569,10 @@ export const create = mutation({
         v.literal('QUINTA'),
         v.literal('APARTAMENTO'),
         v.literal('CASA'),
+        v.literal('CASA_PRIVADA'),
+        v.literal('CASA_EN_CONJUNTO_CERRADO'),
+        v.literal('VILLA_PRIVADA'),
+        v.literal('CONDOMINIO'),
       ),
     ),
     images: v.optional(v.array(v.string())),
@@ -636,7 +659,7 @@ export const create = mutation({
       await Promise.all(
         args.features.map((name) => {
           const catEntry = catalog.find(
-            (c) => c.name.toLowerCase() === name.toLowerCase(),
+            (c) => c.name?.toLowerCase() === name.toLowerCase(),
           );
           return ctx.db.insert('propertyFeatures', {
             propertyId,
@@ -730,6 +753,10 @@ export const update = mutation({
         v.literal('QUINTA'),
         v.literal('APARTAMENTO'),
         v.literal('CASA'),
+        v.literal('CASA_PRIVADA'),
+        v.literal('CASA_EN_CONJUNTO_CERRADO'),
+        v.literal('VILLA_PRIVADA'),
+        v.literal('CONDOMINIO'),
       ),
     ),
     video: v.optional(v.string()),
@@ -771,7 +798,7 @@ export const update = mutation({
         await Promise.all(
           features.map((name) => {
             const catEntry = catalog.find(
-              (c) => c.name.toLowerCase() === name.toLowerCase(),
+              (c) => c.name?.toLowerCase() === name.toLowerCase(),
             );
             return ctx.db.insert('propertyFeatures', {
               propertyId: id,

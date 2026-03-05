@@ -36,11 +36,15 @@ export class FeaturesService {
     }
   }
 
-  async create(name: string, icon: Express.Multer.File) {
+  async create(name?: string, emoji?: string, icon?: Express.Multer.File) {
     try {
-      const iconUrl = await this.s3Service.uploadFile(icon, 'features');
+      let iconUrl: string | undefined;
+      if (icon) {
+        iconUrl = await this.s3Service.uploadFile(icon, 'features');
+      }
       return await this.convexService.mutation('features:create', {
         name,
+        emoji,
         iconUrl,
       });
     } catch (error) {
@@ -78,7 +82,12 @@ export class FeaturesService {
     }
   }
 
-  async update(id: string, name?: string, icon?: Express.Multer.File) {
+  async update(
+    id: string,
+    name?: string,
+    emoji?: string,
+    icon?: Express.Multer.File,
+  ) {
     try {
       // Verificar que existe
       const existing = await this.convexService.query('features:getById', {
@@ -90,6 +99,7 @@ export class FeaturesService {
 
       const updateData: Record<string, unknown> = {};
       if (name !== undefined) updateData.name = name;
+      if (emoji !== undefined) updateData.emoji = emoji;
 
       if (icon) {
         // Eliminar icono anterior de S3

@@ -47,6 +47,11 @@ export default defineSchema({
       v.literal('QUINTA'),
       v.literal('APARTAMENTO'),
       v.literal('CASA'),
+      v.literal('CASA_PRIVADA'),
+      v.literal('CASA_EN_CONJUNTO_CERRADO'),
+      v.literal('VILLA_PRIVADA'),
+      v.literal('CONDOMINIO'),
+      v.literal('CASA_BOUTIQUE'),
     ),
     /** Si true, la finca aparece en el listado público. */
     visible: v.optional(v.boolean()),
@@ -62,7 +67,8 @@ export default defineSchema({
     .index('by_rating', ['rating'])
     .index('by_type', ['type'])
     .index('by_category', ['category'])
-    .index('by_code', ['code']),
+    .index('by_code', ['code'])
+    .index('by_createdAt', ['createdAt']),
 
   // Tabla de imágenes de propiedades
   propertyImages: defineTable({
@@ -71,10 +77,11 @@ export default defineSchema({
     order: v.optional(v.number()),
   }).index('by_property', ['propertyId']),
 
-  // Catálogo de features (nombre + icono SVG)
+  // Catálogo de features (nombre + icono SVG + emoji)
   featureCatalog: defineTable({
-    name: v.string(),
-    iconUrl: v.string(),
+    name: v.optional(v.string()),
+    iconUrl: v.optional(v.string()),
+    emoji: v.optional(v.string()),
     createdAt: v.number(),
     updatedAt: v.number(),
   }).index('by_name', ['name']),

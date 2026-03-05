@@ -49,19 +49,20 @@ export class FeaturesController {
       new ParseFilePipe({
         validators: [
           new MaxFileSizeValidator({ maxSize: 2 * 1024 * 1024 }),
-          new FileTypeValidator({ fileType: /(svg|svg\+xml)$/ }),
+          new FileTypeValidator({ fileType: /(svg|xml)/ }),
         ],
+        fileIsRequired: false,
       }),
     )
-    icon: Express.Multer.File,
+    icon?: Express.Multer.File,
   ) {
-    return this.featuresService.create(createDto.name, icon);
+    return this.featuresService.create(createDto.name, createDto.emoji, icon);
   }
 
   @Post('bulk')
   @UseGuards(ConvexAuthGuard, AdminGuard)
   @UseInterceptors(
-    FilesInterceptor('icons', 50, {
+    FilesInterceptor('icons', 1000, {
       storage: memoryStorage(),
       limits: { fileSize: 2 * 1024 * 1024 }, // 2MB por archivo
     }),
@@ -84,9 +85,23 @@ export class FeaturesController {
   async update(
     @Param('id') id: string,
     @Body() updateDto: UpdateFeatureDto,
-    @UploadedFile() icon?: Express.Multer.File,
+    @UploadedFile(
+      new ParseFilePipe({
+        validators: [
+          new MaxFileSizeValidator({ maxSize: 2 * 1024 * 1024 }),
+          new FileTypeValidator({ fileType: /(svg|xml)/ }),
+        ],
+        fileIsRequired: false,
+      }),
+    )
+    icon?: Express.Multer.File,
   ) {
-    return this.featuresService.update(id, updateDto.name, icon);
+    return this.featuresService.update(
+      id,
+      updateDto.name,
+      updateDto.emoji,
+      icon,
+    );
   }
 
   @Delete(':id')

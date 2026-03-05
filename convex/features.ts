@@ -1,4 +1,4 @@
-import { v } from 'convex/values';
+import { v } from 'convex/values'; // Re-sync trigger
 import { query, mutation } from './_generated/server';
 
 // ============ QUERIES ============
@@ -31,14 +31,16 @@ export const getById = query({
  */
 export const create = mutation({
   args: {
-    name: v.string(),
-    iconUrl: v.string(),
+    name: v.optional(v.string()),
+    iconUrl: v.optional(v.string()),
+    emoji: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
     const now = Date.now();
     const id = await ctx.db.insert('featureCatalog', {
       name: args.name,
       iconUrl: args.iconUrl,
+      emoji: args.emoji,
       createdAt: now,
       updatedAt: now,
     });
@@ -53,8 +55,9 @@ export const bulkCreate = mutation({
   args: {
     features: v.array(
       v.object({
-        name: v.string(),
-        iconUrl: v.string(),
+        name: v.optional(v.string()),
+        iconUrl: v.optional(v.string()),
+        emoji: v.optional(v.string()),
       }),
     ),
   },
@@ -65,6 +68,7 @@ export const bulkCreate = mutation({
       const id = await ctx.db.insert('featureCatalog', {
         name: feature.name,
         iconUrl: feature.iconUrl,
+        emoji: feature.emoji,
         createdAt: now,
         updatedAt: now,
       });
@@ -82,6 +86,7 @@ export const update = mutation({
     id: v.id('featureCatalog'),
     name: v.optional(v.string()),
     iconUrl: v.optional(v.string()),
+    emoji: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
     const feature = await ctx.db.get(args.id);
@@ -92,6 +97,7 @@ export const update = mutation({
     const updates: Record<string, unknown> = { updatedAt: Date.now() };
     if (args.name !== undefined) updates.name = args.name;
     if (args.iconUrl !== undefined) updates.iconUrl = args.iconUrl;
+    if (args.emoji !== undefined) updates.emoji = args.emoji;
 
     await ctx.db.patch(args.id, updates);
     return args.id;

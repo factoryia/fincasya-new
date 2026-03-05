@@ -17,7 +17,9 @@
     "noImplicitAny": false,
     "esModuleInterop": true,
     "resolveJsonModule": true,
-    "noEmitOnError": false
+    "noEmitOnError": false,
+    "typeRoots": ["node_modules/@types"],
+    "types": ["node", "multer"]
   },
   "include": ["src/**/*"],
   "exclude": ["node_modules", "dist", "test", "convex", "**/*spec.ts"]

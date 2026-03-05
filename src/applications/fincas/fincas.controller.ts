@@ -76,7 +76,7 @@ export class FincasController {
       ],
       {
         storage: memoryStorage(),
-        limits: { fileSize: 100 * 1024 * 1024 }, // 100MB para video
+        limits: { fileSize: 3000 * 1024 * 1024 }, // 3GB total para video e imágenes
       },
     ),
   )
@@ -159,7 +159,7 @@ export class FincasController {
       {
         storage: memoryStorage(),
         limits: {
-          fileSize: 100 * 1024 * 1024, // 100MB para video / 10MB típico imágenes
+          fileSize: 3000 * 1024 * 1024, // 3GB total para video e imágenes
         },
       },
     ),
@@ -189,7 +189,7 @@ export class FincasController {
   @UseInterceptors(
     FileInterceptor('image', {
       storage: memoryStorage(),
-      limits: { fileSize: 10 * 1024 * 1024 }, // 10MB
+      limits: { fileSize: 3000 * 1024 * 1024 }, // 3GB
     }),
   )
   async addImage(
@@ -197,7 +197,7 @@ export class FincasController {
     @UploadedFile(
       new ParseFilePipe({
         validators: [
-          new MaxFileSizeValidator({ maxSize: 10 * 1024 * 1024 }), // 10MB
+          new MaxFileSizeValidator({ maxSize: 3000 * 1024 * 1024 }), // 3GB
           new FileTypeValidator({ fileType: /(jpg|jpeg|png|webp)$/ }),
         ],
       }),
@@ -252,7 +252,7 @@ export class FincasController {
     @UploadedFile(
       new ParseFilePipe({
         validators: [
-          new MaxFileSizeValidator({ maxSize: 100 * 1024 * 1024 }), // 100MB
+          new MaxFileSizeValidator({ maxSize: 3000 * 1024 * 1024 }), // 3GB
           new FileTypeValidator({ fileType: /(mp4|webm|mov)$/ }),
         ],
       }),

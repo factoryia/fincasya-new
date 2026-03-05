@@ -1,4 +1,8 @@
-import { Injectable, BadRequestException, NotFoundException } from '@nestjs/common';
+import {
+  Injectable,
+  BadRequestException,
+  NotFoundException,
+} from '@nestjs/common';
 import sharp from 'sharp';
 import { ConvexService } from '../shared/services/convex.service';
 import { S3Service } from '../shared/services/s3.service';
@@ -65,10 +69,14 @@ export class InboxService {
   ) {
     const { type, text, mediaUrl, file } = params;
     if (type === 'text' && !text?.trim()) {
-      throw new BadRequestException('Texto requerido para mensaje de tipo text');
+      throw new BadRequestException(
+        'Texto requerido para mensaje de tipo text',
+      );
     }
     if (type !== 'text' && !file && !mediaUrl?.trim()) {
-      throw new BadRequestException('Archivo o mediaUrl requerido para imagen/audio/documento');
+      throw new BadRequestException(
+        'Archivo o mediaUrl requerido para imagen/audio/documento',
+      );
     }
     const conv = await this.convexService.query('conversations:getById', {
       conversationId,
