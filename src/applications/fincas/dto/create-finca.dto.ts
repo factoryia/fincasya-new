@@ -140,16 +140,48 @@ export class CreateFincaDto {
   @Transform(({ value }) => toNumber(value))
   priceOriginal?: number;
 
-  /** En multipart envía varias: -F "features=Piscina" -F "features=BBQ" o JSON string. */
+  /** En multipart envía varias: -F "features=Piscina" -F "features=BBQ" o JSON string. El frontend puede enviarlas como { name: string, iconUrl: string } */
   @IsOptional()
   @IsArray()
   @IsString({ each: true })
   @Transform(({ value }) => {
     if (!value) return [];
-    if (Array.isArray(value)) return value;
-    if (typeof value === 'string')
-      return value.includes('[') ? JSON.parse(value) : [value];
-    return [];
+
+    // Parse JSON si viene como string
+    let parsedValue = value;
+    if (typeof value === 'string') {
+      try {
+        parsedValue = value.includes('[') ? JSON.parse(value) : [value];
+      } catch (e) {
+        parsedValue = [value];
+      }
+    }
+
+    // Si no es un array después del parseo, lo ignoramos o forzamos array
+    if (!Array.isArray(parsedValue)) return [];
+
+    // Mapear los elementos para sacar solo el 'name' si viene como objeto
+    return parsedValue
+      .map((item) => {
+        // Si el elemento es un JSON stringificado (pasa a veces en formdata), parsearlo
+        if (typeof item === 'string' && item.startsWith('{')) {
+          try {
+            const obj = JSON.parse(item);
+            return obj.name || item;
+          } catch (e) {
+            return item;
+          }
+        }
+
+        // Si es un objeto ya parseado
+        if (typeof item === 'object' && item !== null) {
+          return item.name || '';
+        }
+
+        // Si es string normal
+        return String(item);
+      })
+      .filter(Boolean); // Remover vacíos
   })
   features?: string[];
 

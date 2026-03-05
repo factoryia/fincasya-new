@@ -555,7 +555,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"name\": \"Jacuzzi\"\n}"
+              "raw": "{\n  \"name\": \"Jacuzzi\",\n  \"featureId\": \"feature_catalog_id_here\"\n}"
             },
             "url": {
               "raw": "{{base_url}}/api/fincas/:id/features",
@@ -568,26 +568,200 @@
                 }
               ]
             },
-            "description": "Agregar una característica a una finca."
+            "description": "Agregar una característica a una finca. Puede enviarse 'name' (string) y opcionalmente 'featureId' (ID del catálogo)."
           }
         },
         {
-          "name": "Eliminar Característica",
+          "name": "Desenlazar Característica (Unlink)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Jacuzzi\",\n  \"featureId\": \"feature_catalog_id_here\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/fincas/:id/features/unlink",
+              "host": ["{{base_url}}"],
+              "path": ["api", "fincas", ":id", "features", "unlink"],
+              "variable": [
+                {
+                  "key": "id",
+                  "value": "property_id_here"
+                }
+              ]
+            },
+            "description": "Desenlazar/Quitar una característica de una finca usando el nombre o el ID del catálogo. Elimina todas las coincidencias para esa finca."
+          }
+        },
+        {
+          "name": "Eliminar Enlace Característica (Hard Delete)",
           "request": {
             "method": "DELETE",
             "header": [],
             "url": {
-              "raw": "{{base_url}}/api/fincas/features/:featureId",
+              "raw": "{{base_url}}/api/fincas/features/:linkId",
               "host": ["{{base_url}}"],
-              "path": ["api", "fincas", "features", ":featureId"],
+              "path": ["api", "fincas", "features", ":linkId"],
               "variable": [
                 {
-                  "key": "featureId",
+                  "key": "linkId",
+                  "value": "link_id_here"
+                }
+              ]
+            },
+            "description": "Eliminar una característica de una finca por su ID interno de enlace (propertyFeatures ID)."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Catálogo de Features",
+      "item": [
+        {
+          "name": "Listar Features",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/features",
+              "host": ["{{base_url}}"],
+              "path": ["api", "features"]
+            },
+            "description": "Lista todas las features del catálogo (nombre + URL del icono SVG). No requiere autenticación."
+          }
+        },
+        {
+          "name": "Obtener Feature por ID",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/features/:id",
+              "host": ["{{base_url}}"],
+              "path": ["api", "features", ":id"],
+              "variable": [
+                {
+                  "key": "id",
                   "value": "feature_id_here"
                 }
               ]
             },
-            "description": "Eliminar una característica de una finca."
+            "description": "Obtener una feature del catálogo por su ID."
+          }
+        },
+        {
+          "name": "Crear Feature",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "name",
+                  "value": "Piscina",
+                  "type": "text",
+                  "description": "Nombre de la feature"
+                },
+                {
+                  "key": "icon",
+                  "type": "file",
+                  "src": [],
+                  "description": "Archivo SVG del icono (máx 2MB)"
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{base_url}}/api/features",
+              "host": ["{{base_url}}"],
+              "path": ["api", "features"]
+            },
+            "description": "Crear una feature individual con nombre y archivo SVG. Requiere rol Admin."
+          }
+        },
+        {
+          "name": "Carga Masiva de Features (Bulk)",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "icons",
+                  "type": "file",
+                  "src": [],
+                  "description": "Archivos SVG (máx 50 archivos, 2MB c/u). El nombre de la feature se toma del nombre del archivo sin la extensión .svg"
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{base_url}}/api/features/bulk",
+              "host": ["{{base_url}}"],
+              "path": ["api", "features", "bulk"]
+            },
+            "description": "Subir múltiples archivos SVG de una sola vez. El nombre de cada feature se extrae del nombre del archivo (sin .svg). Requiere rol Admin."
+          }
+        },
+        {
+          "name": "Actualizar Feature",
+          "request": {
+            "method": "PATCH",
+            "header": [],
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "name",
+                  "value": "Nombre Actualizado",
+                  "type": "text",
+                  "description": "Nuevo nombre (opcional)"
+                },
+                {
+                  "key": "icon",
+                  "type": "file",
+                  "src": [],
+                  "description": "Nuevo archivo SVG (opcional, reemplaza el anterior)"
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{base_url}}/api/features/:id",
+              "host": ["{{base_url}}"],
+              "path": ["api", "features", ":id"],
+              "variable": [
+                {
+                  "key": "id",
+                  "value": "feature_id_here"
+                }
+              ]
+            },
+            "description": "Actualizar nombre y/o icono SVG de una feature. Si se sube un nuevo icono, el anterior se elimina de S3. Requiere rol Admin."
+          }
+        },
+        {
+          "name": "Eliminar Feature",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/features/:id",
+              "host": ["{{base_url}}"],
+              "path": ["api", "features", ":id"],
+              "variable": [
+                {
+                  "key": "id",
+                  "value": "feature_id_here"
+                }
+              ]
+            },
+            "description": "Eliminar una feature del catálogo. También elimina el icono de S3. Falla si la feature está enlazada a alguna finca. Requiere rol Admin."
           }
         }
       ]

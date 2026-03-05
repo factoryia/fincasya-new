@@ -116,6 +116,17 @@ export const list = query({
             .withIndex('by_property', (q) => q.eq('propertyId', property._id))
             .collect();
 
+          // Enriquecer features con iconUrl del catálogo
+          const enrichedFeatures = await Promise.all(
+            features.map(async (f) => {
+              if (f.featureId) {
+                const catalog = await ctx.db.get(f.featureId);
+                return { name: f.name, iconUrl: catalog?.iconUrl ?? null };
+              }
+              return { name: f.name, iconUrl: null };
+            }),
+          );
+
           const pricingRows = await ctx.db
             .query('propertyPricing')
             .withIndex('by_property', (q) => q.eq('propertyId', property._id))
@@ -142,7 +153,7 @@ export const list = query({
             visible: property.visible ?? true,
             reservable: property.reservable ?? true,
             images: sortedImages.map((img) => img.url),
-            features: features.map((f) => f.name),
+            features: enrichedFeatures,
             pricing: sortedPricing.map((p) => {
               let condicionesParsed: unknown;
               if (p.condiciones) {
@@ -221,6 +232,17 @@ export const getById = query({
       .withIndex('by_property', (q) => q.eq('propertyId', args.id))
       .collect();
 
+    // Enriquecer features con iconUrl del catálogo
+    const enrichedFeatures = await Promise.all(
+      features.map(async (f) => {
+        if (f.featureId) {
+          const catalog = await ctx.db.get(f.featureId);
+          return { name: f.name, iconUrl: catalog?.iconUrl ?? null };
+        }
+        return { name: f.name, iconUrl: null };
+      }),
+    );
+
     const additionalCosts = await ctx.db
       .query('additionalCosts')
       .withIndex('by_property', (q) => q.eq('propertyId', args.id))
@@ -241,7 +263,7 @@ export const getById = query({
       ...property,
       images: sortedImages.map((img) => img.url),
       imageItems: sortedImages.map((img) => ({ id: img._id, url: img.url })),
-      features: features.map((f) => f.name),
+      features: enrichedFeatures,
       additionalCosts,
       pricing: sortedPricing.map((p) => {
         let condicionesParsed: unknown;
@@ -301,13 +323,24 @@ export const getByCode = query({
       .withIndex('by_property', (q) => q.eq('propertyId', property._id))
       .collect();
 
+    // Enriquecer features con iconUrl del catálogo
+    const enrichedFeatures = await Promise.all(
+      features.map(async (f) => {
+        if (f.featureId) {
+          const catalog = await ctx.db.get(f.featureId);
+          return { name: f.name, iconUrl: catalog?.iconUrl ?? null };
+        }
+        return { name: f.name, iconUrl: null };
+      }),
+    );
+
     // Ordenar imágenes por el campo order
     const sortedImages = images.sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
 
     return {
       ...property,
       images: sortedImages.map((img) => img.url),
-      features: features.map((f) => f.name),
+      features: enrichedFeatures,
     };
   },
 });
@@ -597,15 +630,20 @@ export const create = mutation({
       );
     }
 
-    // Insertar características
+    // Insertar características (buscando en el catálogo para el featureId)
     if (args.features && args.features.length > 0) {
+      const catalog = await ctx.db.query('featureCatalog').collect();
       await Promise.all(
-        args.features.map((name) =>
-          ctx.db.insert('propertyFeatures', {
+        args.features.map((name) => {
+          const catEntry = catalog.find(
+            (c) => c.name.toLowerCase() === name.toLowerCase(),
+          );
+          return ctx.db.insert('propertyFeatures', {
             propertyId,
             name,
-          }),
-        ),
+            featureId: catEntry?._id,
+          });
+        }),
       );
     }
 
@@ -699,9 +737,11 @@ export const update = mutation({
     reservable: v.optional(v.boolean()),
     isFavorite: v.optional(v.boolean()),
     priceOriginal: v.optional(v.number()),
+    features: v.optional(v.array(v.string())),
+    catalogIds: v.optional(v.array(v.string())),
   },
   handler: async (ctx, args) => {
-    const { id, ...updates } = args;
+    const { id, features, catalogIds, ...updates } = args;
     const property = await ctx.db.get(id);
 
     if (!property) {
@@ -712,6 +752,66 @@ export const update = mutation({
       ...updates,
       updatedAt: Date.now(),
     });
+
+    // Sincronizar Features
+    if (features !== undefined) {
+      const existingFeatures = await ctx.db
+        .query('propertyFeatures')
+        .withIndex('by_property', (q) => q.eq('propertyId', id))
+        .collect();
+
+      // Eliminar actuales
+      for (const ef of existingFeatures) {
+        await ctx.db.delete(ef._id);
+      }
+
+      // Insertar nuevos (buscando en catálogo)
+      if (features.length > 0) {
+        const catalog = await ctx.db.query('featureCatalog').collect();
+        await Promise.all(
+          features.map((name) => {
+            const catEntry = catalog.find(
+              (c) => c.name.toLowerCase() === name.toLowerCase(),
+            );
+            return ctx.db.insert('propertyFeatures', {
+              propertyId: id,
+              name,
+              featureId: catEntry?._id,
+            });
+          }),
+        );
+      }
+    }
+
+    // Sincronizar Catálogos WhatsApp
+    if (catalogIds !== undefined) {
+      const existingLnks = await ctx.db
+        .query('propertyWhatsAppCatalog')
+        .withIndex('by_property', (q) => q.eq('propertyId', id))
+        .collect();
+
+      for (const lnk of existingLnks) {
+        await ctx.db.delete(lnk._id);
+      }
+
+      if (catalogIds.length > 0) {
+        const allCatalogs = await ctx.db.query('whatsappCatalogs').collect();
+        const now = Date.now();
+        for (const rawId of catalogIds) {
+          const catalog = allCatalogs.find(
+            (c) => c._id === rawId || c.whatsappCatalogId === rawId,
+          );
+          if (!catalog) continue;
+          await ctx.db.insert('propertyWhatsAppCatalog', {
+            propertyId: id,
+            catalogId: catalog._id,
+            productRetailerId: id,
+            createdAt: now,
+            updatedAt: now,
+          });
+        }
+      }
+    }
 
     await ctx.scheduler.runAfter(
       0,
@@ -990,14 +1090,68 @@ export const addFeature = mutation({
   args: {
     propertyId: v.id('properties'),
     name: v.string(),
+    featureId: v.optional(v.id('featureCatalog')),
   },
   handler: async (ctx, args) => {
     const featureId = await ctx.db.insert('propertyFeatures', {
       propertyId: args.propertyId,
       name: args.name,
+      featureId: args.featureId,
     });
 
     return featureId;
+  },
+});
+
+/**
+ * Eliminar característica de una finca por nombre o ID del catálogo
+ */
+export const unlinkFeature = mutation({
+  args: {
+    propertyId: v.id('properties'),
+    name: v.optional(v.string()),
+    featureId: v.optional(v.id('featureCatalog')),
+  },
+  handler: async (ctx, args) => {
+    const property = await ctx.db.get(args.propertyId);
+    if (!property) throw new Error('Propiedad no encontrada');
+
+    let targetName = args.name;
+    // Si no tenemos nombre pero sí ID, intentamos sacarlo del catálogo
+    if (!targetName && args.featureId) {
+      const catEntry = await ctx.db.get(args.featureId);
+      if (catEntry) targetName = catEntry.name;
+    }
+
+    const records = await ctx.db
+      .query('propertyFeatures')
+      .withIndex('by_property', (q) => q.eq('propertyId', args.propertyId))
+      .collect();
+
+    let deletedCount = 0;
+    for (const r of records) {
+      let shouldDelete = false;
+
+      // Priorizar match por ID si existe en el registro
+      if (args.featureId && r.featureId === args.featureId) {
+        shouldDelete = true;
+      }
+      // Si no, comparar por nombre (case-insensitive)
+      else if (
+        targetName &&
+        r.name &&
+        r.name.toLowerCase() === targetName.toLowerCase()
+      ) {
+        shouldDelete = true;
+      }
+
+      if (shouldDelete) {
+        await ctx.db.delete(r._id);
+        deletedCount++;
+      }
+    }
+
+    return { success: true, count: deletedCount };
   },
 });
 

@@ -71,11 +71,22 @@ export default defineSchema({
     order: v.optional(v.number()),
   }).index('by_property', ['propertyId']),
 
-  // Tabla de características de propiedades
+  // Catálogo de features (nombre + icono SVG)
+  featureCatalog: defineTable({
+    name: v.string(),
+    iconUrl: v.string(),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  }).index('by_name', ['name']),
+
+  // Tabla de características de propiedades (enlaza propiedad con feature del catálogo)
   propertyFeatures: defineTable({
     propertyId: v.id('properties'),
     name: v.string(),
-  }).index('by_property', ['propertyId']),
+    featureId: v.optional(v.id('featureCatalog')),
+  })
+    .index('by_property', ['propertyId'])
+    .index('by_feature', ['featureId']),
 
   // Temporadas y precios por propiedad: el admin crea las que quiera y marca cuáles están activas para el cliente
   propertyPricing: defineTable({

@@ -17,7 +17,11 @@ import {
   UseGuards,
   Header,
 } from '@nestjs/common';
-import { FilesInterceptor, FileInterceptor, FileFieldsInterceptor } from '@nestjs/platform-express';
+import {
+  FilesInterceptor,
+  FileInterceptor,
+  FileFieldsInterceptor,
+} from '@nestjs/platform-express';
 import { memoryStorage } from 'multer';
 import { FincasService } from './fincas.service';
 import { CreateFincaDto, PricingItemDto } from './dto/create-finca.dto';
@@ -36,10 +40,7 @@ export class FincasController {
   }
 
   @Get('search')
-  async search(
-    @Query('q') query: string,
-    @Query('limit') limit?: string,
-  ) {
+  async search(@Query('q') query: string, @Query('limit') limit?: string) {
     const limitNum = limit ? parseInt(limit, 10) : undefined;
     return this.fincasService.search(query, limitNum);
   }
@@ -84,7 +85,11 @@ export class FincasController {
     @UploadedFiles()
     files?: { images?: Express.Multer.File[]; video?: Express.Multer.File[] },
   ) {
-    return this.fincasService.create(createDto, files?.images, files?.video?.[0]);
+    return this.fincasService.create(
+      createDto,
+      files?.images,
+      files?.video?.[0],
+    );
   }
 
   @Post('import')
@@ -115,10 +120,7 @@ export class FincasController {
 
   @Post(':id/pricing')
   @UseGuards(ConvexAuthGuard, AdminGuard)
-  async addTemporada(
-    @Param('id') id: string,
-    @Body() body: PricingItemDto,
-  ) {
+  async addTemporada(@Param('id') id: string, @Body() body: PricingItemDto) {
     return this.fincasService.addTemporada(id, body);
   }
 
@@ -168,7 +170,12 @@ export class FincasController {
     @UploadedFiles()
     files?: { images?: Express.Multer.File[]; video?: Express.Multer.File[] },
   ) {
-    return this.fincasService.update(id, updateDto, files?.images, files?.video?.[0]);
+    return this.fincasService.update(
+      id,
+      updateDto,
+      files?.images,
+      files?.video?.[0],
+    );
   }
 
   @Delete(':id')
@@ -208,8 +215,22 @@ export class FincasController {
 
   @Post(':id/features')
   @UseGuards(ConvexAuthGuard, AdminGuard)
-  async addFeature(@Param('id') propertyId: string, @Body('name') name: string) {
-    return this.fincasService.addFeature(propertyId, name);
+  async addFeature(
+    @Param('id') propertyId: string,
+    @Body('name') name: string,
+    @Body('featureId') featureId?: string,
+  ) {
+    return this.fincasService.addFeature(propertyId, name, featureId);
+  }
+
+  @Post(':id/features/unlink')
+  @UseGuards(ConvexAuthGuard, AdminGuard)
+  async unlinkFeature(
+    @Param('id') propertyId: string,
+    @Body('name') name?: string,
+    @Body('featureId') featureId?: string,
+  ) {
+    return this.fincasService.unlinkFeature(propertyId, name, featureId);
   }
 
   @Delete('features/:featureId')

@@ -1,4 +1,8 @@
-import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
+import {
+  Injectable,
+  NotFoundException,
+  BadRequestException,
+} from '@nestjs/common';
 import { ConvexService } from '../shared/services/convex.service';
 import { S3Service } from '../shared/services/s3.service';
 import { CreateFincaDto } from './dto/create-finca.dto';
@@ -17,7 +21,9 @@ export class FincasService {
     try {
       // Filtrar propiedades undefined para evitar errores en Convex
       const args = Object.fromEntries(
-        Object.entries(listDto).filter(([_, value]) => value !== undefined && value !== null && value !== '')
+        Object.entries(listDto).filter(
+          ([_, value]) => value !== undefined && value !== null && value !== '',
+        ),
       );
       return await this.convexService.query('fincas:list', args);
     } catch (error) {
@@ -32,7 +38,9 @@ export class FincasService {
         throw new NotFoundException('Finca no encontrada');
       }
       if (activasOnly && finca.pricing) {
-        finca.pricing = finca.pricing.filter((p: { activa?: boolean }) => p.activa !== false);
+        finca.pricing = finca.pricing.filter(
+          (p: { activa?: boolean }) => p.activa !== false,
+        );
       }
       return finca;
     } catch (error) {
@@ -45,7 +53,9 @@ export class FincasService {
 
   async getByCode(code: string) {
     try {
-      const finca = await this.convexService.query('fincas:getByCode', { code });
+      const finca = await this.convexService.query('fincas:getByCode', {
+        code,
+      });
       if (!finca) {
         throw new NotFoundException('Finca no encontrada');
       }
@@ -70,17 +80,46 @@ export class FincasService {
    * Lista de fincas para feed de catálogo (Meta/WhatsApp). Solo incluye las que tienen al menos una imagen.
    */
   async getCatalogFeedRows(): Promise<
-    { id: string; title: string; description: string; link: string; image_link: string; additional_image_link: string; price: string; availability: string; condition: string }[]
+    {
+      id: string;
+      title: string;
+      description: string;
+      link: string;
+      image_link: string;
+      additional_image_link: string;
+      price: string;
+      availability: string;
+      condition: string;
+    }[]
   > {
-    const baseUrl = (process.env.CATALOG_PRODUCT_BASE_URL || process.env.FRONTEND_URL || process.env.SITE_URL || 'https://fincasya.cloud').replace(/\/$/, '');
-    const result = await this.convexService.query('fincas:list', { limit: 2000 });
-    const rows: { id: string; title: string; description: string; link: string; image_link: string; additional_image_link: string; price: string; availability: string; condition: string }[] = [];
+    const baseUrl = (
+      process.env.CATALOG_PRODUCT_BASE_URL ||
+      process.env.FRONTEND_URL ||
+      process.env.SITE_URL ||
+      'https://fincasya.cloud'
+    ).replace(/\/$/, '');
+    const result = await this.convexService.query('fincas:list', {
+      limit: 2000,
+    });
+    const rows: {
+      id: string;
+      title: string;
+      description: string;
+      link: string;
+      image_link: string;
+      additional_image_link: string;
+      price: string;
+      availability: string;
+      condition: string;
+    }[] = [];
     for (const p of result.properties || []) {
       const images = (p as { images?: string[] }).images ?? [];
       if (images.length === 0) continue;
       const id = String((p as { _id: string })._id);
       const title = ((p as { title?: string }).title ?? 'Finca').slice(0, 200);
-      const description = ((p as { description?: string }).description ?? '').slice(0, 9999).replace(/<[^>]*>/g, '');
+      const description = ((p as { description?: string }).description ?? '')
+        .slice(0, 9999)
+        .replace(/<[^>]*>/g, '');
       const priceBase = (p as { priceBase?: number }).priceBase ?? 0;
       rows.push({
         id,
@@ -104,10 +143,34 @@ export class FincasService {
       const t = String(s ?? '').replace(/"/g, '""');
       return /[",\n\r]/.test(t) ? `"${t}"` : t;
     };
-    const headers = ['id', 'title', 'description', 'link', 'image_link', 'additional_image_link', 'price', 'availability', 'condition'];
+    const headers = [
+      'id',
+      'title',
+      'description',
+      'link',
+      'image_link',
+      'additional_image_link',
+      'price',
+      'availability',
+      'condition',
+    ];
     const lines = [headers.join(',')];
     for (const r of rows) {
-      lines.push([r.id, r.title, r.description, r.link, r.image_link, r.additional_image_link, r.price, r.availability, r.condition].map(escape).join(','));
+      lines.push(
+        [
+          r.id,
+          r.title,
+          r.description,
+          r.link,
+          r.image_link,
+          r.additional_image_link,
+          r.price,
+          r.availability,
+          r.condition,
+        ]
+          .map(escape)
+          .join(','),
+      );
     }
     return '\uFEFF' + lines.join('\r\n');
   }
@@ -166,12 +229,18 @@ export class FincasService {
         });
       }
 
-      const propertyId = await this.convexService.mutation('fincas:create', fincaData);
+      const propertyId = await this.convexService.mutation(
+        'fincas:create',
+        fincaData,
+      );
 
       if (catalogIds && catalogIds.length > 0) {
-        const metaSync = (await this.convexService.action('metaCatalog:syncPropertyToCatalogs', {
-          propertyId,
-        } as Record<string, unknown>)) as { synced: number };
+        const metaSync = (await this.convexService.action(
+          'metaCatalog:syncPropertyToCatalogs',
+          {
+            propertyId,
+          } as Record<string, unknown>,
+        )) as { synced: number };
         return { id: propertyId, metaSync };
       }
 
@@ -181,7 +250,12 @@ export class FincasService {
     }
   }
 
-  async update(id: string, updateDto: UpdateFincaDto, images?: Express.Multer.File[], video?: Express.Multer.File) {
+  async update(
+    id: string,
+    updateDto: UpdateFincaDto,
+    images?: Express.Multer.File[],
+    video?: Express.Multer.File,
+  ) {
     try {
       // Subir nuevas imágenes a S3 si existen
       let imageUrls: string[] = [];
@@ -196,9 +270,8 @@ export class FincasService {
       }
 
       // Actualizar la finca
-      // No enviamos campos que el validator de fincas:update no acepta (pricing, catalogIds, features, images).
-      const { pricing, catalogIds, features, ...rest } = updateDto as any;
-      const updateData: any = { ...rest };
+      // Pasamos pricing por separado si existe, y el resto de campos (incluyendo features y catalogIds) a la mutación update.
+      const { pricing, catalogIds, features, ...updateData } = updateDto as any;
       if (videoUrl) {
         updateData.video = videoUrl;
       }
@@ -206,6 +279,8 @@ export class FincasService {
       const result = await this.convexService.mutation('fincas:update', {
         id,
         ...updateData,
+        features,
+        catalogIds,
       });
 
       // Si se enviaron catalogIds en el update, sincronizar con Meta Catalog (pero sin pasarlos a Convex).
@@ -268,16 +343,19 @@ export class FincasService {
     }
   }
 
-  async setPricing(propertyId: string, pricing: Array<{
-    nombre: string;
-    fechaDesde?: string;
-    fechaHasta?: string;
-    valorUnico?: number;
-    condiciones?: string;
-    activa?: boolean;
-    reglas?: string;
-    order?: number;
-  }>) {
+  async setPricing(
+    propertyId: string,
+    pricing: Array<{
+      nombre: string;
+      fechaDesde?: string;
+      fechaHasta?: string;
+      valorUnico?: number;
+      condiciones?: string;
+      activa?: boolean;
+      reglas?: string;
+      order?: number;
+    }>,
+  ) {
     try {
       return await this.convexService.mutation('fincas:setPricing', {
         propertyId,
@@ -288,16 +366,19 @@ export class FincasService {
     }
   }
 
-  async addTemporada(propertyId: string, body: {
-    nombre: string;
-    fechaDesde?: string;
-    fechaHasta?: string;
-    valorUnico?: number;
-    condiciones?: string;
-    activa?: boolean;
-    reglas?: string;
-    order?: number;
-  }) {
+  async addTemporada(
+    propertyId: string,
+    body: {
+      nombre: string;
+      fechaDesde?: string;
+      fechaHasta?: string;
+      valorUnico?: number;
+      condiciones?: string;
+      activa?: boolean;
+      reglas?: string;
+      order?: number;
+    },
+  ) {
     try {
       return await this.convexService.mutation('fincas:addTemporada', {
         propertyId,
@@ -308,16 +389,19 @@ export class FincasService {
     }
   }
 
-  async updateTemporada(pricingId: string, body: {
-    nombre?: string;
-    fechaDesde?: string;
-    fechaHasta?: string;
-    valorUnico?: number;
-    condiciones?: string;
-    activa?: boolean;
-    reglas?: string;
-    order?: number;
-  }) {
+  async updateTemporada(
+    pricingId: string,
+    body: {
+      nombre?: string;
+      fechaDesde?: string;
+      fechaHasta?: string;
+      valorUnico?: number;
+      condiciones?: string;
+      activa?: boolean;
+      reglas?: string;
+      order?: number;
+    },
+  ) {
     try {
       return await this.convexService.mutation('fincas:updateTemporada', {
         pricingId,
@@ -330,7 +414,9 @@ export class FincasService {
 
   async removeTemporada(pricingId: string) {
     try {
-      return await this.convexService.mutation('fincas:removeTemporada', { pricingId });
+      return await this.convexService.mutation('fincas:removeTemporada', {
+        pricingId,
+      });
     } catch (error) {
       throw new BadRequestException(error.message);
     }
@@ -344,7 +430,9 @@ export class FincasService {
       // Eliminar imágenes de S3
       if (finca.images && finca.images.length > 0) {
         await Promise.all(
-          finca.images.map((url: string) => this.s3Service.deleteFile(url).catch(() => {}))
+          finca.images.map((url: string) =>
+            this.s3Service.deleteFile(url).catch(() => {}),
+          ),
         );
       }
 
@@ -374,21 +462,38 @@ export class FincasService {
 
   async removeImage(imageId: string) {
     try {
-      const image = await this.convexService.query('fincas:getImageById', { imageId });
+      const image = await this.convexService.query('fincas:getImageById', {
+        imageId,
+      });
       if (image?.url) {
         await this.s3Service.deleteFile(image.url).catch(() => {});
       }
-      return await this.convexService.mutation('fincas:removeImage', { imageId });
+      return await this.convexService.mutation('fincas:removeImage', {
+        imageId,
+      });
     } catch (error) {
       throw new BadRequestException(error.message);
     }
   }
 
-  async addFeature(propertyId: string, name: string) {
+  async addFeature(propertyId: string, name: string, featureId?: string) {
     try {
       return await this.convexService.mutation('fincas:addFeature', {
         propertyId,
         name,
+        featureId: featureId as any,
+      });
+    } catch (error) {
+      throw new BadRequestException(error.message);
+    }
+  }
+
+  async unlinkFeature(propertyId: string, name?: string, featureId?: string) {
+    try {
+      return await this.convexService.mutation('fincas:unlinkFeature', {
+        propertyId,
+        name,
+        featureId: featureId as any,
       });
     } catch (error) {
       throw new BadRequestException(error.message);
@@ -397,7 +502,9 @@ export class FincasService {
 
   async removeFeature(featureId: string) {
     try {
-      return await this.convexService.mutation('fincas:removeFeature', { featureId });
+      return await this.convexService.mutation('fincas:removeFeature', {
+        featureId,
+      });
     } catch (error) {
       throw new BadRequestException(error.message);
     }
@@ -407,7 +514,12 @@ export class FincasService {
    * Carga masiva desde Excel (tabla de precios).
    * Parsea el archivo y crea una finca por cada fila válida.
    */
-  async importFromExcel(buffer: Buffer): Promise<{ created: number; skipped: number; errors: number; details: string[] }> {
+  async importFromExcel(buffer: Buffer): Promise<{
+    created: number;
+    skipped: number;
+    errors: number;
+    details: string[];
+  }> {
     const payloads = parseExcelToFincas(buffer);
     let created = 0;
     let errors = 0;

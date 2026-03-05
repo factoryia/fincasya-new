@@ -1,5 +1,5 @@
-import { ConvexError, v } from "convex/values";
-import { action, mutation, query, QueryCtx } from "./_generated/server";
+import { ConvexError, v } from 'convex/values';
+import { action, mutation, query, QueryCtx } from './_generated/server';
 import {
   contentHashFromArrayBuffer,
   type Entry,
@@ -7,20 +7,20 @@ import {
   guessMimeTypeFromContents,
   guessMimeTypeFromExtension,
   vEntryId,
-} from "@convex-dev/rag";
-import { paginationOptsValidator } from "convex/server";
-import { extractTextContent } from "./lib/extractTextContent";
-import rag from "./rag";
-import type { Id } from "./_generated/dataModel";
-import { api } from "./_generated/api";
+} from '@convex-dev/rag';
+import { paginationOptsValidator } from 'convex/server';
+import { extractTextContent } from './lib/extractTextContent';
+import rag from './rag';
+import type { Id } from './_generated/dataModel';
+import { api } from './_generated/api';
 
-const DEFAULT_NAMESPACE = "fincas";
+const DEFAULT_NAMESPACE = 'fincas';
 
 function guessMimeType(filename: string, bytes: ArrayBuffer): string {
   return (
     guessMimeTypeFromExtension(filename) ||
     guessMimeTypeFromContents(bytes) ||
-    "application/octet-stream"
+    'application/octet-stream'
   );
 }
 
@@ -44,13 +44,13 @@ export type KnowledgeFile = {
   name: string;
   type: string;
   size: string;
-  status: "ready" | "processing" | "error";
+  status: 'ready' | 'processing' | 'error';
   url: string | null;
   category?: string;
 };
 
 type EntryMetadata = {
-  storageId?: Id<"_storage">;
+  storageId?: Id<'_storage'>;
   uploadedBy: string;
   filename: string;
   category: string | null;
@@ -58,12 +58,12 @@ type EntryMetadata = {
 
 async function convertEntryToPublicFile(
   ctx: QueryCtx,
-  entry: Entry
+  entry: Entry,
 ): Promise<KnowledgeFile> {
   const metadata = entry.metadata as EntryMetadata | undefined;
   const storageId = metadata?.storageId;
 
-  let fileSize = "unknown";
+  let fileSize = 'unknown';
 
   if (storageId) {
     try {
@@ -72,18 +72,18 @@ async function convertEntryToPublicFile(
         fileSize = formatFileSize(storageMetadata.size);
       }
     } catch (error) {
-      console.log("Failed to get storage metadata: ", error);
+      console.log('Failed to get storage metadata: ', error);
     }
   }
 
-  const filename = entry.key || "Unknown";
-  const extension = filename.split(".").pop()?.toLowerCase() || "txt";
+  const filename = entry.key || 'Unknown';
+  const extension = filename.split('.').pop()?.toLowerCase() || 'txt';
 
-  let status: "ready" | "processing" | "error" = "error";
-  if (entry.status === "ready") {
-    status = "ready";
-  } else if (entry.status === "pending") {
-    status = "processing";
+  let status: 'ready' | 'processing' | 'error' = 'error';
+  if (entry.status === 'ready') {
+    status = 'ready';
+  } else if (entry.status === 'pending') {
+    status = 'processing';
   }
 
   const url = storageId ? await ctx.storage.getUrl(storageId) : null;
@@ -101,10 +101,10 @@ async function convertEntryToPublicFile(
 
 function formatFileSize(bytes: number): string {
   if (bytes === 0) {
-    return "0 B";
+    return '0 B';
   }
   const k = 1024;
-  const sizes = ["B", "KB", "MB", "GB"];
+  const sizes = ['B', 'KB', 'MB', 'GB'];
   const i = Math.floor(Math.log(bytes) / Math.log(k));
   return `${Number.parseFloat((bytes / k ** i).toFixed(1))} ${sizes[i]}`;
 }
@@ -123,8 +123,8 @@ export const list = query({
     const identity = await ctx.auth.getUserIdentity();
     if (identity === null) {
       throw new ConvexError({
-        code: "UNAUTHORIZED",
-        message: "Debes iniciar sesión para listar el conocimiento",
+        code: 'UNAUTHORIZED',
+        message: 'Debes iniciar sesión para listar el conocimiento',
       });
     }
 
@@ -132,7 +132,7 @@ export const list = query({
     const ns = await rag.getNamespace(ctx, { namespace });
 
     if (!ns) {
-      return { page: [], isDone: true, continueCursor: "" };
+      return { page: [], isDone: true, continueCursor: '' };
     }
 
     const results = await rag.list(ctx, {
@@ -141,7 +141,7 @@ export const list = query({
     });
 
     const files = await Promise.all(
-      results.page.map((entry) => convertEntryToPublicFile(ctx, entry))
+      results.page.map((entry) => convertEntryToPublicFile(ctx, entry)),
     );
 
     const filteredFiles = args.category
@@ -162,7 +162,7 @@ export const list = query({
  */
 export const enqueueFile = mutation({
   args: {
-    storageId: v.id("_storage"),
+    storageId: v.id('_storage'),
     filename: v.string(),
     mimeType: v.string(),
     category: v.optional(v.string()),
@@ -170,7 +170,7 @@ export const enqueueFile = mutation({
     userId: v.string(),
   },
   handler: async (ctx, args) => {
-    const jobId = await ctx.db.insert("pendingKnowledgeUploads", {
+    const jobId = await ctx.db.insert('pendingKnowledgeUploads', {
       storageId: args.storageId,
       filename: args.filename,
       mimeType: args.mimeType,
@@ -189,7 +189,7 @@ export const enqueueFile = mutation({
  * Se ejecuta en background (programado por enqueueFile).
  */
 export const processUpload = action({
-  args: { jobId: v.id("pendingKnowledgeUploads") },
+  args: { jobId: v.id('pendingKnowledgeUploads') },
   handler: async (ctx, args) => {
     const job = await ctx.runQuery(api.knowledge.getPendingUpload, {
       jobId: args.jobId,
@@ -207,9 +207,7 @@ export const processUpload = action({
 
     const res = await fetch(url);
     const arrayBuffer = await res.arrayBuffer();
-    const mimeResolved =
-      mimeType ||
-      guessMimeType(filename, arrayBuffer);
+    const mimeResolved = mimeType || guessMimeType(filename, arrayBuffer);
 
     const text = await extractTextContent(ctx, {
       storageId,
@@ -245,7 +243,7 @@ export const processUpload = action({
 
 /** Elimina un job de la cola (tras procesar o si falla). */
 export const deletePendingUpload = mutation({
-  args: { jobId: v.id("pendingKnowledgeUploads") },
+  args: { jobId: v.id('pendingKnowledgeUploads') },
   handler: async (ctx, args) => {
     await ctx.db.delete(args.jobId);
   },
@@ -253,7 +251,7 @@ export const deletePendingUpload = mutation({
 
 /** Devuelve el estado de una subida (para que el cliente haga poll). */
 export const getPendingUpload = query({
-  args: { jobId: v.id("pendingKnowledgeUploads") },
+  args: { jobId: v.id('pendingKnowledgeUploads') },
   handler: async (ctx, args) => {
     return await ctx.db.get(args.jobId);
   },
@@ -261,9 +259,9 @@ export const getPendingUpload = query({
 
 /** Resultado de addFile (procesamiento en background). */
 type AddFileResult = {
-  jobId: Id<"pendingKnowledgeUploads">;
-  storageId: Id<"_storage">;
-  status: "processing";
+  jobId: Id<'pendingKnowledgeUploads'>;
+  storageId: Id<'_storage'>;
+  status: 'processing';
   url: string | null;
   message: string;
 };
@@ -285,8 +283,8 @@ export const addFile = action({
     const identity = await ctx.auth.getUserIdentity();
     if (identity === null) {
       throw new ConvexError({
-        code: "UNAUTHORIZED",
-        message: "Debes iniciar sesión para subir documentos",
+        code: 'UNAUTHORIZED',
+        message: 'Debes iniciar sesión para subir documentos',
       });
     }
 
@@ -310,15 +308,15 @@ export const addFile = action({
       userId,
     });
 
-    const jobId = result.jobId as Id<"pendingKnowledgeUploads">;
+    const jobId = result.jobId as Id<'pendingKnowledgeUploads'>;
 
     return {
       jobId,
       storageId,
-      status: "processing",
+      status: 'processing',
       url: await ctx.storage.getUrl(storageId),
       message:
-        "Archivo subido. La indexación continúa en segundo plano; el documento aparecerá en la lista cuando esté listo.",
+        'Archivo subido. La indexación continúa en segundo plano; el documento aparecerá en la lista cuando esté listo.',
     };
   },
 });
@@ -339,8 +337,8 @@ export const addText = action({
     const identity = await ctx.auth.getUserIdentity();
     if (identity === null) {
       throw new ConvexError({
-        code: "UNAUTHORIZED",
-        message: "Debes iniciar sesión para añadir contenido",
+        code: 'UNAUTHORIZED',
+        message: 'Debes iniciar sesión para añadir contenido',
       });
     }
 
@@ -372,8 +370,8 @@ export const deleteFile = mutation({
     const identity = await ctx.auth.getUserIdentity();
     if (identity === null) {
       throw new ConvexError({
-        code: "UNAUTHORIZED",
-        message: "Debes iniciar sesión para eliminar documentos",
+        code: 'UNAUTHORIZED',
+        message: 'Debes iniciar sesión para eliminar documentos',
       });
     }
 
@@ -383,8 +381,8 @@ export const deleteFile = mutation({
 
     if (!namespace) {
       throw new ConvexError({
-        code: "NOT_FOUND",
-        message: "Namespace no encontrado",
+        code: 'NOT_FOUND',
+        message: 'Namespace no encontrado',
       });
     }
 
@@ -392,8 +390,8 @@ export const deleteFile = mutation({
 
     if (!entry) {
       throw new ConvexError({
-        code: "NOT_FOUND",
-        message: "Documento no encontrado",
+        code: 'NOT_FOUND',
+        message: 'Documento no encontrado',
       });
     }
 
@@ -422,8 +420,8 @@ export const search = action({
     const identity = await ctx.auth.getUserIdentity();
     if (identity === null) {
       throw new ConvexError({
-        code: "UNAUTHORIZED",
-        message: "Debes iniciar sesión para buscar en el conocimiento",
+        code: 'UNAUTHORIZED',
+        message: 'Debes iniciar sesión para buscar en el conocimiento',
       });
     }
 
@@ -453,15 +451,15 @@ export const search = action({
 export const indexFincas = action({
   args: {
     namespace: v.optional(v.string()),
-    propertyIds: v.optional(v.array(v.id("properties"))),
+    propertyIds: v.optional(v.array(v.id('properties'))),
     limit: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
     const identity = await ctx.auth.getUserIdentity();
     if (identity === null) {
       throw new ConvexError({
-        code: "UNAUTHORIZED",
-        message: "Debes iniciar sesión para indexar fincas",
+        code: 'UNAUTHORIZED',
+        message: 'Debes iniciar sesión para indexar fincas',
       });
     }
 
@@ -469,12 +467,32 @@ export const indexFincas = action({
     const userId = identity.subject;
 
     // Obtener fincas: si hay propertyIds usarlas, si no listar con límite
-    let listResult: { properties: Array<{ _id: Id<"properties">; title: string; description: string; location: string; capacity: number; type: string; category: string; features?: string[] }> };
+    let listResult: {
+      properties: Array<{
+        _id: Id<'properties'>;
+        title: string;
+        description: string;
+        location: string;
+        capacity: number;
+        type: string;
+        category: string;
+        features?: { name: string; iconUrl: string | null }[];
+      }>;
+    };
     if (args.propertyIds?.length) {
       const props = await Promise.all(
-        args.propertyIds.map((id) => ctx.runQuery(api.fincas.getById, { id }))
+        args.propertyIds.map((id) => ctx.runQuery(api.fincas.getById, { id })),
       );
-      type PropRow = { _id: Id<"properties">; title: string; description: string; location: string; capacity: number; type: string; category: string; features?: string[] };
+      type PropRow = {
+        _id: Id<'properties'>;
+        title: string;
+        description: string;
+        location: string;
+        capacity: number;
+        type: string;
+        category: string;
+        features?: { name: string; iconUrl: string | null }[];
+      };
       listResult = {
         properties: (props as (PropRow | null)[])
           .filter((p): p is PropRow => p != null)
@@ -493,7 +511,16 @@ export const indexFincas = action({
       const result = await ctx.runQuery(api.fincas.list, {
         limit: args.limit ?? 100,
       });
-      type PropRow = { _id: Id<"properties">; title: string; description: string; location: string; capacity: number; type: string; category: string; features?: string[] };
+      type PropRow = {
+        _id: Id<'properties'>;
+        title: string;
+        description: string;
+        location: string;
+        capacity: number;
+        type: string;
+        category: string;
+        features?: { name: string; iconUrl: string | null }[];
+      };
       listResult = {
         properties: result.properties.map((p: PropRow) => ({
           _id: p._id,
@@ -518,10 +545,12 @@ export const indexFincas = action({
         `Capacidad: ${prop.capacity} personas`,
         `Tipo: ${prop.type}`,
         `Categoría: ${prop.category}`,
-        prop.features?.length ? `Características: ${prop.features.join(", ")}` : "",
+        prop.features?.length
+          ? `Características: ${prop.features.map((f) => f.name).join(', ')}`
+          : '',
       ]
         .filter(Boolean)
-        .join("\n");
+        .join('\n');
 
       const { entryId } = await rag.add(ctx, {
         namespace,
@@ -531,7 +560,7 @@ export const indexFincas = action({
         metadata: {
           uploadedBy: userId,
           filename: prop.title,
-          category: "finca",
+          category: 'finca',
         } as EntryMetadata,
       });
 
