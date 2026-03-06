@@ -23,6 +23,7 @@ export enum PropertyType {
   VILLA_PRIVADA = 'VILLA_PRIVADA',
   CONDOMINIO = 'CONDOMINIO',
   CASA_BOUTIQUE = 'CASA_BOUTIQUE',
+  YATE = 'YATE',
 }
 
 export enum PropertyCategory {

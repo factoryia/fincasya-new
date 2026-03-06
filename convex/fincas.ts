@@ -25,6 +25,7 @@ export const list = query({
         v.literal('CASA_EN_CONJUNTO_CERRADO'),
         v.literal('VILLA_PRIVADA'),
         v.literal('CONDOMINIO'),
+        v.literal('YATE'),
       ),
     ),
     category: v.optional(
@@ -573,6 +574,7 @@ export const create = mutation({
         v.literal('CASA_EN_CONJUNTO_CERRADO'),
         v.literal('VILLA_PRIVADA'),
         v.literal('CONDOMINIO'),
+        v.literal('YATE'),
       ),
     ),
     images: v.optional(v.array(v.string())),
@@ -757,6 +759,7 @@ export const update = mutation({
         v.literal('CASA_EN_CONJUNTO_CERRADO'),
         v.literal('VILLA_PRIVADA'),
         v.literal('CONDOMINIO'),
+        v.literal('YATE'),
       ),
     ),
     video: v.optional(v.string()),
