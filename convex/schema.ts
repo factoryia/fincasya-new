@@ -53,6 +53,7 @@ export default defineSchema({
       v.literal('CONDOMINIO'),
       v.literal('CASA_BOUTIQUE'),
       v.literal('YATE'),
+      v.literal('ISLA'),
     ),
     /** Si true, la finca aparece en el listado público. */
     visible: v.optional(v.boolean()),

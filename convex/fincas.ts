@@ -26,6 +26,7 @@ export const list = query({
         v.literal('VILLA_PRIVADA'),
         v.literal('CONDOMINIO'),
         v.literal('YATE'),
+        v.literal('ISLA'),
       ),
     ),
     category: v.optional(
@@ -575,6 +576,7 @@ export const create = mutation({
         v.literal('VILLA_PRIVADA'),
         v.literal('CONDOMINIO'),
         v.literal('YATE'),
+        v.literal('ISLA'),
       ),
     ),
     images: v.optional(v.array(v.string())),
@@ -760,6 +762,7 @@ export const update = mutation({
         v.literal('VILLA_PRIVADA'),
         v.literal('CONDOMINIO'),
         v.literal('YATE'),
+        v.literal('ISLA'),
       ),
     ),
     video: v.optional(v.string()),

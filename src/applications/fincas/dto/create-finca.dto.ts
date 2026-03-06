@@ -24,6 +24,7 @@ export enum PropertyType {
   CONDOMINIO = 'CONDOMINIO',
   CASA_BOUTIQUE = 'CASA_BOUTIQUE',
   YATE = 'YATE',
+  ISLA = 'ISLA',
 }
 
 export enum PropertyCategory {
