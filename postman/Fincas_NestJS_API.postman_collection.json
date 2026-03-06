@@ -716,6 +716,28 @@
           }
         },
         {
+          "name": "Carga Masiva de Features (JSON)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"features\": [\n    { \"emoji\": \"🛏\", \"name\": \"Habitaciones\" },\n    { \"emoji\": \"🚽\", \"name\": \"Baños\" },\n    { \"emoji\": \"🏊♀️\", \"name\": \"Piscina\" },\n    { \"emoji\": \"💦\", \"name\": \"Jacuzzi\" },\n    { \"emoji\": \"❄️\", \"name\": \"Aire acondicionado\" },\n    { \"emoji\": \"🌬️\", \"name\": \"Ventilador\" },\n    { \"emoji\": \"📺\", \"name\": \"Televisión\" },\n    { \"emoji\": \"💻\", \"name\": \"Wifi\" },\n    { \"emoji\": \"🍳\", \"name\": \"Cocina equipada\" },\n    { \"emoji\": \"🍽️\", \"name\": \"Comedor\" },\n    { \"emoji\": \"🛋️\", \"name\": \"Sala\" },\n    { \"emoji\": \"🥩\", \"name\": \"Zona de asados / BBQ\" },\n    { \"emoji\": \"🕌\", \"name\": \"Kiosko\" },\n    { \"emoji\": \"🚗\", \"name\": \"Parqueadero\" },\n    { \"emoji\": \"🌳\", \"name\": \"Zonas verdes\" },\n    { \"emoji\": \"👙\", \"name\": \"Asoleadoras\" },\n    { \"emoji\": \"🍻\", \"name\": \"Zona de bar\" },\n    { \"emoji\": \"🎱\", \"name\": \"Mesa de billar\" },\n    { \"emoji\": \"🏓\", \"name\": \"Mesa de ping pong\" },\n    { \"emoji\": \"🐸\", \"name\": \"Bolirana / Rana electrónica\" },\n    { \"emoji\": \"🎯\", \"name\": \"Dardos\" },\n    { \"emoji\": \"🎲\", \"name\": \"Juegos de mesa\" },\n    { \"emoji\": \"⚽\", \"name\": \"Cancha de fútbol\" },\n    { \"emoji\": \"🏀\", \"name\": \"Cancha de basketball\" },\n    { \"emoji\": \"🏐\", \"name\": \"Cancha de vóley playa\" },\n    { \"emoji\": \"🎾\", \"name\": \"Cancha de tenis\" },\n    { \"emoji\": \"🏋️\", \"name\": \"Gimnasio\" },\n    { \"emoji\": \"🧖\", \"name\": \"Sauna / Turco\" },\n    { \"emoji\": \"🔥\", \"name\": \"Chimenea\" },\n    { \"emoji\": \"🎤\", \"name\": \"Karaoke / Sonido\" },\n    { \"emoji\": \"🎥\", \"name\": \"Video beam / Proyector\" },\n    { \"emoji\": \"👧\", \"name\": \"Parque infantil\" },\n    { \"emoji\": \"🪢\", \"name\": \"Hamacas\" },\n    { \"emoji\": \"⛱️\", \"name\": \"Sala exterior\" },\n    { \"emoji\": \"🍳\", \"name\": \"Cocina industrial\" },\n    { \"emoji\": \"👨🍳\", \"name\": \"Personal de servicio\" },\n    { \"emoji\": \"⚡\", \"name\": \"Planta eléctrica\" },\n    { \"emoji\": \"🎥\", \"name\": \"Cámaras de seguridad / CCTV\" },\n    { \"emoji\": \"🏡\", \"name\": \"Glamping / Cabañas\" },\n    { \"emoji\": \"🛝\", \"name\": \"Saltarín / juegos para niños\" },\n    { \"emoji\": \"🎮\", \"name\": \"Sala de entretenimiento\" },\n    { \"emoji\": \"🧊\", \"name\": \"Nevera / Nevecón / Enfriador\" },\n    { \"emoji\": \"🧺\", \"name\": \"Zona de lavado / lavandería\" },\n    { \"emoji\": \"🌄\", \"name\": \"Terraza / Mirador\" },\n    { \"emoji\": \"🔥\", \"name\": \"Horno de leña / pizzero\" },\n    { \"emoji\": \"🎉\", \"name\": \"Salón de eventos\" },\n    { \"emoji\": \"🏃\", \"name\": \"Sendero ecológico\" },\n    { \"emoji\": \"🐶\", \"name\": \"Pet friendly\" }\n  ]\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/features/bulk-json",
+              "host": ["{{base_url}}"],
+              "path": ["api", "features", "bulk-json"]
+            },
+            "description": "Cargar múltiples features enviando un array de objetos JSON con 'name' y 'emoji'. Requiere rol Admin."
+          }
+        },
+        {
           "name": "Actualizar Feature",
           "request": {
             "method": "PATCH",

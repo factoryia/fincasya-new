@@ -82,6 +82,24 @@ export class FeaturesService {
     }
   }
 
+  async bulkCreate(features: { name?: string; emoji?: string }[]) {
+    try {
+      const ids = await this.convexService.mutation('features:bulkCreate', {
+        features: features.map((f) => ({
+          name: f.name,
+          emoji: f.emoji,
+        })),
+      });
+
+      return {
+        created: ids.length,
+        ids,
+      };
+    } catch (error) {
+      throw new BadRequestException(error.message);
+    }
+  }
+
   async update(
     id: string,
     name?: string,

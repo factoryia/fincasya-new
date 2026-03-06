@@ -1,4 +1,11 @@
-import { IsString, IsNotEmpty, IsOptional } from 'class-validator';
+import {
+  IsString,
+  IsNotEmpty,
+  IsOptional,
+  ValidateNested,
+  ArrayNotEmpty,
+} from 'class-validator';
+import { Type } from 'class-transformer';
 
 export class CreateFeatureDto {
   @IsString()
@@ -24,4 +31,11 @@ export class UpdateFeatureDto {
 
   @IsOptional()
   icon?: any;
+}
+
+export class BulkCreateFeaturesDto {
+  @ValidateNested({ each: true })
+  @Type(() => CreateFeatureDto)
+  @ArrayNotEmpty()
+  features: CreateFeatureDto[];
 }

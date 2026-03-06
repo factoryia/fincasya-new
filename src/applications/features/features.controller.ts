@@ -17,7 +17,11 @@ import {
 import { FileInterceptor, FilesInterceptor } from '@nestjs/platform-express';
 import { memoryStorage } from 'multer';
 import { FeaturesService } from './features.service';
-import { CreateFeatureDto, UpdateFeatureDto } from './dto/feature.dto';
+import {
+  CreateFeatureDto,
+  UpdateFeatureDto,
+  BulkCreateFeaturesDto,
+} from './dto/feature.dto';
 import { ConvexAuthGuard } from '../shared/guards/convex-auth.guard';
 import { AdminGuard } from '../shared/guards/admin.guard';
 
@@ -72,6 +76,12 @@ export class FeaturesController {
       throw new Error('No se proporcionaron archivos');
     }
     return this.featuresService.bulkUpload(files);
+  }
+
+  @Post('bulk-json')
+  @UseGuards(ConvexAuthGuard, AdminGuard)
+  async bulkCreateJson(@Body() bulkDto: BulkCreateFeaturesDto) {
+    return this.featuresService.bulkCreate(bulkDto.features);
   }
 
   @Patch(':id')
