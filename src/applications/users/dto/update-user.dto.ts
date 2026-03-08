@@ -1,4 +1,4 @@
-import { IsOptional, IsString, IsEnum } from 'class-validator';
+import { IsOptional, IsString, IsEnum, MinLength } from 'class-validator';
 import { UserRole } from '../../shared/constants/user-role';
 
 export class UpdateUserDto {
@@ -21,4 +21,9 @@ export class UpdateUserDto {
   @IsOptional()
   @IsString()
   documentId?: string;
+
+  @IsOptional()
+  @IsString()
+  @MinLength(6, { message: 'La contraseña debe tener al menos 6 caracteres' })
+  password?: string;
 }

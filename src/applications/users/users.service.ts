@@ -120,10 +120,23 @@ export class UsersService {
 
   async update(id: string, updateUserDto: UpdateUserDto) {
     try {
-      return await this.convexService.mutation('users:update', {
-        id,
-        ...updateUserDto,
-      });
+      const { password, ...updates } = updateUserDto;
+
+      // Handle password update separately if provided
+      if (password) {
+        await this.updatePassword(id, password);
+      }
+
+      // If there are other updates, perform them
+      if (Object.keys(updates).length > 0) {
+        return await this.convexService.mutation('users:update', {
+          id,
+          ...updates,
+        });
+      }
+
+      // If only password was updated, returning the user
+      return await this.getById(id);
     } catch (error: any) {
       throw new BadRequestException(error.message);
     }
