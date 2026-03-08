@@ -1,5 +1,0 @@
-POST https://adventurous-octopus-651.convex.site/api/auth/sign-in/email -> 415 Unsupported Media Type
-GET https://adventurous-octopus-651.convex.site/api/auth/session -> 404 Not Found
-GET https://adventurous-octopus-651.convex.site/api/auth/get-session -> 200 OK
-POST https://adventurous-octopus-651.convex.site/api/auth/session-refresh -> 404 Not Found
-POST https://adventurous-octopus-651.convex.site/api/auth/refresh-session -> 404 Not Found
