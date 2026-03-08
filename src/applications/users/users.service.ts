@@ -8,7 +8,6 @@ import { UpdateUserDto } from './dto/update-user.dto';
 import { CreateUserDto } from './dto/create-user.dto';
 import * as https from 'https';
 import { URL } from 'url';
-import * as bcrypt from 'bcryptjs';
 
 @Injectable()
 export class UsersService {
@@ -152,21 +151,10 @@ export class UsersService {
 
   async updatePassword(userId: string, newPassword: string) {
     try {
-      // Verify the user exists first
-      const user = await this.convexService.query('users:getById', {
-        id: userId,
-      });
-      if (!user) {
-        throw new NotFoundException('Usuario no encontrado');
-      }
-
-      // Hash the password using bcrypt (same rounds Better Auth uses internally)
-      const newPasswordHash = await bcrypt.hash(newPassword, 10);
-
-      // Update the password in the betterAuth `account` table via Convex
-      return await this.convexService.mutation('users:updatePassword', {
+      // Use the resetPassword action in Convex to handle hashing and updating
+      return await this.convexService.action('users:resetPassword', {
         userId,
-        newPasswordHash,
+        newPassword,
       });
     } catch (error: any) {
       if (error instanceof NotFoundException) throw error;
@@ -188,7 +176,6 @@ export class UsersService {
             email: createUserDto.email,
             password: createUserDto.password,
             name: createUserDto.name,
-            role: 'user',
           }),
         },
       );

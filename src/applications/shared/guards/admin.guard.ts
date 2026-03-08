@@ -14,7 +14,9 @@ export class AdminGuard implements CanActivate {
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
     const req = context.switchToHttp().getRequest<Request>();
-    const cookies = (req.headers.cookie ?? (req.headers as any)['Cookie'] ?? '') as string;
+    const cookies = (req.headers.cookie ??
+      (req.headers as any)['Cookie'] ??
+      '') as string;
 
     if (!cookies) {
       throw new ForbiddenException(
@@ -26,7 +28,7 @@ export class AdminGuard implements CanActivate {
       const result = await this.authService.getSession(cookies);
       const data = result?.data ?? result;
       const user = data?.user;
-      const role = user?.role ?? UserRole.USER;
+      const role = user?.role ?? UserRole.ASSISTANT;
 
       if (role !== UserRole.ADMIN) {
         throw new ForbiddenException(

@@ -21,7 +21,10 @@ export const tables = {
     updatedAt: v.number(),
     userId: v.optional(v.union(v.null(), v.string())),
     /** Rol del usuario: "user" (por defecto) o "admin". Usuarios sin rol se tratan como "user". */
-    role: v.optional(v.union(v.literal('user'), v.literal('admin'))),
+    role: v.optional(
+      v.union(v.literal('admin'), v.literal('assistant'), v.literal('user')),
+    ),
+    banned: v.optional(v.boolean()),
     phone: v.optional(v.string()),
     position: v.optional(v.string()),
     documentId: v.optional(v.string()),
