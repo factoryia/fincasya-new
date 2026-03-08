@@ -1,4 +1,8 @@
-import { Injectable, UnauthorizedException, BadRequestException } from '@nestjs/common';
+import {
+  Injectable,
+  UnauthorizedException,
+  BadRequestException,
+} from '@nestjs/common';
 import { ConvexService } from '../shared/services/convex.service';
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
@@ -10,10 +14,20 @@ export class AuthService {
   private readonly betterAuthUrl: string;
 
   constructor(private readonly convexService: ConvexService) {
-    this.betterAuthUrl = process.env.CONVEX_SITE_URL || 'https://adventurous-octopus-651.convex.site';
+    this.betterAuthUrl =
+      process.env.CONVEX_SITE_URL ||
+      'https://adventurous-octopus-651.convex.site';
   }
 
-  private async makeRequest(url: string, options: { method?: string; body?: string; headers?: Record<string, string>; cookies?: string } = {}) {
+  private async makeRequest(
+    url: string,
+    options: {
+      method?: string;
+      body?: string;
+      headers?: Record<string, string>;
+      cookies?: string;
+    } = {},
+  ) {
     return new Promise<any>((resolve, reject) => {
       const urlObj = new URL(url);
       const requestOptions: any = {
@@ -33,7 +47,9 @@ export class AuthService {
       }
 
       if (options.body) {
-        requestOptions.headers['Content-Length'] = Buffer.byteLength(options.body).toString();
+        requestOptions.headers['Content-Length'] = Buffer.byteLength(
+          options.body,
+        ).toString();
       }
 
       const req = https.request(requestOptions, (res) => {
@@ -45,8 +61,8 @@ export class AuthService {
           const lowerKey = key.toLowerCase();
           // Set-Cookie puede venir como array, mantenerlo como array
           if (lowerKey === 'set-cookie') {
-            responseHeaders[lowerKey] = Array.isArray(res.headers[key]) 
-              ? res.headers[key] 
+            responseHeaders[lowerKey] = Array.isArray(res.headers[key])
+              ? res.headers[key]
               : [res.headers[key]];
           } else {
             responseHeaders[lowerKey] = res.headers[key];
@@ -59,7 +75,11 @@ export class AuthService {
 
         res.on('end', () => {
           try {
-            if (res.statusCode && res.statusCode >= 200 && res.statusCode < 300) {
+            if (
+              res.statusCode &&
+              res.statusCode >= 200 &&
+              res.statusCode < 300
+            ) {
               const jsonData = data ? JSON.parse(data) : {};
               resolve({ data: jsonData, headers: responseHeaders });
             } else {
@@ -67,9 +87,15 @@ export class AuthService {
               try {
                 errorData = data ? JSON.parse(data) : {};
               } catch {
-                errorData = { message: data || `HTTP ${res.statusCode}: ${res.statusMessage}` };
+                errorData = {
+                  message:
+                    data || `HTTP ${res.statusCode}: ${res.statusMessage}`,
+                };
               }
-              const errorMessage = errorData.message || errorData.error || `HTTP ${res.statusCode}: ${res.statusMessage}`;
+              const errorMessage =
+                errorData.message ||
+                errorData.error ||
+                `HTTP ${res.statusCode}: ${res.statusMessage}`;
               reject(new Error(errorMessage));
             }
           } catch (error: any) {
@@ -92,43 +118,53 @@ export class AuthService {
 
   async register(registerDto: RegisterDto, cookies: string) {
     try {
-      const result = await this.makeRequest(`${this.betterAuthUrl}/api/auth/sign-up/email`, {
-        method: 'POST',
-        body: JSON.stringify({
-          email: registerDto.email,
-          password: registerDto.password,
-          name: registerDto.name,
-          role: 'user', // Por defecto nuevo usuario es "user", nunca "admin"
-        }),
-        cookies,
-        headers: {
-          'Origin': process.env.SITE_URL || 'http://localhost:3001',
+      const result = await this.makeRequest(
+        `${this.betterAuthUrl}/api/auth/sign-up/email`,
+        {
+          method: 'POST',
+          body: JSON.stringify({
+            email: registerDto.email,
+            password: registerDto.password,
+            name: registerDto.name,
+            role: 'user', // Por defecto nuevo usuario es "user", nunca "admin"
+          }),
+          cookies,
+          headers: {
+            Origin: process.env.SITE_URL || 'http://localhost:3001',
+          },
         },
-      });
+      );
       return this.ensureUserRoleInResponse(result);
     } catch (error: any) {
       // Log del error completo para debugging
       console.error('Register error:', error.message);
-      throw new BadRequestException(error.message || 'Error al registrar usuario');
+      throw new BadRequestException(
+        error.message || 'Error al registrar usuario',
+      );
     }
   }
 
   async login(loginDto: LoginDto, cookies: string) {
     try {
-      const result = await this.makeRequest(`${this.betterAuthUrl}/api/auth/sign-in/email`, {
-        method: 'POST',
-        body: JSON.stringify({
-          email: loginDto.email,
-          password: loginDto.password,
-        }),
-        cookies,
-        headers: {
-          'Origin': process.env.SITE_URL || 'http://localhost:3001',
+      const result = await this.makeRequest(
+        `${this.betterAuthUrl}/api/auth/sign-in/email`,
+        {
+          method: 'POST',
+          body: JSON.stringify({
+            email: loginDto.email,
+            password: loginDto.password,
+          }),
+          cookies,
+          headers: {
+            Origin: process.env.SITE_URL || 'http://localhost:3001',
+          },
         },
-      });
+      );
       return this.ensureUserRoleInResponse(result);
     } catch (error: any) {
-      throw new UnauthorizedException(error.message || 'Error al iniciar sesión');
+      throw new UnauthorizedException(
+        error.message || 'Error al iniciar sesión',
+      );
     }
   }
 
@@ -137,14 +173,17 @@ export class AuthService {
       if (!cookies) {
         throw new UnauthorizedException('No se proporcionaron cookies');
       }
-      
+
       // Intentar obtener la sesión desde Better Auth
       // Si falla, intentar usar Convex directamente
       try {
-        const result = await this.makeRequest(`${this.betterAuthUrl}/api/auth/session`, {
-          method: 'GET',
-          cookies,
-        });
+        const result = await this.makeRequest(
+          `${this.betterAuthUrl}/api/auth/get-session`,
+          {
+            method: 'GET',
+            cookies,
+          },
+        );
         const data = result.data || result;
         const body = this.ensureUserRoleInData(data);
         return { ...body, _headers: result.headers };
@@ -154,29 +193,65 @@ export class AuthService {
         if (cookieMatch) {
           const convexJwt = cookieMatch[1];
           this.convexService.setAuth(convexJwt);
-          const user = await this.convexService.query('auth:getCurrentUser', {});
+          const user = await this.convexService.query(
+            'auth:getCurrentUser',
+            {},
+          );
           if (user) {
-            return this.ensureUserRoleInData({ user, session: { token: convexJwt } });
+            return this.ensureUserRoleInData({
+              user,
+              session: { token: convexJwt },
+            });
           }
         }
         throw error;
       }
     } catch (error: any) {
       console.error('GetSession error:', error.message);
-      throw new UnauthorizedException(error.message || 'Error al obtener sesión');
+      throw new UnauthorizedException(
+        error.message || 'Error al obtener sesión',
+      );
+    }
+  }
+
+  async refresh(cookies: string) {
+    try {
+      if (!cookies) {
+        throw new UnauthorizedException('No se proporcionaron cookies');
+      }
+
+      const result = await this.makeRequest(
+        `${this.betterAuthUrl}/api/auth/get-session`,
+        {
+          method: 'GET',
+          cookies,
+        },
+      );
+
+      const data = result.data || result;
+      const body = this.ensureUserRoleInData(data);
+      return { ...body, _headers: result.headers };
+    } catch (error: any) {
+      console.error('Refresh error:', error.message);
+      throw new UnauthorizedException(
+        error.message || 'Error al refrescar la sesión',
+      );
     }
   }
 
   async logout(cookies: string) {
     try {
-      const result = await this.makeRequest(`${this.betterAuthUrl}/api/auth/sign-out`, {
-        method: 'POST',
-        body: JSON.stringify({}),
-        cookies,
-        headers: {
-          'Origin': process.env.SITE_URL || 'http://localhost:3001',
+      const result = await this.makeRequest(
+        `${this.betterAuthUrl}/api/auth/sign-out`,
+        {
+          method: 'POST',
+          body: JSON.stringify({}),
+          cookies,
+          headers: {
+            Origin: process.env.SITE_URL || 'http://localhost:3001',
+          },
         },
-      });
+      );
       return result;
     } catch (error: any) {
       throw new BadRequestException(error.message || 'Error al cerrar sesión');
@@ -188,30 +263,34 @@ export class AuthService {
       if (!cookies) {
         throw new UnauthorizedException('No se proporcionaron cookies');
       }
-      
+
       // Extraer el JWT de Convex de las cookies
       const cookieMatch = cookies.match(/better-auth\.convex_jwt=([^;]+)/);
       if (!cookieMatch) {
-        throw new UnauthorizedException('No se encontró el token de Convex en las cookies');
+        throw new UnauthorizedException(
+          'No se encontró el token de Convex en las cookies',
+        );
       }
-      
+
       const convexJwt = cookieMatch[1];
-      
+
       // Usar Convex directamente para obtener el usuario actual
       this.convexService.setAuth(convexJwt);
       const user = await this.convexService.query('auth:getCurrentUser', {});
-      
+
       if (!user) {
         throw new UnauthorizedException('No se pudo obtener el usuario');
       }
-      
+
       return this.ensureUserRole(user);
     } catch (error: any) {
       if (error instanceof UnauthorizedException) {
         throw error;
       }
       console.error('GetCurrentUser error:', error.message);
-      throw new UnauthorizedException('Error al obtener usuario actual: ' + error.message);
+      throw new UnauthorizedException(
+        'Error al obtener usuario actual: ' + error.message,
+      );
     }
   }
 
@@ -238,7 +317,9 @@ export class AuthService {
   }
 
   /** Para respuestas de Better Auth: { data: { user? }, headers } o { user }. */
-  private ensureUserRoleInResponse<T extends Record<string, unknown>>(res: T): T {
+  private ensureUserRoleInResponse<T extends Record<string, unknown>>(
+    res: T,
+  ): T {
     const data = res?.data;
     if (data && typeof data === 'object') {
       this.ensureUserRoleInData(data as Record<string, unknown>);

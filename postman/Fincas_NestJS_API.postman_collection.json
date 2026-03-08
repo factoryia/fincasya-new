@@ -139,16 +139,16 @@
           }
         },
         {
-          "name": "Cerrar Sesión (sign-out)",
+          "name": "Refrescar Token",
           "request": {
             "method": "POST",
             "header": [],
             "url": {
-              "raw": "{{base_url}}/api/auth/sign-out",
+              "raw": "{{base_url}}/api/auth/refresh",
               "host": ["{{base_url}}"],
-              "path": ["api", "auth", "sign-out"]
+              "path": ["api", "auth", "refresh"]
             },
-            "description": "Alias de logout para compatibilidad con Better Auth."
+            "description": "Refrescar el token de Convex usando la sesión activa. Renovará las cookies."
           }
         }
       ]

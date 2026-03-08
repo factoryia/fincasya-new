@@ -9,13 +9,22 @@ export class AuthController {
   constructor(private readonly authService: AuthService) {}
 
   @Post('register')
-  async register(@Body() registerDto: RegisterDto, @Req() req: Request, @Res() res: Response) {
+  async register(
+    @Body() registerDto: RegisterDto,
+    @Req() req: Request,
+    @Res() res: Response,
+  ) {
     try {
-      const result = await this.authService.register(registerDto, req.headers.cookie || '');
+      const result = await this.authService.register(
+        registerDto,
+        req.headers.cookie || '',
+      );
       // Copiar cookies de la respuesta de Better Auth
       const setCookieHeaders = result.headers?.['set-cookie'];
       if (setCookieHeaders) {
-        const cookies = Array.isArray(setCookieHeaders) ? setCookieHeaders : [setCookieHeaders];
+        const cookies = Array.isArray(setCookieHeaders)
+          ? setCookieHeaders
+          : [setCookieHeaders];
         // Establecer cada cookie individualmente
         cookies.forEach((cookie: string) => {
           if (cookie) {
@@ -30,13 +39,22 @@ export class AuthController {
   }
 
   @Post('login')
-  async login(@Body() loginDto: LoginDto, @Req() req: Request, @Res() res: Response) {
+  async login(
+    @Body() loginDto: LoginDto,
+    @Req() req: Request,
+    @Res() res: Response,
+  ) {
     try {
-      const result = await this.authService.login(loginDto, req.headers.cookie || '');
+      const result = await this.authService.login(
+        loginDto,
+        req.headers.cookie || '',
+      );
       // Copiar cookies de la respuesta de Better Auth
       const setCookieHeaders = result.headers?.['set-cookie'];
       if (setCookieHeaders) {
-        const cookies = Array.isArray(setCookieHeaders) ? setCookieHeaders : [setCookieHeaders];
+        const cookies = Array.isArray(setCookieHeaders)
+          ? setCookieHeaders
+          : [setCookieHeaders];
         // Establecer cada cookie individualmente usando append para múltiples valores
         cookies.forEach((cookie: string) => {
           if (cookie) {
@@ -53,11 +71,47 @@ export class AuthController {
   @Get('session')
   async getSession(@Req() req: Request, @Res() res: Response) {
     try {
-      const result = await this.authService.getSession(req.headers.cookie || '');
+      const result = await this.authService.getSession(
+        req.headers.cookie || '',
+      );
       const { _headers, ...data } = result as Record<string, unknown>;
-      if (_headers && typeof _headers === 'object' && 'set-cookie' in _headers) {
-        const setCookie = ( _headers as Record<string, unknown>)['set-cookie'];
-        const cookies = Array.isArray(setCookie) ? setCookie : setCookie ? [setCookie] : [];
+      if (
+        _headers &&
+        typeof _headers === 'object' &&
+        'set-cookie' in _headers
+      ) {
+        const setCookie = (_headers as Record<string, unknown>)['set-cookie'];
+        const cookies = Array.isArray(setCookie)
+          ? setCookie
+          : setCookie
+            ? [setCookie]
+            : [];
+        cookies.forEach((c: unknown) => {
+          if (typeof c === 'string' && c) res.append('Set-Cookie', c);
+        });
+      }
+      return res.json(data);
+    } catch (error: any) {
+      return res.status(401).json({ message: error.message });
+    }
+  }
+
+  @Post('refresh')
+  async refresh(@Req() req: Request, @Res() res: Response) {
+    try {
+      const result = await this.authService.refresh(req.headers.cookie || '');
+      const { _headers, ...data } = result as Record<string, unknown>;
+      if (
+        _headers &&
+        typeof _headers === 'object' &&
+        'set-cookie' in _headers
+      ) {
+        const setCookie = (_headers as Record<string, unknown>)['set-cookie'];
+        const cookies = Array.isArray(setCookie)
+          ? setCookie
+          : setCookie
+            ? [setCookie]
+            : [];
         cookies.forEach((c: unknown) => {
           if (typeof c === 'string' && c) res.append('Set-Cookie', c);
         });
@@ -75,7 +129,9 @@ export class AuthController {
       // Copiar cookies de la respuesta de Better Auth (para limpiar la sesión)
       const setCookieHeaders = result.headers?.['set-cookie'];
       if (setCookieHeaders) {
-        const cookies = Array.isArray(setCookieHeaders) ? setCookieHeaders : [setCookieHeaders];
+        const cookies = Array.isArray(setCookieHeaders)
+          ? setCookieHeaders
+          : [setCookieHeaders];
         cookies.forEach((cookie: string) => {
           if (cookie) {
             res.append('Set-Cookie', cookie);
@@ -85,7 +141,9 @@ export class AuthController {
       // Asegurarnos de eliminar las cookies locales de Better Auth
       const incomingCookies = req.headers.cookie;
       if (incomingCookies) {
-        const cookieNames = incomingCookies.split(';').map((c) => c.trim().split('=')[0]);
+        const cookieNames = incomingCookies
+          .split(';')
+          .map((c) => c.trim().split('=')[0]);
         cookieNames.forEach((name) => {
           if (name.startsWith('better-auth.')) {
             res.clearCookie(name, {
@@ -112,7 +170,9 @@ export class AuthController {
   @Get('me')
   async getCurrentUser(@Req() req: Request, @Res() res: Response) {
     try {
-      const user = await this.authService.getCurrentUser(req.headers.cookie || '');
+      const user = await this.authService.getCurrentUser(
+        req.headers.cookie || '',
+      );
       return res.json(user);
     } catch (error: any) {
       return res.status(401).json({ message: error.message });
