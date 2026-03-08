@@ -385,6 +385,12 @@
                   "key": "images",
                   "type": "file",
                   "src": []
+                },
+                {
+                  "key": "pricing",
+                  "value": "[{\"nombre\":\"Semana Santa\",\"fechas\":[\"2026-04-01\",\"2026-04-02\"],\"valorUnico\":800000,\"activa\":true}]",
+                  "type": "text",
+                  "description": "Array de reglas de precio en formato JSON. Puede usar fechaDesde/fechaHasta o el nuevo campo fechas (array)."
                 }
               ]
             },
@@ -430,6 +436,12 @@
                   "key": "images",
                   "type": "file",
                   "src": []
+                },
+                {
+                  "key": "pricing",
+                  "value": "[{\"nombre\":\"Puente Junio\",\"fechaDesde\":\"2026-06-12\",\"fechaHasta\":\"2026-06-15\",\"valorUnico\":650000,\"activa\":true}]",
+                  "type": "text",
+                  "description": "Reglas de precio actualizadas en JSON."
                 }
               ]
             },
@@ -617,6 +629,121 @@
             },
             "description": "Eliminar una característica de una finca por su ID interno de enlace (propertyFeatures ID)."
           }
+        },
+        {
+          "name": "Precios y Temporadas",
+          "item": [
+            {
+              "name": "Establecer Todo el Pricing (Sobrescribir)",
+              "request": {
+                "method": "PUT",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"pricing\": [\n    {\n      \"nombre\": \"Temporada de Días Específicos\",\n      \"fechas\": [\"2026-08-08\", \"2026-08-10\", \"2026-08-22\"],\n      \"valorUnico\": 900000,\n      \"activa\": true\n    },\n    {\n      \"nombre\": \"Puente Reyes\",\n      \"fechaDesde\": \"2026-01-05\",\n      \"fechaHasta\": \"2026-01-08\",\n      \"valorUnico\": 750000,\n      \"activa\": true\n    }\n  ]\n}"
+                },
+                "url": {
+                  "raw": "{{base_url}}/api/fincas/:id/pricing",
+                  "host": ["{{base_url}}"],
+                  "path": ["api", "fincas", ":id", "pricing"],
+                  "variable": [
+                    {
+                      "key": "id",
+                      "value": "property_id_here"
+                    }
+                  ]
+                },
+                "description": "Sobrescribe todas las reglas de precio de la finca. Ahora soporta el campo 'fechas' para días específicos."
+              }
+            },
+            {
+              "name": "Agregar Una Regla de Temporada",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"nombre\": \"Evento Especial\",\n  \"fechas\": [\"2026-10-12\"],\n  \"valorUnico\": 1200000,\n  \"activa\": true\n}"
+                },
+                "url": {
+                  "raw": "{{base_url}}/api/fincas/:id/pricing",
+                  "host": ["{{base_url}}"],
+                  "path": ["api", "fincas", ":id", "pricing"],
+                  "variable": [
+                    {
+                      "key": "id",
+                      "value": "property_id_here"
+                    }
+                  ]
+                },
+                "description": "Agrega una única regla de precio a la finca."
+              }
+            },
+            {
+              "name": "Actualizar Una Regla Específica",
+              "request": {
+                "method": "PATCH",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"valorUnico\": 950000,\n  \"fechas\": [\"2026-08-08\", \"2026-08-10\", \"2026-08-22\", \"2026-08-25\"]\n}"
+                },
+                "url": {
+                  "raw": "{{base_url}}/api/fincas/:id/pricing/:pricingId",
+                  "host": ["{{base_url}}"],
+                  "path": ["api", "fincas", ":id", "pricing", ":pricingId"],
+                  "variable": [
+                    {
+                      "key": "id",
+                      "value": "property_id_here"
+                    },
+                    {
+                      "key": "pricingId",
+                      "value": "rule_id_here"
+                    }
+                  ]
+                },
+                "description": "Actualiza parcialmente una regla de precio específica."
+              }
+            },
+            {
+              "name": "Eliminar Una Regla",
+              "request": {
+                "method": "DELETE",
+                "header": [],
+                "url": {
+                  "raw": "{{base_url}}/api/fincas/:id/pricing/:pricingId",
+                  "host": ["{{base_url}}"],
+                  "path": ["api", "fincas", ":id", "pricing", ":pricingId"],
+                  "variable": [
+                    {
+                      "key": "id",
+                      "value": "property_id_here"
+                    },
+                    {
+                      "key": "pricingId",
+                      "value": "rule_id_here"
+                    }
+                  ]
+                }
+              }
+            }
+          ]
         }
       ]
     },

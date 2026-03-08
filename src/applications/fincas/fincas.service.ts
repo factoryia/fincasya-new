@@ -211,6 +211,7 @@ export class FincasService {
             nombre,
             fechaDesde,
             fechaHasta,
+            fechas,
             valorUnico,
             condiciones,
             activa,
@@ -220,6 +221,7 @@ export class FincasService {
           const out: Record<string, unknown> = { nombre };
           if (fechaDesde !== undefined) out.fechaDesde = fechaDesde;
           if (fechaHasta !== undefined) out.fechaHasta = fechaHasta;
+          if (fechas !== undefined) out.fechas = fechas;
           if (valorUnico !== undefined) out.valorUnico = valorUnico;
           if (condiciones !== undefined) out.condiciones = condiciones;
           if (activa !== undefined) out.activa = activa;
@@ -314,6 +316,7 @@ export class FincasService {
             nombre,
             fechaDesde,
             fechaHasta,
+            fechas,
             valorUnico,
             condiciones,
             activa,
@@ -323,6 +326,7 @@ export class FincasService {
           const out: Record<string, unknown> = { nombre };
           if (fechaDesde !== undefined) out.fechaDesde = fechaDesde;
           if (fechaHasta !== undefined) out.fechaHasta = fechaHasta;
+          if (fechas !== undefined) out.fechas = fechas;
           if (valorUnico !== undefined) out.valorUnico = valorUnico;
           if (condiciones !== undefined) out.condiciones = condiciones;
           if (activa !== undefined) out.activa = activa;
@@ -349,6 +353,7 @@ export class FincasService {
       nombre: string;
       fechaDesde?: string;
       fechaHasta?: string;
+      fechas?: string[];
       valorUnico?: number;
       condiciones?: string;
       activa?: boolean;
@@ -372,6 +377,7 @@ export class FincasService {
       nombre: string;
       fechaDesde?: string;
       fechaHasta?: string;
+      fechas?: string[];
       valorUnico?: number;
       condiciones?: string;
       activa?: boolean;
@@ -395,6 +401,7 @@ export class FincasService {
       nombre?: string;
       fechaDesde?: string;
       fechaHasta?: string;
+      fechas?: string[];
       valorUnico?: number;
       condiciones?: string;
       activa?: boolean;

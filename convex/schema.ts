@@ -103,6 +103,7 @@ export default defineSchema({
     nombre: v.string(),
     fechaDesde: v.optional(v.string()),
     fechaHasta: v.optional(v.string()),
+    fechas: v.optional(v.array(v.string())),
     valorUnico: v.optional(v.number()),
     condiciones: v.optional(v.string()),
     /** Si true, el cliente final ve esta temporada; el admin puede activar/desactivar */

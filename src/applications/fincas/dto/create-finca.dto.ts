@@ -242,6 +242,11 @@ export class PricingItemDto {
   fechaHasta?: string;
 
   @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  fechas?: string[];
+
+  @IsOptional()
   @IsNumber()
   @Min(0)
   @Transform(({ value }) => toNumber(value))
