@@ -268,11 +268,15 @@ export class PricingItemDto {
   activa?: boolean;
 
   /**
-   * JSON: reglas de la temporada para lógica de reservas.
-   * Ejemplo: { "descripcion": "FDS mínimo 2 noches. 27-30 junio puente San Pedro.", "rangosFechas": [{"desde":"27-06","hasta":"30-06"}], "minNoches": 2, "diasSemana": {"incluir":["viernes","sabado","domingo"]}, "excepciones": ["15-12"] }
+   * JSON: reglas de la temporada para lógica de reservas o array de fechas específicas.
+   * En multipart llega como string, pero en JSON puede llegar como objeto.
    */
   @IsOptional()
-  @IsString()
+  @Transform(({ value }) => {
+    if (value === undefined || value === null) return undefined;
+    if (typeof value === 'object') return JSON.stringify(value);
+    return value;
+  })
   reglas?: string;
 
   @IsOptional()
