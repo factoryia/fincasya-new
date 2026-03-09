@@ -79,8 +79,8 @@ export default defineSchema({
     order: v.optional(v.number()),
   }).index('by_property', ['propertyId']),
 
-  // Catálogo de features (nombre + icono SVG + emoji)
-  featureCatalog: defineTable({
+  // Catálogo de iconografía (nombre + icono SVG + emoji)
+  iconography: defineTable({
     name: v.optional(v.string()),
     iconUrl: v.optional(v.string()),
     emoji: v.optional(v.string()),
@@ -88,14 +88,15 @@ export default defineSchema({
     updatedAt: v.number(),
   }).index('by_name', ['name']),
 
-  // Tabla de características de propiedades (enlaza propiedad con feature del catálogo)
+  // Tabla de características de propiedades (enlaza propiedad con icono de la iconografía)
   propertyFeatures: defineTable({
     propertyId: v.id('properties'),
     name: v.string(),
-    featureId: v.optional(v.id('featureCatalog')),
+    iconId: v.optional(v.id('iconography')),
+    featureId: v.optional(v.string()), // Legacy field to allow Convex dev to pass validation
   })
     .index('by_property', ['propertyId'])
-    .index('by_feature', ['featureId']),
+    .index('by_icon', ['iconId']),
 
   // Temporadas y precios por propiedad: el admin crea las que quiera y marca cuáles están activas para el cliente
   propertyPricing: defineTable({

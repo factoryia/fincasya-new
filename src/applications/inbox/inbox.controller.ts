@@ -100,11 +100,7 @@ export class InboxController {
     @Body('type') type?: 'text' | 'image' | 'audio' | 'document',
     @UploadedFile() file?: Express.Multer.File,
   ) {
-    const msgType = (type || (file ? this.inferTypeFromFile(file) : 'text')) as
-      | 'text'
-      | 'image'
-      | 'audio'
-      | 'document';
+    const msgType = (type || (file ? this.inferTypeFromFile(file) : 'text'));
 
     return this.inboxService.sendMessage(conversationId, {
       type: msgType,

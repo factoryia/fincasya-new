@@ -16,6 +16,7 @@ import {
   FileTypeValidator,
   UseGuards,
   Header,
+  Req,
 } from '@nestjs/common';
 import {
   FilesInterceptor,
@@ -167,9 +168,12 @@ export class FincasController {
   async update(
     @Param('id') id: string,
     @Body() updateDto: UpdateFincaDto,
+    @Req() req: any,
     @UploadedFiles()
     files?: { images?: Express.Multer.File[]; video?: Express.Multer.File[] },
   ) {
+    console.log('[DEBUG] Raw body features:', req.body.features);
+    console.log('[DEBUG] UpdateFincaDto features:', updateDto.features);
     return this.fincasService.update(
       id,
       updateDto,

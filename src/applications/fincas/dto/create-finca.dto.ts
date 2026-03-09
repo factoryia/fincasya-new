@@ -39,6 +39,23 @@ export enum PropertyCategory {
   VIP = 'VIP',
 }
 
+export class FeatureItemDto {
+  @IsString()
+  name: string;
+
+  @IsOptional()
+  @IsString()
+  iconId?: string;
+
+  @IsOptional()
+  @IsString()
+  iconUrl?: string | null;
+
+  @IsOptional()
+  @IsString()
+  emoji?: string | null;
+}
+
 const toNumber = (v: unknown) =>
   v === '' || v === undefined || v === null ? undefined : Number(v);
 
@@ -147,10 +164,11 @@ export class CreateFincaDto {
   @Transform(({ value }) => toNumber(value))
   priceOriginal?: number;
 
-  /** En multipart envía varias: -F "features=Piscina" -F "features=BBQ" o JSON string. El frontend puede enviarlas como { name: string, iconUrl: string } */
+  /** En multipart envía como JSON string de array de objetos { name, iconId } */
   @IsOptional()
   @IsArray()
-  @IsString({ each: true })
+  @ValidateNested({ each: true })
+  @Type(() => FeatureItemDto)
   @Transform(({ value }) => {
     if (!value) return [];
 
@@ -164,33 +182,27 @@ export class CreateFincaDto {
       }
     }
 
-    // Si no es un array después del parseo, lo ignoramos o forzamos array
     if (!Array.isArray(parsedValue)) return [];
 
-    // Mapear los elementos para sacar solo el 'name' si viene como objeto
     return parsedValue
       .map((item) => {
-        // Si el elemento es un JSON stringificado (pasa a veces en formdata), parsearlo
+        let obj: any;
         if (typeof item === 'string' && item.startsWith('{')) {
           try {
-            const obj = JSON.parse(item);
-            return obj.name || item;
+            obj = JSON.parse(item);
           } catch (e) {
-            return item;
+            obj = { name: item };
           }
+        } else if (typeof item === 'object' && item !== null) {
+          obj = item;
+        } else {
+          obj = { name: String(item) };
         }
-
-        // Si es un objeto ya parseado
-        if (typeof item === 'object' && item !== null) {
-          return item.name || '';
-        }
-
-        // Si es string normal
-        return String(item);
+        return plainToInstance(FeatureItemDto, obj);
       })
-      .filter(Boolean); // Remover vacíos
+      .filter((i) => !!i.name);
   })
-  features?: string[];
+  features?: FeatureItemDto[];
 
   @IsOptional()
   @IsString()

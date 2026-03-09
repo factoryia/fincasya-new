@@ -13,7 +13,7 @@ export class ConvexService {
 
   async query(path: string, args: Record<string, unknown> = {}, token?: string): Promise<any> {
     const [module, functionName] = path.split(':');
-    const fullPath = (api as any)[module]?.[functionName];
+    const fullPath = (api)[module]?.[functionName];
     if (!fullPath) {
       throw new Error(`Query not found: ${path}`);
     }
@@ -42,7 +42,7 @@ export class ConvexService {
 
   async mutation(path: string, args: any) {
     const [module, functionName] = path.split(':');
-    const fullPath = (api as any)[module]?.[functionName];
+    const fullPath = (api)[module]?.[functionName];
     if (!fullPath) {
       throw new Error(`Mutation not found: ${path}`);
     }

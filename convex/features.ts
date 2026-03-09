@@ -4,21 +4,21 @@ import { query, mutation } from './_generated/server';
 // ============ QUERIES ============
 
 /**
- * Listar todas las features del catálogo
+ * Listar toda la iconografía del catálogo
  */
-export const list = query({
+export const listIcons = query({
   args: {},
   handler: async (ctx) => {
-    const features = await ctx.db.query('featureCatalog').collect();
-    return features;
+    const icons = await ctx.db.query('iconography').collect();
+    return icons;
   },
 });
 
 /**
- * Obtener una feature por ID
+ * Obtener un icono por ID
  */
-export const getById = query({
-  args: { id: v.id('featureCatalog') },
+export const getIconById = query({
+  args: { id: v.id('iconography') },
   handler: async (ctx, args) => {
     return await ctx.db.get(args.id);
   },
@@ -27,9 +27,9 @@ export const getById = query({
 // ============ MUTATIONS ============
 
 /**
- * Crear una feature en el catálogo
+ * Crear un icono en el catálogo
  */
-export const create = mutation({
+export const createIcon = mutation({
   args: {
     name: v.optional(v.string()),
     iconUrl: v.optional(v.string()),
@@ -37,7 +37,7 @@ export const create = mutation({
   },
   handler: async (ctx, args) => {
     const now = Date.now();
-    const id = await ctx.db.insert('featureCatalog', {
+    const id = await ctx.db.insert('iconography', {
       name: args.name,
       iconUrl: args.iconUrl,
       emoji: args.emoji,
@@ -49,11 +49,11 @@ export const create = mutation({
 });
 
 /**
- * Crear múltiples features de una sola vez (carga masiva)
+ * Crear múltiples iconos de una sola vez (carga masiva)
  */
-export const bulkCreate = mutation({
+export const bulkCreateIcons = mutation({
   args: {
-    features: v.array(
+    icons: v.array(
       v.object({
         name: v.optional(v.string()),
         iconUrl: v.optional(v.string()),
@@ -64,11 +64,11 @@ export const bulkCreate = mutation({
   handler: async (ctx, args) => {
     const now = Date.now();
     const ids: string[] = [];
-    for (const feature of args.features) {
-      const id = await ctx.db.insert('featureCatalog', {
-        name: feature.name,
-        iconUrl: feature.iconUrl,
-        emoji: feature.emoji,
+    for (const icon of args.icons) {
+      const id = await ctx.db.insert('iconography', {
+        name: icon.name,
+        iconUrl: icon.iconUrl,
+        emoji: icon.emoji,
         createdAt: now,
         updatedAt: now,
       });
@@ -79,19 +79,19 @@ export const bulkCreate = mutation({
 });
 
 /**
- * Actualizar nombre y/o iconUrl de una feature
+ * Actualizar nombre y/o iconUrl de un icono
  */
-export const update = mutation({
+export const updateIcon = mutation({
   args: {
-    id: v.id('featureCatalog'),
+    id: v.id('iconography'),
     name: v.optional(v.string()),
     iconUrl: v.optional(v.string()),
     emoji: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
-    const feature = await ctx.db.get(args.id);
-    if (!feature) {
-      throw new Error('Feature no encontrada');
+    const icon = await ctx.db.get(args.id);
+    if (!icon) {
+      throw new Error('Icono no encontrado');
     }
 
     const updates: Record<string, unknown> = { updatedAt: Date.now() };
@@ -105,26 +105,26 @@ export const update = mutation({
 });
 
 /**
- * Eliminar una feature del catálogo.
+ * Eliminar un icono del catálogo.
  * Valida que no esté en uso en propertyFeatures.
  */
-export const remove = mutation({
-  args: { id: v.id('featureCatalog') },
+export const removeIcon = mutation({
+  args: { id: v.id('iconography') },
   handler: async (ctx, args) => {
-    const feature = await ctx.db.get(args.id);
-    if (!feature) {
-      throw new Error('Feature no encontrada');
+    const icon = await ctx.db.get(args.id);
+    if (!icon) {
+      throw new Error('Icono no encontrado');
     }
 
     // Verificar que no esté en uso
     const inUse = await ctx.db
       .query('propertyFeatures')
-      .withIndex('by_feature', (q) => q.eq('featureId', args.id))
+      .withIndex('by_icon', (q) => q.eq('iconId', args.id))
       .first();
 
     if (inUse) {
       throw new Error(
-        'No se puede eliminar la feature porque está siendo usada por al menos una finca. Desenlácela primero.',
+        'No se puede eliminar el icono porque está siendo usado por al menos una finca. Desenlácela primero.',
       );
     }
 

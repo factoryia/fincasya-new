@@ -1,7 +1,7 @@
-import { httpRouter } from "convex/server";
-import { httpAction } from "./_generated/server";
-import { authComponent, createAuth } from "./betterAuth/auth";
-import { internal } from "./_generated/api";
+import { httpRouter } from 'convex/server';
+import { httpAction } from './_generated/server';
+import { authComponent, createAuth } from './betterAuth/auth';
+import { internal } from './_generated/api';
 
 const http = httpRouter();
 
@@ -10,17 +10,17 @@ authComponent.registerRoutes(http, createAuth);
 // Webhook YCloud: recibe mensajes entrantes de WhatsApp
 // URL en YCloud: https://<tu-deployment>.convex.site/webhooks/ycloud
 http.route({
-  path: "/webhooks/ycloud",
-  method: "POST",
+  path: '/webhooks/ycloud',
+  method: 'POST',
   handler: httpAction(async (ctx, request) => {
     const rawBody = await request.text();
     let body: unknown;
     try {
       body = JSON.parse(rawBody);
     } catch {
-      return new Response(JSON.stringify({ error: "Invalid JSON" }), {
+      return new Response(JSON.stringify({ error: 'Invalid JSON' }), {
         status: 400,
-        headers: { "Content-Type": "application/json" },
+        headers: { 'Content-Type': 'application/json' },
       });
     }
 
@@ -43,47 +43,49 @@ http.route({
     };
 
     if (
-      parsed.type === "whatsapp.inbound_message.received" &&
+      parsed.type === 'whatsapp.inbound_message.received' &&
       parsed.whatsappInboundMessage
     ) {
       const evt = parsed.whatsappInboundMessage;
       const eventId = parsed.id ?? `evt_${Date.now()}`;
-      const phone = evt.from ?? "";
-      const name = (evt.customerProfile?.name ?? "").trim() || phone;
+      const phone = evt.from ?? '';
+      const name = (evt.customerProfile?.name ?? '').trim() || phone;
       const wamid = evt.wamid ?? evt.id;
 
-      let content = "";
-      let msgType: "text" | "image" | "audio" | "video" | "document" = "text";
-      let mediaUrl = "";
+      let content = '';
+      let msgType: 'text' | 'image' | 'audio' | 'video' | 'document' = 'text';
+      let mediaUrl = '';
 
-      if (evt.type === "text" && evt.text?.body) {
+      if (evt.type === 'text' && evt.text?.body) {
         content = String(evt.text.body).trim();
-        msgType = "text";
-      } else if (evt.type === "image" && evt.image?.link) {
-        content = (evt.image.caption ?? "").trim() || "[Imagen]";
-        msgType = "image";
+        msgType = 'text';
+      } else if (evt.type === 'image' && evt.image?.link) {
+        content = (evt.image.caption ?? '').trim() || '[Imagen]';
+        msgType = 'image';
         mediaUrl = evt.image.link;
-      } else if (evt.type === "audio" && evt.audio?.link) {
-        content = "[Audio]";
-        msgType = "audio";
+      } else if (evt.type === 'audio' && evt.audio?.link) {
+        content = '[Audio]';
+        msgType = 'audio';
         mediaUrl = evt.audio.link;
-      } else if (evt.type === "video" && evt.video?.link) {
-        content = (evt.video.caption ?? "").trim() || "[Video]";
-        msgType = "video";
+      } else if (evt.type === 'video' && evt.video?.link) {
+        content = (evt.video.caption ?? '').trim() || '[Video]';
+        msgType = 'video';
         mediaUrl = evt.video.link;
-      } else if (evt.type === "document" && evt.document?.link) {
-        content = (evt.document.caption ?? evt.document.filename ?? "").trim() || "[Documento]";
-        msgType = "document";
+      } else if (evt.type === 'document' && evt.document?.link) {
+        content =
+          (evt.document.caption ?? evt.document.filename ?? '').trim() ||
+          '[Documento]';
+        msgType = 'document';
         mediaUrl = evt.document.link;
       }
 
       if (phone && (content || mediaUrl)) {
         const dedupe = await ctx.runMutation(
           internal.ycloud.recordProcessedEvent,
-          { eventId }
+          { eventId },
         );
         if (dedupe.duplicate) {
-          console.log("YCloud: evento duplicado, skip", { eventId, phone });
+          console.log('YCloud: evento duplicado, skip', { eventId, phone });
         } else {
           await ctx.runAction(internal.ycloud.processInboundMessage, {
             eventId,
@@ -105,7 +107,7 @@ http.route({
       whatsappOutboundMessage?: { to?: string };
     };
     if (
-      outbound.type === "whatsapp.outbound_message.sent" &&
+      outbound.type === 'whatsapp.outbound_message.sent' &&
       outbound.whatsappOutboundMessage?.to
     ) {
       await ctx.runMutation(internal.ycloud.markOutboundAsHuman, {
@@ -117,30 +119,30 @@ http.route({
       JSON.stringify({
         ok: true,
         receivedAt: new Date().toISOString(),
-        message: "Webhook recibido correctamente",
+        message: 'Webhook recibido correctamente',
       }),
       {
         status: 200,
-        headers: { "Content-Type": "application/json" },
-      }
+        headers: { 'Content-Type': 'application/json' },
+      },
     );
   }),
 });
 
 // GET para verificar que el webhook está activo
 http.route({
-  path: "/webhooks/ycloud",
-  method: "GET",
+  path: '/webhooks/ycloud',
+  method: 'GET',
   handler: httpAction(async () => {
     return new Response(
       JSON.stringify({
-        message: "Webhook YCloud activo",
-        webhookUrl: "POST a esta misma URL con el body de YCloud",
+        message: 'Webhook YCloud activo',
+        webhookUrl: 'POST a esta misma URL con el body de YCloud',
       }),
       {
         status: 200,
-        headers: { "Content-Type": "application/json" },
-      }
+        headers: { 'Content-Type': 'application/json' },
+      },
     );
   }),
 });

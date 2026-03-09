@@ -1,5 +1,10 @@
 import * as XLSX from 'xlsx';
-import { CreateFincaDto, PropertyCategory, PropertyType } from './dto/create-finca.dto';
+import {
+  CreateFincaDto,
+  PropertyCategory,
+  PropertyType,
+  FeatureItemDto,
+} from './dto/create-finca.dto';
 
 // Estructura para precios por rango de personas o valor único (para pricingDetail JSON)
 export interface PrecioPorRango {
@@ -63,7 +68,10 @@ function parseFirstMoneyFromCell(value: unknown): number | null {
   if (value == null || value === '') return null;
   const text = String(value).replace(/\r\n/g, '\n').trim();
   const amounts: number[] = [];
-  const lines = text.split(/\n/).map((l) => l.trim()).filter(Boolean);
+  const lines = text
+    .split(/\n/)
+    .map((l) => l.trim())
+    .filter(Boolean);
   for (const line of lines) {
     const match = line.match(/COP\s*([\d.,]+)/i);
     if (match) {
@@ -75,7 +83,12 @@ function parseFirstMoneyFromCell(value: unknown): number | null {
   return Math.min(...amounts);
 }
 
-const SECCIONES = ['TOLIMA', 'CUNDINAMARCA', 'EJE CAFETERO', 'LLANOS ORIENTALES'];
+const SECCIONES = [
+  'TOLIMA',
+  'CUNDINAMARCA',
+  'EJE CAFETERO',
+  'LLANOS ORIENTALES',
+];
 
 function isSectionRow(nombre: unknown): boolean {
   if (!nombre) return true;
@@ -95,25 +108,29 @@ function slug(str: unknown): string {
     .slice(0, 30);
 }
 
-function serviciosToFeatures(servicios: unknown): string[] {
+function serviciosToFeatures(servicios: unknown): FeatureItemDto[] {
   if (!servicios) return [];
   const raw = String(servicios)
     .replace(/\r\n/g, '\n')
     .split(/[\n,;]+/)
     .map((s) => s.trim())
     .filter(Boolean);
-  return [...new Set(raw)].slice(0, 20);
+  return [...new Set(raw)].slice(0, 20).map((name) => ({ name }));
 }
 
 // Clasifica el header de una columna de precios: temporada + condición + fechas + reglas
-function classifyPricingHeader(headerNorm: string, headerOriginal: string): {
+function classifyPricingHeader(
+  headerNorm: string,
+  headerOriginal: string,
+): {
   temporada: 'baja' | 'alta' | 'media' | 'especiales' | 'catalogo' | null;
   condicion: string | null;
   fechaDesde?: string;
   fechaHasta?: string;
   reglas?: string; // Texto completo del header original con las reglas descriptivas
 } {
-  let temporada: 'baja' | 'alta' | 'media' | 'especiales' | 'catalogo' | null = null;
+  let temporada: 'baja' | 'alta' | 'media' | 'especiales' | 'catalogo' | null =
+    null;
   let condicion: string | null = null;
 
   // Detectar temporada
@@ -126,7 +143,10 @@ function classifyPricingHeader(headerNorm: string, headerOriginal: string): {
     (headerNorm.includes('especiales') && !headerNorm.includes('temporada'))
   )
     temporada = 'especiales';
-  else if (headerNorm.includes('catalogo') || headerNorm.includes('precio catalogo'))
+  else if (
+    headerNorm.includes('catalogo') ||
+    headerNorm.includes('precio catalogo')
+  )
     temporada = 'catalogo';
 
   // Detectar condiciones (pueden estar solas o dentro de una temporada)
@@ -142,7 +162,10 @@ function classifyPricingHeader(headerNorm: string, headerOriginal: string): {
   ) {
     condicion = 'Más de 3 noches';
     if (!temporada) temporada = null;
-  } else if (headerNorm.includes('mas de 10 noches') || headerNorm.includes('más de 10 noches')) {
+  } else if (
+    headerNorm.includes('mas de 10 noches') ||
+    headerNorm.includes('más de 10 noches')
+  ) {
     condicion = 'Más de 10 noches';
     if (!temporada) temporada = null;
   } else if (
@@ -159,10 +182,11 @@ function classifyPricingHeader(headerNorm: string, headerOriginal: string): {
 
   // Extraer fechas del header original (preservar formato)
   const fechaMatch = headerOriginal.match(
-    /(\d{1,2}\s+(?:de\s+)?\w+)(?:\s*-\s*(\d{1,2}\s+(?:de\s+)?\w+))?/i
+    /(\d{1,2}\s+(?:de\s+)?\w+)(?:\s*-\s*(\d{1,2}\s+(?:de\s+)?\w+))?/i,
   );
   const fechaDesde = fechaMatch ? fechaMatch[1].trim() : undefined;
-  const fechaHasta = fechaMatch && fechaMatch[2] ? fechaMatch[2].trim() : undefined;
+  const fechaHasta =
+    fechaMatch && fechaMatch[2] ? fechaMatch[2].trim() : undefined;
 
   // Extraer reglas completas del header original (todo el texto descriptivo)
   const reglas = headerOriginal.trim();
@@ -181,11 +205,16 @@ function parsePricingCell(cell: unknown): {
   if (cell == null || cell === '') return { preciosPorRango, valorUnico };
 
   const text = String(cell).replace(/\r\n/g, '\n').trim();
-  const lines = text.split(/\n/).map((l) => l.trim()).filter(Boolean);
+  const lines = text
+    .split(/\n/)
+    .map((l) => l.trim())
+    .filter(Boolean);
 
   for (const line of lines) {
     // COP 1,200,000.00 1-16 personas  o  COP 1,200,000.00 17-23 personas  o  COP 3.700.000.00
-    const match = line.match(/COP\s*([\d.,]+)(?:\s+(\d+)\s*-\s*(\d+)\s*personas)?/i);
+    const match = line.match(
+      /COP\s*([\d.,]+)(?:\s+(\d+)\s*-\s*(\d+)\s*personas)?/i,
+    );
     if (!match) continue;
 
     const copStr = match[1].replace(/[^\d]/g, '');
@@ -309,7 +338,9 @@ export function parseExcelToFincas(buffer: Buffer): CreateFincaDto[] {
       'temporada media festivos que comprenden',
       'temporada media',
     );
-    const si1Noche = parseFirstMoneyFromCell(findHeaderKey(headersNorm, 'si 1 noche'));
+    const si1Noche = parseFirstMoneyFromCell(
+      findHeaderKey(headersNorm, 'si 1 noche'),
+    );
 
     // Construir pricingDetail desde columnas de precios
     const temporadasMap = new Map<
@@ -368,7 +399,11 @@ export function parseExcelToFincas(buffer: Buffer): CreateFincaDto[] {
       const condicionTipo = col.condicion ?? 'General';
 
       // Actualizar reglas si esta columna tiene el texto completo de la temporada
-      if (col.reglas && col.temporada && col.reglas.length > (entry.reglas?.length || 0)) {
+      if (
+        col.reglas &&
+        col.temporada &&
+        col.reglas.length > (entry.reglas?.length || 0)
+      ) {
         entry.reglas = col.reglas;
       }
 
@@ -396,9 +431,17 @@ export function parseExcelToFincas(buffer: Buffer): CreateFincaDto[] {
     }
 
     // Orden: baja, media, alta, especiales
-    const orden = ['Temporada Baja', 'Temporada Media', 'Temporada Alta', 'Fechas especiales', 'General'];
+    const orden = [
+      'Temporada Baja',
+      'Temporada Media',
+      'Temporada Alta',
+      'Fechas especiales',
+      'General',
+    ];
     temporadas.sort(
-      (a, b) => orden.indexOf(a.nombre) - orden.indexOf(b.nombre) || a.nombre.localeCompare(b.nombre)
+      (a, b) =>
+        orden.indexOf(a.nombre) - orden.indexOf(b.nombre) ||
+        a.nombre.localeCompare(b.nombre),
     );
 
     // Una fila por temporada para la tabla propertyPricing: fechas (opcionales), valores y reglas
@@ -429,8 +472,12 @@ export function parseExcelToFincas(buffer: Buffer): CreateFincaDto[] {
               nombre: t.nombre,
               fechaDesde: t.fechaDesde,
               fechaHasta: t.fechaHasta,
-              valorUnico: soloValorUnico ? t.condiciones[0].valorUnico : undefined,
-              condiciones: soloValorUnico ? undefined : JSON.stringify(t.condiciones),
+              valorUnico: soloValorUnico
+                ? t.condiciones[0].valorUnico
+                : undefined,
+              condiciones: soloValorUnico
+                ? undefined
+                : JSON.stringify(t.condiciones),
               activa: true,
               reglas: reglasJson,
               order: index,
@@ -456,11 +503,14 @@ export function parseExcelToFincas(buffer: Buffer): CreateFincaDto[] {
     const te = temporadas.find((t) => t.nombre === 'Fechas especiales');
 
     const priceBajaNum =
-      (tb ? getPrecioRepresentativo(tb) : null) ?? parseFirstMoneyFromCell(rawTemporadaBaja);
+      (tb ? getPrecioRepresentativo(tb) : null) ??
+      parseFirstMoneyFromCell(rawTemporadaBaja);
     const priceMediaNum =
-      (tm ? getPrecioRepresentativo(tm) : null) ?? parseFirstMoneyFromCell(rawTemporadaMedia);
+      (tm ? getPrecioRepresentativo(tm) : null) ??
+      parseFirstMoneyFromCell(rawTemporadaMedia);
     const priceAltaNum =
-      (ta ? getPrecioRepresentativo(ta) : null) ?? parseFirstMoneyFromCell(rawTemporadaAlta);
+      (ta ? getPrecioRepresentativo(ta) : null) ??
+      parseFirstMoneyFromCell(rawTemporadaAlta);
     const priceEspecialesNum =
       (te ? getPrecioRepresentativo(te) : null) ?? fechaEspecial;
 
@@ -470,7 +520,10 @@ export function parseExcelToFincas(buffer: Buffer): CreateFincaDto[] {
     const priceAlta = priceAltaNum ?? priceBase;
     const priceEspeciales = priceEspecialesNum ?? priceAlta;
 
-    const descriptionFinal = [descripcion, contrato ? `Contrato: ${contrato}` : null]
+    const descriptionFinal = [
+      descripcion,
+      contrato ? `Contrato: ${contrato}` : null,
+    ]
       .filter(Boolean)
       .join('\n\n');
 

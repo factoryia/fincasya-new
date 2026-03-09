@@ -15,7 +15,7 @@ export class FeaturesService {
 
   async list() {
     try {
-      return await this.convexService.query('features:list', {});
+      return await this.convexService.query('features:listIcons', {});
     } catch (error) {
       throw new BadRequestException(error.message);
     }
@@ -23,11 +23,11 @@ export class FeaturesService {
 
   async getById(id: string) {
     try {
-      const feature = await this.convexService.query('features:getById', {
+      const feature = await this.convexService.query('features:getIconById', {
         id,
       });
       if (!feature) {
-        throw new NotFoundException('Feature no encontrada');
+        throw new NotFoundException('Icono no encontrado');
       }
       return feature;
     } catch (error) {
@@ -42,7 +42,7 @@ export class FeaturesService {
       if (icon) {
         iconUrl = await this.s3Service.uploadFile(icon, 'features');
       }
-      return await this.convexService.mutation('features:create', {
+      return await this.convexService.mutation('features:createIcon', {
         name,
         emoji,
         iconUrl,
@@ -65,9 +65,12 @@ export class FeaturesService {
       );
 
       // Crear todos los registros en Convex
-      const ids = await this.convexService.mutation('features:bulkCreate', {
-        features: uploadResults,
-      });
+      const ids = await this.convexService.mutation(
+        'features:bulkCreateIcons',
+        {
+          icons: uploadResults,
+        },
+      );
 
       return {
         created: uploadResults.length,
@@ -84,12 +87,15 @@ export class FeaturesService {
 
   async bulkCreate(features: { name?: string; emoji?: string }[]) {
     try {
-      const ids = await this.convexService.mutation('features:bulkCreate', {
-        features: features.map((f) => ({
-          name: f.name,
-          emoji: f.emoji,
-        })),
-      });
+      const ids = await this.convexService.mutation(
+        'features:bulkCreateIcons',
+        {
+          icons: features.map((f) => ({
+            name: f.name,
+            emoji: f.emoji,
+          })),
+        },
+      );
 
       return {
         created: ids.length,
@@ -108,11 +114,11 @@ export class FeaturesService {
   ) {
     try {
       // Verificar que existe
-      const existing = await this.convexService.query('features:getById', {
+      const existing = await this.convexService.query('features:getIconById', {
         id,
       });
       if (!existing) {
-        throw new NotFoundException('Feature no encontrada');
+        throw new NotFoundException('Icono no encontrado');
       }
 
       const updateData: Record<string, unknown> = {};
@@ -128,7 +134,7 @@ export class FeaturesService {
         updateData.iconUrl = iconUrl;
       }
 
-      return await this.convexService.mutation('features:update', {
+      return await this.convexService.mutation('features:updateIcon', {
         id,
         ...updateData,
       });
@@ -140,15 +146,15 @@ export class FeaturesService {
 
   async remove(id: string) {
     try {
-      // Obtener feature para eliminar icono de S3
-      const feature = await this.convexService.query('features:getById', {
+      // Obtener icon para eliminar de S3
+      const icon = await this.convexService.query('features:getIconById', {
         id,
       });
-      if (feature?.iconUrl) {
-        await this.s3Service.deleteFile(feature.iconUrl).catch(() => {});
+      if (icon?.iconUrl) {
+        await this.s3Service.deleteFile(icon.iconUrl).catch(() => {});
       }
 
-      return await this.convexService.mutation('features:remove', { id });
+      return await this.convexService.mutation('features:removeIcon', { id });
     } catch (error) {
       throw new BadRequestException(error.message);
     }

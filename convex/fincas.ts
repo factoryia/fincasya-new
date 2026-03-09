@@ -125,18 +125,19 @@ export const list = query({
             .withIndex('by_property', (q) => q.eq('propertyId', property._id))
             .collect();
 
-          // Enriquecer features con iconUrl del catálogo
+          // Enriquecer features con iconUrl de la iconografía
           const enrichedFeatures = await Promise.all(
             features.map(async (f) => {
-              if (f.featureId) {
-                const catalog = await ctx.db.get(f.featureId);
+              if (f.iconId) {
+                const icon = await ctx.db.get(f.iconId);
                 return {
                   name: f.name,
-                  iconUrl: catalog?.iconUrl ?? null,
-                  emoji: catalog?.emoji ?? null,
+                  iconId: f.iconId,
+                  iconUrl: icon?.iconUrl ?? null,
+                  emoji: icon?.emoji ?? null,
                 };
               }
-              return { name: f.name, iconUrl: null, emoji: null };
+              return { name: f.name, iconId: null, iconUrl: null, emoji: null };
             }),
           );
 
@@ -246,18 +247,19 @@ export const getById = query({
       .withIndex('by_property', (q) => q.eq('propertyId', args.id))
       .collect();
 
-    // Enriquecer features con iconUrl del catálogo
+    // Enriquecer features con iconUrl de la iconografía
     const enrichedFeatures = await Promise.all(
       features.map(async (f) => {
-        if (f.featureId) {
-          const catalog = await ctx.db.get(f.featureId);
+        if (f.iconId) {
+          const icon = await ctx.db.get(f.iconId);
           return {
             name: f.name,
-            iconUrl: catalog?.iconUrl ?? null,
-            emoji: catalog?.emoji ?? null,
+            iconId: f.iconId,
+            iconUrl: icon?.iconUrl ?? null,
+            emoji: icon?.emoji ?? null,
           };
         }
-        return { name: f.name, iconUrl: null, emoji: null };
+        return { name: f.name, iconId: null, iconUrl: null, emoji: null };
       }),
     );
 
@@ -342,15 +344,15 @@ export const getByCode = query({
       .withIndex('by_property', (q) => q.eq('propertyId', property._id))
       .collect();
 
-    // Enriquecer features con iconUrl del catálogo
+    // Enriquecer features con iconUrl de la iconografía
     const enrichedFeatures = await Promise.all(
       features.map(async (f) => {
-        if (f.featureId) {
-          const catalog = await ctx.db.get(f.featureId);
+        if (f.iconId) {
+          const icon = await ctx.db.get(f.iconId);
           return {
             name: f.name,
-            iconUrl: catalog?.iconUrl ?? null,
-            emoji: catalog?.emoji ?? null,
+            iconUrl: icon?.iconUrl ?? null,
+            emoji: icon?.emoji ?? null,
           };
         }
         return { name: f.name, iconUrl: null, emoji: null };
@@ -582,7 +584,14 @@ export const create = mutation({
       ),
     ),
     images: v.optional(v.array(v.string())),
-    features: v.optional(v.array(v.string())),
+    features: v.optional(
+      v.array(
+        v.object({
+          name: v.string(),
+          iconId: v.optional(v.id('iconography')),
+        }),
+      ),
+    ),
     video: v.optional(v.string()),
     pricing: v.optional(
       v.array(
@@ -660,18 +669,14 @@ export const create = mutation({
       );
     }
 
-    // Insertar características (buscando en el catálogo para el featureId)
+    // Insertar características
     if (args.features && args.features.length > 0) {
-      const catalog = await ctx.db.query('featureCatalog').collect();
       await Promise.all(
-        args.features.map((name) => {
-          const catEntry = catalog.find(
-            (c) => c.name?.toLowerCase() === name.toLowerCase(),
-          );
+        args.features.map((f) => {
           return ctx.db.insert('propertyFeatures', {
             propertyId,
-            name,
-            featureId: catEntry?._id,
+            name: f.name,
+            iconId: f.iconId,
           });
         }),
       );
@@ -774,7 +779,14 @@ export const update = mutation({
     reservable: v.optional(v.boolean()),
     isFavorite: v.optional(v.boolean()),
     priceOriginal: v.optional(v.number()),
-    features: v.optional(v.array(v.string())),
+    features: v.optional(
+      v.array(
+        v.object({
+          name: v.string(),
+          iconId: v.optional(v.id('iconography')),
+        }),
+      ),
+    ),
     catalogIds: v.optional(v.array(v.string())),
   },
   handler: async (ctx, args) => {
@@ -802,18 +814,14 @@ export const update = mutation({
         await ctx.db.delete(ef._id);
       }
 
-      // Insertar nuevos (buscando en catálogo)
+      // Insertar nuevos
       if (features.length > 0) {
-        const catalog = await ctx.db.query('featureCatalog').collect();
         await Promise.all(
-          features.map((name) => {
-            const catEntry = catalog.find(
-              (c) => c.name?.toLowerCase() === name.toLowerCase(),
-            );
+          features.map((f) => {
             return ctx.db.insert('propertyFeatures', {
               propertyId: id,
-              name,
-              featureId: catEntry?._id,
+              name: f.name,
+              iconId: f.iconId,
             });
           }),
         );
@@ -1132,13 +1140,13 @@ export const addFeature = mutation({
   args: {
     propertyId: v.id('properties'),
     name: v.string(),
-    featureId: v.optional(v.id('featureCatalog')),
+    iconId: v.optional(v.id('iconography')),
   },
   handler: async (ctx, args) => {
     const featureId = await ctx.db.insert('propertyFeatures', {
       propertyId: args.propertyId,
       name: args.name,
-      featureId: args.featureId,
+      iconId: args.iconId,
     });
 
     return featureId;
@@ -1146,13 +1154,13 @@ export const addFeature = mutation({
 });
 
 /**
- * Eliminar característica de una finca por nombre o ID del catálogo
+ * Eliminar característica de una finca por nombre o ID del catálogo de iconos
  */
 export const unlinkFeature = mutation({
   args: {
     propertyId: v.id('properties'),
     name: v.optional(v.string()),
-    featureId: v.optional(v.id('featureCatalog')),
+    iconId: v.optional(v.id('iconography')),
   },
   handler: async (ctx, args) => {
     const property = await ctx.db.get(args.propertyId);
@@ -1160,9 +1168,9 @@ export const unlinkFeature = mutation({
 
     let targetName = args.name;
     // Si no tenemos nombre pero sí ID, intentamos sacarlo del catálogo
-    if (!targetName && args.featureId) {
-      const catEntry = await ctx.db.get(args.featureId);
-      if (catEntry) targetName = catEntry.name;
+    if (!targetName && args.iconId) {
+      const iconEntry = await ctx.db.get(args.iconId);
+      if (iconEntry) targetName = iconEntry.name;
     }
 
     const records = await ctx.db
@@ -1175,7 +1183,7 @@ export const unlinkFeature = mutation({
       let shouldDelete = false;
 
       // Priorizar match por ID si existe en el registro
-      if (args.featureId && r.featureId === args.featureId) {
+      if (args.iconId && r.iconId === args.iconId) {
         shouldDelete = true;
       }
       // Si no, comparar por nombre (case-insensitive)

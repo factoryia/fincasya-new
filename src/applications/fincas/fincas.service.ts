@@ -191,7 +191,7 @@ export class FincasService {
         videoUrl = await this.s3Service.uploadVideo(video);
       }
 
-      const { catalogIds, pricing, ...rest } = createDto;
+      const { catalogIds, pricing, features, ...rest } = createDto;
       const base = rest.priceBase ?? 0;
       const fincaData: Record<string, unknown> = {
         ...rest,
@@ -199,6 +199,11 @@ export class FincasService {
         priceMedia: rest.priceMedia ?? base,
         priceAlta: rest.priceAlta ?? base,
         images: imageUrls,
+        features:
+          features?.map((f) => ({
+            name: f.name,
+            ...(f.iconId ? { iconId: f.iconId } : {}),
+          })) || [],
         ...(videoUrl && { video: videoUrl }),
         ...(catalogIds?.length && { catalogIds }),
       };
@@ -281,7 +286,11 @@ export class FincasService {
       const result = await this.convexService.mutation('fincas:update', {
         id,
         ...updateData,
-        features,
+        features:
+          features?.map((f) => ({
+            name: f.name,
+            ...(f.iconId ? { iconId: f.iconId } : {}),
+          })) || [],
         catalogIds,
       });
 
@@ -483,24 +492,24 @@ export class FincasService {
     }
   }
 
-  async addFeature(propertyId: string, name: string, featureId?: string) {
+  async addFeature(propertyId: string, name: string, iconId?: string) {
     try {
       return await this.convexService.mutation('fincas:addFeature', {
         propertyId,
         name,
-        featureId: featureId as any,
+        iconId,
       });
     } catch (error) {
       throw new BadRequestException(error.message);
     }
   }
 
-  async unlinkFeature(propertyId: string, name?: string, featureId?: string) {
+  async unlinkFeature(propertyId: string, name?: string, iconId?: string) {
     try {
       return await this.convexService.mutation('fincas:unlinkFeature', {
         propertyId,
         name,
-        featureId: featureId as any,
+        iconId,
       });
     } catch (error) {
       throw new BadRequestException(error.message);
