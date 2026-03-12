@@ -27,11 +27,29 @@ export const createAuthOptions = (ctx: GenericCtx<DataModel>) => {
   // Esto es necesario para que createApi pueda obtener el schema
   const database = authComponent.adapter(ctx);
 
+  // Forzar el puerto 3000 si Convex tiene cacheado 3001 en sus variables de entorno
+  let siteUrl =
+    process.env.SITE_URL ||
+    process.env.NEXT_PUBLIC_SITE_URL ||
+    'http://localhost:3000';
+  if (siteUrl.includes('localhost:3001')) {
+    siteUrl = 'http://localhost:3000';
+  }
+
   return {
     appName: 'Fincas Ya',
-    baseURL: process.env.SITE_URL,
+    baseURL: siteUrl + '/api/auth',
+    basePath: '/api/auth',
     secret: process.env.BETTER_AUTH_SECRET,
     database,
+    trustedOrigins: [
+      'http://localhost:3000',
+      'http://localhost:3001',
+      'https://adventurous-octopus-651.convex.site', // Agregamos el origen de convex mismo por seguridad
+      'https://fincasya.com',
+      'https://www.fincasya.com',
+      'https://*.ngrok-free.dev',
+    ],
     emailAndPassword: {
       enabled: true,
     },
@@ -40,7 +58,7 @@ export const createAuthOptions = (ctx: GenericCtx<DataModel>) => {
         role: {
           type: 'string',
           required: false,
-          defaultValue: 'assistant',
+          defaultValue: 'user', // Predeterminado para clientes
           input: true,
         },
       },
@@ -52,6 +70,9 @@ export const createAuthOptions = (ctx: GenericCtx<DataModel>) => {
     plugins: [
       convex({
         authConfig,
+        options: {
+          basePath: '/api/auth',
+        },
         jwt: {
           expirationSeconds: 60 * 60 * 24, // 1 día (86400 s)
         },

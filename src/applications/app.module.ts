@@ -6,6 +6,7 @@ import { FincasModule } from './fincas/fincas.module';
 import { InboxModule } from './inbox/inbox.module';
 import { KnowledgeModule } from './knowledge/knowledge.module';
 import { UsersModule } from './users/users.module';
+import { ReviewsModule } from './reviews/reviews.module';
 
 @Module({
   imports: [
@@ -16,6 +17,7 @@ import { UsersModule } from './users/users.module';
     InboxModule,
     KnowledgeModule,
     UsersModule,
+    ReviewsModule,
   ],
   controllers: [],
   providers: [],

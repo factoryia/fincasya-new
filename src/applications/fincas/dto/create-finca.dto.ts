@@ -54,6 +54,10 @@ export class FeatureItemDto {
   @IsOptional()
   @IsString()
   emoji?: string | null;
+
+  @IsOptional()
+  @IsString()
+  zone?: string;
 }
 
 const toNumber = (v: unknown) =>
@@ -76,6 +80,12 @@ export class CreateFincaDto {
   @Min(1)
   @Transform(({ value }) => toNumber(value))
   capacity: number;
+
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  @Transform(({ value }) => toNumber(value))
+  rating?: number;
 
   @IsNumber()
   @Transform(({ value }) => toNumber(value))

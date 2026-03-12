@@ -26,6 +26,7 @@ export class AuthService {
       body?: string;
       headers?: Record<string, string>;
       cookies?: string;
+      authorization?: string;
     } = {},
   ) {
     return new Promise<any>((resolve, reject) => {
@@ -44,6 +45,11 @@ export class AuthService {
       // Agregar cookies si están presentes
       if (options.cookies) {
         requestOptions.headers['Cookie'] = options.cookies;
+      }
+
+      // Agregar authorization header
+      if (options.authorization) {
+        requestOptions.headers['Authorization'] = options.authorization;
       }
 
       if (options.body) {
@@ -130,7 +136,7 @@ export class AuthService {
           }),
           cookies,
           headers: {
-            Origin: process.env.SITE_URL || 'http://localhost:3001',
+            Origin: process.env.NEXT_PUBLIC_SITE_URL || 'http://localhost:3000',
           },
         },
       );
@@ -156,7 +162,7 @@ export class AuthService {
           }),
           cookies,
           headers: {
-            Origin: process.env.SITE_URL || 'http://localhost:3001',
+            Origin: process.env.NEXT_PUBLIC_SITE_URL || 'http://localhost:3000',
           },
         },
       );
@@ -168,10 +174,10 @@ export class AuthService {
     }
   }
 
-  async getSession(cookies: string) {
+  async getSession(cookies: string, authorization?: string) {
     try {
-      if (!cookies) {
-        throw new UnauthorizedException('No se proporcionaron cookies');
+      if (!cookies && !authorization) {
+        throw new UnauthorizedException('No se proporcionaron credenciales');
       }
 
       // Intentar obtener la sesión desde Better Auth
@@ -182,6 +188,7 @@ export class AuthService {
           {
             method: 'GET',
             cookies,
+            authorization,
           },
         );
         const data = result.data || result;
@@ -214,10 +221,10 @@ export class AuthService {
     }
   }
 
-  async refresh(cookies: string) {
+  async refresh(cookies: string, authorization?: string) {
     try {
-      if (!cookies) {
-        throw new UnauthorizedException('No se proporcionaron cookies');
+      if (!cookies && !authorization) {
+        throw new UnauthorizedException('No se proporcionaron credenciales');
       }
 
       const result = await this.makeRequest(
@@ -225,6 +232,7 @@ export class AuthService {
         {
           method: 'GET',
           cookies,
+          authorization,
         },
       );
 
@@ -239,7 +247,7 @@ export class AuthService {
     }
   }
 
-  async logout(cookies: string) {
+  async logout(cookies: string, authorization?: string) {
     try {
       const result = await this.makeRequest(
         `${this.betterAuthUrl}/api/auth/sign-out`,
@@ -247,8 +255,9 @@ export class AuthService {
           method: 'POST',
           body: JSON.stringify({}),
           cookies,
+          authorization,
           headers: {
-            Origin: process.env.SITE_URL || 'http://localhost:3001',
+            Origin: process.env.NEXT_PUBLIC_SITE_URL || 'http://localhost:3000',
           },
         },
       );
@@ -258,10 +267,32 @@ export class AuthService {
     }
   }
 
-  async getCurrentUser(cookies: string) {
+  async getCurrentUser(cookies: string, authorization?: string) {
     try {
+      if (!cookies && !authorization) {
+        throw new UnauthorizedException('No se proporcionaron credenciales');
+      }
+
+      // Intentar obtener usuario desde Better Auth usando el header API OAuth
+      try {
+        const result = await this.makeRequest(
+          `${this.betterAuthUrl}/api/auth/get-session`,
+          {
+            method: 'GET',
+            cookies,
+            authorization,
+          },
+        );
+        if (result.data?.user) {
+          return this.ensureUserRole(result.data.user);
+        }
+      } catch (e) {
+        // Ignorar y caer al fallback de Convex
+      }
+
+      // Si no pudimos obtener con Better Auth, es posible que el cookie sea el especial de Convex
       if (!cookies) {
-        throw new UnauthorizedException('No se proporcionaron cookies');
+        throw new UnauthorizedException('No hay credenciales válidas');
       }
 
       // Extraer el JWT de Convex de las cookies

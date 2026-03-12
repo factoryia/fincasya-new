@@ -1,6 +1,6 @@
-import { v } from "convex/values";
-import { query, mutation } from "./_generated/server";
-import { api } from "./_generated/api";
+import { v } from 'convex/values';
+import { query, mutation } from './_generated/server';
+import { api } from './_generated/api';
 
 // ============ QUERIES ============
 
@@ -9,36 +9,47 @@ import { api } from "./_generated/api";
  */
 export const list = query({
   args: {
-    propertyId: v.optional(v.id("properties")),
-    userId: v.optional(v.id("users")),
+    propertyId: v.optional(v.id('properties')),
+    userId: v.optional(v.id('user')),
     status: v.optional(
       v.union(
-        v.literal("PENDING"),
-        v.literal("CONFIRMED"),
-        v.literal("PAID"),
-        v.literal("CANCELLED"),
-        v.literal("COMPLETED")
-      )
+        v.literal('PENDING'),
+        v.literal('CONFIRMED'),
+        v.literal('PAID'),
+        v.literal('CANCELLED'),
+        v.literal('COMPLETED'),
+      ),
     ),
     limit: v.optional(v.number()),
-    cursor: v.optional(v.id("bookings")),
+    cursor: v.optional(v.id('bookings')),
   },
   handler: async (ctx, args) => {
     const limit = args.limit ?? 50;
-    
+
     // Aplicar filtros con índices y obtener todas las reservas
     const allBookings = args.propertyId
-      ? await ctx.db.query("bookings").withIndex("by_property", (q) => q.eq("propertyId", args.propertyId!)).collect()
+      ? await ctx.db
+          .query('bookings')
+          .withIndex('by_property', (q) => q.eq('propertyId', args.propertyId!))
+          .collect()
       : args.status
-      ? await ctx.db.query("bookings").withIndex("by_status", (q) => q.eq("status", args.status!)).collect()
-      : args.userId
-      ? await ctx.db.query("bookings").withIndex("by_user", (q) => q.eq("userId", args.userId)).collect()
-      : await ctx.db.query("bookings").collect();
+        ? await ctx.db
+            .query('bookings')
+            .withIndex('by_status', (q) => q.eq('status', args.status!))
+            .collect()
+        : args.userId
+          ? await ctx.db
+              .query('bookings')
+              .withIndex('by_user', (q) => q.eq('userId', args.userId as any))
+              .collect()
+          : await ctx.db.query('bookings').collect();
 
     // Aplicar cursor si existe (filtrar manualmente después de obtener los resultados)
     let filtered = allBookings;
     if (args.cursor) {
-      filtered = filtered.filter((b: typeof allBookings[number]) => b._id > args.cursor!);
+      filtered = filtered.filter(
+        (b: (typeof allBookings)[number]) => b._id > args.cursor!,
+      );
     }
 
     // Ordenar por fecha de creación (más recientes primero)
@@ -50,7 +61,7 @@ export const list = query({
 
     // Obtener detalles de la propiedad para cada reserva
     const bookingsWithDetails = await Promise.all(
-      bookingsToReturn.map(async (booking: typeof allBookings[number]) => {
+      bookingsToReturn.map(async (booking: (typeof allBookings)[number]) => {
         const property = await ctx.db.get(booking.propertyId);
         return {
           ...booking,
@@ -62,13 +73,14 @@ export const list = query({
               }
             : null,
         };
-      })
+      }),
     );
 
     // Obtener el cursor para la siguiente página
-    const nextCursor = hasMore && bookingsWithDetails.length > 0 
-      ? bookingsWithDetails[bookingsWithDetails.length - 1]._id 
-      : undefined;
+    const nextCursor =
+      hasMore && bookingsWithDetails.length > 0
+        ? bookingsWithDetails[bookingsWithDetails.length - 1]._id
+        : undefined;
 
     return {
       bookings: bookingsWithDetails,
@@ -82,7 +94,7 @@ export const list = query({
  * Obtener reserva por ID
  */
 export const getById = query({
-  args: { id: v.id("bookings") },
+  args: { id: v.id('bookings') },
   handler: async (ctx, args) => {
     const booking = await ctx.db.get(args.id);
     if (!booking) {
@@ -91,8 +103,8 @@ export const getById = query({
 
     const property = await ctx.db.get(booking.propertyId);
     const payments = await ctx.db
-      .query("payments")
-      .withIndex("by_booking", (q) => q.eq("bookingId", args.id))
+      .query('payments')
+      .withIndex('by_booking', (q) => q.eq('bookingId', args.id))
       .collect();
 
     return {
@@ -110,8 +122,8 @@ export const getByReference = query({
   args: { reference: v.string() },
   handler: async (ctx, args) => {
     const booking = await ctx.db
-      .query("bookings")
-      .withIndex("by_reference", (q) => q.eq("reference", args.reference))
+      .query('bookings')
+      .withIndex('by_reference', (q) => q.eq('reference', args.reference))
       .first();
 
     if (!booking) {
@@ -120,8 +132,8 @@ export const getByReference = query({
 
     const property = await ctx.db.get(booking.propertyId);
     const payments = await ctx.db
-      .query("payments")
-      .withIndex("by_booking", (q) => q.eq("bookingId", booking._id))
+      .query('payments')
+      .withIndex('by_booking', (q) => q.eq('bookingId', booking._id))
       .collect();
 
     return {
@@ -137,37 +149,35 @@ export const getByReference = query({
  */
 export const checkAvailability = query({
   args: {
-    propertyId: v.id("properties"),
+    propertyId: v.id('properties'),
     fechaEntrada: v.number(),
     fechaSalida: v.number(),
   },
   handler: async (ctx, args) => {
     // Buscar reservas que se solapen con las fechas solicitadas
     const conflictingBookings = await ctx.db
-      .query("bookings")
-      .withIndex("by_property", (q) => q.eq("propertyId", args.propertyId))
+      .query('bookings')
+      .withIndex('by_property', (q) => q.eq('propertyId', args.propertyId))
       .filter((q) =>
         q.or(
           // Reserva empieza antes y termina durante el período solicitado
           q.and(
-            q.lte(q.field("fechaEntrada"), args.fechaEntrada),
-            q.gt(q.field("fechaSalida"), args.fechaEntrada)
+            q.lte(q.field('fechaEntrada'), args.fechaEntrada),
+            q.gt(q.field('fechaSalida'), args.fechaEntrada),
           ),
           // Reserva está completamente dentro del período solicitado
           q.and(
-            q.gte(q.field("fechaEntrada"), args.fechaEntrada),
-            q.lte(q.field("fechaSalida"), args.fechaSalida)
+            q.gte(q.field('fechaEntrada'), args.fechaEntrada),
+            q.lte(q.field('fechaSalida'), args.fechaSalida),
           ),
           // Reserva empieza durante el período solicitado
           q.and(
-            q.gte(q.field("fechaEntrada"), args.fechaEntrada),
-            q.lt(q.field("fechaEntrada"), args.fechaSalida)
-          )
-        )
+            q.gte(q.field('fechaEntrada'), args.fechaEntrada),
+            q.lt(q.field('fechaEntrada'), args.fechaSalida),
+          ),
+        ),
       )
-      .filter((q) =>
-        q.neq(q.field("status"), "CANCELLED")
-      )
+      .filter((q) => q.neq(q.field('status'), 'CANCELLED'))
       .collect();
 
     return {
@@ -189,8 +199,8 @@ export const checkAvailability = query({
  */
 export const create = mutation({
   args: {
-    propertyId: v.id("properties"),
-    userId: v.optional(v.id("users")),
+    propertyId: v.id('properties'),
+    userId: v.optional(v.id('user')),
     nombreCompleto: v.string(),
     cedula: v.string(),
     celular: v.string(),
@@ -229,13 +239,13 @@ export const create = mutation({
 
     if (!availability.available) {
       throw new Error(
-        "La propiedad no está disponible para las fechas seleccionadas"
+        'La propiedad no está disponible para las fechas seleccionadas',
       );
     }
 
-    const bookingId = await ctx.db.insert("bookings", {
+    const bookingId = await ctx.db.insert('bookings', {
       propertyId: args.propertyId,
-      userId: args.userId,
+      userId: args.userId as any,
       nombreCompleto: args.nombreCompleto,
       cedula: args.cedula,
       celular: args.celular,
@@ -257,10 +267,10 @@ export const create = mutation({
       discountCode: args.discountCode,
       discountAmount: args.discountAmount ?? 0,
       precioTotal: args.precioTotal,
-      currency: args.currency ?? "COP",
+      currency: args.currency ?? 'COP',
       temporada: args.temporada,
-      status: "PENDING",
-      paymentStatus: "PENDING",
+      status: 'PENDING',
+      paymentStatus: 'PENDING',
       reference: args.reference,
       observaciones: args.observaciones,
       createdAt: now,
@@ -268,13 +278,13 @@ export const create = mutation({
     });
 
     // Crear bloque de disponibilidad
-    await ctx.db.insert("propertyAvailability", {
+    await ctx.db.insert('propertyAvailability', {
       propertyId: args.propertyId,
       bookingId,
       fechaEntrada: args.fechaEntrada,
       fechaSalida: args.fechaSalida,
       blocked: true,
-      reason: "Reserva confirmada",
+      reason: 'Reserva confirmada',
     });
 
     return bookingId;
@@ -286,23 +296,23 @@ export const create = mutation({
  */
 export const update = mutation({
   args: {
-    id: v.id("bookings"),
+    id: v.id('bookings'),
     status: v.optional(
       v.union(
-        v.literal("PENDING"),
-        v.literal("CONFIRMED"),
-        v.literal("PAID"),
-        v.literal("CANCELLED"),
-        v.literal("COMPLETED")
-      )
+        v.literal('PENDING'),
+        v.literal('CONFIRMED'),
+        v.literal('PAID'),
+        v.literal('CANCELLED'),
+        v.literal('COMPLETED'),
+      ),
     ),
     paymentStatus: v.optional(
       v.union(
-        v.literal("PENDING"),
-        v.literal("PARTIAL"),
-        v.literal("PAID"),
-        v.literal("REFUNDED")
-      )
+        v.literal('PENDING'),
+        v.literal('PARTIAL'),
+        v.literal('PAID'),
+        v.literal('REFUNDED'),
+      ),
     ),
     observaciones: v.optional(v.string()),
   },
@@ -311,7 +321,7 @@ export const update = mutation({
     const booking = await ctx.db.get(id);
 
     if (!booking) {
-      throw new Error("Reserva no encontrada");
+      throw new Error('Reserva no encontrada');
     }
 
     await ctx.db.patch(id, {
@@ -328,26 +338,26 @@ export const update = mutation({
  */
 export const cancel = mutation({
   args: {
-    id: v.id("bookings"),
+    id: v.id('bookings'),
     reason: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
     const booking = await ctx.db.get(args.id);
 
     if (!booking) {
-      throw new Error("Reserva no encontrada");
+      throw new Error('Reserva no encontrada');
     }
 
     // Actualizar estado de la reserva
     await ctx.db.patch(args.id, {
-      status: "CANCELLED",
+      status: 'CANCELLED',
       updatedAt: Date.now(),
     });
 
     // Eliminar bloque de disponibilidad
     const availability = await ctx.db
-      .query("propertyAvailability")
-      .withIndex("by_booking", (q) => q.eq("bookingId", args.id))
+      .query('propertyAvailability')
+      .withIndex('by_booking', (q) => q.eq('bookingId', args.id))
       .collect();
 
     await Promise.all(availability.map((a) => ctx.db.delete(a._id)));
@@ -361,12 +371,12 @@ export const cancel = mutation({
  */
 export const createPayment = mutation({
   args: {
-    bookingId: v.id("bookings"),
+    bookingId: v.id('bookings'),
     type: v.union(
-      v.literal("ABONO_50"),
-      v.literal("SALDO_50"),
-      v.literal("COMPLETO"),
-      v.literal("REEMBOLSO")
+      v.literal('ABONO_50'),
+      v.literal('SALDO_50'),
+      v.literal('COMPLETO'),
+      v.literal('REEMBOLSO'),
     ),
     amount: v.number(),
     currency: v.optional(v.string()),
@@ -380,16 +390,16 @@ export const createPayment = mutation({
   handler: async (ctx, args) => {
     const now = Date.now();
 
-    const paymentId = await ctx.db.insert("payments", {
+    const paymentId = await ctx.db.insert('payments', {
       bookingId: args.bookingId,
       type: args.type,
       amount: args.amount,
-      currency: args.currency ?? "COP",
+      currency: args.currency ?? 'COP',
       transactionId: args.transactionId,
       reference: args.reference,
       paymentMethod: args.paymentMethod,
       checkoutUrl: args.checkoutUrl,
-      status: args.status ?? "pending",
+      status: args.status ?? 'pending',
       wompiData: args.wompiData,
       createdAt: now,
       updatedAt: now,
@@ -398,21 +408,22 @@ export const createPayment = mutation({
     // Actualizar estado de pago de la reserva si es necesario
     const booking = await ctx.db.get(args.bookingId);
     if (booking) {
-      let paymentStatus: "PENDING" | "PARTIAL" | "PAID" | "REFUNDED" = "PENDING";
+      let paymentStatus: 'PENDING' | 'PARTIAL' | 'PAID' | 'REFUNDED' =
+        'PENDING';
 
       // Calcular total pagado
       const payments = await ctx.db
-        .query("payments")
-        .withIndex("by_booking", (q) => q.eq("bookingId", args.bookingId))
-        .filter((q) => q.neq(q.field("status"), "refunded"))
+        .query('payments')
+        .withIndex('by_booking', (q) => q.eq('bookingId', args.bookingId))
+        .filter((q) => q.neq(q.field('status'), 'refunded'))
         .collect();
 
       const totalPaid = payments.reduce((sum, p) => sum + p.amount, 0);
 
       if (totalPaid >= booking.precioTotal) {
-        paymentStatus = "PAID";
+        paymentStatus = 'PAID';
       } else if (totalPaid > 0) {
-        paymentStatus = "PARTIAL";
+        paymentStatus = 'PARTIAL';
       }
 
       await ctx.db.patch(args.bookingId, {

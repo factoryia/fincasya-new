@@ -257,9 +257,16 @@ export const getById = query({
             iconId: f.iconId,
             iconUrl: icon?.iconUrl ?? null,
             emoji: icon?.emoji ?? null,
+            zone: f.zone,
           };
         }
-        return { name: f.name, iconId: null, iconUrl: null, emoji: null };
+        return {
+          name: f.name,
+          iconId: null,
+          iconUrl: null,
+          emoji: null,
+          zone: f.zone,
+        };
       }),
     );
 
@@ -353,9 +360,10 @@ export const getByCode = query({
             name: f.name,
             iconUrl: icon?.iconUrl ?? null,
             emoji: icon?.emoji ?? null,
+            zone: f.zone,
           };
         }
-        return { name: f.name, iconUrl: null, emoji: null };
+        return { name: f.name, iconUrl: null, emoji: null, zone: f.zone };
       }),
     );
 
@@ -583,12 +591,14 @@ export const create = mutation({
         v.literal('ISLA'),
       ),
     ),
+    rating: v.optional(v.number()),
     images: v.optional(v.array(v.string())),
     features: v.optional(
       v.array(
         v.object({
           name: v.string(),
           iconId: v.optional(v.id('iconography')),
+          zone: v.optional(v.string()),
         }),
       ),
     ),
@@ -645,7 +655,7 @@ export const create = mutation({
       code: args.code,
       category: args.category ?? 'ESTANDAR',
       type: args.type ?? 'FINCA',
-      rating: 0,
+      rating: args.rating ?? 0,
       reviewsCount: 0,
       video: args.video,
       visible: args.visible ?? true,
@@ -677,6 +687,7 @@ export const create = mutation({
             propertyId,
             name: f.name,
             iconId: f.iconId,
+            zone: f.zone,
           });
         }),
       );
@@ -774,6 +785,7 @@ export const update = mutation({
         v.literal('ISLA'),
       ),
     ),
+    rating: v.optional(v.number()),
     video: v.optional(v.string()),
     visible: v.optional(v.boolean()),
     reservable: v.optional(v.boolean()),
@@ -784,6 +796,7 @@ export const update = mutation({
         v.object({
           name: v.string(),
           iconId: v.optional(v.id('iconography')),
+          zone: v.optional(v.string()),
         }),
       ),
     ),
@@ -822,6 +835,7 @@ export const update = mutation({
               propertyId: id,
               name: f.name,
               iconId: f.iconId,
+              zone: f.zone,
             });
           }),
         );
@@ -1141,12 +1155,14 @@ export const addFeature = mutation({
     propertyId: v.id('properties'),
     name: v.string(),
     iconId: v.optional(v.id('iconography')),
+    zone: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
     const featureId = await ctx.db.insert('propertyFeatures', {
       propertyId: args.propertyId,
       name: args.name,
       iconId: args.iconId,
+      zone: args.zone,
     });
 
     return featureId;

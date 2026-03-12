@@ -203,6 +203,7 @@ export class FincasService {
           features?.map((f) => ({
             name: f.name,
             ...(f.iconId ? { iconId: f.iconId } : {}),
+            ...(f.zone ? { zone: f.zone } : {}),
           })) || [],
         ...(videoUrl && { video: videoUrl }),
         ...(catalogIds?.length && { catalogIds }),
@@ -290,6 +291,7 @@ export class FincasService {
           features?.map((f) => ({
             name: f.name,
             ...(f.iconId ? { iconId: f.iconId } : {}),
+            ...(f.zone ? { zone: f.zone } : {}),
           })) || [],
         catalogIds,
       });

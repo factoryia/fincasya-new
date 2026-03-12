@@ -73,6 +73,7 @@ export class AuthController {
     try {
       const result = await this.authService.getSession(
         req.headers.cookie || '',
+        req.headers.authorization,
       );
       const { _headers, ...data } = result as Record<string, unknown>;
       if (
@@ -99,7 +100,10 @@ export class AuthController {
   @Post('refresh')
   async refresh(@Req() req: Request, @Res() res: Response) {
     try {
-      const result = await this.authService.refresh(req.headers.cookie || '');
+      const result = await this.authService.refresh(
+        req.headers.cookie || '',
+        req.headers.authorization,
+      );
       const { _headers, ...data } = result as Record<string, unknown>;
       if (
         _headers &&
@@ -125,7 +129,10 @@ export class AuthController {
   @Post('logout')
   async logout(@Req() req: Request, @Res() res: Response) {
     try {
-      const result = await this.authService.logout(req.headers.cookie || '');
+      const result = await this.authService.logout(
+        req.headers.cookie || '',
+        req.headers.authorization,
+      );
       // Copiar cookies de la respuesta de Better Auth (para limpiar la sesión)
       const setCookieHeaders = result.headers?.['set-cookie'];
       if (setCookieHeaders) {
@@ -172,6 +179,7 @@ export class AuthController {
     try {
       const user = await this.authService.getCurrentUser(
         req.headers.cookie || '',
+        req.headers.authorization,
       );
       return res.json(user);
     } catch (error: any) {

@@ -5,7 +5,7 @@ import { internal } from './_generated/api';
 
 const http = httpRouter();
 
-authComponent.registerRoutes(http, createAuth);
+authComponent.registerRoutes(http, createAuth, { cors: true });
 
 // Webhook YCloud: recibe mensajes entrantes de WhatsApp
 // URL en YCloud: https://<tu-deployment>.convex.site/webhooks/ycloud

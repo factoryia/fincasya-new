@@ -94,6 +94,7 @@ export default defineSchema({
     name: v.string(),
     iconId: v.optional(v.id('iconography')),
     featureId: v.optional(v.string()), // Legacy field to allow Convex dev to pass validation
+    zone: v.optional(v.string()),
   })
     .index('by_property', ['propertyId'])
     .index('by_icon', ['iconId']),
@@ -119,7 +120,7 @@ export default defineSchema({
   // Tabla de reservas (bookings)
   bookings: defineTable({
     propertyId: v.id('properties'),
-    userId: v.optional(v.id('users')),
+    userId: v.optional(v.string()),
     nombreCompleto: v.string(),
     cedula: v.string(),
     celular: v.string(),
@@ -244,7 +245,7 @@ export default defineSchema({
 
   // Tabla de favoritos
   favorites: defineTable({
-    userId: v.id('users'),
+    userId: v.string(),
     propertyId: v.id('properties'),
     createdAt: v.number(),
   })
@@ -361,7 +362,7 @@ export default defineSchema({
   reviews: defineTable({
     propertyId: v.id('properties'),
     bookingId: v.optional(v.id('bookings')),
-    userId: v.optional(v.id('users')),
+    userId: v.optional(v.string()),
     rating: v.number(),
     comment: v.optional(v.string()),
     verified: v.optional(v.boolean()),
