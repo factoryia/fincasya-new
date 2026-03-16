@@ -248,6 +248,16 @@ export class CreateFincaDto {
   })
   @Type(() => PricingItemDto)
   pricing?: PricingItemDto[];
+
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  @Transform(({ value }) => {
+    if (typeof value === 'string')
+      return value ? (value.includes('[') ? JSON.parse(value) : [value]) : [];
+    return Array.isArray(value) ? value : [];
+  })
+  featuredIcons?: string[];
 }
 
 export class PricingItemDto {

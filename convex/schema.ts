@@ -4,7 +4,7 @@ import { tables as betterAuthTables } from './betterAuth/schema';
 
 export default defineSchema({
   ...betterAuthTables,
-  // Tabla de propiedades (fincas)
+  // Tabla de propiedades (fincas) - Actualizado por Antigravity para soportar featuredIcons
   properties: defineTable({
     title: v.string(),
     description: v.string(),
@@ -61,6 +61,8 @@ export default defineSchema({
     reservable: v.optional(v.boolean()),
     /** Bandera legacy para favoritos (para compatibilidad con documentos existentes). */
     isFavorite: v.optional(v.boolean()),
+    /** Lista de IDs de la iconografía para mostrar en la card de la finca (máximo 4). */
+    featuredIcons: v.optional(v.array(v.id('iconography'))),
     createdAt: v.number(),
     updatedAt: v.number(),
   })

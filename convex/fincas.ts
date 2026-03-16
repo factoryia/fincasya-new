@@ -168,6 +168,7 @@ export const list = query({
             reservable: property.reservable ?? true,
             images: sortedImages.map((img) => img.url),
             features: enrichedFeatures,
+            featuredIcons: property.featuredIcons ?? [],
             pricing: sortedPricing.map((p) => {
               let condicionesParsed: unknown;
               if (p.condiciones) {
@@ -291,6 +292,7 @@ export const getById = query({
       images: sortedImages.map((img) => img.url),
       imageItems: sortedImages.map((img) => ({ id: img._id, url: img.url })),
       features: enrichedFeatures,
+      featuredIcons: property.featuredIcons ?? [],
       additionalCosts,
       pricing: sortedPricing.map((p) => {
         let condicionesParsed: unknown;
@@ -624,6 +626,7 @@ export const create = mutation({
     reservable: v.optional(v.boolean()),
     isFavorite: v.optional(v.boolean()),
     priceOriginal: v.optional(v.number()),
+    featuredIcons: v.optional(v.array(v.id('iconography'))),
   },
   handler: async (ctx, args) => {
     const now = Date.now();
@@ -662,6 +665,7 @@ export const create = mutation({
       reservable: args.reservable ?? true,
       isFavorite: args.isFavorite ?? false,
       priceOriginal: args.priceOriginal,
+      featuredIcons: args.featuredIcons,
       createdAt: now,
       updatedAt: now,
     });
@@ -743,6 +747,7 @@ export const create = mutation({
 export const update = mutation({
   args: {
     id: v.id('properties'),
+    featuredIcons: v.optional(v.array(v.id('iconography'))),
     title: v.optional(v.string()),
     description: v.optional(v.string()),
     location: v.optional(v.string()),
@@ -803,7 +808,7 @@ export const update = mutation({
     catalogIds: v.optional(v.array(v.string())),
   },
   handler: async (ctx, args) => {
-    const { id, features, catalogIds, ...updates } = args;
+    const { id, features, catalogIds, featuredIcons, ...updates } = args;
     const property = await ctx.db.get(id);
 
     if (!property) {
@@ -812,6 +817,7 @@ export const update = mutation({
 
     await ctx.db.patch(id, {
       ...updates,
+      ...(featuredIcons !== undefined ? { featuredIcons } : {}),
       updatedAt: Date.now(),
     });
 
@@ -1231,3 +1237,5 @@ export const removeFeature = mutation({
     return { success: true };
   },
 });
+
+
