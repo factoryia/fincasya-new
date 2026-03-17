@@ -48,4 +48,9 @@ export class ListFincasDto {
   @Type(() => Boolean)
   @IsBoolean()
   isFavorite?: boolean;
+
+  @IsOptional()
+  @Type(() => Boolean)
+  @IsBoolean()
+  all?: boolean;
 }

@@ -45,6 +45,8 @@ export const list = query({
     minCapacity: v.optional(v.number()),
     maxPrice: v.optional(v.number()),
     isFavorite: v.optional(v.boolean()),
+    /** Si true, devuelve todas las fincas sin filtrar por active/visible (para admin). */
+    all: v.optional(v.boolean()),
   },
   handler: async (ctx, args) => {
     const limit = args.limit ?? 1000;
@@ -74,14 +76,19 @@ export const list = query({
                 .order('desc');
 
     const allProperties = await allPropertiesQuery.collect();
-
-    // Solo mostrar fincas visibles (visible !== false; undefined = visible por compatibilidad)
-    const visibleOnly = allProperties.filter(
-      (p: { visible?: boolean }) => p.visible !== false,
-    );
+    const showAll = args.all === true;
+    
+    // Solo mostrar fincas cuando (active !== false && visible !== false)
+    // Para administradores (args.all === true), se muestran todas
+    const filteredByVisibility = showAll 
+      ? allProperties 
+      : allProperties.filter(
+          (p: { active?: boolean; visible?: boolean }) => 
+            p.active !== false && p.visible !== false,
+        );
 
     // Aplicar cursor si existe (filtrar manualmente después de obtener los resultados)
-    let filtered = visibleOnly;
+    let filtered = filteredByVisibility;
     if (args.cursor) {
       filtered = filtered.filter(
         (p: (typeof allProperties)[number]) => p._id > args.cursor!,
@@ -164,6 +171,7 @@ export const list = query({
 
           return {
             ...property,
+            active: property.active ?? true,
             visible: property.visible ?? true,
             reservable: property.reservable ?? true,
             images: sortedImages.map((img) => img.url),
@@ -452,7 +460,8 @@ export const search = query({
       searchTerms.filter((term) => matchesTerm(p, term)).length;
 
     const visibleProperties = allProperties.filter(
-      (p: { visible?: boolean }) => p.visible !== false,
+      (p: { active?: boolean; visible?: boolean }) => 
+        p.active !== false && p.visible !== false,
     );
     const filtered = visibleProperties
       .filter((p) => searchTerms.some((term) => matchesTerm(p, term)))
@@ -506,6 +515,7 @@ export const searchAvailableByLocationAndDates = query({
     const all = await ctx.db.query('properties').collect();
     let byLocation = all.filter(
       (p) =>
+        p.active !== false &&
         p.visible !== false &&
         p.location.toLowerCase().includes(locLower) &&
         inCatalogIds.has(p._id) &&
@@ -622,6 +632,7 @@ export const create = mutation({
     ),
     /** IDs: Convex _id (m977...) o Meta whatsappCatalogId (26198995209693859). */
     catalogIds: v.optional(v.array(v.string())),
+    active: v.optional(v.boolean()),
     visible: v.optional(v.boolean()),
     reservable: v.optional(v.boolean()),
     isFavorite: v.optional(v.boolean()),
@@ -661,6 +672,7 @@ export const create = mutation({
       rating: args.rating ?? 0,
       reviewsCount: 0,
       video: args.video,
+      active: args.active ?? true,
       visible: args.visible ?? true,
       reservable: args.reservable ?? true,
       isFavorite: args.isFavorite ?? false,
@@ -792,6 +804,7 @@ export const update = mutation({
     ),
     rating: v.optional(v.number()),
     video: v.optional(v.string()),
+    active: v.optional(v.boolean()),
     visible: v.optional(v.boolean()),
     reservable: v.optional(v.boolean()),
     isFavorite: v.optional(v.boolean()),
