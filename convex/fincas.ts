@@ -637,6 +637,7 @@ export const create = mutation({
     reservable: v.optional(v.boolean()),
     isFavorite: v.optional(v.boolean()),
     priceOriginal: v.optional(v.number()),
+    owner: v.optional(v.string()),
     featuredIcons: v.optional(v.array(v.id('iconography'))),
   },
   handler: async (ctx, args) => {
@@ -677,6 +678,7 @@ export const create = mutation({
       reservable: args.reservable ?? true,
       isFavorite: args.isFavorite ?? false,
       priceOriginal: args.priceOriginal,
+      owner: args.owner,
       featuredIcons: args.featuredIcons,
       createdAt: now,
       updatedAt: now,
@@ -819,6 +821,7 @@ export const update = mutation({
       ),
     ),
     catalogIds: v.optional(v.array(v.string())),
+    owner: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
     const { id, features, catalogIds, featuredIcons, ...updates } = args;

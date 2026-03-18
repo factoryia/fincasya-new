@@ -280,7 +280,7 @@ export class FincasService {
 
       // Actualizar la finca
       // Pasamos pricing por separado si existe, y el resto de campos (incluyendo features y catalogIds) a la mutación update.
-      const { pricing, catalogIds, features, featuredIcons, active, ...updateData } = updateDto as any;
+      const { pricing, catalogIds, features, featuredIcons, active, owner, ...updateData } = updateDto as any;
       if (videoUrl) {
         updateData.video = videoUrl;
       }
@@ -296,6 +296,7 @@ export class FincasService {
           })) || [],
         ...(featuredIcons && { featuredIcons }),
         ...(active !== undefined && { active }),
+        owner,
         catalogIds,
       });
 

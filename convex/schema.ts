@@ -59,6 +59,7 @@ export default defineSchema({
     visible: v.optional(v.boolean()),
     /** Si false, la finca está desactivada y no se muestra en la web principal. Default true. */
     active: v.optional(v.boolean()),
+    owner: v.optional(v.string()),
     /** Si true, se puede reservar desde la página web. */
     reservable: v.optional(v.boolean()),
     /** Bandera legacy para favoritos (para compatibilidad con documentos existentes). */
