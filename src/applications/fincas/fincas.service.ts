@@ -482,6 +482,16 @@ export class FincasService {
     }
   }
 
+  async reorderImages(imageOrders: { id: string; order: number }[]) {
+    try {
+      return await this.convexService.mutation('fincas:updateImageOrder', {
+        imageOrders,
+      });
+    } catch (error) {
+      throw new BadRequestException(error.message);
+    }
+  }
+
   async removeImage(imageId: string) {
     try {
       const image = await this.convexService.query('fincas:getImageById', {

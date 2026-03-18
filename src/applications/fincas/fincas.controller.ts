@@ -217,6 +217,15 @@ export class FincasController {
     return this.fincasService.removeImage(imageId);
   }
 
+  @Put(':id/images/reorder')
+  @UseGuards(ConvexAuthGuard, AdminGuard)
+  async reorderImages(
+    @Param('id') id: string,
+    @Body('imageOrders') imageOrders: { id: string; order: number }[],
+  ) {
+    return this.fincasService.reorderImages(imageOrders);
+  }
+
   @Post(':id/features')
   @UseGuards(ConvexAuthGuard, AdminGuard)
   async addFeature(

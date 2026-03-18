@@ -1249,7 +1249,26 @@ export const unlinkFeature = mutation({
 export const removeFeature = mutation({
   args: { featureId: v.id('propertyFeatures') },
   handler: async (ctx, args) => {
-    await ctx.db.delete(args.featureId);
+    return { success: true };
+  },
+});
+
+/**
+ * Actualizar el orden de las imágenes de una finca
+ */
+export const updateImageOrder = mutation({
+  args: {
+    imageOrders: v.array(
+      v.object({
+        id: v.id('propertyImages'),
+        order: v.number(),
+      }),
+    ),
+  },
+  handler: async (ctx, args) => {
+    await Promise.all(
+      args.imageOrders.map(({ id, order }) => ctx.db.patch(id, { order })),
+    );
     return { success: true };
   },
 });
