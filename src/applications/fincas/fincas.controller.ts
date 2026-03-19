@@ -226,6 +226,20 @@ export class FincasController {
     return this.fincasService.reorderImages(imageOrders);
   }
 
+  @Get('tab-order/:tabId')
+  async getTabOrder(@Param('tabId') tabId: string) {
+    return this.fincasService.getTabOrder(tabId);
+  }
+
+  @Put('tab-order/:tabId')
+  @UseGuards(ConvexAuthGuard, AdminGuard)
+  async reorderTab(
+    @Param('tabId') tabId: string,
+    @Body('propertyIds') propertyIds: string[],
+  ) {
+    return this.fincasService.updateTabOrder(tabId, propertyIds);
+  }
+
   @Post(':id/features')
   @UseGuards(ConvexAuthGuard, AdminGuard)
   async addFeature(

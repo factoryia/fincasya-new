@@ -1276,4 +1276,58 @@ export const updateImageOrder = mutation({
   },
 });
 
+/**
+ * Obtener todos los órdenes de pestañas
+ */
+export const getTabOrders = query({
+  args: {},
+  handler: async (ctx) => {
+    return await ctx.db.query('tabOrders').collect();
+  },
+});
+
+/**
+ * Obtener el orden de una pestaña específica
+ */
+export const getTabOrder = query({
+  args: { tabId: v.string() },
+  handler: async (ctx, args) => {
+    return await ctx.db
+      .query('tabOrders')
+      .withIndex('by_tab', (q) => q.eq('tabId', args.tabId))
+      .unique();
+  },
+});
+
+/**
+ * Actualizar o crear el orden de una pestaña
+ */
+export const updateTabOrder = mutation({
+  args: {
+    tabId: v.string(),
+    propertyIds: v.array(v.id('properties')),
+  },
+  handler: async (ctx, args) => {
+    const existing = await ctx.db
+      .query('tabOrders')
+      .withIndex('by_tab', (q) => q.eq('tabId', args.tabId))
+      .unique();
+
+    if (existing) {
+      await ctx.db.patch(existing._id, {
+        propertyIds: args.propertyIds,
+        updatedAt: Date.now(),
+      });
+      return existing._id;
+    } else {
+      const id = await ctx.db.insert('tabOrders', {
+        tabId: args.tabId,
+        propertyIds: args.propertyIds,
+        updatedAt: Date.now(),
+      });
+      return id;
+    }
+  },
+});
+
 

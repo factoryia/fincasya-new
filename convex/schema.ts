@@ -378,4 +378,11 @@ export default defineSchema({
     .index('by_property', ['propertyId'])
     .index('by_booking', ['bookingId'])
     .index('by_user', ['userId']),
+
+  /** Orden manual de propiedades por cada "Tab" o categoría del front */
+  tabOrders: defineTable({
+    tabId: v.string(), // e.g. "melgar", "cerca-bogota", "favoritas", "todas"
+    propertyIds: v.array(v.id('properties')),
+    updatedAt: v.number(),
+  }).index('by_tab', ['tabId']),
 });

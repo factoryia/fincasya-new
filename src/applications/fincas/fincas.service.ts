@@ -492,6 +492,25 @@ export class FincasService {
     }
   }
 
+  async getTabOrder(tabId: string) {
+    try {
+      return await this.convexService.query('fincas:getTabOrder', { tabId });
+    } catch (error) {
+      throw new BadRequestException(error.message);
+    }
+  }
+
+  async updateTabOrder(tabId: string, propertyIds: string[]) {
+    try {
+      return await this.convexService.mutation('fincas:updateTabOrder', {
+        tabId,
+        propertyIds,
+      });
+    } catch (error) {
+      throw new BadRequestException(error.message);
+    }
+  }
+
   async removeImage(imageId: string) {
     try {
       const image = await this.convexService.query('fincas:getImageById', {
