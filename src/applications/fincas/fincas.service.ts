@@ -191,7 +191,7 @@ export class FincasService {
         videoUrl = await this.s3Service.uploadVideo(video);
       }
 
-      const { catalogIds, pricing, features, featuredIcons, ...rest } = createDto;
+      const { catalogIds, pricing, features, featuredIcons, zoneOrder, ...rest } = createDto;
       const base = rest.priceBase ?? 0;
       const fincaData: Record<string, unknown> = {
         ...rest,
@@ -206,6 +206,7 @@ export class FincasService {
             ...(f.zone ? { zone: f.zone } : {}),
           })) || [],
         ...(featuredIcons && { featuredIcons }),
+        ...(zoneOrder && { zoneOrder }),
         ...(videoUrl && { video: videoUrl }),
         ...(catalogIds?.length && { catalogIds }),
       };
@@ -280,7 +281,7 @@ export class FincasService {
 
       // Actualizar la finca
       // Pasamos pricing por separado si existe, y el resto de campos (incluyendo features y catalogIds) a la mutación update.
-      const { pricing, catalogIds, features, featuredIcons, active, owner, ...updateData } = updateDto as any;
+      const { pricing, catalogIds, features, featuredIcons, active, owner, zoneOrder, ...updateData } = updateDto as any;
       if (videoUrl) {
         updateData.video = videoUrl;
       }
@@ -295,6 +296,7 @@ export class FincasService {
             ...(f.zone ? { zone: f.zone } : {}),
           })) || [],
         ...(featuredIcons && { featuredIcons }),
+        ...(zoneOrder && { zoneOrder }),
         ...(active !== undefined && { active }),
         owner,
         catalogIds,

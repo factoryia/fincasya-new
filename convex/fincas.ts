@@ -641,6 +641,7 @@ export const create = mutation({
     priceOriginal: v.optional(v.number()),
     owner: v.optional(v.string()),
     featuredIcons: v.optional(v.array(v.id('iconography'))),
+    zoneOrder: v.optional(v.array(v.string())),
   },
   handler: async (ctx, args) => {
     const now = Date.now();
@@ -682,6 +683,7 @@ export const create = mutation({
       priceOriginal: args.priceOriginal,
       owner: args.owner,
       featuredIcons: args.featuredIcons,
+      zoneOrder: args.zoneOrder,
       createdAt: now,
       updatedAt: now,
     });
@@ -825,6 +827,7 @@ export const update = mutation({
     ),
     catalogIds: v.optional(v.array(v.string())),
     owner: v.optional(v.string()),
+    zoneOrder: v.optional(v.array(v.string())),
   },
   handler: async (ctx, args) => {
     const { id, features, catalogIds, featuredIcons, ...updates } = args;

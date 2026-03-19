@@ -67,6 +67,8 @@ export default defineSchema({
     isFavorite: v.optional(v.boolean()),
     /** Lista de IDs de la iconografía para mostrar en la card de la finca (máximo 4). */
     featuredIcons: v.optional(v.array(v.id('iconography'))),
+    /** Lista ordenada de nombres de zonas para renderizado. */
+    zoneOrder: v.optional(v.array(v.string())),
     createdAt: v.number(),
     updatedAt: v.number(),
   })

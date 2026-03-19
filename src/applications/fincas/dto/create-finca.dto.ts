@@ -273,6 +273,16 @@ export class CreateFincaDto {
     return Array.isArray(value) ? value : [];
   })
   featuredIcons?: string[];
+
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  @Transform(({ value }) => {
+    if (typeof value === 'string')
+      return value ? (value.includes('[') ? JSON.parse(value) : [value]) : [];
+    return Array.isArray(value) ? value : [];
+  })
+  zoneOrder?: string[];
 }
 
 export class PricingItemDto {
