@@ -27,6 +27,7 @@ export const list = query({
         v.literal('CONDOMINIO'),
         v.literal('YATE'),
         v.literal('ISLA'),
+        v.literal('GLAMPING'),
       ),
     ),
     category: v.optional(
@@ -601,6 +602,7 @@ export const create = mutation({
         v.literal('CONDOMINIO'),
         v.literal('YATE'),
         v.literal('ISLA'),
+        v.literal('GLAMPING'),
       ),
     ),
     rating: v.optional(v.number()),
@@ -802,6 +804,7 @@ export const update = mutation({
         v.literal('CONDOMINIO'),
         v.literal('YATE'),
         v.literal('ISLA'),
+        v.literal('GLAMPING'),
       ),
     ),
     rating: v.optional(v.number()),
