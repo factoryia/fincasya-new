@@ -15,10 +15,13 @@ import { FileInterceptor } from '@nestjs/platform-express';
 import { memoryStorage } from 'multer';
 import { InboxService } from './inbox.service';
 import { ConvexAuthGuard } from '../shared/guards/convex-auth.guard';
-import { AdminGuard } from '../shared/guards/admin.guard';
+import { RolesGuard } from '../shared/guards/roles.guard';
+import { Roles } from '../shared/decorators/roles.decorator';
+import { UserRole } from '../shared/constants/user-role';
 
 @Controller('inbox')
-@UseGuards(ConvexAuthGuard, AdminGuard)
+@UseGuards(ConvexAuthGuard, RolesGuard)
+@Roles(UserRole.ADMIN, UserRole.ASSISTANT, UserRole.VENDEDOR)
 export class InboxController {
   constructor(private readonly inboxService: InboxService) {}
 

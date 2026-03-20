@@ -40,7 +40,7 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
                   name: string;
                   phone?: string;
                   position?: string;
-                  role?: "admin" | "assistant" | "user";
+                  role?: "admin" | "assistant" | "vendedor" | "user";
                   updatedAt: number;
                   userId?: null | string;
                 };
@@ -573,7 +573,7 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
                   name?: string;
                   phone?: string;
                   position?: string;
-                  role?: "admin" | "assistant" | "user";
+                  role?: "admin" | "assistant" | "vendedor" | "user";
                   updatedAt?: number;
                   userId?: null | string;
                 };
@@ -816,7 +816,7 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
                   name?: string;
                   phone?: string;
                   position?: string;
-                  role?: "admin" | "assistant" | "user";
+                  role?: "admin" | "assistant" | "vendedor" | "user";
                   updatedAt?: number;
                   userId?: null | string;
                 };

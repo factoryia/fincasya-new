@@ -68,7 +68,12 @@ export const update = mutation({
     id: v.string(),
     name: v.optional(v.string()),
     role: v.optional(
-      v.union(v.literal('admin'), v.literal('assistant'), v.literal('user')),
+      v.union(
+        v.literal('admin'),
+        v.literal('assistant'),
+        v.literal('vendedor'),
+        v.literal('user'),
+      ),
     ),
     banned: v.optional(v.boolean()),
     phone: v.optional(v.string()),
@@ -97,7 +102,12 @@ export const updateByEmail = mutation({
     email: v.string(),
     name: v.optional(v.string()),
     role: v.optional(
-      v.union(v.literal('admin'), v.literal('assistant'), v.literal('user')),
+      v.union(
+        v.literal('admin'),
+        v.literal('assistant'),
+        v.literal('vendedor'),
+        v.literal('user'),
+      ),
     ),
     banned: v.optional(v.boolean()),
     phone: v.optional(v.string()),
