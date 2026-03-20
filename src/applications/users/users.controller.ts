@@ -28,6 +28,11 @@ export class UsersController {
     return await this.usersService.list(limitNum);
   }
 
+  @Get('propietarios')
+  async listPropietarios() {
+    return await this.usersService.listPropietarios();
+  }
+
   @Get(':id')
   async getById(@Param('id') id: string) {
     return await this.usersService.getById(id);

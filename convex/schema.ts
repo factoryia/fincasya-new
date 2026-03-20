@@ -60,7 +60,6 @@ export default defineSchema({
     visible: v.optional(v.boolean()),
     /** Si false, la finca está desactivada y no se muestra en la web principal. Default true. */
     active: v.optional(v.boolean()),
-    owner: v.optional(v.string()),
     /** Si true, se puede reservar desde la página web. */
     reservable: v.optional(v.boolean()),
     /** Bandera legacy para favoritos (para compatibilidad con documentos existentes). */
@@ -404,4 +403,22 @@ export default defineSchema({
     propertyIds: v.array(v.id('properties')),
     updatedAt: v.number(),
   }).index('by_tab', ['tabId']),
+
+  /** Información legal y bancaria del propietario de la finca */
+  propertyOwnerInfo: defineTable({
+    propertyId: v.id('properties'),
+    /** Usuario con rol 'propietario' enlazado */
+    ownerUserId: v.string(),
+    rutNumber: v.string(),
+    bankName: v.string(),
+    accountNumber: v.string(),
+    rntNumber: v.string(),
+    /** URLs de documentos cargados (PDF) */
+    bankCertificationUrl: v.optional(v.string()),
+    idCopyUrl: v.optional(v.string()),
+    rntPdfUrl: v.optional(v.string()),
+    chamberOfCommerceUrl: v.optional(v.string()),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  }).index('by_property', ['propertyId']),
 });

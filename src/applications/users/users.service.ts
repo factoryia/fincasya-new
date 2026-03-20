@@ -213,4 +213,14 @@ export class UsersService {
       );
     }
   }
+
+  async listPropietarios() {
+    try {
+      const result = await this.convexService.query('users:listPropietarios', {});
+      console.log('List Propietarios Result:', result?.length || 0, 'users found');
+      return result;
+    } catch (error: any) {
+      throw new BadRequestException(error.message);
+    }
+  }
 }

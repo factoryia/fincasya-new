@@ -140,10 +140,6 @@ export class CreateFincaDto {
   @IsEnum(PropertyType)
   type?: PropertyType;
 
-  @IsOptional()
-  @IsString()
-  owner?: string;
-
   /** Si false, la finca está desactivada y no se muestra en la web principal. Por defecto true. */
   @IsOptional()
   @IsBoolean()

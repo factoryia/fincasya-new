@@ -10,6 +10,7 @@ import { UpdateFincaDto } from './dto/update-finca.dto';
 import { ListFincasDto } from './dto/list-fincas.dto';
 import { parseExcelToFincas } from './excel-parser';
 import { GlobalPricingRuleDto, UpdateGlobalPricingRuleDto } from './dto/global-pricing.dto';
+import { UpdateOwnerInfoDto } from './dto/owner-info.dto';
 
 @Injectable()
 export class FincasService {
@@ -285,7 +286,7 @@ export class FincasService {
 
       // Actualizar la finca
       // Pasamos pricing por separado si existe, y el resto de campos (incluyendo features y catalogIds) a la mutación update.
-      const { pricing, catalogIds, features, featuredIcons, active, owner, zoneOrder, ...updateData } = updateDto as any;
+      const { pricing, catalogIds, features, featuredIcons, active, zoneOrder, ...updateData } = updateDto as any;
       if (videoUrl) {
         updateData.video = videoUrl;
       }
@@ -302,7 +303,6 @@ export class FincasService {
         ...(featuredIcons && { featuredIcons }),
         ...(zoneOrder && { zoneOrder }),
         ...(active !== undefined && { active }),
-        owner,
         catalogIds,
       });
 
@@ -644,6 +644,65 @@ export class FincasService {
   async deleteGlobalPricingRule(id: string) {
     try {
       return await this.convexService.mutation('globalPricing:remove', { id });
+    } catch (error) {
+      throw new BadRequestException(error.message);
+    }
+  }
+
+  async getOwnerInfo(propertyId: string) {
+    try {
+      return await this.convexService.query('propertyOwners:getByPropertyId', {
+        propertyId,
+      });
+    } catch (error) {
+      throw new BadRequestException(error.message);
+    }
+  }
+
+  async upsertOwnerInfo(
+    propertyId: string,
+    dto: UpdateOwnerInfoDto,
+    files?: {
+      bankCertification?: Express.Multer.File;
+      idCopy?: Express.Multer.File;
+      rntPdf?: Express.Multer.File;
+      chamberOfCommerce?: Express.Multer.File;
+    },
+  ) {
+    try {
+      const updateData: any = { ...dto, propertyId };
+
+      if (files) {
+        if (files.bankCertification) {
+          updateData.bankCertificationUrl = await this.s3Service.uploadFile(
+            files.bankCertification,
+            'owners/bank-certifications',
+          );
+        }
+        if (files.idCopy) {
+          updateData.idCopyUrl = await this.s3Service.uploadFile(
+            files.idCopy,
+            'owners/id-copies',
+          );
+        }
+        if (files.rntPdf) {
+          updateData.rntPdfUrl = await this.s3Service.uploadFile(
+            files.rntPdf,
+            'owners/rnt-pdfs',
+          );
+        }
+        if (files.chamberOfCommerce) {
+          updateData.chamberOfCommerceUrl = await this.s3Service.uploadFile(
+            files.chamberOfCommerce,
+            'owners/chamber-of-commerce',
+          );
+        }
+      }
+
+      return await this.convexService.mutation(
+        'propertyOwners:upsert',
+        updateData,
+      );
     } catch (error) {
       throw new BadRequestException(error.message);
     }

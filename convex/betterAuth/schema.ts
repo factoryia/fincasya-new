@@ -26,13 +26,15 @@ export const tables = {
         v.literal('admin'),
         v.literal('assistant'),
         v.literal('vendedor'),
+        v.literal('propietario'),
         v.literal('user'),
+        v.null(),
       ),
     ),
     banned: v.optional(v.boolean()),
-    phone: v.optional(v.string()),
-    position: v.optional(v.string()),
-    documentId: v.optional(v.string()),
+    phone: v.optional(v.union(v.null(), v.string())),
+    position: v.optional(v.union(v.null(), v.string())),
+    documentId: v.optional(v.union(v.null(), v.string())),
   })
     .index('email_name', ['email', 'name'])
     .index('name', ['name'])

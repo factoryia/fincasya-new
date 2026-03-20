@@ -29,6 +29,7 @@ import { CreateFincaDto, PricingItemDto } from './dto/create-finca.dto';
 import { GlobalPricingRuleDto, UpdateGlobalPricingRuleDto } from './dto/global-pricing.dto';
 import { UpdateFincaDto } from './dto/update-finca.dto';
 import { ListFincasDto } from './dto/list-fincas.dto';
+import { UpdateOwnerInfoDto } from './dto/owner-info.dto';
 import { ConvexAuthGuard } from '../shared/guards/convex-auth.guard';
 import { AdminGuard } from '../shared/guards/admin.guard';
 
@@ -323,5 +324,46 @@ export class FincasController {
     @Query('activasOnly') activasOnly?: string,
   ) {
     return this.fincasService.getById(id, activasOnly === 'true');
+  }
+
+  @Get(':id/owner')
+  @UseGuards(ConvexAuthGuard, AdminGuard)
+  async getOwnerInfo(@Param('id') id: string) {
+    return this.fincasService.getOwnerInfo(id);
+  }
+
+  @Post(':id/owner')
+  @UseGuards(ConvexAuthGuard, AdminGuard)
+  @UseInterceptors(
+    FileFieldsInterceptor(
+      [
+        { name: 'bankCertification', maxCount: 1 },
+        { name: 'idCopy', maxCount: 1 },
+        { name: 'rntPdf', maxCount: 1 },
+        { name: 'chamberOfCommerce', maxCount: 1 },
+      ],
+      {
+        storage: memoryStorage(),
+        limits: { fileSize: 50 * 1024 * 1024 }, // 50MB por documento
+      },
+    ),
+  )
+  async upsertOwnerInfo(
+    @Param('id') id: string,
+    @Body() dto: UpdateOwnerInfoDto,
+    @UploadedFiles()
+    files?: {
+      bankCertification?: Express.Multer.File[];
+      idCopy?: Express.Multer.File[];
+      rntPdf?: Express.Multer.File[];
+      chamberOfCommerce?: Express.Multer.File[];
+    },
+  ) {
+    return this.fincasService.upsertOwnerInfo(id, dto, {
+      bankCertification: files?.bankCertification?.[0],
+      idCopy: files?.idCopy?.[0],
+      rntPdf: files?.rntPdf?.[0],
+      chamberOfCommerce: files?.chamberOfCommerce?.[0],
+    });
   }
 }

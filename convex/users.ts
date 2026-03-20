@@ -72,20 +72,25 @@ export const update = mutation({
         v.literal('admin'),
         v.literal('assistant'),
         v.literal('vendedor'),
+        v.literal('propietario'),
         v.literal('user'),
+        v.null(),
       ),
     ),
     banned: v.optional(v.boolean()),
-    phone: v.optional(v.string()),
-    position: v.optional(v.string()),
-    documentId: v.optional(v.string()),
+    phone: v.optional(v.union(v.null(), v.string())),
+    position: v.optional(v.union(v.null(), v.string())),
+    documentId: v.optional(v.union(v.null(), v.string())),
   },
   handler: async (ctx, args) => {
     const { id, ...updates } = args;
+    const cleanUpdates = Object.fromEntries(
+      Object.entries(updates).filter(([k, v]) => !(k === 'role' && v === null)),
+    );
     await ctx.runMutation(components.betterAuth.adapter.updateOne, {
       input: {
         model: 'user',
-        update: updates,
+        update: cleanUpdates,
         where: [{ field: '_id', value: id }],
       },
     });
@@ -106,12 +111,13 @@ export const updateByEmail = mutation({
         v.literal('admin'),
         v.literal('assistant'),
         v.literal('vendedor'),
+        v.literal('propietario'),
         v.literal('user'),
       ),
     ),
     banned: v.optional(v.boolean()),
     phone: v.optional(v.string()),
-    position: v.optional(v.string()),
+    position: v.optional(v.union(v.null(), v.string())),
     documentId: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
@@ -196,5 +202,22 @@ export const remove = mutation({
       },
     });
     return { success: true };
+  },
+});
+
+/**
+ * List only users with the 'propietario' role
+ */
+export const listPropietarios = query({
+  args: {},
+  handler: async (ctx) => {
+    const result = await ctx.runQuery(components.betterAuth.adapter.findMany, {
+      model: 'user',
+      paginationOpts: {
+        cursor: null,
+        numItems: 1000,
+      },
+    });
+    return result.page.filter((u: any) => u.role === 'propietario');
   },
 });

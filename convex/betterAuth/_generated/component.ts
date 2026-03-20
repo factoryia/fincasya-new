@@ -33,14 +33,20 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
                 data: {
                   banned?: boolean;
                   createdAt: number;
-                  documentId?: string;
+                  documentId?: null | string;
                   email: string;
                   emailVerified: boolean;
                   image?: null | string;
                   name: string;
-                  phone?: string;
-                  position?: string;
-                  role?: "admin" | "assistant" | "vendedor" | "user";
+                  phone?: null | string;
+                  position?: null | string;
+                  role?:
+                    | "admin"
+                    | "assistant"
+                    | "vendedor"
+                    | "propietario"
+                    | "user"
+                    | null;
                   updatedAt: number;
                   userId?: null | string;
                 };
@@ -566,14 +572,20 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
                 update: {
                   banned?: boolean;
                   createdAt?: number;
-                  documentId?: string;
+                  documentId?: null | string;
                   email?: string;
                   emailVerified?: boolean;
                   image?: null | string;
                   name?: string;
-                  phone?: string;
-                  position?: string;
-                  role?: "admin" | "assistant" | "vendedor" | "user";
+                  phone?: null | string;
+                  position?: null | string;
+                  role?:
+                    | "admin"
+                    | "assistant"
+                    | "vendedor"
+                    | "propietario"
+                    | "user"
+                    | null;
                   updatedAt?: number;
                   userId?: null | string;
                 };
@@ -809,14 +821,20 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
                 update: {
                   banned?: boolean;
                   createdAt?: number;
-                  documentId?: string;
+                  documentId?: null | string;
                   email?: string;
                   emailVerified?: boolean;
                   image?: null | string;
                   name?: string;
-                  phone?: string;
-                  position?: string;
-                  role?: "admin" | "assistant" | "vendedor" | "user";
+                  phone?: null | string;
+                  position?: null | string;
+                  role?:
+                    | "admin"
+                    | "assistant"
+                    | "vendedor"
+                    | "propietario"
+                    | "user"
+                    | null;
                   updatedAt?: number;
                   userId?: null | string;
                 };
