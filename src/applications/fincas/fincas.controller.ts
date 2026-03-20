@@ -26,6 +26,7 @@ import {
 import { memoryStorage } from 'multer';
 import { FincasService } from './fincas.service';
 import { CreateFincaDto, PricingItemDto } from './dto/create-finca.dto';
+import { GlobalPricingRuleDto, UpdateGlobalPricingRuleDto } from './dto/global-pricing.dto';
 import { UpdateFincaDto } from './dto/update-finca.dto';
 import { ListFincasDto } from './dto/list-fincas.dto';
 import { ConvexAuthGuard } from '../shared/guards/convex-auth.guard';
@@ -54,13 +55,6 @@ export class FincasController {
     return this.fincasService.getCatalogFeedCsv();
   }
 
-  @Get(':id')
-  async getById(
-    @Param('id') id: string,
-    @Query('activasOnly') activasOnly?: string,
-  ) {
-    return this.fincasService.getById(id, activasOnly === 'true');
-  }
 
   @Get('code/:code')
   async getByCode(@Param('code') code: string) {
@@ -287,5 +281,47 @@ export class FincasController {
     video: Express.Multer.File,
   ) {
     return this.fincasService.update(id, {}, undefined, video);
+  }
+
+
+  // --- Global Pricing Rules ---
+
+  @Get('global-pricing')
+  async listGlobalPricingRules() {
+    return this.fincasService.listGlobalPricingRules();
+  }
+
+  @Get('global-pricing/:id')
+  async getGlobalPricingRuleById(@Param('id') id: string) {
+    return this.fincasService.getGlobalPricingRuleById(id);
+  }
+
+  @Post('global-pricing')
+  @UseGuards(ConvexAuthGuard, AdminGuard)
+  async createGlobalPricingRule(@Body() dto: GlobalPricingRuleDto) {
+    return this.fincasService.createGlobalPricingRule(dto);
+  }
+
+  @Put('global-pricing/:id')
+  @UseGuards(ConvexAuthGuard, AdminGuard)
+  async updateGlobalPricingRule(
+    @Param('id') id: string,
+    @Body() dto: UpdateGlobalPricingRuleDto,
+  ) {
+    return this.fincasService.updateGlobalPricingRule(id, dto);
+  }
+
+  @Delete('global-pricing/:id')
+  @UseGuards(ConvexAuthGuard, AdminGuard)
+  async deleteGlobalPricingRule(@Param('id') id: string) {
+    return this.fincasService.deleteGlobalPricingRule(id);
+  }
+
+  @Get(':id')
+  async getById(
+    @Param('id') id: string,
+    @Query('activasOnly') activasOnly?: string,
+  ) {
+    return this.fincasService.getById(id, activasOnly === 'true');
   }
 }

@@ -178,7 +178,12 @@ export const list = query({
             images: sortedImages.map((img) => img.url),
             features: enrichedFeatures,
             featuredIcons: property.featuredIcons ?? [],
-            pricing: sortedPricing.map((p) => {
+            pricing: await Promise.all(sortedPricing.map(async (p) => {
+              let globalData = null;
+              if (p.globalRuleId) {
+                globalData = await ctx.db.get(p.globalRuleId);
+              }
+
               let condicionesParsed: unknown;
               if (p.condiciones) {
                 try {
@@ -195,19 +200,21 @@ export const list = query({
                   reglasParsed = undefined;
                 }
               }
+
               return {
                 id: p._id,
-                nombre: p.nombre,
-                fechaDesde: p.fechaDesde,
-                fechaHasta: p.fechaHasta,
-                fechas: p.fechas,
+                globalRuleId: p.globalRuleId,
+                nombre: globalData?.nombre || p.nombre,
+                fechaDesde: globalData?.fechaDesde || p.fechaDesde,
+                fechaHasta: globalData?.fechaHasta || p.fechaHasta,
+                fechas: globalData?.fechas || p.fechas,
                 valorUnico: p.valorUnico,
                 condiciones: condicionesParsed,
-                activa: p.activa ?? true,
+                activa: (globalData?.activa !== false) && (p.activa ?? true),
                 reglas: reglasParsed,
                 order: p.order,
               };
-            }),
+            })),
             metaCatalogs: catalogLinks.map((link, index) => {
               const catalog = catalogs[index];
               return {
@@ -303,7 +310,12 @@ export const getById = query({
       features: enrichedFeatures,
       featuredIcons: property.featuredIcons ?? [],
       additionalCosts,
-      pricing: sortedPricing.map((p) => {
+      pricing: await Promise.all(sortedPricing.map(async (p) => {
+        let globalData = null;
+        if (p.globalRuleId) {
+          globalData = await ctx.db.get(p.globalRuleId);
+        }
+
         let condicionesParsed: unknown;
         if (p.condiciones) {
           try {
@@ -322,17 +334,18 @@ export const getById = query({
         }
         return {
           id: p._id,
-          nombre: p.nombre,
-          fechaDesde: p.fechaDesde,
-          fechaHasta: p.fechaHasta,
-          fechas: p.fechas,
+          globalRuleId: p.globalRuleId,
+          nombre: globalData?.nombre || p.nombre,
+          fechaDesde: globalData?.fechaDesde || p.fechaDesde,
+          fechaHasta: globalData?.fechaHasta || p.fechaHasta,
+          fechas: globalData?.fechas || p.fechas,
           valorUnico: p.valorUnico,
           condiciones: condicionesParsed,
-          activa: p.activa ?? true,
+          activa: (globalData?.activa !== false) && (p.activa ?? true),
           reglas: reglasParsed,
           order: p.order,
         };
-      }),
+      })),
     };
   },
 });
@@ -369,13 +382,33 @@ export const getByCode = query({
           const icon = await ctx.db.get(f.iconId);
           return {
             name: f.name,
+            iconId: f.iconId,
             iconUrl: icon?.iconUrl ?? null,
             emoji: icon?.emoji ?? null,
             zone: f.zone,
           };
         }
-        return { name: f.name, iconUrl: null, emoji: null, zone: f.zone };
+        return {
+          name: f.name,
+          iconId: null,
+          iconUrl: null,
+          emoji: null,
+          zone: f.zone,
+        };
       }),
+    );
+
+    const additionalCosts = await ctx.db
+      .query('additionalCosts')
+      .withIndex('by_property', (q) => q.eq('propertyId', property._id))
+      .collect();
+
+    const pricing = await ctx.db
+      .query('propertyPricing')
+      .withIndex('by_property', (q) => q.eq('propertyId', property._id))
+      .collect();
+    const sortedPricing = pricing.sort(
+      (a, b) => (a.order ?? 999) - (b.order ?? 999),
     );
 
     // Ordenar imágenes por el campo order
@@ -384,7 +417,46 @@ export const getByCode = query({
     return {
       ...property,
       images: sortedImages.map((img) => img.url),
+      imageItems: sortedImages.map((img) => ({ id: img._id, url: img.url })),
       features: enrichedFeatures,
+      featuredIcons: property.featuredIcons ?? [],
+      additionalCosts,
+      pricing: await Promise.all(sortedPricing.map(async (p) => {
+        let globalData = null;
+        if (p.globalRuleId) {
+          globalData = await ctx.db.get(p.globalRuleId);
+        }
+
+        let condicionesParsed: unknown;
+        if (p.condiciones) {
+          try {
+            condicionesParsed = JSON.parse(p.condiciones);
+          } catch {
+            condicionesParsed = undefined;
+          }
+        }
+        let reglasParsed: unknown;
+        if (p.reglas) {
+          try {
+            reglasParsed = JSON.parse(p.reglas);
+          } catch {
+            reglasParsed = undefined;
+          }
+        }
+        return {
+          id: p._id,
+          globalRuleId: p.globalRuleId,
+          nombre: globalData?.nombre || p.nombre,
+          fechaDesde: globalData?.fechaDesde || p.fechaDesde,
+          fechaHasta: globalData?.fechaHasta || p.fechaHasta,
+          fechas: globalData?.fechas || p.fechas,
+          valorUnico: p.valorUnico,
+          condiciones: condicionesParsed,
+          activa: (globalData?.activa !== false) && (p.activa ?? true),
+          reglas: reglasParsed,
+          order: p.order,
+        };
+      })),
     };
   },
 });
@@ -625,6 +697,7 @@ export const create = mutation({
           fechaHasta: v.optional(v.string()),
           fechas: v.optional(v.array(v.string())),
           valorUnico: v.optional(v.number()),
+          globalRuleId: v.optional(v.id('globalPricing')),
           condiciones: v.optional(v.string()),
           activa: v.optional(v.boolean()),
           reglas: v.optional(v.string()),
@@ -725,6 +798,7 @@ export const create = mutation({
             fechaDesde: p.fechaDesde,
             fechaHasta: p.fechaHasta,
             fechas: p.fechas,
+            globalRuleId: p.globalRuleId,
             valorUnico: p.valorUnico,
             condiciones: p.condiciones,
             activa: p.activa ?? true,
@@ -924,6 +998,7 @@ export const setPricing = mutation({
         fechaDesde: v.optional(v.string()),
         fechaHasta: v.optional(v.string()),
         fechas: v.optional(v.array(v.string())),
+        globalRuleId: v.optional(v.id('globalPricing')),
         valorUnico: v.optional(v.number()),
         condiciones: v.optional(v.string()),
         activa: v.optional(v.boolean()),
@@ -956,6 +1031,7 @@ export const setPricing = mutation({
         fechaDesde: p.fechaDesde,
         fechaHasta: p.fechaHasta,
         fechas: p.fechas,
+        globalRuleId: p.globalRuleId,
         valorUnico: p.valorUnico,
         condiciones: p.condiciones,
         activa: p.activa ?? true,
@@ -980,6 +1056,7 @@ export const addTemporada = mutation({
     fechaDesde: v.optional(v.string()),
     fechaHasta: v.optional(v.string()),
     fechas: v.optional(v.array(v.string())),
+    globalRuleId: v.optional(v.id('globalPricing')),
     valorUnico: v.optional(v.number()),
     condiciones: v.optional(v.string()),
     activa: v.optional(v.boolean()),
@@ -987,28 +1064,23 @@ export const addTemporada = mutation({
     order: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
-    const property = await ctx.db.get(args.propertyId);
+    const { propertyId, ...rest } = args;
+    const property = await ctx.db.get(propertyId);
     if (!property) {
       throw new Error('Propiedad no encontrada');
     }
 
     const existing = await ctx.db
       .query('propertyPricing')
-      .withIndex('by_property', (q) => q.eq('propertyId', args.propertyId))
+      .withIndex('by_property', (q) => q.eq('propertyId', propertyId))
       .collect();
     const nextOrder = args.order ?? existing.length;
 
     const now = Date.now();
     const id = await ctx.db.insert('propertyPricing', {
-      propertyId: args.propertyId,
-      nombre: args.nombre,
-      fechaDesde: args.fechaDesde,
-      fechaHasta: args.fechaHasta,
-      fechas: args.fechas,
-      valorUnico: args.valorUnico,
-      condiciones: args.condiciones,
+      propertyId,
+      ...rest,
       activa: args.activa ?? true,
-      reglas: args.reglas,
       order: nextOrder,
       createdAt: now,
       updatedAt: now,
@@ -1028,6 +1100,7 @@ export const updateTemporada = mutation({
     fechaDesde: v.optional(v.string()),
     fechaHasta: v.optional(v.string()),
     fechas: v.optional(v.array(v.string())),
+    globalRuleId: v.optional(v.id('globalPricing')),
     valorUnico: v.optional(v.number()),
     condiciones: v.optional(v.string()),
     activa: v.optional(v.boolean()),

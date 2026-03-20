@@ -9,6 +9,7 @@ import { CreateFincaDto } from './dto/create-finca.dto';
 import { UpdateFincaDto } from './dto/update-finca.dto';
 import { ListFincasDto } from './dto/list-fincas.dto';
 import { parseExcelToFincas } from './excel-parser';
+import { GlobalPricingRuleDto, UpdateGlobalPricingRuleDto } from './dto/global-pricing.dto';
 
 @Injectable()
 export class FincasService {
@@ -225,11 +226,14 @@ export class FincasService {
             activa,
             reglas,
             order,
+            globalRuleId,
           } = p;
-          const out: Record<string, unknown> = { nombre };
+          const out: Record<string, unknown> = {};
+          if (nombre !== undefined) out.nombre = nombre;
           if (fechaDesde !== undefined) out.fechaDesde = fechaDesde;
           if (fechaHasta !== undefined) out.fechaHasta = fechaHasta;
           if (fechas !== undefined) out.fechas = fechas;
+          if (globalRuleId !== undefined) out.globalRuleId = globalRuleId;
           if (valorUnico !== undefined) out.valorUnico = valorUnico;
           if (condiciones !== undefined) out.condiciones = condiciones;
           if (activa !== undefined) out.activa = activa;
@@ -339,11 +343,14 @@ export class FincasService {
             activa,
             reglas,
             order,
+            globalRuleId,
           } = p;
-          const out: Record<string, unknown> = { nombre };
+          const out: Record<string, unknown> = {};
+          if (nombre !== undefined) out.nombre = nombre;
           if (fechaDesde !== undefined) out.fechaDesde = fechaDesde;
           if (fechaHasta !== undefined) out.fechaHasta = fechaHasta;
           if (fechas !== undefined) out.fechas = fechas;
+          if (globalRuleId !== undefined) out.globalRuleId = globalRuleId;
           if (valorUnico !== undefined) out.valorUnico = valorUnico;
           if (condiciones !== undefined) out.condiciones = condiciones;
           if (activa !== undefined) out.activa = activa;
@@ -367,10 +374,11 @@ export class FincasService {
   async setPricing(
     propertyId: string,
     pricing: Array<{
-      nombre: string;
+      nombre?: string;
       fechaDesde?: string;
       fechaHasta?: string;
       fechas?: string[];
+      globalRuleId?: string;
       valorUnico?: number;
       condiciones?: string;
       activa?: boolean;
@@ -391,10 +399,11 @@ export class FincasService {
   async addTemporada(
     propertyId: string,
     body: {
-      nombre: string;
+      nombre?: string;
       fechaDesde?: string;
       fechaHasta?: string;
       fechas?: string[];
+      globalRuleId?: string;
       valorUnico?: number;
       condiciones?: string;
       activa?: boolean;
@@ -419,6 +428,7 @@ export class FincasService {
       fechaDesde?: string;
       fechaHasta?: string;
       fechas?: string[];
+      globalRuleId?: string;
       valorUnico?: number;
       condiciones?: string;
       activa?: boolean;
@@ -592,5 +602,50 @@ export class FincasService {
 
     const skipped = 0;
     return { created, skipped, errors, details };
+  }
+
+  // --- Global Pricing Rules Methods ---
+
+  async listGlobalPricingRules() {
+    try {
+      return await this.convexService.query('globalPricing:list', {});
+    } catch (error) {
+      throw new BadRequestException(error.message);
+    }
+  }
+
+  async getGlobalPricingRuleById(id: string) {
+    try {
+      const rule = await this.convexService.query('globalPricing:getById', { id });
+      if (!rule) throw new NotFoundException('Regla global no encontrada');
+      return rule;
+    } catch (error) {
+      if (error instanceof NotFoundException) throw error;
+      throw new BadRequestException(error.message);
+    }
+  }
+
+  async createGlobalPricingRule(dto: GlobalPricingRuleDto) {
+    try {
+      return await this.convexService.mutation('globalPricing:create', { ...dto });
+    } catch (error) {
+      throw new BadRequestException(error.message);
+    }
+  }
+
+  async updateGlobalPricingRule(id: string, dto: UpdateGlobalPricingRuleDto) {
+    try {
+      return await this.convexService.mutation('globalPricing:update', { id, ...dto });
+    } catch (error) {
+      throw new BadRequestException(error.message);
+    }
+  }
+
+  async deleteGlobalPricingRule(id: string) {
+    try {
+      return await this.convexService.mutation('globalPricing:remove', { id });
+    } catch (error) {
+      throw new BadRequestException(error.message);
+    }
   }
 }

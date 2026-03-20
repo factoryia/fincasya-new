@@ -107,9 +107,24 @@ export default defineSchema({
     .index('by_property', ['propertyId'])
     .index('by_icon', ['iconId']),
 
+  // Temporadas y precios generales: el admin las crea para reutilizarlas en múltiples fincas
+  globalPricing: defineTable({
+    nombre: v.string(),
+    /** Formato: MM-DD (ej: 04-01 para 1ro de abril). Independiente del año. */
+    fechaDesde: v.optional(v.string()),
+    fechaHasta: v.optional(v.string()),
+    /** Lista de fechas específicas en formato MM-DD. */
+    fechas: v.optional(v.array(v.string())),
+    activa: v.optional(v.boolean()),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  }).index('by_nombre', ['nombre']),
+
   // Temporadas y precios por propiedad: el admin crea las que quiera y marca cuáles están activas para el cliente
   propertyPricing: defineTable({
     propertyId: v.id('properties'),
+    /** ID de la regla global (opcional). Si existe, los datos de nombre/fechas pueden heredarse. */
+    globalRuleId: v.optional(v.id('globalPricing')),
     nombre: v.string(),
     fechaDesde: v.optional(v.string()),
     fechaHasta: v.optional(v.string()),
@@ -123,7 +138,9 @@ export default defineSchema({
     order: v.optional(v.number()),
     createdAt: v.number(),
     updatedAt: v.number(),
-  }).index('by_property', ['propertyId']),
+  })
+    .index('by_property', ['propertyId'])
+    .index('by_global_rule', ['globalRuleId']),
 
   // Tabla de reservas (bookings)
   bookings: defineTable({

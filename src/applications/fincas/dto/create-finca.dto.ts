@@ -286,9 +286,10 @@ export class CreateFincaDto {
 }
 
 export class PricingItemDto {
+  @IsOptional()
   @IsString()
   @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))
-  nombre: string;
+  nombre?: string;
 
   @IsOptional()
   @IsString()
@@ -302,6 +303,10 @@ export class PricingItemDto {
   @IsArray()
   @IsString({ each: true })
   fechas?: string[];
+
+  @IsOptional()
+  @IsString()
+  globalRuleId?: string;
 
   @IsOptional()
   @IsNumber()
