@@ -421,4 +421,24 @@ export default defineSchema({
     createdAt: v.number(),
     updatedAt: v.number(),
   }).index('by_property', ['propertyId']),
+  
+  // Tabla para gestionar el contenido de la página "¿Quiénes Somos?"
+  quienes_somos: defineTable({
+    queEsFincasYa: v.string(),
+    mision: v.string(),
+    vision: v.string(),
+    objetivos: v.union(v.string(), v.array(v.string())),
+    politicas: v.union(v.string(), v.array(v.string())),
+    trayectoriaTitle: v.string(),
+    trayectoriaParagraphs: v.string(),
+    stats: v.array(v.object({
+      label: v.string(),
+      value: v.string(),
+    })),
+    recognitionTitle: v.string(),
+    recognitionSubtitle: v.string(),
+    presenciaInstitucional: v.string(),
+    carouselImages: v.optional(v.array(v.string())),
+    updatedAt: v.number(),
+  }),
 });

@@ -46,7 +46,10 @@ export class ConvexService {
     if (!fullPath) {
       throw new Error(`Mutation not found: ${path}`);
     }
-    return this.client.mutation(fullPath, args);
+    // Ensure args is a plain object to avoid Convex validation errors with class instances
+    // We use JSON.parse(JSON.stringify) to handle recursive plain object conversion
+    const plainArgs = typeof args === 'object' && args !== null ? JSON.parse(JSON.stringify(args)) : args;
+    return this.client.mutation(fullPath, plainArgs);
   }
 
   /**

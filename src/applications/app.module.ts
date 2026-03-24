@@ -7,6 +7,7 @@ import { InboxModule } from './inbox/inbox.module';
 import { KnowledgeModule } from './knowledge/knowledge.module';
 import { UsersModule } from './users/users.module';
 import { ReviewsModule } from './reviews/reviews.module';
+import { QuienesSomosModule } from './quienes-somos/quienes-somos.module';
 
 @Module({
   imports: [
@@ -18,6 +19,7 @@ import { ReviewsModule } from './reviews/reviews.module';
     KnowledgeModule,
     UsersModule,
     ReviewsModule,
+    QuienesSomosModule,
   ],
   controllers: [],
   providers: [],
