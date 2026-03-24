@@ -899,9 +899,25 @@ export const update = mutation({
     ),
     catalogIds: v.optional(v.array(v.string())),
     zoneOrder: v.optional(v.array(v.string())),
+    pricing: v.optional(
+      v.array(
+        v.object({
+          nombre: v.string(),
+          fechaDesde: v.optional(v.string()),
+          fechaHasta: v.optional(v.string()),
+          fechas: v.optional(v.array(v.string())),
+          globalRuleId: v.optional(v.id('globalPricing')),
+          valorUnico: v.optional(v.number()),
+          condiciones: v.optional(v.string()),
+          activa: v.optional(v.boolean()),
+          reglas: v.optional(v.string()),
+          order: v.optional(v.number()),
+        }),
+      ),
+    ),
   },
   handler: async (ctx, args) => {
-    const { id, features, catalogIds, featuredIcons, ...updates } = args;
+    const { id, features, catalogIds, featuredIcons, pricing, ...updates } = args;
     const property = await ctx.db.get(id);
 
     if (!property) {
@@ -937,6 +953,41 @@ export const update = mutation({
               zone: f.zone,
             });
           }),
+        );
+      }
+    }
+
+    // Sincronizar Pricing
+    if (pricing !== undefined) {
+      const existingPricing = await ctx.db
+        .query('propertyPricing')
+        .withIndex('by_property', (q) => q.eq('propertyId', id))
+        .collect();
+
+      for (const ep of existingPricing) {
+        await ctx.db.delete(ep._id);
+      }
+
+      const now = Date.now();
+      if (pricing.length > 0) {
+        await Promise.all(
+          pricing.map((p, index) =>
+            ctx.db.insert('propertyPricing', {
+              propertyId: id,
+              nombre: p.nombre,
+              fechaDesde: p.fechaDesde,
+              fechaHasta: p.fechaHasta,
+              fechas: p.fechas,
+              globalRuleId: p.globalRuleId,
+              valorUnico: p.valorUnico,
+              condiciones: p.condiciones,
+              activa: p.activa ?? true,
+              reglas: p.reglas,
+              order: p.order ?? index,
+              createdAt: now,
+              updatedAt: now,
+            }),
+          ),
         );
       }
     }
