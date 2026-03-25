@@ -30,6 +30,7 @@ import { GlobalPricingRuleDto, UpdateGlobalPricingRuleDto } from './dto/global-p
 import { UpdateFincaDto } from './dto/update-finca.dto';
 import { ListFincasDto } from './dto/list-fincas.dto';
 import { UpdateOwnerInfoDto } from './dto/owner-info.dto';
+import { GenerateContractDto } from './dto/generate-contract.dto';
 import { ConvexAuthGuard } from '../shared/guards/convex-auth.guard';
 import { AdminGuard } from '../shared/guards/admin.guard';
 
@@ -334,6 +335,14 @@ export class FincasController {
     return this.fincasService.deleteGlobalPricingRule(id);
   }
 
+  @Get(':id/calculate-price')
+  async calculatePrice(
+    @Param('id') id: string,
+    @Query('checkInDate') checkInDate: string,
+  ) {
+    return this.fincasService.calculateSuggestedPrice(id, checkInDate);
+  }
+
   @Get(':id')
   async getById(
     @Param('id') id: string,
@@ -381,5 +390,14 @@ export class FincasController {
       rntPdf: files?.rntPdf?.[0],
       chamberOfCommerce: files?.chamberOfCommerce?.[0],
     });
+  }
+
+  @Post(':id/generate-contract')
+  @UseGuards(ConvexAuthGuard, AdminGuard)
+  async generateContract(
+    @Param('id') id: string,
+    @Body() dto: GenerateContractDto,
+  ) {
+    return this.fincasService.generateContract(id, dto);
   }
 }

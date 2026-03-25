@@ -148,6 +148,12 @@ export class InboxService {
     }
   }
 
+  async getSuggestedContractData(conversationId: string) {
+    return this.convexService.action('ycloud:extractContractData', {
+      conversationId,
+    });
+  }
+ 
   private normalizePhoneE164(phone: string): string {
     let p = (phone || '').replace(/\D/g, '');
     if (p.startsWith('57') && p.length <= 12) {

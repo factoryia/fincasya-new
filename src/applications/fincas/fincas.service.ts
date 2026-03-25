@@ -3,20 +3,28 @@ import {
   NotFoundException,
   BadRequestException,
 } from '@nestjs/common';
+import { PDFDocument, StandardFonts } from 'pdf-lib';
+const PizZip = require('pizzip');
+const Docxtemplater = require('docxtemplater');
+import { format as formatDate } from 'date-fns';
+import axios from 'axios';
 import { ConvexService } from '../shared/services/convex.service';
 import { S3Service } from '../shared/services/s3.service';
+import { InboxService } from '../inbox/inbox.service';
 import { CreateFincaDto } from './dto/create-finca.dto';
 import { UpdateFincaDto } from './dto/update-finca.dto';
 import { ListFincasDto } from './dto/list-fincas.dto';
 import { parseExcelToFincas } from './excel-parser';
 import { GlobalPricingRuleDto, UpdateGlobalPricingRuleDto } from './dto/global-pricing.dto';
 import { UpdateOwnerInfoDto } from './dto/owner-info.dto';
+import { GenerateContractDto } from './dto/generate-contract.dto';
 
 @Injectable()
 export class FincasService {
   constructor(
     private readonly convexService: ConvexService,
     private readonly s3Service: S3Service,
+    private readonly inboxService: InboxService,
   ) {}
 
   async list(listDto: ListFincasDto) {
@@ -90,6 +98,17 @@ export class FincasService {
   async search(query: string, limit?: number) {
     try {
       return await this.convexService.query('fincas:search', { query, limit });
+    } catch (error) {
+      throw new BadRequestException(error.message);
+    }
+  }
+
+  async calculateSuggestedPrice(propertyId: string, checkInDate: string) {
+    try {
+      return await this.convexService.query('fincas:calculateSuggestedPrice', {
+        propertyId,
+        checkInDate,
+      });
     } catch (error) {
       throw new BadRequestException(error.message);
     }
@@ -746,5 +765,409 @@ export class FincasService {
     } catch (error) {
       throw new BadRequestException(error.message);
     }
+  }
+
+  async generateContract(propertyId: string, dto: GenerateContractDto) {
+    try {
+      // 1. Obtener la finca y su plantilla
+      const finca = await this.getById(propertyId);
+      if (!finca.contractTemplateUrl) {
+        throw new BadRequestException(
+          'Esta finca no tiene una plantilla de contrato configurada.',
+        );
+      }
+
+      // 2. Descargar la plantilla PDF
+      const response = await axios.get(finca.contractTemplateUrl, {
+        responseType: 'arraybuffer',
+      });
+      const pdfBytes = response.data;
+
+      // 3. Modificar el PDF con pdf-lib
+      // 2. Obtener información de la conversación y contacto para el cliente
+      let contact: any = null;
+      try {
+        const conv = await this.convexService.query('conversations:getById', {
+          conversationId: dto.conversationId,
+        });
+        if (conv) {
+          contact = await this.convexService.query('contacts:getById', {
+            contactId: conv.contactId,
+          });
+        }
+      } catch (e) {
+        console.warn('No se pudo obtener el contacto para el contrato');
+      }
+
+      const now = new Date();
+      const months = [
+        'Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio',
+        'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'
+      ];
+      const formattedDate = `${now.getDate()} de ${months[now.getMonth()]} de ${now.getFullYear()}`;
+
+      // 1. Cálculos de duración (necesarios para el precio total)
+      let totalNights = 1;
+      let totalDays = 1;
+      let checkInMini = '';
+      let checkOutMini = '';
+
+      if (dto.checkInDate && dto.checkOutDate) {
+        try {
+          const start = new Date(dto.checkInDate);
+          const end = new Date(dto.checkOutDate);
+          const diffTime = Math.abs(end.getTime() - start.getTime());
+          totalNights = Math.max(1, Math.ceil(diffTime / (1000 * 60 * 60 * 24)));
+          totalDays = totalNights;
+
+          const formatMini = (d: Date) => {
+            const day = String(d.getUTCDate()).padStart(2, '0');
+            const month = String(d.getUTCMonth() + 1).padStart(2, '0');
+            const year = d.getUTCFullYear();
+            return `${day}/${month}/${year}`;
+          };
+          checkInMini = formatMini(start);
+          checkOutMini = formatMini(end);
+        } catch (e) {
+          console.error('Error calculating duration:', e);
+        }
+      }
+
+      // 2. Cálculo del precio total (Precio por día * Total de días)
+      // Según instrucción del usuario: "multiplicado por los dias de reserva"
+      const unitPriceNum = parseInt(dto.nightlyPrice) || 0;
+      const totalPriceNum = unitPriceNum * totalDays;
+      
+      const totalPriceText = this.numberToSpanishText(totalPriceNum).toUpperCase();
+      const totalPriceFormatted = new Intl.NumberFormat('es-CO', {
+        style: 'currency',
+        currency: 'COP',
+        minimumFractionDigits: 0,
+      }).format(totalPriceNum);
+
+      // Mapeo de campos solicitado por el usuario
+      const mappingKeys = {
+        date: 'FECHA_GENERACIÓN DE CONTRATO (FORMATO DIA(NUMERO) MES(TEXTO) de AÑO(NUMERO))',
+        priceText: 'VALOR – PRECIO EN TEXTO',
+        priceNumeric: '($VALOR NUMERICO)',
+        priceNumericAlt: '($VALOR - PRECIO NUMERICO)',
+        accountHolder: 'NOMBRE TITULAR DE LA CUENTA, datos admin',
+        idNumber: 'NUMERO DE CEDULA TITULAR CUENTA, datos admin',
+        accountNumber: 'NUMERO DE CUENTA, datos admin',
+        bankName: 'NOMBRE BANCO, datos admin',
+        contractNumber: 'Numero registrados datos admin',
+        clientName: 'NOMBRE CLIENTE',
+        clientId: 'Numero de cedula, cliente',
+        clientEmail: 'clientCorreo',
+        clientPhone: 'clienteCelular',
+        checkInDate: 'FECHA ENTRADA',
+        checkOutDate: 'FECHA SALIDA',
+        city: 'ciudad',
+      };
+
+      const valuesMapping = {
+        [mappingKeys.date]: formattedDate,
+        [mappingKeys.priceText]: totalPriceText,
+        [mappingKeys.priceNumeric]: totalPriceFormatted,
+        [mappingKeys.priceNumericAlt]: totalPriceFormatted,
+        [mappingKeys.accountHolder]: dto.accountHolder,
+        [mappingKeys.idNumber]: dto.idNumber,
+        [mappingKeys.accountNumber]: dto.accountNumber,
+        [mappingKeys.bankName]: dto.bankName,
+        [mappingKeys.contractNumber]: dto.contractNumber,
+        [mappingKeys.clientName]: dto.clientName || contact?.name || '',
+        [mappingKeys.clientId]: dto.clientId || '',
+        [mappingKeys.clientEmail]: dto.clientEmail || '',
+        [mappingKeys.clientPhone]: dto.clientPhone || '',
+        [mappingKeys.checkInDate]: dto.checkInDate || '',
+        [mappingKeys.checkOutDate]: dto.checkOutDate || '',
+        [mappingKeys.city]: finca.location || '',
+        // Fallbacks genéricos
+        'Text6': dto.contractNumber,
+        'Text9': totalPriceText,
+        'Text10': totalPriceFormatted,
+        'Text11': dto.accountNumber,
+        'Text13': dto.bankName,
+      };
+
+      // --- DETECCIÓN DE FORMATO Y PROCESAMIENTO ---
+      const isDocx = pdfBytes.slice(0, 2).toString() === 'PK';
+      let finalBuffer: Buffer;
+      let finalFilename: string;
+      let finalMimeType: string;
+
+      if (isDocx) {
+        console.log('[api] Detectado formato Word (.docx)');
+        const zip = new PizZip(pdfBytes);
+        
+        // --- LIMPIEZA DE XML (Para evitar errores por formato de Word) ---
+        try {
+          const docXml = zip.file('word/document.xml')?.asText();
+          if (docXml) {
+            // Eliminar etiquetas XML que queden atrapadas dentro de { ... } o {{ ... }}
+            // Esto limpia casos donde Word fragmenta las etiquetas: {<w:t>{</w:t>...<w:t>}</w:t>}
+            const cleanedXml = docXml.replace(/\{[^}]+\}/g, (match) => {
+              return match.replace(/<[^>]+>/g, '');
+            });
+            zip.file('word/document.xml', cleanedXml);
+          }
+        } catch (e) {
+          console.warn('[api] No se pudo limpiar el XML del Word, procediendo normal');
+        }
+
+        const doc = new Docxtemplater(zip, {
+          paragraphLoop: true,
+          linebreaks: true,
+          delimiters: { start: '{{', end: '}}' },
+        });
+
+        // Mapeo limpio para Word
+        const wordData = {
+          fechaGeneracion: valuesMapping[mappingKeys.date],
+          precioLetras: valuesMapping[mappingKeys.priceText],
+          precioNumerico: valuesMapping[mappingKeys.priceNumeric],
+          bancoNombre: valuesMapping[mappingKeys.bankName],
+          cuentaNumero: valuesMapping[mappingKeys.accountNumber],
+          titularNombre: valuesMapping[mappingKeys.accountHolder],
+          titularCedula: valuesMapping[mappingKeys.idNumber],
+          contratoNumero: valuesMapping[mappingKeys.contractNumber],
+          clienteNombre: valuesMapping[mappingKeys.clientName],
+          clienteCedula: valuesMapping[mappingKeys.clientId],
+          clientCorreo: valuesMapping[mappingKeys.clientEmail],
+          clienteCelular: valuesMapping[mappingKeys.clientPhone],
+          fechaEntrada: valuesMapping[mappingKeys.checkInDate],
+          fechaSalida: valuesMapping[mappingKeys.checkOutDate],
+          ciudad: valuesMapping[mappingKeys.city],
+          // Nuevos campos de duración y tiempos
+          nochesTexto: this.numberToSpanishText(totalNights, false),
+          nochesNumero: String(totalNights),
+          diasTexto: this.numberToSpanishText(totalDays, false),
+          diasNumero: String(totalDays),
+          fechaLlegadaMini: checkInMini,
+          fechaSalidaMini: checkOutMini,
+          horaLlegada: dto.checkInTime || '03:00 PM',
+          horaSalida: dto.checkOutTime || '01:00 PM',
+        };
+
+        try {
+          doc.render(wordData);
+        } catch (error) {
+          console.error('[api] Error al renderizar Word:', error);
+          if (error.properties && error.properties.errors instanceof Array) {
+            const errorMessages = error.properties.errors
+              .map((e: any) => e.explanation)
+              .join(', ');
+            throw new BadRequestException(`Error en la plantilla Word: ${errorMessages}`);
+          }
+          throw new BadRequestException(`Error al procesar la plantilla Word: ${error.message}`);
+        }
+
+        finalBuffer = doc.getZip().generate({ type: 'nodebuffer', compression: 'DEFLATE' });
+        finalFilename = `Contrato_${finca.title.replace(/\s+/g, '_')}_${dto.contractNumber}.docx`;
+        finalMimeType = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+      } else {
+        // --- PROCESAMIENTO PDF ---
+        const pdfDoc = await PDFDocument.load(pdfBytes);
+        const helveticaFont = await pdfDoc.embedFont('Helvetica');
+        const form = pdfDoc.getForm();
+        const allFields = form.getFields();
+        const allFieldNames = allFields.map(f => f.getName());
+
+        console.log('=== DIAGNÓSTICO PDF ===');
+        console.log(`Campos detectados (${allFieldNames.length}):`, allFieldNames);
+        if (allFieldNames.length === 0) {
+          console.error('¡ADVERTENCIA! El PDF no parece tener campos de formulario (AcroForm).');
+        }
+
+        // Rellenar campos usando búsqueda robusta (con y sin corchetes)
+        allFieldNames.forEach(fieldName => {
+          try {
+            const field = form.getTextField(fieldName);
+            if (!field) return;
+
+            // Limpiar el nombre del campo en el PDF para comparar
+            const cleanPdfName = fieldName.replace(/^\[/, '').replace(/\]$/, '').trim();
+
+            // Buscar coincidencia en nuestro mapeo
+            for (const [key, val] of Object.entries(valuesMapping)) {
+              const cleanKey = key.replace(/^\[/, '').replace(/\]$/, '').trim();
+
+              if (cleanPdfName === cleanKey || fieldName === key) {
+                field.setText(val.toString());
+
+                // Eliminar bordes y fondos para que parezca texto normal
+                try {
+                  // @ts-ignore - En algunas versiones de pdf-lib estos métodos existen
+                  if (typeof (field as any).setBorderWidth === 'function') {
+                    (field as any).setBorderWidth(0);
+                  }
+                } catch (e) {}
+
+                // Ajustar fuente y tamaño
+                field.setFontSize(10);
+                field.updateAppearances(helveticaFont);
+
+                console.log(`Campo llenado y estilizado: "${fieldName}" con valor: "${val}"`);
+                break;
+              }
+            }
+          } catch (e) {
+            // Ignorar si no es text field
+          }
+        });
+
+        // Aplanar el formulario
+        form.flatten();
+
+        const pdfSavedBytes = await pdfDoc.save();
+        finalBuffer = Buffer.from(pdfSavedBytes);
+        finalFilename = `Contrato_${finca.title.replace(/\s+/g, '_')}_${dto.contractNumber}.pdf`;
+        finalMimeType = 'application/pdf';
+      }
+
+      // 4. Subir el archivo generado a S3
+      const generatedFile: Express.Multer.File = {
+        fieldname: 'file',
+        originalname: finalFilename,
+        encoding: '7bit',
+        mimetype: finalMimeType,
+        buffer: finalBuffer,
+        size: finalBuffer.length,
+        stream: null as any,
+        destination: '',
+        filename: '',
+        path: '',
+      };
+
+      const publicUrl = await this.s3Service.uploadFile(
+        generatedFile,
+        'contracts/generated',
+      );
+
+      // 5. Enviar mensaje a la conversación
+      await this.inboxService.sendMessage(dto.conversationId, {
+        type: 'document',
+        text: `Contrato generado para ${finca.title} (Nº ${dto.contractNumber})`,
+        mediaUrl: publicUrl,
+        file: generatedFile,
+      });
+
+      return {
+        success: true,
+        url: publicUrl,
+        message: 'Contrato generado y enviado exitosamente.',
+      };
+    } catch (error) {
+      if (error instanceof BadRequestException || error instanceof NotFoundException) {
+        throw error;
+      }
+      throw new BadRequestException(`Error al generar contrato: ${error.message}`);
+    }
+  }
+
+  private numberToSpanishText(n: number, addCurrency = true): string {
+    if (n === 0) return 'CERO';
+
+    const unidades = [
+      '',
+      'UN',
+      'DOS',
+      'TRES',
+      'CUATRO',
+      'CINCO',
+      'SEIS',
+      'SIETE',
+      'OCHO',
+      'NUEVE',
+    ];
+    const decenas = [
+      '',
+      'DIEZ',
+      'VEINTE',
+      'TREINTA',
+      'CUARENTA',
+      'CINCUENTA',
+      'SESENTA',
+      'SETENTA',
+      'OCHENTA',
+      'NOVENTA',
+    ];
+    const especiales = [
+      'ONCE',
+      'DOCE',
+      'TRECE',
+      'CATORCE',
+      'QUINCE',
+      'DIECISÉIS',
+      'DIECISIETE',
+      'DIECIOCHO',
+      'DIECINUEVE',
+    ];
+    const centenas = [
+      '',
+      'CIENTO',
+      'DOSCIENTOS',
+      'TRESCIENTOS',
+      'CUATROCIENTOS',
+      'QUINIENTOS',
+      'SEISCIENTOS',
+      'SETECIENTOS',
+      'OCHOCIENTOS',
+      'NOVECIENTOS',
+    ];
+
+    const convertirMenorA1000 = (num: number): string => {
+      let res = '';
+      if (num >= 100) {
+        if (num === 100) return 'CIEN';
+        res += centenas[Math.floor(num / 100)] + ' ';
+        num %= 100;
+      }
+      if (num >= 10 && num <= 19) {
+        if (num === 10) res += 'DIEZ';
+        else res += especiales[num - 11];
+      } else {
+        if (num >= 20) {
+          if (num === 20) res += 'VEINTE';
+          else if (num < 30) res += 'VEINTI' + unidades[num % 10];
+          else
+            res +=
+              decenas[Math.floor(num / 10)] +
+              (num % 10 > 0 ? ' Y ' + unidades[num % 10] : '');
+        } else if (num > 0) {
+          res += unidades[num];
+        }
+      }
+      return res.trim();
+    };
+
+    const processNum = (num: number): string => {
+      if (num === 0) return '';
+      if (num < 1000) return convertirMenorA1000(num);
+
+      if (num < 1000000) {
+        const miles = Math.floor(num / 1000);
+        const resto = num % 1000;
+        let res = miles === 1 ? 'MIL' : convertirMenorA1000(miles) + ' MIL';
+        if (resto > 0) res += ' ' + convertirMenorA1000(resto);
+        return res;
+      }
+
+      if (num < 1000000000) {
+        const millones = Math.floor(num / 1000000);
+        const resto = num % 1000000;
+        let res =
+          millones === 1
+            ? 'UN MILLÓN'
+            : convertirMenorA1000(millones) + ' MILLONES';
+        if (resto > 0) res += ' ' + processNum(resto);
+        return res;
+      }
+
+      return num.toString();
+    };
+
+    const text = processNum(n).toUpperCase();
+    return addCurrency ? `${text} PESOS M/CTE` : text;
   }
 }

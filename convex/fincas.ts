@@ -363,6 +363,79 @@ export const getById = query({
 });
 
 /**
+ * Calcular el precio sugerido por noche para una finca en una fecha dada
+ * Basado en reglas de temporada (propertyPricing + globalPricing)
+ */
+export const calculateSuggestedPrice = query({
+  args: {
+    propertyId: v.id('properties'),
+    checkInDate: v.string(), // YYYY-MM-DD
+  },
+  handler: async (ctx, args) => {
+    const property = await ctx.db.get(args.propertyId);
+    if (!property) return null;
+
+    const pricingRules = await ctx.db
+      .query('propertyPricing')
+      .withIndex('by_property', (q) => q.eq('propertyId', args.propertyId))
+      .collect();
+
+    // Solo reglas activas (considerando la herencia global)
+    const activeRules = [];
+    for (const rule of pricingRules) {
+      let globalData = null;
+      if (rule.globalRuleId) {
+        globalData = await ctx.db.get(rule.globalRuleId);
+      }
+      
+      const isActive = (globalData?.activa !== false) && (rule.activa ?? true);
+      if (isActive) {
+        activeRules.push({
+          ...rule,
+          fechaDesde: globalData?.fechaDesde || rule.fechaDesde,
+          fechaHasta: globalData?.fechaHasta || rule.fechaHasta,
+          fechas: globalData?.fechas || rule.fechas,
+        });
+      }
+    }
+
+    if (!activeRules.length) return property.priceBase;
+
+    // Extraer MM-DD de la fecha de entrada
+    const parts = args.checkInDate.split('-');
+    if (parts.length < 3) return property.priceBase;
+    const dateStr = `${parts[1]}-${parts[2]}`; // MM-DD
+
+    // Ordenar por el campo order si existe (prioridad)
+    const sortedRules = activeRules.sort((a, b) => (a.order ?? 999) - (b.order ?? 999));
+
+    // Buscar coincidencia
+    for (const rule of sortedRules) {
+      // 1. Coincidencia por lista de fechas específicas
+      if (rule.fechas?.includes(dateStr)) {
+        return rule.valorUnico ?? property.priceBase;
+      }
+
+      // 2. Coincidencia por rango MM-DD
+      if (rule.fechaDesde && rule.fechaHasta) {
+        if (rule.fechaDesde <= rule.fechaHasta) {
+          if (dateStr >= rule.fechaDesde && dateStr <= rule.fechaHasta) {
+            return rule.valorUnico ?? property.priceBase;
+          }
+        } else {
+          // Rango que cruza el año (ej: 12-15 a 01-15)
+          if (dateStr >= rule.fechaDesde || dateStr <= rule.fechaHasta) {
+            return rule.valorUnico ?? property.priceBase;
+          }
+        }
+      }
+    }
+
+    return property.priceBase;
+  },
+});
+
+/**
  * Obtener una finca por código
  */
 export const getByCode = query({

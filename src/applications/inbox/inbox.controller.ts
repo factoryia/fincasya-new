@@ -111,7 +111,16 @@ export class InboxController {
       file,
     });
   }
-
+ 
+  /**
+   * Obtener sugerencias de datos para el contrato basados en IA
+   * GET /api/inbox/:conversationId/suggested-data
+   */
+  @Get(':conversationId/suggested-data')
+  async getSuggestedData(@Param('conversationId') conversationId: string) {
+    return this.inboxService.getSuggestedContractData(conversationId);
+  }
+ 
   private inferTypeFromFile(file: Express.Multer.File): 'image' | 'audio' | 'document' {
     const mime = (file.mimetype || '').toLowerCase();
     if (mime.startsWith('image/')) return 'image';

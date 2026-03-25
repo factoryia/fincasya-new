@@ -1,7 +1,7 @@
 import { openai } from "@ai-sdk/openai";
 import { generateText } from "ai";
 import { v } from "convex/values";
-import { internalAction, internalMutation } from "./_generated/server";
+import { action, internalAction, internalMutation } from "./_generated/server";
 import { internal, api } from "./_generated/api";
 import type { Id } from "./_generated/dataModel";
 import rag from "./rag";
@@ -938,5 +938,103 @@ export const sendWhatsAppCatalogList = internalAction({
       throw new Error(`YCloud API error: ${res.status} - ${textRes}`);
     }
     return JSON.parse(textRes);
+  },
+});
+
+/**
+ * Extrae datos del cliente y de la reserva analizando el historial de mensajes.
+ * Prioriza bloques [CONTRACT_PDF:...] existentes o usa la IA para inferir.
+ */
+export const extractContractData = action({
+  args: { conversationId: v.id("conversations") },
+  handler: async (ctx, args) => {
+    const messages = await ctx.runQuery(api.messages.listRecent, {
+      conversationId: args.conversationId,
+      limit: 30,
+    });
+
+    // 1. Intentar encontrar un bloque [CONTRACT_PDF:...] ya generado
+    for (const msg of [...messages].reverse()) {
+      if (msg.sender === "assistant" && msg.content.includes("[CONTRACT_PDF:")) {
+        const tag = "[CONTRACT_PDF:";
+        const idx = msg.content.indexOf(tag);
+        const jsonStart = msg.content.indexOf("{", idx);
+        let jsonEnd = -1;
+        if (jsonStart >= 0) {
+          let depth = 0;
+          for (let i = jsonStart; i < msg.content.length; i++) {
+            if (msg.content[i] === "{") depth++;
+            else if (msg.content[i] === "}") {
+              depth--;
+              if (depth === 0) {
+                jsonEnd = i + 1;
+                break;
+              }
+            }
+          }
+        }
+        if (jsonEnd > 0) {
+          try {
+            const parsed = JSON.parse(msg.content.slice(jsonStart, jsonEnd));
+            return {
+              clientName: String(parsed.nombre || ""),
+              clientId: String(parsed.cedula || ""),
+              clientPhone: String(parsed.celular || ""),
+              clientEmail: String(parsed.correo || ""),
+              checkInDate: String(parsed.entrada || ""),
+              checkOutDate: String(parsed.salida || ""),
+              nightlyPrice: parsed.precioTotal && parsed.noches 
+                ? String(Math.round(Number(parsed.precioTotal) / Number(parsed.noches))) 
+                : "",
+              totalPrice: String(parsed.precioTotal || ""),
+              source: "finalized_block",
+            };
+          } catch (e) {}
+        }
+      }
+    }
+
+    // 2. Usar IA para extraer del historial si no hay bloque final
+    const history = messages
+      .map((m) => `${m.sender.toUpperCase()}: ${m.content}`)
+      .join("\n");
+
+    const { text } = await generateText({
+      model: openai.chat("gpt-4o-mini"),
+      maxTokens: 500,
+      system: `Analiza el historial de chat y extrae los datos del cliente para un contrato de arrendamiento. 
+Responde ÚNICAMENTE con un JSON válido. Si no encuentras un valor, pon "".
+Campos: 
+- nombre (Nombre completo del cliente)
+- cedula (Número de identificación)
+- celular (Teléfono móvil)
+- correo (Email)
+- fechaEntrada (YYYY-MM-DD)
+- fechaSalida (YYYY-MM-DD)
+- noches (Número entero)
+- precioTotal (Número entero sin puntos ni comas)`,
+      prompt: `Historial de conversación:\n${history}`,
+    });
+
+    try {
+      const raw = text.trim().replace(/^```\w*\n?|\n?```$/g, "").trim();
+      const parsed = JSON.parse(raw);
+      return {
+        clientName: String(parsed.nombre || ""),
+        clientId: String(parsed.cedula || ""),
+        clientPhone: String(parsed.celular || ""),
+        clientEmail: String(parsed.correo || ""),
+        checkInDate: String(parsed.fechaEntrada || ""),
+        checkOutDate: String(parsed.fechaSalida || ""),
+        nightlyPrice: parsed.precioTotal && parsed.noches 
+          ? String(Math.round(Number(parsed.precioTotal) / Number(parsed.noches))) 
+          : "",
+        totalPrice: String(parsed.precioTotal || ""),
+        source: "ai_extraction",
+      };
+    } catch (e) {
+      console.error("Error parsing AI extraction:", e);
+      return { error: "No se pudieron extraer los datos automáticamente" };
+    }
   },
 });
