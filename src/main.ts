@@ -33,6 +33,6 @@ async function bootstrap() {
 
   const port = process.env.PORT ?? 3001;
   await app.listen(port);
-  console.log(`Application is running on: http://localhost:${port}/api`);
+  console.log(`[DEBUG] Application is running on: http://localhost:${port}/api - V2 Slugs Active`);
 }
 bootstrap();

@@ -70,6 +70,23 @@ export class FincasService {
     }
   }
 
+  async getBySlug(slug: string) {
+    try {
+      const finca = await this.convexService.query('fincas:getBySlug', {
+        slug,
+      });
+      if (!finca) {
+        throw new NotFoundException('Finca no encontrada');
+      }
+      return finca;
+    } catch (error) {
+      if (error instanceof NotFoundException) {
+        throw error;
+      }
+      throw new BadRequestException(error.message);
+    }
+  }
+
   async search(query: string, limit?: number) {
     try {
       return await this.convexService.query('fincas:search', { query, limit });

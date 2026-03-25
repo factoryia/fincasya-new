@@ -28,6 +28,7 @@ export default defineSchema({
     priceRawAlta: v.optional(v.string()),
     priceRawEspeciales: v.optional(v.string()),
     code: v.optional(v.string()),
+    slug: v.optional(v.string()),
     category: v.union(
       v.literal('ECONOMICA'),
       v.literal('ESTANDAR'),
@@ -77,6 +78,7 @@ export default defineSchema({
     .index('by_type', ['type'])
     .index('by_category', ['category'])
     .index('by_code', ['code'])
+    .index('by_slug', ['slug'])
     .index('by_createdAt', ['createdAt']),
 
   // Tabla de imágenes de propiedades

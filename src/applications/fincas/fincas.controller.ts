@@ -37,6 +37,16 @@ import { AdminGuard } from '../shared/guards/admin.guard';
 export class FincasController {
   constructor(private readonly fincasService: FincasService) {}
 
+  @Get('slug/:slug')
+  async getBySlug(@Param('slug') slug: string) {
+    return this.fincasService.getBySlug(slug);
+  }
+
+  @Get('code/:code')
+  async getByCode(@Param('code') code: string) {
+    return this.fincasService.getByCode(code);
+  }
+
   @Get()
   async list(@Query() listDto: ListFincasDto) {
     return this.fincasService.list(listDto);
@@ -54,12 +64,6 @@ export class FincasController {
   @Header('Content-Disposition', 'attachment; filename="catalog.csv"')
   async getCatalogFeed(): Promise<string> {
     return this.fincasService.getCatalogFeedCsv();
-  }
-
-
-  @Get('code/:code')
-  async getByCode(@Param('code') code: string) {
-    return this.fincasService.getByCode(code);
   }
 
   @Post()

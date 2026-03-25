@@ -2,6 +2,18 @@ import { v } from 'convex/values';
 import { query, mutation } from './_generated/server';
 import { internal } from './_generated/api';
 
+const slugify = (text: string) => {
+  return text
+    .toString()
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "") // Remove accents
+    .trim()
+    .replace(/\s+/g, "-") // Replace spaces with -
+    .replace(/[^\w-]+/g, "") // Remove all non-word chars
+    .replace(/--+/g, "-"); // Replace multiple - with single -
+};
+
 // ============ QUERIES ============
 
 /**
@@ -461,6 +473,125 @@ export const getByCode = query({
   },
 });
 
+
+/**
+ * Obtener una finca por slug
+ */
+export const getBySlug = query({
+  args: { slug: v.string() },
+  handler: async (ctx, args) => {
+    let property = await ctx.db
+      .query('properties')
+      .withIndex('by_slug', (q) => q.eq('slug', args.slug))
+      .first();
+
+    if (!property) {
+      property = await ctx.db
+        .query('properties')
+        .withIndex('by_code', (q) => q.eq('code', args.slug))
+        .first();
+    }
+
+    if (!property) {
+      return null;
+    }
+
+    const images = await ctx.db
+      .query('propertyImages')
+      .withIndex('by_property', (q) => q.eq('propertyId', property._id))
+      .collect();
+
+    const features = await ctx.db
+      .query('propertyFeatures')
+      .withIndex('by_property', (q) => q.eq('propertyId', property._id))
+      .collect();
+
+    // Enriquecer features con iconUrl de la iconografía
+    const enrichedFeatures = await Promise.all(
+      features.map(async (f) => {
+        if (f.iconId) {
+          const icon = await ctx.db.get(f.iconId);
+          return {
+            name: f.name,
+            iconId: f.iconId,
+            iconUrl: icon?.iconUrl ?? null,
+            emoji: icon?.emoji ?? null,
+            zone: f.zone,
+          };
+        }
+        return {
+          name: f.name,
+          iconId: null,
+          iconUrl: null,
+          emoji: null,
+          zone: f.zone,
+        };
+      }),
+    );
+
+    const additionalCosts = await ctx.db
+      .query('additionalCosts')
+      .withIndex('by_property', (q) => q.eq('propertyId', property._id))
+      .collect();
+
+    const pricing = await ctx.db
+      .query('propertyPricing')
+      .withIndex('by_property', (q) => q.eq('propertyId', property._id))
+      .collect();
+    const sortedPricing = pricing.sort(
+      (a, b) => (a.order ?? 999) - (b.order ?? 999),
+    );
+
+    // Ordenar imágenes por el campo order
+    const sortedImages = images.sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+
+    return {
+      ...property,
+      images: sortedImages.map((img) => img.url),
+      imageItems: sortedImages.map((img) => ({ id: img._id, url: img.url })),
+      features: enrichedFeatures,
+      featuredIcons: property.featuredIcons ?? [],
+      additionalCosts,
+      pricing: await Promise.all(sortedPricing.map(async (p) => {
+        let globalData = null;
+        if (p.globalRuleId) {
+          globalData = await ctx.db.get(p.globalRuleId);
+        }
+
+        let condicionesParsed: unknown;
+        if (p.condiciones) {
+          try {
+            condicionesParsed = JSON.parse(p.condiciones);
+          } catch {
+            condicionesParsed = undefined;
+          }
+        }
+        let reglasParsed: unknown;
+        if (p.reglas) {
+          try {
+            reglasParsed = JSON.parse(p.reglas);
+          } catch {
+            reglasParsed = undefined;
+          }
+        }
+        return {
+          id: p._id,
+          globalRuleId: p.globalRuleId,
+          nombre: globalData?.nombre || p.nombre,
+          fechaDesde: globalData?.fechaDesde || p.fechaDesde,
+          fechaHasta: globalData?.fechaHasta || p.fechaHasta,
+          fechas: globalData?.fechas || p.fechas,
+          valorUnico: p.valorUnico,
+          condiciones: condicionesParsed,
+          activa: (globalData?.activa !== false) && (p.activa ?? true),
+          reglas: reglasParsed,
+          order: p.order,
+        };
+      })),
+    };
+  },
+});
+
 const SEARCH_STOPWORDS = new Set([
   'estoy',
   'buscando',
@@ -646,6 +777,7 @@ export const create = mutation({
     priceAlta: v.number(),
     priceEspeciales: v.optional(v.number()),
     code: v.optional(v.string()),
+    slug: v.optional(v.string()),
     category: v.optional(
       v.union(
         v.literal('ECONOMICA'),
@@ -743,6 +875,7 @@ export const create = mutation({
       priceAlta: args.priceAlta,
       priceEspeciales: args.priceEspeciales,
       code: args.code,
+      slug: args.slug || slugify(args.title),
       category: args.category ?? 'ESTANDAR',
       type: args.type ?? 'FINCA',
       rating: args.rating ?? 0,
@@ -898,6 +1031,7 @@ export const update = mutation({
       ),
     ),
     catalogIds: v.optional(v.array(v.string())),
+    slug: v.optional(v.string()),
     zoneOrder: v.optional(v.array(v.string())),
     pricing: v.optional(
       v.array(
@@ -926,6 +1060,7 @@ export const update = mutation({
 
     await ctx.db.patch(id, {
       ...updates,
+      ...(updates.title !== undefined && updates.slug === undefined ? { slug: slugify(updates.title) } : {}),
       ...(featuredIcons !== undefined ? { featuredIcons } : {}),
       updatedAt: Date.now(),
     });
