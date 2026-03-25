@@ -73,6 +73,7 @@ export class FincasController {
       [
         { name: 'images', maxCount: 20 },
         { name: 'video', maxCount: 1 },
+        { name: 'contractTemplate', maxCount: 1 },
       ],
       {
         storage: memoryStorage(),
@@ -83,12 +84,17 @@ export class FincasController {
   async create(
     @Body() createDto: CreateFincaDto,
     @UploadedFiles()
-    files?: { images?: Express.Multer.File[]; video?: Express.Multer.File[] },
+    files?: { 
+      images?: Express.Multer.File[]; 
+      video?: Express.Multer.File[];
+      contractTemplate?: Express.Multer.File[];
+    },
   ) {
     return this.fincasService.create(
       createDto,
       files?.images,
       files?.video?.[0],
+      files?.contractTemplate?.[0],
     );
   }
 
@@ -155,6 +161,7 @@ export class FincasController {
       [
         { name: 'images', maxCount: 20 },
         { name: 'video', maxCount: 1 },
+        { name: 'contractTemplate', maxCount: 1 },
       ],
       {
         storage: memoryStorage(),
@@ -169,7 +176,11 @@ export class FincasController {
     @Body() updateDto: UpdateFincaDto,
     @Req() req: any,
     @UploadedFiles()
-    files?: { images?: Express.Multer.File[]; video?: Express.Multer.File[] },
+    files?: { 
+      images?: Express.Multer.File[]; 
+      video?: Express.Multer.File[];
+      contractTemplate?: Express.Multer.File[];
+    },
   ) {
     console.log('[DEBUG] Raw body features:', req.body.features);
     console.log('[DEBUG] UpdateFincaDto features:', updateDto.features);
@@ -178,6 +189,7 @@ export class FincasController {
       updateDto,
       files?.images,
       files?.video?.[0],
+      files?.contractTemplate?.[0],
     );
   }
 

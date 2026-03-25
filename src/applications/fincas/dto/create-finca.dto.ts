@@ -229,11 +229,18 @@ export class CreateFincaDto {
   @IsString()
   video?: string;
 
-  // Campo presente en multipart pero gestionado por el interceptor, no por el DTO.
-  // Se marca opcional y se limpia para que no rompa el whitelist.
+  @IsOptional()
+  @IsString()
+  contractTemplateUrl?: string;
+
+  // Campos de archivos (multipart) gestionados por interceptores, no por el DTO.
   @IsOptional()
   @Transform(() => undefined)
   images?: unknown;
+
+  @IsOptional()
+  @Transform(() => undefined)
+  contractTemplate?: unknown;
 
   /** IDs de catálogos WhatsApp. En multipart puede llegar como JSON string o array. */
   @IsOptional()

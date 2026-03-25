@@ -198,6 +198,7 @@ export class FincasService {
     createDto: CreateFincaDto,
     images?: Express.Multer.File[],
     video?: Express.Multer.File,
+    contractTemplate?: Express.Multer.File,
   ) {
     try {
       let imageUrls: string[] = [];
@@ -208,6 +209,14 @@ export class FincasService {
       let videoUrl: string | undefined;
       if (video) {
         videoUrl = await this.s3Service.uploadVideo(video);
+      }
+
+      let contractTemplateUrl: string | undefined;
+      if (contractTemplate) {
+        contractTemplateUrl = await this.s3Service.uploadFile(
+          contractTemplate,
+          'contracts',
+        );
       }
 
       const { catalogIds, pricing, features, featuredIcons, zoneOrder, ...rest } = createDto;
@@ -227,6 +236,7 @@ export class FincasService {
         ...(featuredIcons && { featuredIcons }),
         ...(zoneOrder && { zoneOrder }),
         ...(videoUrl && { video: videoUrl }),
+        ...(contractTemplateUrl && { contractTemplateUrl }),
         ...(catalogIds?.length && { catalogIds }),
       };
 
@@ -287,6 +297,7 @@ export class FincasService {
     updateDto: UpdateFincaDto,
     images?: Express.Multer.File[],
     video?: Express.Multer.File,
+    contractTemplate?: Express.Multer.File,
   ) {
     try {
       // Subir nuevas imágenes a S3 si existen
@@ -301,11 +312,23 @@ export class FincasService {
         videoUrl = await this.s3Service.uploadVideo(video);
       }
 
+      // Subir nueva plantilla de contrato si existe
+      let contractTemplateUrl: string | undefined;
+      if (contractTemplate) {
+        contractTemplateUrl = await this.s3Service.uploadFile(
+          contractTemplate,
+          'contracts',
+        );
+      }
+
       // Actualizar la finca
       // Pasamos pricing por separado si existe, y el resto de campos (incluyendo features y catalogIds) a la mutación update.
       const { pricing, catalogIds, features, featuredIcons, active, zoneOrder, ...updateData } = updateDto as any;
       if (videoUrl) {
         updateData.video = videoUrl;
+      }
+      if (contractTemplateUrl) {
+        updateData.contractTemplateUrl = contractTemplateUrl;
       }
 
       const result = await this.convexService.mutation('fincas:update', {

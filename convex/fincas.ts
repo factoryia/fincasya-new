@@ -821,6 +821,7 @@ export const create = mutation({
       ),
     ),
     video: v.optional(v.string()),
+    contractTemplateUrl: v.optional(v.string()),
     pricing: v.optional(
       v.array(
         v.object({
@@ -885,6 +886,7 @@ export const create = mutation({
       visible: args.visible ?? true,
       reservable: args.reservable ?? true,
       isFavorite: args.isFavorite ?? false,
+      contractTemplateUrl: args.contractTemplateUrl,
       priceOriginal: args.priceOriginal,
       featuredIcons: args.featuredIcons,
       zoneOrder: args.zoneOrder,
@@ -1016,6 +1018,7 @@ export const update = mutation({
     ),
     rating: v.optional(v.number()),
     video: v.optional(v.string()),
+    contractTemplateUrl: v.optional(v.string()),
     active: v.optional(v.boolean()),
     visible: v.optional(v.boolean()),
     reservable: v.optional(v.boolean()),

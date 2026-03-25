@@ -63,6 +63,8 @@ export default defineSchema({
     active: v.optional(v.boolean()),
     /** Si true, se puede reservar desde la página web. */
     reservable: v.optional(v.boolean()),
+    /** URL de la plantilla del contrato en PDF. */
+    contractTemplateUrl: v.optional(v.string()),
     /** Bandera legacy para favoritos (para compatibilidad con documentos existentes). */
     isFavorite: v.optional(v.boolean()),
     /** Lista de IDs de la iconografía para mostrar en la card de la finca (máximo 4). */
