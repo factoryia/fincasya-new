@@ -170,6 +170,14 @@ Se reciben mensajes entrantes de WhatsApp por **webhook** y se responde automát
 
 - `YCLOUD_API_KEY`: API key de YCloud.
 - `YCLOUD_WABA_NUMBER`: Número de WhatsApp Business (E164, ej. `573001234567`).
+- `YCLOUD_WABA_ID`: ID de la cuenta WABA (recomendado para listar solo tus plantillas al enrutar respuestas).
+- `YCLOUD_TEMPLATE_ROUTING`: si vale `off`, `false` o `0`, el bot no elige plantillas YCloud y siempre usa RAG + texto libre.
+- `YCLOUD_WELCOME_TEMPLATE_NAME`: plantilla para saludos genéricos (“hola”, “quiero una finca” corto); por defecto `bienvenida_hernan`, si no existe prueba `bienvenida`.
+- `YCLOUD_TEMPLATE_ROUTING_DENYLIST`: nombres separados por coma que el bot no elegirá (en código solo se excluye por defecto `chat_center`).
+
+**Enrutamiento por plantilla (bot):** Tras los envíos de catálogo, si el mensaje encaja con una plantilla **APPROVED** sin variables en el cuerpo, el bot puede enviar esa plantilla vía YCloud y **omitir** la generación RAG en ese turno. Así el texto oficial sale de Meta/YCloud y no hace falta duplicar esas respuestas en el RAG.
+
+**Si no ves respuestas por plantilla:** En Convex → Logs busca `[template-routing]`. Causas típicas: `YCLOUD_TEMPLATE_ROUTING=off`; `YCLOUD_WABA_ID` mal o falta y el listado queda vacío; ninguna plantilla en estado `APPROVED`; el BODY tiene `{{variables}}`; la IA eligió `NONE` (prueba un mensaje muy específico, ej. «¿aceptan mascotas en las fincas?»); error de YCloud al enviar (revisa el log `sendWhatsAppTemplateMessage error`).
 
 **No hay variables de entorno para catálogos.** Los catálogos y la relación finca–catálogo se configuran en la base de datos desde el frontend.
 
