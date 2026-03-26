@@ -804,7 +804,7 @@ export class FincasService {
         'Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio',
         'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'
       ];
-      const formattedDate = `${now.getDate()} de ${months[now.getMonth()]} de ${now.getFullYear()}`;
+      const formattedDate = `${now.getDate()} dias del mes de ${months[now.getMonth()]} del ${now.getFullYear()}`;
 
       // 1. Cálculos de duración (necesarios para el precio total)
       let totalNights = 1;
@@ -863,6 +863,8 @@ export class FincasService {
         checkInDate: 'FECHA ENTRADA',
         checkOutDate: 'FECHA SALIDA',
         city: 'ciudad',
+        clientCity: 'ciudadCliente',
+        clientAddress: 'direccionCliente',
       };
 
       const valuesMapping = {
@@ -882,6 +884,8 @@ export class FincasService {
         [mappingKeys.checkInDate]: dto.checkInDate || '',
         [mappingKeys.checkOutDate]: dto.checkOutDate || '',
         [mappingKeys.city]: finca.location || '',
+        [mappingKeys.clientCity]: dto.clientCity || '',
+        [mappingKeys.clientAddress]: dto.clientAddress || '',
         // Fallbacks genéricos
         'Text6': dto.contractNumber,
         'Text9': totalPriceText,
@@ -931,22 +935,31 @@ export class FincasService {
           titularNombre: valuesMapping[mappingKeys.accountHolder],
           titularCedula: valuesMapping[mappingKeys.idNumber],
           contratoNumero: valuesMapping[mappingKeys.contractNumber],
-          clienteNombre: valuesMapping[mappingKeys.clientName],
-          clienteCedula: valuesMapping[mappingKeys.clientId],
-          clientCorreo: valuesMapping[mappingKeys.clientEmail],
-          clienteCelular: valuesMapping[mappingKeys.clientPhone],
           fechaEntrada: valuesMapping[mappingKeys.checkInDate],
+          fechaLlegada: valuesMapping[mappingKeys.checkInDate], // Alias prioritario
+          fecha_entrada: valuesMapping[mappingKeys.checkInDate],
+          fecha_llegada: valuesMapping[mappingKeys.checkInDate],
           fechaSalida: valuesMapping[mappingKeys.checkOutDate],
+          fecha_salida: valuesMapping[mappingKeys.checkOutDate],
           ciudad: valuesMapping[mappingKeys.city],
           // Nuevos campos de duración y tiempos
           nochesTexto: this.numberToSpanishText(totalNights, false),
           nochesNumero: String(totalNights),
           diasTexto: this.numberToSpanishText(totalDays, false),
           diasNumero: String(totalDays),
+          fechaEntradaMini: checkInMini,
           fechaLlegadaMini: checkInMini,
           fechaSalidaMini: checkOutMini,
           horaLlegada: dto.checkInTime || '03:00 PM',
           horaSalida: dto.checkOutTime || '01:00 PM',
+          ciudadCliente: valuesMapping[mappingKeys.clientCity] || dto.clientCity || '',
+          direccionCliente: valuesMapping[mappingKeys.clientAddress] || dto.clientAddress || '',
+          clienteNombre: valuesMapping[mappingKeys.clientName],
+          clienteCedula: valuesMapping[mappingKeys.clientId],
+          clienteId: valuesMapping[mappingKeys.clientId],
+          clienteIdentificacion: valuesMapping[mappingKeys.clientId],
+          clientCorreo: valuesMapping[mappingKeys.clientEmail],
+          clienteCelular: valuesMapping[mappingKeys.clientPhone],
         };
 
         try {
@@ -1047,7 +1060,7 @@ export class FincasService {
       // 5. Enviar mensaje a la conversación
       await this.inboxService.sendMessage(dto.conversationId, {
         type: 'document',
-        text: `Contrato generado para ${finca.title} (Nº ${dto.contractNumber})`,
+        text: `¡Hola! 👋 Aquí tienes el documento del contrato para la finca ${finca.title}. Por favor revísalo y quedamos atentos a cualquier duda. ✨`,
         mediaUrl: publicUrl,
         file: generatedFile,
       });

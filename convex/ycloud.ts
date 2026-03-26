@@ -1,11 +1,31 @@
 import { openai } from "@ai-sdk/openai";
 import { generateText } from "ai";
 import { v } from "convex/values";
-import { action, internalAction, internalMutation } from "./_generated/server";
+import { action, internalAction, internalMutation, internalQuery } from "./_generated/server";
 import { internal, api } from "./_generated/api";
 import type { Id } from "./_generated/dataModel";
 import rag from "./rag";
 import { CONSULTANT_SYSTEM_PROMPT } from "./lib/consultantPrompt";
+
+/**
+ * Solo afirmación corta (confirmación), sin datos nuevos de búsqueda.
+ * Evita enrutar plantillas genéricas de catálogo cuando el usuario confirma "sí" a mostrar opciones.
+ */
+export function isAffirmativeOnly(userMessage: string): boolean {
+  const t = userMessage.trim().toLowerCase().normalize("NFD").replace(/\p{M}/gu, "").replace(/[^\w\s]/g, "");
+  if (t.length > 50) return false;
+  return /^(s[ií]|si(\s+.*)?|ok|okey|dale|claro|va|yes|listo|bueno|uhum|aja|por\s+supuesto|adelante|confirmo|exacto|eso(\s+mismo)?)$/i.test(t);
+}
+
+/**
+ * Solo respuesta negativa corta (ej. no, nada, ni idea), sin datos nuevos.
+ * Evita enrutar plantillas de mascotas/etc cuando el usuario responde "no".
+ */
+export function isNegativeOnly(userMessage: string): boolean {
+  const t = userMessage.trim().toLowerCase().normalize("NFD").replace(/\p{M}/gu, "").replace(/[^\w\s]/g, "");
+  if (t.length > 50) return false;
+  return /^(no(\s+.*)?|nada|ningun[oa]|tampoco|ni\s+idea|para\s+nada)$/i.test(t);
+}
 
 /**
  * Deduplicación de eventos YCloud (reintentos).
@@ -267,17 +287,29 @@ export const processInboundMessage = internalAction({
           if (jsonStr) {
             try {
               const parsed = JSON.parse(jsonStr) as Record<string, unknown>;
-              const blockStart = replyText.indexOf(tag);
-              const blockEnd =
-                jsonEnd > 0
-                  ? replyText.indexOf("]", jsonEnd) + 1
-                  : replyText.length;
-              const paymentMessageText = (
-                (blockStart > 0 ? replyText.slice(0, blockStart) : "") +
-                (blockEnd < replyText.length ? replyText.slice(blockEnd) : "")
-              )
-                .replace(/\n\s*\n/g, "\n")
-                .trim();
+              // Extraer datos para el sistema (aunque no enviemos PDF automático, se escalará a humano)
+              const ciudad = String(parsed.ciudad ?? "");
+              const direccion = String(parsed.direccion ?? "");
+              const entradaHora = String(parsed.entradaHora ?? "");
+              const salidaHora = String(parsed.salidaHora ?? "");
+              
+              const cleanReplyText = replyText.split(tag)[0].trim();
+
+              // Enviar el mensaje visible del asistente (sin el bloque técnico)
+              await ctx.runAction(internal.ycloud.sendWhatsAppMessage, {
+                to: args.phone,
+                text: cleanReplyText || "¡Listo! He recibido tus datos. En breve un asesor se pondrá en contacto contigo para finalizar la reserva. ✨",
+                wamid: args.wamid,
+              });
+
+              // Escalar a humano (la IA ya hizo su trabajo de recolectar datos)
+              await ctx.runMutation(internal.conversations.escalate, {
+                conversationId,
+              });
+
+              /* 
+              // DESACTIVADO: Envío automático de PDF por solicitud de QA. 
+              // Se deja el código como referencia por si se requiere reactivar.
               await ctx.runAction(
                 internal.contractPdf.sendContractPdfAndPaymentMethods,
                 {
@@ -290,6 +322,8 @@ export const processInboundMessage = internalAction({
                     cedula: String(parsed.cedula ?? ""),
                     celular: String(parsed.celular ?? ""),
                     correo: String(parsed.correo ?? ""),
+                    ciudad,
+                    direccion,
                     entrada: String(parsed.entrada ?? ""),
                     salida: String(parsed.salida ?? ""),
                     noches: Number(parsed.noches) || 0,
@@ -297,9 +331,10 @@ export const processInboundMessage = internalAction({
                   },
                   paymentMessageText:
                     paymentMessageText ||
-                    "MÉTODOS DE PAGO: Abono 50% para confirmar. Saldo 50% al recibir la finca. Nequi, PSE, transferencia o datos bancarios. ¿Te envío los datos bancarios? 💳✨",
+                    "MÉTODOS DE PAGO: Abono 50% para confirmar. Saldo 50% al recibir la finca. Nequi, PSE, transferencia o datos bancarios. ✨",
                 }
               );
+              */
             } catch (parseErr) {
               console.error("CONTRACT_PDF parse/send error:", parseErr);
               await ctx.runAction(internal.ycloud.sendWhatsAppMessage, {
@@ -368,10 +403,18 @@ export const generateReplyWithRagAndFincas = internalAction({
       limit: 10,
     });
 
+    const currentDate = new Date().toLocaleDateString("es-CO", {
+      timeZone: "America/Bogota",
+      year: "numeric",
+      month: "long",
+      day: "numeric",
+    });
+
     const systemPrompt = buildSystemPrompt(ragResult.text, fincasContext, {
       singleFincaCatalogSent: args.singleFincaCatalogSent ?? false,
       fincaTitle: args.fincaTitle ?? "",
       whatsappCatalogSentForSearch: catalogAlreadyShown,
+      currentDate,
     });
     const messages = recentMessages.map((m) => ({
       role: m.sender === "user" ? ("user" as const) : ("assistant" as const),
@@ -411,7 +454,7 @@ function formatFincasForPrompt(
   return list
     .map(
       (p) =>
-        `- ${p.title}: ${p.description ?? ""} | Ubicación: ${p.location ?? "N/A"} | Capacidad: ${p.capacity ?? "N/A"} personas | Tipo: ${p.type ?? "N/A"} | Precio base: ${p.priceBase ?? "consultar"}`
+        `- ${p.title} (ID: ${p._id}): ${p.description ?? ""} | Ubicación: ${p.location ?? "N/A"} | Capacidad: ${p.capacity ?? "N/A"} personas | Tipo: ${p.type ?? "N/A"} | Precio base: ${p.priceBase ?? "consultar"}`
     )
     .join("\n");
 }
@@ -423,6 +466,7 @@ function buildSystemPrompt(
     singleFincaCatalogSent?: boolean;
     fincaTitle?: string;
     whatsappCatalogSentForSearch?: boolean;
+    currentDate?: string;
   }
 ): string {
   const singleFincaHint =
@@ -454,15 +498,18 @@ ${ragContext || "(No hay fragmentos relevantes para esta consulta. Responde con 
 
 ### 2) Fincas disponibles según la búsqueda del usuario:
 ${fincasContext || "(No hay fincas que coincidan. Ofrece alternativas de sector o pide más datos.)"}
+
+### 3) Información Temporal:
+Fecha actual (Colombia): ${opts?.currentDate || new Date().toLocaleDateString("es-CO")}
 ${singleFincaHint}${multiCatalogHint}
 ---
 **CRÍTICO:** La bienvenida inicial la envía el sistema como **plantilla WhatsApp** (YCloud), no tú como texto largo con listas 📅👥. No repitas ese bloque. Si el usuario ya dio ubicación, fechas, personas o tipo de plan, CONFIRMA y sigue (fincas, mascotas, etc.). Ejemplo: "Perfecto, Restrepo del 20 al 21 para 10 personas… ¿Llevarán mascotas? 🐶".
 
 ${variasFincasTextoRule}
 
-**RESERVA:** Si hay varias opciones, NUNCA pidas nombre/cédula/celular/correo hasta que el usuario ELIJA una finca. **Fechas:** "Del 20 al 21" = 1 NOCHE (entrada 20, salida 21). Si la finca pide mínimo 2 noches, di: "Del 20 al 21 es 1 noche; la mínima es 2 noches. ¿Te sirve del 20 al 22?" Cuando tenga finca elegida + todos los datos, incluye el bloque [CONTRACT_PDF:{...}] con los datos del contrato y el mensaje visible con confirmación + métodos de pago (abono 50%, saldo 50%, Nequi/PSE/transferencia); el sistema enviará el contrato en PDF y luego el mensaje.
+**RESERVA:** Si hay varias opciones, NUNCA pidas nombre/cédula/celular/correo hasta que el usuario ELIJA una finca. Cuando tenga finca elegida + todos los datos, incluya el bloque [CONTRACT_PDF:{...}] con los datos del contrato y el mensaje visible con confirmación + métodos de pago (abono 50%, saldo 50%, Nequi/PSE/transferencia); el sistema enviará el contrato en PDF y luego el mensaje.
 
-Responde SIEMPRE como Hernán, Consultor de FincasYa.com (nunca escribas FincasYa.cloud ni otra variante), en español. USA EMOJIS. Usa el RAG y el catálogo de fincas para datos; no inventes. Máximo 2-4 líneas por mensaje cuando sea posible.`;
+Responde SIEMPRE como Hernán, Consultor de FincasYa.com (never write FincasYa.cloud or another variant), en español. USA EMOJIS. Usa el RAG y el catálogo de fincas para datos; no inventes. Máximo 2-4 líneas por mensaje cuando sea posible.`;
 }
 
 /**
@@ -520,7 +567,7 @@ export const sendWhatsAppMessage = internalAction({
       from: wabaNumber,
       to: args.to,
       type: "text",
-      text: { body: args.text },
+      text: { body: args.text.replace(/\[CONTRACT_PDF:.*?\]/g, "").trim() },
     };
     if (args.wamid) body.context = { message_id: args.wamid };
     const res = await fetch(endpoint, {
@@ -577,6 +624,7 @@ export type RoutableWhatsappTemplate = {
   language: string;
   /** Pistas para el clasificador sin enviar el BODY completo al prompt. */
   hint: string;
+  body?: string;
 };
 
 function bodyHasVariables(
@@ -630,10 +678,12 @@ function itemsToRoutable(
     if (seen.has(key)) continue;
 
     seen.add(key);
+    const bodyText = t.components?.find((c) => c.type === "BODY")?.text || "";
     out.push({
       name: t.name,
       language: lang,
       hint: buildIntentHintFromName(t.name),
+      body: bodyText,
     });
   }
 
@@ -945,9 +995,9 @@ export const maybeSendWhatsappTemplateReply = internalAction({
       return { sent: false };
     }
 
-    if (isAffirmativeOnly(args.userMessage)) {
+    if (isAffirmativeOnly(args.userMessage) || isNegativeOnly(args.userMessage)) {
       console.log(
-        "[template-routing] solo afirmación (sí/ok/dale); no enviar plantilla"
+        "[template-routing] solo afirmación/negación (sí/no); no enviar plantilla"
       );
       return { sent: false };
     }
@@ -1025,9 +1075,13 @@ export const maybeSendWhatsappTemplateReply = internalAction({
       return { sent: false };
     }
 
+    const pickedTemplate = routable.find(
+      (t) => t.name === picked!.name && t.language === picked!.language
+    );
+
     await ctx.runMutation(internal.messages.insertAssistantMessage, {
       conversationId: args.conversationId,
-      content: `[Plantilla WhatsApp: ${picked.name}]`,
+      content: pickedTemplate?.body || `[Plantilla WhatsApp: ${picked.name}]`,
       createdAt: Date.now(),
     });
 
@@ -1073,7 +1127,7 @@ export const detectCatalogIntentWithAI = internalAction({
       system: `Eres un clasificador. Del mensaje del usuario extrae la intención y datos. Responde SOLO con un JSON válido, sin markdown, sin explicación.
 
 Reglas:
-- intent: "single_finca" si pide VER una finca por nombre (ej. "quiero ver villa green", "mostrar la finca X"). En fincaName pon solo el nombre de la finca en minúsculas, sin "finca" ni "la".
+- intent: "single_finca" si pide VER o RESERVAR una finca específica por nombre (ej. "quiero ver villa green", "me gustaría reservar la finca X", "quinto la finca X", "esta es la finca que elegí"). También si el mensaje es una confirmación de datos (fechas/personas) para una finca mencionada justo antes en el chat. En fincaName pon solo el nombre de la finca en minúsculas, sin "finca" ni "la".
 - intent: "more_options" si pide otras opciones, más opciones, no le gustan, envía más, otras fincas, dame otras.
 - intent: "search_catalog" si pide buscar fincas en una UBICACIÓN y tiene fechas o "fin de semana". Extrae: location (solo nombre del lugar, minúsculas, sin emojis; "mergal" u errores similares a Melgar → location "melgar"), hasWeekend (true si dice fin de semana / este fin / próximo fin / viernes a domingo), dateD1 y dateD2 (números del 1 al 31 si dice "del X al Y"), minCapacity (número si dice "X personas" o "X o más personas"), sortByPrice (true si dice buen precio, económico, barato).
 - Si el mensaje ACTUAL es solo confirmación (sí, si, ok, dale, claro, perfecto, va) y en el CONTEXTO del chat ya constan ubicación (ej. melgar, tolima) y además "fin de semana" o fechas o número de personas, devuelve "search_catalog" con location, hasWeekend y minCapacity inferidos de ese contexto (no uses "none" si hay datos claros en el contexto).
@@ -1243,21 +1297,6 @@ function normalizeCatalogLocation(location: string): string {
   return location.trim().replace(/\s+/g, " ");
 }
 
-/**
- * Solo afirmación corta (confirmación), sin datos nuevos de búsqueda.
- * Evita enrutar plantillas genéricas de catálogo cuando el usuario confirma "sí" a mostrar opciones.
- */
-function isAffirmativeOnly(userMessage: string): boolean {
-  const t = userMessage
-    .trim()
-    .toLowerCase()
-    .normalize("NFD")
-    .replace(/\p{M}/gu, "");
-  if (t.length > 28) return false;
-  return /^(s[ií]|si(\s+se[nñ]or|p)?|ok|okey|dale|claro|va|yes|listo|bueno|uhum|aja|por\s+supuesto|adelante|confirmo|exacto|eso(\s+mismo)?)\.?$/i.test(
-    t
-  );
-}
 
 /** Pregunta por catálogo / opciones (sí debe poder usar contexto fusionado de mensajes anteriores). */
 function asksFincasOrCatalogInMessage(userMessage: string): boolean {
@@ -1658,20 +1697,37 @@ export const extractContractData = action({
         if (jsonEnd > 0) {
           try {
             const parsed = JSON.parse(msg.content.slice(jsonStart, jsonEnd));
+            
+            const currentYear = new Date().getFullYear();
+            const fixYear = (d: string) => {
+              if (!d) return d;
+              const match = d.match(/^(\d{4})-(.*)/);
+              if (match && Number(match[1]) < currentYear) {
+                return `${currentYear}-${match[2]}`;
+              }
+              return d;
+            };
+
             return {
-              clientName: String(parsed.nombre || ""),
-              clientId: String(parsed.cedula || ""),
-              clientPhone: String(parsed.celular || ""),
-              clientEmail: String(parsed.correo || ""),
-              checkInDate: String(parsed.entrada || ""),
-              checkOutDate: String(parsed.salida || ""),
-              nightlyPrice: parsed.precioTotal && parsed.noches 
+              clientName: String(parsed.nombre || parsed.clientName || ""),
+              clientId: String(parsed.cedula || parsed.clientId || ""),
+              clientPhone: String(parsed.celular || parsed.clientPhone || ""),
+              clientEmail: String(parsed.correo || parsed.clientEmail || ""),
+              clientCity: String(parsed.ciudad || ""),
+              clientAddress: String(parsed.direccion || ""),
+              checkInDate: fixYear(String(parsed.entrada || parsed.checkInDate || "")),
+              checkOutDate: fixYear(String(parsed.salida || parsed.checkOutDate || "")),
+              checkInTime: String(parsed.entradaHora || ""),
+              checkOutTime: String(parsed.salidaHora || ""),
+              nightlyPrice: parsed.nightlyPrice || (parsed.precioTotal && parsed.noches 
                 ? String(Math.round(Number(parsed.precioTotal) / Number(parsed.noches))) 
-                : "",
-              totalPrice: String(parsed.precioTotal || ""),
+                : ""),
+              totalPrice: String(parsed.totalPrice || parsed.precioTotal || ""),
               source: "finalized_block",
             };
-          } catch (e) {}
+          } catch (e) {
+            console.error("Error parsing CONTRACT_PDF block:", e);
+          }
         }
       }
     }
@@ -1681,42 +1737,115 @@ export const extractContractData = action({
       .map((m) => `${m.sender.toUpperCase()}: ${m.content}`)
       .join("\n");
 
+    const currentDate = new Date().toLocaleDateString("es-CO", {
+      timeZone: "America/Bogota",
+      year: "numeric",
+      month: "long",
+      day: "numeric",
+    });
+
+    const prompt = `Analiza los siguientes mensajes de una conversación de WhatsApp y extrae los datos necesarios para un contrato de alquiler de finca.
+FECHA ACTUAL: ${currentDate}. Usa este año para fechas ambiguas.
+Responde ÚNICAMENTE con un objeto JSON válido con estas llaves (si no conoces un dato, usa null o ""):
+- clientName: nombre completo
+- clientId: cédula o ID
+- clientEmail: correo electrónico
+- clientPhone: celular
+- ciudad: ciudad de residencia
+- direccion: dirección completa
+- checkInDate: fecha de entrada (YYYY-MM-DD)
+- checkOutDate: fecha de salida (YYYY-MM-DD)
+- entradaHora: hora de entrada aproximada (ej. 03:00 PM)
+- salidaHora: hora de salida aproximada (ej. 01:00 PM)
+- nightlyPrice: precio por noche/día (solo números)
+- totalPrice: precio total (solo números)
+- propertyId: ID de la finca (si se menciona)
+
+Mensajes:\n${history}`;
+
     const { text } = await generateText({
       model: openai.chat("gpt-4o-mini"),
       maxTokens: 500,
-      system: `Analiza el historial de chat y extrae los datos del cliente para un contrato de arrendamiento. 
-Responde ÚNICAMENTE con un JSON válido. Si no encuentras un valor, pon "".
-Campos: 
-- nombre (Nombre completo del cliente)
-- cedula (Número de identificación)
-- celular (Teléfono móvil)
-- correo (Email)
-- fechaEntrada (YYYY-MM-DD)
-- fechaSalida (YYYY-MM-DD)
-- noches (Número entero)
-- precioTotal (Número entero sin puntos ni comas)`,
-      prompt: `Historial de conversación:\n${history}`,
+      prompt,
     });
 
     try {
       const raw = text.trim().replace(/^```\w*\n?|\n?```$/g, "").trim();
       const parsed = JSON.parse(raw);
+      
+      const currentYear = new Date().getFullYear();
+      const fixYear = (d: string) => {
+        if (!d) return d;
+        const match = d.match(/^(\d{4})-(.*)/);
+        if (match && Number(match[1]) < currentYear) {
+          return `${currentYear}-${match[2]}`;
+        }
+        return d;
+      };
+
       return {
-        clientName: String(parsed.nombre || ""),
-        clientId: String(parsed.cedula || ""),
-        clientPhone: String(parsed.celular || ""),
-        clientEmail: String(parsed.correo || ""),
-        checkInDate: String(parsed.fechaEntrada || ""),
-        checkOutDate: String(parsed.fechaSalida || ""),
-        nightlyPrice: parsed.precioTotal && parsed.noches 
-          ? String(Math.round(Number(parsed.precioTotal) / Number(parsed.noches))) 
-          : "",
-        totalPrice: String(parsed.precioTotal || ""),
+        clientName: String(parsed.clientName || parsed.nombre || ""),
+        clientId: String(parsed.clientId || parsed.cedula || ""),
+        clientPhone: String(parsed.clientPhone || parsed.celular || ""),
+        clientEmail: String(parsed.clientEmail || parsed.correo || ""),
+        clientCity: String(parsed.ciudad || ""),
+        clientAddress: String(parsed.direccion || ""),
+        checkInDate: fixYear(String(parsed.checkInDate || parsed.fechaEntrada || "")),
+        checkOutDate: fixYear(String(parsed.checkOutDate || parsed.fechaSalida || "")),
+        checkInTime: String(parsed.entradaHora || ""),
+        checkOutTime: String(parsed.salidaHora || ""),
+        nightlyPrice: String(parsed.nightlyPrice || ""),
+        totalPrice: String(parsed.totalPrice || parsed.precioTotal || ""),
+        propertyId: String(parsed.propertyId || ""),
         source: "ai_extraction",
       };
     } catch (e) {
       console.error("Error parsing AI extraction:", e);
       return { error: "No se pudieron extraer los datos automáticamente" };
     }
+  },
+});
+
+/**
+ * Busca mensajes del asistente que solo tengan el marcador [Plantilla WhatsApp: ...]
+ * y los actualiza con el cuerpo real de YCloud para mejorar la visibilidad en el admin.
+ */
+export const backfillTemplateMessages = internalAction({
+  args: {},
+  handler: async (ctx) => {
+    const routable = await fetchRoutableTemplates();
+    if (routable.length === 0) return { updated: 0 };
+
+    const messages = await ctx.runQuery(internal.ycloud.listAllAssistantMessages);
+    let updatedCount = 0;
+
+    for (const msg of messages) {
+      if (msg.content.startsWith("[Plantilla WhatsApp:")) {
+        const match = msg.content.match(/\[Plantilla WhatsApp:\s*(.+?)\]/);
+        if (match) {
+          const templateName = match[1].trim();
+          const template = routable.find((t) => t.name === templateName);
+          if (template && template.body) {
+            await ctx.runMutation(internal.messages.updateMessageContent, {
+              messageId: msg._id,
+              content: template.body,
+            });
+            updatedCount++;
+          }
+        }
+      }
+    }
+
+    return { updated: updatedCount };
+  },
+});
+
+export const listAllAssistantMessages = internalQuery({
+  args: {},
+  handler: async (ctx: any) => {
+    return await ctx.db
+      .query("messages")
+      .filter((q: any) => q.eq(q.field("sender"), "assistant"))
+      .collect();
   },
 });

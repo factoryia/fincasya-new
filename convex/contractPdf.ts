@@ -13,6 +13,10 @@ export const contractDataValidator = v.object({
   cedula: v.string(),
   celular: v.string(),
   correo: v.string(),
+  ciudad: v.string(),
+  direccion: v.string(),
+  entradaHora: v.optional(v.string()), // HH:MM AM/PM
+  salidaHora: v.optional(v.string()), // HH:MM AM/PM
   entrada: v.string(),
   salida: v.string(),
   noches: v.number(),
@@ -26,6 +30,8 @@ export type ContractData = {
   cedula: string;
   celular: string;
   correo: string;
+  ciudad: string;
+  direccion: string;
   entrada: string;
   salida: string;
   noches: number;
@@ -65,7 +71,8 @@ async function generateContractPdfBuffer(data: ContractData): Promise<Uint8Array
   draw("CONTRATO DE ARRENDAMIENTO TEMPORAL", { bold: true, size: titleSize });
   y -= 8;
   draw(`Inmueble: ${data.finca}, ubicación: ${data.ubicacion}.`);
-  draw(`Arrendatario: ${data.nombre}, CC ${data.cedula}, cel ${data.celular}, ${data.correo}.`);
+  draw(`Arrendatario: ${data.nombre}, CC ${data.cedula}, ${data.ciudad}, ${data.direccion}.`);
+  draw(`Contacto: ${data.celular}, ${data.correo}.`);
   draw(`Fechas: entrada ${data.entrada}, salida ${data.salida}.`);
   draw(`Noches: ${data.noches}.`);
   draw(`Precio total: $${formatPrecio(data.precioTotal)} COP (${data.noches} noche(s)).`);

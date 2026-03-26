@@ -94,3 +94,13 @@ export const listRecent = query({
     return list.reverse();
   },
 });
+
+export const updateMessageContent = internalMutation({
+  args: {
+    messageId: v.id("messages"),
+    content: v.string(),
+  },
+  handler: async (ctx, args) => {
+    await ctx.db.patch(args.messageId, { content: args.content });
+  },
+});

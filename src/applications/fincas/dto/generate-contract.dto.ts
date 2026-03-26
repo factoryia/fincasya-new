@@ -65,4 +65,12 @@ export class GenerateContractDto {
   @IsString()
   @IsOptional()
   checkOutTime?: string;
+
+  @IsString()
+  @IsOptional()
+  clientCity?: string;
+
+  @IsString()
+  @IsOptional()
+  clientAddress?: string;
 }
