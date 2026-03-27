@@ -234,9 +234,15 @@ export const processInboundMessage = internalAction({
         console.error("YCloud catalog send error:", e);
       }
 
-      // FALLBACK: si el catálogo NO se envió pero el usuario menciona una ciudad conocida, 
-      // forzar el envío del catálogo con esa ciudad usando fechas del próximo fin de semana
-      if (!whatsappCatalogSentForSearch && !singleFincaSent) {
+      // FALLBACK: si el catálogo NO se envió pero el usuario menciona una ciudad conocida,
+      // forzar el envío del catálogo con esa ciudad usando fechas del próximo fin de semana.
+      // IMPORTANTE: no aplicar este fallback cuando el usuario pidió una finca específica,
+      // para no reemplazar la intención "single_finca" por un catálogo general de ciudad.
+      if (
+        !whatsappCatalogSentForSearch &&
+        !singleFincaSent &&
+        catalogIntent.intent !== "single_finca"
+      ) {
         const dynamicLocationsList_pre = await ctx.runQuery(api.fincas.getAllUniqueLocations, {});
         const msgLower_pre = args.text.toLowerCase().normalize("NFD").replace(/\p{M}/gu, "");
         const matchedCity = dynamicLocationsList_pre.find(
@@ -376,10 +382,30 @@ export const processInboundMessage = internalAction({
               
               const cleanReplyText = replyText.split(tag)[0].trim();
 
+              const PAYMENT_PROCESS_TEXT = `👨‍💻 Proceso de reserva:
+
+1. Documentación: Te enviamos el contrato y nuestro respaldo legal para tu revisión 📄.
+2. Reserva: Realizas el abono del 50% del valor total para separar la fecha 💰.
+3. Confirmación: Validamos tu pago y recibes el soporte oficial junto a la ubicación de la finca ✅.
+
+❗Nuestro RNT es 163658, disponible para consulta y verificación.
+
+En FincasYa.com tu alquiler siempre es seguro, respaldado y con total tranquilidad. ®`;
+
+              // Si el texto limpio ya contiene el mensaje de proceso de pago, enviarlo tal cual.
+              // Si no lo contiene (la IA lo olvidó), agregar el mensaje de proceso como segundo mensaje.
+              const alreadyHasPaymentInfo = cleanReplyText.includes("RNT") || cleanReplyText.includes("50%") || cleanReplyText.includes("Proceso de reserva");
+
+              const textToSend = cleanReplyText
+                ? (alreadyHasPaymentInfo
+                    ? cleanReplyText
+                    : `${cleanReplyText}\n\n${PAYMENT_PROCESS_TEXT}`)
+                : `¡Listo! He recibido todos tus datos para la reserva. ✨\n\n${PAYMENT_PROCESS_TEXT}`;
+
               // Enviar el mensaje visible del asistente (sin el bloque técnico)
               await ctx.runAction(internal.ycloud.sendWhatsAppMessage, {
                 to: args.phone,
-                text: cleanReplyText || "¡Listo! He recibido tus datos. En breve un asesor se pondrá en contacto contigo para finalizar la reserva. ✨",
+                text: textToSend,
                 wamid: args.wamid,
               });
 
@@ -1551,12 +1577,23 @@ export const maybeSendSingleFincaCatalogForUserMessage = internalAction({
 
     const searchTerm = args.extractedFincaName?.trim();
     if (!searchTerm) return { sent: false };
+    console.log("[single-finca] buscando:", searchTerm);
 
     const searchResults = await ctx.runQuery(api.fincas.search, {
       query: searchTerm,
       limit: 5,
     });
-    if (searchResults.length === 0) return { sent: false };
+    console.log("[single-finca] resultados de búsqueda:", searchResults.map((p) => p.title));
+    if (searchResults.length === 0) {
+      console.log("[single-finca] sin resultados, abortando");
+      return { sent: false };
+    }
+
+    const catalog = await ctx.runQuery(api.whatsappCatalogs.getDefault, {});
+    if (!catalog) {
+      console.log("[single-finca] sin catálogo por defecto, abortando");
+      return { sent: false };
+    }
 
     const inCatalogIds = await ctx.runQuery(
       api.propertyWhatsAppCatalog.getPropertyIdsInAnyCatalog,
@@ -1564,25 +1601,39 @@ export const maybeSendSingleFincaCatalogForUserMessage = internalAction({
     );
     const inCatalogSet = new Set(inCatalogIds);
     const firstInCatalog = searchResults.find((p) => inCatalogSet.has(p._id));
-    if (!firstInCatalog) return { sent: false };
 
-    const catalog = await ctx.runQuery(api.whatsappCatalogs.getDefault, {});
-    if (!catalog) return { sent: false };
+    let productRetailerIdToUse: string;
+    let fincaToSend: (typeof searchResults)[number];
 
-    const productEntries = await ctx.runQuery(
-      api.propertyWhatsAppCatalog.getProductRetailerIdsForProperties,
-      { catalogId: catalog._id, propertyIds: [firstInCatalog._id] }
-    );
-    if (productEntries.length === 0) return { sent: false };
+    if (firstInCatalog) {
+      const productEntries = await ctx.runQuery(
+        api.propertyWhatsAppCatalog.getProductRetailerIdsForProperties,
+        { catalogId: catalog._id, propertyIds: [firstInCatalog._id] }
+      );
+      if (productEntries.length === 0) {
+        console.log("[single-finca] sin product entries para", firstInCatalog.title, "usando ID directo como fallback");
+        productRetailerIdToUse = firstInCatalog._id;
+      } else {
+        productRetailerIdToUse = productEntries[0].productRetailerId;
+      }
+      fincaToSend = firstInCatalog;
+    } else {
+      // La finca no está en la tabla propertyWhatsAppCatalog de Convex,
+      // pero puede existir en el catálogo de Meta con productRetailerId = su propio ID de Convex.
+      const candidate = searchResults[0];
+      console.log("[single-finca] finca no registrada en Convex catalog table, intentando fallback con ID:", candidate._id, candidate.title);
+      productRetailerIdToUse = candidate._id;
+      fincaToSend = candidate;
+    }
 
     await ctx.runAction(internal.ycloud.sendWhatsAppCatalogList, {
       to: args.phone,
-      productRetailerIds: productEntries.map((e) => e.productRetailerId),
-      bodyText: `Aquí está ${firstInCatalog.title} 🏡`,
+      productRetailerIds: [productRetailerIdToUse],
+      bodyText: `Aquí está ${fincaToSend.title} 🏡`,
       catalogId: catalog.whatsappCatalogId,
       wamid: args.wamid,
     });
-    return { sent: true, fincaTitle: firstInCatalog.title };
+    return { sent: true, fincaTitle: fincaToSend.title };
   },
 });
 
