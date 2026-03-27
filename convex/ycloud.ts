@@ -153,6 +153,8 @@ export const processInboundMessage = internalAction({
       let singleFincaSent = false;
       let fincaTitle = "";
       let whatsappCatalogSentForSearch = false;
+      let catalogLocation = "";
+      let catalogFincasCount = 0;
       let catalogIntent: CatalogIntent = { intent: "none" };
 
       const recentForCatalogIntent = await ctx.runQuery(api.messages.listRecent, {
@@ -176,50 +178,123 @@ export const processInboundMessage = internalAction({
       }
 
       // Enviar ficha de una finca (IA o regex como respaldo).
+      // PERO NO re-enviar si el usuario está dando datos de seguimiento (fechas, personas) SIN mencionar finca
+      const isProvidingFollowUpData = /\b(\d{1,2}\s*(al|hasta)\s*\d{1,2}|para\s+\d+\s)/i.test(args.text) 
+        && catalogIntent.intent !== "single_finca";
       try {
-        const result = await ctx.runAction(
-          internal.ycloud.maybeSendSingleFincaCatalogForUserMessage,
-          {
-            phone: args.phone,
-            userMessage: args.text,
-            wamid: args.wamid,
-            extractedFincaName:
-              catalogIntent.intent === "single_finca"
-                ? catalogIntent.fincaName
-                : undefined,
-          }
-        );
-        singleFincaSent = result?.sent ?? false;
-        fincaTitle = result?.fincaTitle ?? "";
+        if (!isProvidingFollowUpData) {
+          const result = await ctx.runAction(
+            internal.ycloud.maybeSendSingleFincaCatalogForUserMessage,
+            {
+              phone: args.phone,
+              userMessage: args.text,
+              wamid: args.wamid,
+              extractedFincaName:
+                catalogIntent.intent === "single_finca"
+                  ? catalogIntent.fincaName
+                  : undefined,
+            }
+          );
+          singleFincaSent = result?.sent ?? false;
+          fincaTitle = result?.fincaTitle ?? "";
+        }
       } catch (e) {
         console.error("YCloud single-finca catalog error:", e);
       }
 
       try {
-        const catalogIntentArg =
-          catalogIntent.intent === "more_options"
-            ? catalogIntent
-            : catalogIntent.intent === "search_catalog"
+        if (!singleFincaSent) {
+          console.log("[catalog-intent]", JSON.stringify(catalogIntent));
+          // Validar que la ubicación de search_catalog no sea una palabra genérica
+          const invalidSearchLocations = /\b(dias?|personas?|fincas?|reservar?|noches?|una|los|las|el|la)\b/i;
+          const catalogIntentArg =
+            catalogIntent.intent === "more_options"
               ? catalogIntent
-              : undefined;
-        const catalogRes = await ctx.runAction(
-          internal.ycloud.maybeSendCatalogForUserMessage,
-          {
-            conversationId,
-            phone: args.phone,
-            userMessage: args.text,
-            wamid: args.wamid,
-            catalogIntent: catalogIntentArg,
-          }
-        );
-        whatsappCatalogSentForSearch = catalogRes?.sent ?? false;
+              : catalogIntent.intent === "search_catalog" && 
+                catalogIntent.location &&
+                catalogIntent.location.length >= 3 &&
+                !invalidSearchLocations.test(catalogIntent.location)
+                ? catalogIntent
+                : undefined;
+          const catalogRes = await ctx.runAction(
+            internal.ycloud.maybeSendCatalogForUserMessage,
+            {
+              conversationId,
+              phone: args.phone,
+              userMessage: args.text,
+              wamid: args.wamid,
+              catalogIntent: catalogIntentArg,
+            }
+          );
+          whatsappCatalogSentForSearch = catalogRes?.sent ?? false;
+          catalogLocation = catalogRes?.location ?? "";
+          catalogFincasCount = catalogRes?.fincasCount ?? 0;
+        }
       } catch (e) {
         console.error("YCloud catalog send error:", e);
       }
 
-      // Plantillas: no pisar el flujo cuando ya mandamos catálogo interactivo (evita plantilla + return sin texto útil).
+      // FALLBACK: si el catálogo NO se envió pero el usuario menciona una ciudad conocida, 
+      // forzar el envío del catálogo con esa ciudad usando fechas del próximo fin de semana
+      if (!whatsappCatalogSentForSearch && !singleFincaSent) {
+        const dynamicLocationsList_pre = await ctx.runQuery(api.fincas.getAllUniqueLocations, {});
+        const msgLower_pre = args.text.toLowerCase().normalize("NFD").replace(/\p{M}/gu, "");
+        const matchedCity = dynamicLocationsList_pre.find(
+          (loc) => msgLower_pre.includes(loc.toLowerCase().normalize("NFD").replace(/\p{M}/gu, ""))
+        );
+        if (matchedCity) {
+          console.log("[catalog-fallback] Ciudad detectada sin catálogo, forzando envío:", matchedCity);
+          try {
+            const catalogRes = await ctx.runAction(
+              internal.ycloud.maybeSendCatalogForUserMessage,
+              {
+                conversationId,
+                phone: args.phone,
+                userMessage: args.text,
+                wamid: args.wamid,
+                catalogIntent: {
+                  intent: "search_catalog" as const,
+                  location: matchedCity,
+                  hasWeekend: true,
+                },
+              }
+            );
+            whatsappCatalogSentForSearch = catalogRes?.sent ?? false;
+            catalogLocation = catalogRes?.location ?? matchedCity;
+            catalogFincasCount = catalogRes?.fincasCount ?? 0;
+          } catch (e) {
+            console.error("YCloud catalog fallback error:", e);
+          }
+        }
+      }
+
+      // Plantillas: no pisar el flujo cuando ya mandamos catálogo interactivo, el cliente pide finca específica, o envía datos.
       let templateSent = false;
-      if (!whatsappCatalogSentForSearch) {
+      const isProvidingData = /\\d{7,}/.test(args.text) || /@\\w+\\.\\w+/.test(args.text);
+      const isSpecificFinca = singleFincaSent || catalogIntent.intent === "single_finca";
+      
+      // Detectar si el usuario menciona una ubicación o datos de reserva (no enviar template genérica)
+      const dynamicLocationsList = await ctx.runQuery(api.fincas.getAllUniqueLocations, {});
+      const msgLower = args.text.toLowerCase().normalize("NFD").replace(/\p{M}/gu, "");
+      const mentionsCityOrFinca = dynamicLocationsList.some(
+        (loc) => msgLower.includes(loc.toLowerCase().normalize("NFD").replace(/\p{M}/gu, ""))
+      );
+      const mentionsDatesOrPersonas = /\b(\d{1,2}\s*(al|hasta)\s*\d{1,2}|personas?|fin de semana)\b/i.test(args.text);
+      // También detectar intención de reserva con ubicación: "finca en X", "reservar en X"
+      const mentionsBookingIntent = /\b(reservar|alquilar|arrendar|finca\s+en|fincas\s+en|fincas\s+de|finca\s+de|finca\s+para)\b/i.test(args.text);
+      const hasBookingContext = mentionsCityOrFinca || mentionsDatesOrPersonas || mentionsBookingIntent;
+      
+      console.log("[template-guard]", {
+        mentionsCityOrFinca,
+        mentionsDatesOrPersonas,
+        mentionsBookingIntent,
+        hasBookingContext,
+        whatsappCatalogSentForSearch,
+        isSpecificFinca,
+        willBlockTemplate: whatsappCatalogSentForSearch || isSpecificFinca || isProvidingData || hasBookingContext,
+      });
+      
+      if (!whatsappCatalogSentForSearch && !isSpecificFinca && !isProvidingData && !hasBookingContext) {
         try {
           const routed = await ctx.runAction(
             internal.ycloud.maybeSendWhatsappTemplateReply,
@@ -250,6 +325,9 @@ export const processInboundMessage = internalAction({
           : singleFincaSent && fincaTitle
             ? fincaTitle
             : undefined;
+      // Reutilizar dynamicLocationsList ya declarado arriba (template-guard)
+      const dynamicLocations = dynamicLocationsList.join(", ");
+
       const replyText = await ctx.runAction(
         internal.ycloud.generateReplyWithRagAndFincas,
         {
@@ -259,6 +337,9 @@ export const processInboundMessage = internalAction({
           fincaTitle,
           searchQueryOverride: searchOverride,
           whatsappCatalogSentForSearch,
+          dynamicLocations,
+          catalogLocation,
+          catalogFincasCount,
         }
       );
 
@@ -379,6 +460,12 @@ export const generateReplyWithRagAndFincas = internalAction({
      * No repetir lista de fincas ni precios en texto.
      */
     whatsappCatalogSentForSearch: v.optional(v.boolean()),
+    /** Lista de ubicaciones separadas por coma para el prompt. */
+    dynamicLocations: v.optional(v.string()),
+    /** Ciudad/municipio del catálogo enviado. */
+    catalogLocation: v.optional(v.string()),
+    /** Número de fincas enviadas en el catálogo. */
+    catalogFincasCount: v.optional(v.number()),
   },
   handler: async (ctx, args): Promise<string> => {
     const ragResult = await rag.search(ctx, {
@@ -394,9 +481,61 @@ export const generateReplyWithRagAndFincas = internalAction({
     });
 
     const catalogAlreadyShown = args.whatsappCatalogSentForSearch === true;
-    const fincasContext = catalogAlreadyShown
-      ? "(Ya se envió el catálogo de WhatsApp con las fincas; el cliente ve nombres, fotos y precios ahí. NO repitas lista numerada ni precios en tu mensaje.)"
-      : formatFincasForPrompt(fincasList);
+    let fincasContext: string;
+    if (catalogAlreadyShown && args.catalogLocation) {
+      fincasContext = `(El sistema YA ENVIÓ EXITOSAMENTE el catálogo interactivo de WhatsApp con ${args.catalogFincasCount || "varias"} fincas disponibles en ${args.catalogLocation}. El cliente ya puede ver nombres, fotos y precios directamente en su pantalla. Responde siguiendo EXACTAMENTE el formato del PASO 2: menciona que compartiste el catálogo en ${args.catalogLocation}, y luego pide los datos faltantes con viñetas: ● 🏡 ¿Cuál de estas fincas te llamó la atención? ● 📅 Fechas exactas de tu estadía ● 👨‍👩‍👧‍👦 Número total de personas ● 🐾 ¿Llevarán mascotas? Omite los datos que el cliente ya haya proporcionado, pero SIEMPRE incluye la pregunta de finca y mascotas. NO repitas lista de fincas en texto. Termina con "Quedo atento a tu respuesta. 😊")`;
+    } else if (catalogAlreadyShown) {
+      fincasContext = "(Ya se envió el catálogo de WhatsApp con las fincas; el cliente ve nombres, fotos y precios ahí. Sigue el PASO 2: pregunta cuál finca le llamó la atención, fechas, personas y mascotas. NO repitas lista de fincas en texto.)";
+    } else {
+      fincasContext = formatFincasForPrompt(fincasList);
+    }
+
+    // Enriquecer con el PRECIO EFECTIVO calculado por el serverdor para cada finca
+    if (fincasList.length > 0 && !catalogAlreadyShown) {
+      // Extraer fechas del mensaje del usuario para calcular precios de temporada
+      const dateMatch = args.userMessage.match(/(?:del\s+)?(\d{1,2})\s*(?:al|hasta el|hasta)\s*(\d{1,2})/i);
+      if (dateMatch) {
+        const now = new Date();
+        const d1 = parseInt(dateMatch[1], 10);
+        const d2 = parseInt(dateMatch[2], 10);
+        const monthMatch = args.userMessage.match(/(?:de\s+)?(enero|febrero|marzo|abril|mayo|junio|julio|agosto|septiembre|octubre|noviembre|diciembre)/i);
+        const monthNames: Record<string, number> = { enero:0,febrero:1,marzo:2,abril:3,mayo:4,junio:5,julio:6,agosto:7,septiembre:8,octubre:9,noviembre:10,diciembre:11 };
+        const month = monthMatch ? monthNames[monthMatch[1].toLowerCase()] ?? now.getMonth() : now.getMonth();
+        const year = now.getFullYear();
+        const checkDateMMDD = `${String(month + 1).padStart(2, '0')}-${String(d1).padStart(2, '0')}`;
+        
+        const priceOverrides: string[] = [];
+        for (const finca of fincasList.slice(0, 5)) {
+          try {
+            const rules = await ctx.runQuery(api.fincas.getPropertyPricingRules, {
+              propertyId: finca._id as any,
+            });
+            if (rules.length > 0) {
+              // Buscar la regla de temporada que aplique para las fechas
+              let aplicable = rules.find((r: any) => {
+                if (r.fechaDesde && r.fechaHasta) {
+                  return checkDateMMDD >= r.fechaDesde && checkDateMMDD <= r.fechaHasta;
+                }
+                if (r.fechas?.length) {
+                  return r.fechas.includes(checkDateMMDD);
+                }
+                return false;
+              });
+              if (aplicable && aplicable.valorUnico) {
+                priceOverrides.push(`**PRECIO REAL DE ${finca.title}:** $${aplicable.valorUnico.toLocaleString("es-CO")}/noche (Temporada: ${aplicable.nombre}). USA ESTE PRECIO.`);
+              }
+            }
+          } catch (e) {
+            // Si falla getPropertyPricingRules, usar priceBase como fallback
+            console.log("[pricing] Error fetching seasonal rules for", finca.title, e);
+          }
+        }
+        if (priceOverrides.length > 0) {
+          fincasContext += `\n\n## ⚠️ PRECIOS DE TEMPORADA APLICABLES (OBLIGATORIOS)\n${priceOverrides.join("\n")}\nSi una finca tiene PRECIO REAL listado arriba, DEBES usar ESE precio. Para las demás, usa el precio Base.`;
+        }
+      }
+      fincasContext += `\n\n⚠️ **INSTRUCCIÓN DE PRECIOS:** SIEMPRE usa el precio Base que aparece en cada finca (campo "Precios/noche: Base: $X"). Si hay un PRECIO REAL DE TEMPORADA listado arriba, usa ese en su lugar. NUNCA inventes un precio diferente al que está en los datos.`;
+    }
 
     const recentMessages = await ctx.runQuery(api.messages.listRecent, {
       conversationId: args.conversationId,
@@ -415,6 +554,7 @@ export const generateReplyWithRagAndFincas = internalAction({
       fincaTitle: args.fincaTitle ?? "",
       whatsappCatalogSentForSearch: catalogAlreadyShown,
       currentDate,
+      dynamicLocations: args.dynamicLocations,
     });
     const messages = recentMessages.map((m) => ({
       role: m.sender === "user" ? ("user" as const) : ("assistant" as const),
@@ -454,7 +594,7 @@ function formatFincasForPrompt(
   return list
     .map(
       (p) =>
-        `- ${p.title} (ID: ${p._id}): ${p.description ?? ""} | Ubicación: ${p.location ?? "N/A"} | Capacidad: ${p.capacity ?? "N/A"} personas | Tipo: ${p.type ?? "N/A"} | Precio base: ${p.priceBase ?? "consultar"}`
+        `- ${p.title} (ID: ${p._id}): ${p.description ?? ""} | Ubicación: ${p.location ?? "N/A"} | Capacidad: ${p.capacity ?? "N/A"} personas | Precio base/noche: $${(p.priceBase ?? 0).toLocaleString("es-CO")}`
     )
     .join("\n");
 }
@@ -467,8 +607,19 @@ function buildSystemPrompt(
     fincaTitle?: string;
     whatsappCatalogSentForSearch?: boolean;
     currentDate?: string;
+    dynamicLocations?: string;
   }
 ): string {
+  let basePrompt = CONSULTANT_SYSTEM_PROMPT;
+  
+  // Reemplazo dinámico o limpieza del listado de ciudades
+  if (opts?.dynamicLocations) {
+    basePrompt = basePrompt.replace(/{DYNAMIC_LOCATIONS_LIST}/g, opts.dynamicLocations);
+  } else {
+    // Si no se provee la lista (porque ya hay ubicación), reemplazar con algo genérico o vacío para que no use el placeholder literal
+    basePrompt = basePrompt.replace(/{DYNAMIC_LOCATIONS_LIST}/g, "nuestros destinos disponibles");
+  }
+
   const singleFincaHint =
     opts?.singleFincaCatalogSent && opts?.fincaTitle
       ? `
@@ -480,36 +631,52 @@ function buildSystemPrompt(
   const multiCatalogHint = opts?.whatsappCatalogSentForSearch
     ? `
 ---
-**AHORA MISMO:** El sistema YA ENVIÓ el **catálogo interactivo de WhatsApp** (tarjeta con varias fincas: fotos, precios, detalles). Está PROHIBIDO escribir lista numerada (1. 2. 3.), PROHIBIDO copiar nombres de fincas con precios en texto. Responde 1-3 líneas máximo: confirma brevemente (ubicación/fechas/personas si aplica) e invita a elegir en el catálogo o decir el nombre. Ejemplo: "Te compartí el catálogo con las opciones para Melgar y tu fin de semana. Toca la que te guste o dime cuál prefieres. 💎🏡"
+## 🚫 PROHIBICIÓN ABSOLUTA: NO LISTAR FINCAS EN TEXTO
+**AHORA MISMO:** El sistema YA ENVIÓ el **catálogo interactivo de WhatsApp** con TODAS las fincas disponibles (tarjetas con fotos, precios y detalles). El cliente ya las puede ver en su pantalla.
+
+**ESTÁ TERMINANTEMENTE PROHIBIDO:**
+- Escribir listas numeradas (1. 2. 3.) con nombres de fincas
+- Escribir listas con viñetas (*Finca X*: descripción)
+- Mencionar nombres de fincas específicas con descripciones
+- Decir "Aquí tienes algunas opciones:" seguido de una lista
+- Copiar o resumir el contenido del catálogo en texto
+
+**LO ÚNICO QUE DEBES HACER:** Responder con 1-2 líneas MÁXIMO confirmando que enviaste el catálogo e invitando a elegir.
+**EJEMPLO CORRECTO:** "¡Claro que sí! Te compartí el catálogo con las opciones de fincas disponibles en [Ciudad] para tus fechas. Dime cuál de estas fincas prefieres reservar. 🏡✨"
+**EJEMPLO INCORRECTO (NUNCA HAGAS ESTO):** "Aquí tienes algunas opciones: 1. *Finca X*: Capacidad para... 2. *Finca Y*: Ideal para..."
 `
     : "";
 
   const variasFincasTextoRule = opts?.whatsappCatalogSentForSearch
-    ? "**Catálogo ya enviado:** no aplica listar fincas en texto; el cliente las ve en WhatsApp."
+    ? "**REGLA ABSOLUTA: NUNCA listes fincas en texto cuando el catálogo interactivo fue enviado. El cliente las ve directamente en WhatsApp. Tu mensaje debe ser SOLO confirmación breve + invitación a elegir.**"
     : "**Si en el contexto hay VARIAS fincas y NO se ha enviado catálogo interactivo:** puedes mencionar 3-5 opciones con nombre y precio. Si el sistema envía catálogo, nunca dupliques eso en texto.";
 
-  return `${CONSULTANT_SYSTEM_PROMPT}
+  const dynamicLocationsText = opts?.dynamicLocations 
+    ? `\n**UBICACIONES DISPONIBLES EN TIEMPO REAL:** ${opts.dynamicLocations}`
+    : "";
+
+  const priorityInstructions = `
+---
+## ⚠️ INSTRUCCIONES DE PRIORIDAD MÁXIMA (OVERRIDE)
+1. **PASO 1 (Ubicación Faltante):** Si el usuario te da fechas/personas pero NO ubicación, DEBES proporcionar el listado completo de ciudades (visto arriba como UBICACIONES DISPONIBLES).
+2. **CATÁLOGO ENVIADO = NO LISTAR EN TEXTO:** Si el CONTEXTO DE FINCAS dice que "YA ENVIÓ EXITOSAMENTE el catálogo", tu mensaje debe ser SOLO 1-2 líneas confirmando el envío. NUNCA listes fincas en texto.
+3. **DESTINOS CERCANOS:** Si el cliente pide una ciudad sin fincas, sugiere destinos cercanos de la lista de UBICACIONES DISPONIBLES.
+4. **NUNCA USES "MELGAR" COMO ÚNICO EJEMPLO:** Usa siempre el listado completo proporcionado.
+`;
+
+  return `${basePrompt}${dynamicLocationsText}${priorityInstructions}
 
 ---
-## CONTEXTO ACTUAL (usa SOLO esta información para datos concretos)
+## CONTEXTO RAG (Base de Conocimiento)
+${ragContext}
 
-### 1) Base de conocimiento (normas, políticas, FAQs, respuestas rápidas):
-${ragContext || "(No hay fragmentos relevantes para esta consulta. Responde con las reglas generales del consultor.)"}
+## CONTEXTO DE FINCAS (Resultados de búsqueda)
+${fincasContext}
 
-### 2) Fincas disponibles según la búsqueda del usuario:
-${fincasContext || "(No hay fincas que coincidan. Ofrece alternativas de sector o pide más datos.)"}
-
-### 3) Información Temporal:
-Fecha actual (Colombia): ${opts?.currentDate || new Date().toLocaleDateString("es-CO")}
-${singleFincaHint}${multiCatalogHint}
+## FECHA ACTUAL: ${opts?.currentDate ?? "No especificada"}
 ---
-**CRÍTICO:** La bienvenida inicial la envía el sistema como **plantilla WhatsApp** (YCloud), no tú como texto largo con listas 📅👥. No repitas ese bloque. Si el usuario ya dio ubicación, fechas, personas o tipo de plan, CONFIRMA y sigue (fincas, mascotas, etc.). Ejemplo: "Perfecto, Restrepo del 20 al 21 para 10 personas… ¿Llevarán mascotas? 🐶".
-
-${variasFincasTextoRule}
-
-**RESERVA:** Si hay varias opciones, NUNCA pidas nombre/cédula/celular/correo hasta que el usuario ELIJA una finca. Cuando tenga finca elegida + todos los datos, incluya el bloque [CONTRACT_PDF:{...}] con los datos del contrato y el mensaje visible con confirmación + métodos de pago (abono 50%, saldo 50%, Nequi/PSE/transferencia); el sistema enviará el contrato en PDF y luego el mensaje.
-
-Responde SIEMPRE como Hernán, Consultor de FincasYa.com (never write FincasYa.cloud or another variant), en español. USA EMOJIS. Usa el RAG y el catálogo de fincas para datos; no inventes. Máximo 2-4 líneas por mensaje cuando sea posible.`;
+## CONTEXTO ACTUAL (Usa SOLO esta información para datos concretos)
+`;
 }
 
 /**
@@ -937,9 +1104,10 @@ o
 {"choice":"TEMPLATE","name":"<nombre_exacto>","language":"<idioma_exacto>"}
 
 Reglas:
-- TEMPLATE: cualquier mensaje que encaje con una plantilla de la lista (nombre + hint), incluidas **bienvenida** / **bienvenida_hernan** para saludos genéricos o pedidos muy abiertos de información sin tema específico ya cubierto por otra plantilla.
-- TEMPLATE: preguntas de política/FAQ (mascotas, check-in/out, cobro por persona, fechas especiales, puente, personal de servicio, contrato, proceso de pago, etc.).
-- NONE: mensaje con ubicación + fechas + personas para buscar catálogo (mejor RAG/catálogo), elige una finca por nombre concreto, envía datos personales para contrato, o ninguna plantilla encaja.
+- TEMPLATE: cualquier mensaje que encaje con una plantilla de la lista (nombre + hint), incluidas **bienvenida** para saludos genéricos.
+- TEMPLATE: preguntas de política/FAQ (mascotas, check-in, cobro por persona, contrato, proceso de pago, etc.).
+- NONE: SI EL USUARIO RESPONDE DANDO FECHAS (ej. "del 27 al 30 de marzo", "el próximo fin de semana") o CANTIDAD DE PERSONAS (ej. "para 2 personas", "somos 5 adultos"). El RAG debe encargarse de esto, NO envíes plantillas en respuestas de cotización o recolección de datos de reserva.
+- NONE: mensaje con ubicación + fechas + personas para buscar catálogo, elige una finca por nombre concreto, envía datos personales para contrato, o ninguna plantilla encaja.
 - Si encajan dos plantillas por igual → NONE.
 - "name" y "language" deben ser idénticos a un elemento de la lista.`,
       prompt: `Plantillas disponibles (JSON, cada una: name, language, hint):
@@ -1129,8 +1297,8 @@ export const detectCatalogIntentWithAI = internalAction({
 Reglas:
 - intent: "single_finca" si pide VER o RESERVAR una finca específica por nombre (ej. "quiero ver villa green", "me gustaría reservar la finca X", "quinto la finca X", "esta es la finca que elegí"). También si el mensaje es una confirmación de datos (fechas/personas) para una finca mencionada justo antes en el chat. En fincaName pon solo el nombre de la finca en minúsculas, sin "finca" ni "la".
 - intent: "more_options" si pide otras opciones, más opciones, no le gustan, envía más, otras fincas, dame otras.
-- intent: "search_catalog" si pide buscar fincas en una UBICACIÓN y tiene fechas o "fin de semana". Extrae: location (solo nombre del lugar, minúsculas, sin emojis; "mergal" u errores similares a Melgar → location "melgar"), hasWeekend (true si dice fin de semana / este fin / próximo fin / viernes a domingo), dateD1 y dateD2 (números del 1 al 31 si dice "del X al Y"), minCapacity (número si dice "X personas" o "X o más personas"), sortByPrice (true si dice buen precio, económico, barato).
-- Si el mensaje ACTUAL es solo confirmación (sí, si, ok, dale, claro, perfecto, va) y en el CONTEXTO del chat ya constan ubicación (ej. melgar, tolima) y además "fin de semana" o fechas o número de personas, devuelve "search_catalog" con location, hasWeekend y minCapacity inferidos de ese contexto (no uses "none" si hay datos claros en el contexto).
+- intent: "search_catalog" SOLO SI MENCIONA EXPLÍCITAMENTE UN MUNICIPIO O CIUDAD (ej. Villeta, Melgar, etc.). Si el usuario pide "una finca" pero NO EXPRESA NINGUNA CIUDAD NI FINCA, DEBES DEVOLVER intent "none". Extrae: location (solo nombre del lugar, minúsculas, sin emojis; "mergal" u errores similares a Melgar → location "melgar"), hasWeekend (true si dice fin de semana / este fin / próximo fin / viernes a domingo), dateD1 y dateD2 (números del 1 al 31 si dice "del X al Y"), minCapacity (número si dice "X personas" o "X o más personas"), sortByPrice (true si dice buen precio, económico, barato).
+- Si el mensaje ACTUAL es solo confirmación (sí, si, ok, dale, por favor, procede): Si el Asistente en el mensaje anterior estaba ofreciendo avanzar con la reserva o pidiendo datos ("¿Te gustaría que avancemos...", "Para elaborar tu contrato..."), devuelve SIEMPRE intent "none". Si no es un cierre de venta, y en el CONTEXTO del chat constan ubicación y fechas, entonces devuelve "search_catalog" infiriendo la ubicación.
 - Si pregunta por métodos de pago, datos bancarios, Nequi, PSE, transferencia, firma de contrato o PDF del contrato, devuelve SIEMPRE intent "none" (no catálogo).
 - intent: "none" si no aplica ninguna de las anteriores.
 
@@ -1214,12 +1382,24 @@ function parseLocationAndDates(userMessage: string): {
   sortByPrice?: boolean;
 } | null {
   const msg = userMessage.trim().toLowerCase();
-  // Ubicación: "para X" o "en X" (X = palabra(s), hasta "del" o "para" o número)
-  const locationMatch = msg.match(/(?:para|en)\s+([a-záéíóúñ\s]+?)(?:\s+del\s|\s+para\s|\s+\d|$)/i);
+  // Palabras que NO son ubicaciones válidas (evitar false positives como "los dias", "dos personas", etc.)
+  const invalidLocations = new Set([
+    "los dias", "los días", "el dia", "el día", "dos personas", "las personas",
+    "una finca", "la finca", "los dias", "este fin", "el fin",
+    "mi", "tu", "su", "un", "una", "el", "la", "los", "las",
+  ]);
+  // Ubicación: "en X" (preferido) o "para X" (solo si X parece una ciudad)
+  const locationMatchEn = msg.match(/(?:en|de)\s+([a-záéíóúñ\s]+?)(?:\s+del\s|\s+para\s|\s+\d|\s+una|\s+la|,|$)/i);
+  const locationMatchPara = msg.match(/(?:para)\s+([a-záéíóúñ\s]+?)(?:\s+del\s|\s+para\s|\s+\d|$)/i);
+  const locationMatch = locationMatchEn || locationMatchPara;
   const location = locationMatch ? locationMatch[1].trim().replace(/\s+/g, " ") : "";
   // Fechas: "del 20 al 21" o "20 al 21"
-  const dateMatch = msg.match(/(?:del\s+)?(\d{1,2})\s*al\s*(\d{1,2})/i);
+  const dateMatch = msg.match(/(?:del\s+)?(\d{1,2})\s*(?:al|hasta el|hasta)\s*(\d{1,2})/i);
   if (!location || !dateMatch) return null;
+  // Validar que la ubicación no sea una palabra genérica
+  if (invalidLocations.has(location) || location.length < 3) return null;
+  // Rechazar si la "ubicación" contiene palabras claramente no-geográficas
+  if (/\b(dias?|personas?|fincas?|reservar?|noches?)\b/i.test(location)) return null;
   const d1 = parseInt(dateMatch[1], 10);
   const d2 = parseInt(dateMatch[2], 10);
   if (d1 < 1 || d1 > 31 || d2 < 1 || d2 > 31) return null;
@@ -1369,7 +1549,7 @@ export const maybeSendSingleFincaCatalogForUserMessage = internalAction({
       return { sent: false };
     }
 
-    const searchTerm = args.extractedFincaName?.trim() || parseSingleFincaRequest(args.userMessage);
+    const searchTerm = args.extractedFincaName?.trim();
     if (!searchTerm) return { sent: false };
 
     const searchResults = await ctx.runQuery(api.fincas.search, {
@@ -1406,7 +1586,7 @@ export const maybeSendSingleFincaCatalogForUserMessage = internalAction({
   },
 });
 
-const CATALOG_LIMIT = 3;
+const CATALOG_LIMIT = 30;
 
 /**
  * Si el mensaje incluye ubicación + fechas (o "fin de semana") o pide "otras opciones",
@@ -1434,8 +1614,8 @@ export const maybeSendCatalogForUserMessage = internalAction({
       )
     ),
   },
-  returns: v.object({ sent: v.boolean() }),
-  handler: async (ctx, args): Promise<{ sent: boolean }> => {
+  returns: v.object({ sent: v.boolean(), location: v.optional(v.string()), fincasCount: v.optional(v.number()) }),
+  handler: async (ctx, args): Promise<{ sent: boolean; location?: string; fincasCount?: number }> => {
     const conv = await ctx.runQuery(api.conversations.getById, {
       conversationId: args.conversationId,
     });
@@ -1495,21 +1675,32 @@ export const maybeSendCatalogForUserMessage = internalAction({
         parseLocationAndDates(args.userMessage) ??
         parseSearchFilters(args.userMessage);
       if (!parsed) {
+        // NUNCA re-disparar catálogo con "sí" / confirmación. Solo con preguntas explícitas.
         const allowMergedUserHistory =
-          isAffirmativeOnly(args.userMessage) ||
           asksFincasOrCatalogInMessage(args.userMessage) ||
           messageLooksLikeDateCapacityFollowup(args.userMessage);
         if (allowMergedUserHistory) {
-          const recent = await ctx.runQuery(api.messages.listRecent, {
+          // Verificar que NO estamos en flujo de cierre (cotización/contrato)
+          const recentMsgs = await ctx.runQuery(api.messages.listRecent, {
             conversationId: args.conversationId,
-            limit: 30,
+            limit: 5,
           });
-          const merged = recent
-            .filter((m) => m.sender === "user")
-            .map((m) => m.content)
-            .join("\n");
-          parsed =
-            parseLocationAndDates(merged) ?? parseSearchFilters(merged);
+          const lastAssistant = recentMsgs.find((m) => m.sender === "assistant");
+          const isInClosingFlow = lastAssistant && (
+            /avancemos con la reserva|elaborar tu contrato|datos de la persona/i.test(lastAssistant.content)
+          );
+          if (!isInClosingFlow) {
+            const recent = await ctx.runQuery(api.messages.listRecent, {
+              conversationId: args.conversationId,
+              limit: 30,
+            });
+            const merged = recent
+              .filter((m) => m.sender === "user")
+              .map((m) => m.content)
+              .join("\n");
+            parsed =
+              parseLocationAndDates(merged) ?? parseSearchFilters(merged);
+          }
         }
       }
       if (!parsed) return { sent: false };
@@ -1531,8 +1722,9 @@ export const maybeSendCatalogForUserMessage = internalAction({
       excludePropertyIds,
       sortByPrice,
     });
+    console.log("[catalog-search] location:", location, "fincas encontradas (antes de catálogo):", fincas.length);
 
-    if (fincas.length === 0) return { sent: false };
+    if (fincas.length === 0) return { sent: false, location };
 
     let chosenCatalog = await ctx.runQuery(api.whatsappCatalogs.getByLocationKeyword, {
       location,
@@ -1564,7 +1756,7 @@ export const maybeSendCatalogForUserMessage = internalAction({
 
     const bodyText = excludePropertyIds?.length
       ? "Aquí tienes más opciones con los mismos filtros:"
-      : "Estas son 3 opciones de fincas disponibles para tus fechas:";
+      : "Estas son las fincas disponibles para tus fechas:";
 
     await ctx.runAction(internal.ycloud.sendWhatsAppCatalogList, {
       to: args.phone,
@@ -1584,7 +1776,7 @@ export const maybeSendCatalogForUserMessage = internalAction({
       sortByPrice,
     });
 
-    return { sent: true };
+    return { sent: true, location, fincasCount: productRetailerIds.length };
   },
 });
 

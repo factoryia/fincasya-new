@@ -779,15 +779,10 @@ export const searchAvailableByLocationAndDates = query({
     sortByPrice: v.optional(v.boolean()),
   },
   handler: async (ctx, args) => {
-    const limit = args.limit ?? 3;
+    const limit = args.limit ?? 30;
     const locLower = args.location.trim().toLowerCase();
     if (!locLower) return [];
 
-    const inCatalogIds = new Set(
-      (await ctx.db.query('propertyWhatsAppCatalog').collect()).map(
-        (r) => r.propertyId,
-      ),
-    );
     const excludeSet = new Set(args.excludePropertyIds ?? []);
     const all = await ctx.db.query('properties').collect();
     let byLocation = all.filter(
@@ -795,39 +790,85 @@ export const searchAvailableByLocationAndDates = query({
         p.active !== false &&
         p.visible !== false &&
         p.location.toLowerCase().includes(locLower) &&
-        inCatalogIds.has(p._id) &&
         !excludeSet.has(p._id),
     );
+
     if (args.minCapacity != null) {
       byLocation = byLocation.filter((p) => p.capacity >= args.minCapacity!);
     }
 
-    const result: Array<{
-      _id: (typeof all)[number]['_id'];
-      title: string;
-      priceBase?: number;
-    }> = [];
+    const available = [];
+    for (const property of byLocation) {
+      const overlapping = await ctx.db
+        .query('propertyAvailability')
+        .withIndex('by_property', (q) => q.eq('propertyId', property._id))
+        .filter((q) =>
+          q.and(
+            q.lt(q.field('fechaEntrada'), args.fechaSalida),
+            q.gt(q.field('fechaSalida'), args.fechaEntrada)
+          )
+        )
+        .first();
 
-    for (const p of byLocation) {
-      const bookings = await ctx.db
-        .query('bookings')
-        .withIndex('by_property', (q) => q.eq('propertyId', p._id))
-        .collect();
-      const overlap = bookings.some(
-        (b) =>
-          b.status !== 'CANCELLED' &&
-          b.fechaEntrada < args.fechaSalida &&
-          b.fechaSalida > args.fechaEntrada,
-      );
-      if (!overlap) {
-        result.push({ _id: p._id, title: p.title, priceBase: p.priceBase });
+      if (!overlapping) {
+        available.push(property);
       }
+      if (available.length >= limit * 2) break; // Fetch a bit more for sorting
     }
 
     if (args.sortByPrice) {
-      result.sort((a, b) => (a.priceBase ?? 0) - (b.priceBase ?? 0));
+      available.sort((a, b) => a.priceBase - b.priceBase);
     }
-    return result.slice(0, limit).map(({ _id, title }) => ({ _id, title }));
+
+    return available.slice(0, limit);
+  },
+});
+
+/**
+ * Obtener lista única de ubicaciones (ciudades/municipios) de todas las fincas activas.
+ */
+export const getAllUniqueLocations = query({
+  args: {},
+  handler: async (ctx) => {
+    const properties = await ctx.db
+      .query('properties')
+      .withIndex('by_createdAt')
+      .collect();
+    
+    // Solo activas y visibles
+    const filtered = properties.filter(p => p.active !== false && p.visible !== false);
+    const locations = filtered.map(p => p.location.trim().toUpperCase());
+    const unique = [...new Set(locations)]
+      .map(loc => loc.charAt(0).toUpperCase() + loc.slice(1).toLowerCase())
+      .sort();
+    return unique;
+  },
+});
+
+/**
+ * Obtener las reglas de temporada (pricing) activas para una propiedad.
+ */
+export const getPropertyPricingRules = query({
+  args: {
+    propertyId: v.id('properties'),
+  },
+  handler: async (ctx, args) => {
+    const rules = await ctx.db
+      .query('propertyPricing')
+      .withIndex('by_property', (q) => q.eq('propertyId', args.propertyId))
+      .collect();
+    
+    // Solo reglas activas
+    return rules
+      .filter((r) => r.activa !== false)
+      .map((r) => ({
+        nombre: r.nombre,
+        fechaDesde: r.fechaDesde,
+        fechaHasta: r.fechaHasta,
+        fechas: r.fechas,
+        valorUnico: r.valorUnico,
+        condiciones: r.condiciones,
+      }));
   },
 });
 
