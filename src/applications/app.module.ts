@@ -8,6 +8,7 @@ import { KnowledgeModule } from './knowledge/knowledge.module';
 import { UsersModule } from './users/users.module';
 import { ReviewsModule } from './reviews/reviews.module';
 import { QuienesSomosModule } from './quienes-somos/quienes-somos.module';
+import { AdminModule } from './admin/admin.module';
 
 @Module({
   imports: [
@@ -20,6 +21,7 @@ import { QuienesSomosModule } from './quienes-somos/quienes-somos.module';
     UsersModule,
     ReviewsModule,
     QuienesSomosModule,
+    AdminModule,
   ],
   controllers: [],
   providers: [],

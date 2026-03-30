@@ -120,7 +120,31 @@ export class InboxController {
   async getSuggestedData(@Param('conversationId') conversationId: string) {
     return this.inboxService.getSuggestedContractData(conversationId);
   }
- 
+
+  /**
+   * Obtener sugerencias de reserva basadas en IA
+   * GET /api/inbox/:conversationId/booking-data
+   */
+  @Get(':conversationId/booking-data')
+  async getSuggestedBookingData(@Param('conversationId') conversationId: string) {
+    return this.inboxService.getSuggestedBookingData(conversationId);
+  }
+
+  /**
+   * Crear reserva desde conversación y marcar como resuelta
+   * POST /api/inbox/:conversationId/create-booking
+   */
+  @Post(':conversationId/create-booking')
+  async createBookingFromConversation(
+    @Param('conversationId') conversationId: string,
+    @Body() body: any,
+  ) {
+    return this.inboxService.createBookingFromConversation({
+      conversationId,
+      ...body,
+    });
+  }
+
   private inferTypeFromFile(file: Express.Multer.File): 'image' | 'audio' | 'document' {
     const mime = (file.mimetype || '').toLowerCase();
     if (mime.startsWith('image/')) return 'image';

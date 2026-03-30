@@ -188,6 +188,8 @@ export default defineSchema({
     transactionId: v.optional(v.string()),
     reference: v.optional(v.string()),
     observaciones: v.optional(v.string()),
+    googleEventId: v.optional(v.string()),
+    googleCalendarId: v.optional(v.string()),
     createdAt: v.number(),
     updatedAt: v.number(),
   })
@@ -249,6 +251,7 @@ export default defineSchema({
     fechaSalida: v.number(),
     blocked: v.optional(v.boolean()),
     reason: v.optional(v.string()),
+    googleEventId: v.optional(v.string()),
   })
     .index('by_property', ['propertyId'])
     .index('by_dates', ['fechaEntrada', 'fechaSalida'])
@@ -443,6 +446,19 @@ export default defineSchema({
     recognitionSubtitle: v.string(),
     presenciaInstitucional: v.string(),
     carouselImages: v.optional(v.array(v.string())),
+    updatedAt: v.number(),
+  }),
+
+  // Integración con Google Calendar (Tokens y configuración)
+  googleCalendarIntegrations: defineTable({
+    accessToken: v.optional(v.string()),
+    refreshToken: v.optional(v.string()),
+    expiresAt: v.optional(v.number()),
+    calendarId: v.optional(v.string()),
+    connected: v.boolean(),
+    connectedEmail: v.optional(v.string()),
+    connectedName: v.optional(v.string()),
+    createdAt: v.number(),
     updatedAt: v.number(),
   }),
 });

@@ -6,12 +6,14 @@ import {
 import sharp from 'sharp';
 import { ConvexService } from '../shared/services/convex.service';
 import { S3Service } from '../shared/services/s3.service';
+import { BookingsSyncService } from '../shared/services/bookings-sync.service';
 
 @Injectable()
 export class InboxService {
   constructor(
     private readonly convexService: ConvexService,
     private readonly s3Service: S3Service,
+    private readonly bookingsSyncService: BookingsSyncService,
   ) {}
 
   async listConversations(params: {
@@ -152,6 +154,47 @@ export class InboxService {
     return this.convexService.action('ycloud:extractContractData', {
       conversationId,
     });
+  }
+
+  async getSuggestedBookingData(conversationId: string) {
+    // Reutilizamos la lógica de extracción de datos de contrato (fechas, finca)
+    const data = await this.convexService.action('ycloud:extractContractData', {
+      conversationId,
+    });
+    return data;
+  }
+
+  async createBookingFromConversation(params: {
+    conversationId: string;
+    propertyId: string;
+    nombreCompleto: string;
+    cedula: string;
+    celular: string;
+    correo: string;
+    fechaEntrada: string; // YYYY-MM-DD
+    fechaSalida: string; // YYYY-MM-DD
+    numeroPersonas: number;
+    precioTotal: number;
+    temporada: string;
+    observaciones?: string;
+  }) {
+    const { conversationId, fechaEntrada, fechaSalida, ...bookingParams } = params;
+
+    // 1. Convertir fechas a timestamps
+    const startTs = new Date(fechaEntrada).getTime();
+    const endTs = new Date(fechaSalida).getTime();
+
+    // 2. Crear la reserva y sincronizar con Google
+    const result = await this.bookingsSyncService.createBooking({
+      ...bookingParams,
+      fechaEntrada: startTs,
+      fechaSalida: endTs,
+    });
+
+    // 3. Marcar la conversación como resuelta
+    await this.setStatus(conversationId, 'resolved');
+
+    return result;
   }
  
   private normalizePhoneE164(phone: string): string {

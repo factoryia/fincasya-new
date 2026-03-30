@@ -1,6 +1,6 @@
 import { v } from 'convex/values';
 import { query, mutation } from './_generated/server';
-import { api } from './_generated/api';
+import { api, internal } from './_generated/api';
 
 // ============ QUERIES ============
 
@@ -226,6 +226,8 @@ export const create = mutation({
     temporada: v.string(),
     observaciones: v.optional(v.string()),
     reference: v.optional(v.string()),
+    googleEventId: v.optional(v.string()),
+    googleCalendarId: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
     const now = Date.now();
@@ -273,6 +275,8 @@ export const create = mutation({
       paymentStatus: 'PENDING',
       reference: args.reference,
       observaciones: args.observaciones,
+      googleEventId: args.googleEventId,
+      googleCalendarId: args.googleCalendarId,
       createdAt: now,
       updatedAt: now,
     });
@@ -285,6 +289,12 @@ export const create = mutation({
       fechaSalida: args.fechaSalida,
       blocked: true,
       reason: 'Reserva confirmada',
+      googleEventId: args.googleEventId,
+    });
+
+    // Sincronizar con Google Calendar en segundo plano
+    await ctx.scheduler.runAfter(0, internal.googleCalendar.syncBookingToCalendar, {
+      bookingId,
     });
 
     return bookingId;
@@ -315,6 +325,8 @@ export const update = mutation({
       ),
     ),
     observaciones: v.optional(v.string()),
+    googleEventId: v.optional(v.string()),
+    googleCalendarId: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
     const { id, ...updates } = args;
@@ -327,6 +339,11 @@ export const update = mutation({
     await ctx.db.patch(id, {
       ...updates,
       updatedAt: Date.now(),
+    });
+
+    // Sincronizar cambios con Google Calendar
+    await ctx.scheduler.runAfter(0, internal.googleCalendar.syncBookingToCalendar, {
+      bookingId: id,
     });
 
     return id;
@@ -361,6 +378,18 @@ export const cancel = mutation({
       .collect();
 
     await Promise.all(availability.map((a) => ctx.db.delete(a._id)));
+
+    // Eliminar de Google Calendar si existe
+    if (booking.googleEventId) {
+      await ctx.scheduler.runAfter(
+        0,
+        internal.googleCalendar.deleteBookingFromCalendar,
+        {
+          googleEventId: booking.googleEventId,
+          googleCalendarId: booking.googleCalendarId,
+        },
+      );
+    }
 
     return { success: true };
   },
