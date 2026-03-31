@@ -49,4 +49,14 @@ export class QuienesSomosService {
       throw new BadRequestException(error.message);
     }
   }
+
+  async uploadVideo(file: Express.Multer.File) {
+    try {
+      if (!file) return null;
+      const videoUrl = await this.s3Service.uploadVideo(file);
+      return videoUrl;
+    } catch (error) {
+      throw new BadRequestException(error.message);
+    }
+  }
 }

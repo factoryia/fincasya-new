@@ -7,8 +7,9 @@ import {
   Post,
   UseInterceptors,
   UploadedFiles,
+  UploadedFile,
 } from '@nestjs/common';
-import { FilesInterceptor } from '@nestjs/platform-express';
+import { FilesInterceptor, FileInterceptor } from '@nestjs/platform-express';
 import { memoryStorage } from 'multer';
 import { QuienesSomosService } from './quienes-somos.service';
 import { UpdateQuienesSomosDto } from './dto/update-quienes-somos.dto';
@@ -36,5 +37,16 @@ export class QuienesSomosController {
   )
   async uploadImages(@UploadedFiles() files: Express.Multer.File[]) {
     return await this.quienesSomosService.uploadImages(files);
+  }
+
+  @Post('video')
+  @UseInterceptors(
+    FileInterceptor('video', {
+      storage: memoryStorage(),
+      limits: { fileSize: 150 * 1024 * 1024 }, // 150MB per video
+    }),
+  )
+  async uploadVideo(@UploadedFile() file: Express.Multer.File) {
+    return await this.quienesSomosService.uploadVideo(file);
   }
 }

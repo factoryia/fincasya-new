@@ -446,6 +446,10 @@ export default defineSchema({
     recognitionSubtitle: v.string(),
     presenciaInstitucional: v.string(),
     carouselImages: v.optional(v.array(v.string())),
+    videoUrl: v.optional(v.string()),
+    videoTitle: v.optional(v.string()),
+    videoDescription: v.optional(v.string()),
+    videoBadge: v.optional(v.string()),
     updatedAt: v.number(),
   }),
 

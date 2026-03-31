@@ -62,4 +62,20 @@ export class UpdateQuienesSomosDto {
   @IsArray()
   @IsString({ each: true })
   carouselImages?: string[];
+
+  @IsOptional()
+  @IsString()
+  videoUrl?: string;
+
+  @IsOptional()
+  @IsString()
+  videoTitle?: string;
+
+  @IsOptional()
+  @IsString()
+  videoDescription?: string;
+
+  @IsOptional()
+  @IsString()
+  videoBadge?: string;
 }

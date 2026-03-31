@@ -31,6 +31,10 @@ export const update = mutation({
     recognitionSubtitle: v.optional(v.string()),
     presenciaInstitucional: v.optional(v.string()),
     carouselImages: v.optional(v.array(v.string())),
+    videoUrl: v.optional(v.string()),
+    videoTitle: v.optional(v.string()),
+    videoDescription: v.optional(v.string()),
+    videoBadge: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
     const existing = await ctx.db.query('quienes_somos').unique();
@@ -51,6 +55,10 @@ export const update = mutation({
       if (args.recognitionSubtitle !== undefined) updates.recognitionSubtitle = args.recognitionSubtitle;
       if (args.presenciaInstitucional !== undefined) updates.presenciaInstitucional = args.presenciaInstitucional;
       if (args.carouselImages !== undefined) updates.carouselImages = args.carouselImages;
+      if (args.videoUrl !== undefined) updates.videoUrl = args.videoUrl;
+      if (args.videoTitle !== undefined) updates.videoTitle = args.videoTitle;
+      if (args.videoDescription !== undefined) updates.videoDescription = args.videoDescription;
+      if (args.videoBadge !== undefined) updates.videoBadge = args.videoBadge;
 
       await ctx.db.patch(existing._id, updates);
       return existing._id;
@@ -68,6 +76,10 @@ export const update = mutation({
         recognitionSubtitle: args.recognitionSubtitle ?? '',
         presenciaInstitucional: args.presenciaInstitucional ?? '',
         carouselImages: args.carouselImages ?? [],
+        videoUrl: args.videoUrl ?? '',
+        videoTitle: args.videoTitle ?? '',
+        videoDescription: args.videoDescription ?? '',
+        videoBadge: args.videoBadge ?? '',
         updatedAt: now,
       });
       return id;

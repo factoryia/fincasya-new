@@ -7,8 +7,14 @@ import { ValidationPipe } from '@nestjs/common';
 import { AppModule } from './applications/app.module';
 const cookieParser = require('cookie-parser');
 
+import { json, urlencoded } from 'express';
+
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
+  
+  // Aumentar límites del body parser para uploads grandes
+  app.use(json({ limit: '150mb' }));
+  app.use(urlencoded({ limit: '150mb', extended: true }));
   
   // Establecer prefijo global para todas las rutas
   app.setGlobalPrefix('api');
