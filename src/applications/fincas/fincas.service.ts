@@ -132,6 +132,21 @@ export class FincasService {
     }
   }
 
+  async listSimple() {
+    try {
+      const data = (await this.convexService.query('fincas:list', { limit: 1000 })) as any;
+      const properties = data?.properties || [];
+      return properties.map((p: any) => ({
+        _id: p._id,
+        title: p.title,
+        code: p.code,
+        image: p.images?.[0] || p.image || null,
+        location: p.location,
+      }));
+    } catch (error) {
+      throw new BadRequestException(error.message);
+    }
+  }
 
   /**
    * Lista de fincas para feed de catálogo (Meta/WhatsApp). Solo incluye las que tienen al menos una imagen.
