@@ -446,6 +446,53 @@ export const calculateSuggestedPrice = query({
 });
 
 /**
+ * Busca una finca por término de búsqueda (título, slug o código)
+ */
+export const findBySearchTerm = query({
+  args: { term: v.string() },
+  handler: async (ctx, args) => {
+    const term = args.term.toLowerCase().trim();
+    if (!term) return null;
+
+    const all = await ctx.db.query('properties').collect();
+
+    // 1. Intento por slug exacto
+    const bySlug = all.find((p: any) => p.slug?.toLowerCase() === term);
+    if (bySlug) return bySlug;
+
+    // 2. Intento por código exacto
+    const byCode = all.find((p: any) => p.code?.toLowerCase() === term);
+    if (byCode) return byCode;
+
+    // 3. Intento por título exacto
+    const byTitle = all.find((p: any) => p.title.toLowerCase() === term);
+    if (byTitle) return byTitle;
+
+    // 4. Intento por inclusión
+    const byInclusion = all.find((p: any) =>
+      p.title.toLowerCase().includes(term) ||
+      p.slug?.toLowerCase().includes(term)
+    );
+
+    return byInclusion ?? null;
+  },
+});
+
+/**
+ * Obtiene la primera imagen de una propiedad
+ */
+export const getPropertyImage = query({
+  args: { propertyId: v.id('properties') },
+  handler: async (ctx, args) => {
+    const images = await ctx.db
+      .query('propertyImages')
+      .withIndex('by_property', (q) => q.eq('propertyId', args.propertyId))
+      .first();
+    return images;
+  },
+});
+
+/**
  * Calcular el precio total de una estadía (rango de fechas)
  */
 export const calculateStayPrice = query({
@@ -882,7 +929,22 @@ export const searchAvailableByLocationAndDates = query({
       available.sort((a, b) => a.priceBase - b.priceBase);
     }
 
-    return available.slice(0, limit);
+    const filteredAvailable = available.slice(0, limit);
+
+    const withDetails = await Promise.all(
+      filteredAvailable.map(async (property) => {
+        const image = await ctx.db
+          .query('propertyImages')
+          .withIndex('by_property', (q: any) => q.eq('propertyId', property._id))
+          .first();
+        return {
+          ...property,
+          image: image?.url,
+        };
+      })
+    );
+
+    return withDetails;
   },
 });
 
@@ -930,6 +992,38 @@ export const getPropertyPricingRules = query({
         fechas: r.fechas,
         valorUnico: r.valorUnico,
         condiciones: r.condiciones,
+      }));
+  },
+});
+
+/**
+ * Obtener las fechas bloqueadas o reservadas de una propiedad desde el presente hacia adelante.
+ */
+export const getPropertyAvailability = query({
+  args: {
+    propertyId: v.id('properties'),
+    monthsAhead: v.optional(v.number()),
+  },
+  handler: async (ctx, args) => {
+    const now = Date.now();
+    const months = args.monthsAhead ?? 3;
+    const futureLimit = now + (months * 30 * 24 * 60 * 60 * 1000);
+
+    const bookings = await ctx.db
+      .query('propertyAvailability')
+      .withIndex('by_property', (q) => q.eq('propertyId', args.propertyId))
+      .filter((q) => q.gt(q.field('fechaSalida'), now))
+      .collect();
+
+    // Ordenar por fecha de entrada y filtrar por límite futuro si se desea
+    return bookings
+      .filter(b => b.fechaEntrada < futureLimit)
+      .sort((a, b) => a.fechaEntrada - b.fechaEntrada)
+      .map(b => ({
+        fechaEntrada: b.fechaEntrada,
+        fechaSalida: b.fechaSalida,
+        blocked: b.blocked,
+        reason: b.reason || (b.bookingId ? "Reservada" : "Bloqueada"),
       }));
   },
 });

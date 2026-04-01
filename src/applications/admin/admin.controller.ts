@@ -61,7 +61,8 @@ export class AdminController {
       return res.redirect(`${appUrl}/admin/reservations?success=true`);
     } catch (err) {
       console.error('Error exchanging code in backend:', err);
-      return res.redirect(`${appUrl}/admin/reservations?error=exchange_failed`);
+      const msg = err.message || 'exchange_failed';
+      return res.redirect(`${appUrl}/admin/reservations?error=${encodeURIComponent(msg)}`);
     }
   }
 

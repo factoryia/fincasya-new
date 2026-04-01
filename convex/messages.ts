@@ -12,10 +12,12 @@ export const insertUserMessage = internalMutation({
         v.literal("image"),
         v.literal("audio"),
         v.literal("video"),
-        v.literal("document")
+        v.literal("document"),
+        v.literal("product")
       )
     ),
     mediaUrl: v.optional(v.string()),
+    metadata: v.optional(v.any()),
   },
   handler: async (ctx, args) => {
     await ctx.db.insert("messages", {
@@ -24,6 +26,7 @@ export const insertUserMessage = internalMutation({
       content: args.content,
       type: args.type ?? "text",
       mediaUrl: args.mediaUrl,
+      metadata: args.metadata,
       createdAt: args.createdAt,
     });
     await ctx.db.patch(args.conversationId, {
@@ -59,10 +62,12 @@ export const insertAssistantMessageWithMedia = internalMutation({
         v.literal("image"),
         v.literal("audio"),
         v.literal("video"),
-        v.literal("document")
+        v.literal("document"),
+        v.literal("product")
       )
     ),
     mediaUrl: v.optional(v.string()),
+    metadata: v.optional(v.any()),
     createdAt: v.number(),
   },
   handler: async (ctx, args) => {
@@ -72,6 +77,7 @@ export const insertAssistantMessageWithMedia = internalMutation({
       content: args.content,
       type: args.type ?? "text",
       mediaUrl: args.mediaUrl,
+      metadata: args.metadata,
       createdAt: args.createdAt,
     });
   },

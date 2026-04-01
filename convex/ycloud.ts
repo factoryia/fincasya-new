@@ -3,7 +3,7 @@ import { generateText } from "ai";
 import { v } from "convex/values";
 import { action, internalAction, internalMutation, internalQuery } from "./_generated/server";
 import { internal, api } from "./_generated/api";
-import type { Id } from "./_generated/dataModel";
+import type { Id, Doc } from "./_generated/dataModel";
 import rag from "./rag";
 import { CONSULTANT_SYSTEM_PROMPT } from "./lib/consultantPrompt";
 
@@ -15,6 +15,23 @@ export function isAffirmativeOnly(userMessage: string): boolean {
   const t = userMessage.trim().toLowerCase().normalize("NFD").replace(/\p{M}/gu, "").replace(/[^\w\s]/g, "");
   if (t.length > 50) return false;
   return /^(s[ií]|si(\s+.*)?|ok|okey|dale|claro|va|yes|listo|bueno|uhum|aja|por\s+supuesto|adelante|confirmo|exacto|eso(\s+mismo)?)$/i.test(t);
+}
+
+/**
+ * Detecta si el mensaje es una respuesta de seguimiento a preguntas sobre mascotas, personal, 
+ * eventos o requerimientos de convivencia, para evitar disparar el catálogo erróneamente.
+ */
+export function isProvidingFollowUpData(userMessage: string): boolean {
+  const t = userMessage.trim().toLowerCase().normalize("NFD").replace(/\p{M}/gu, "");
+  // Fechas o capacidad
+  if (/\b(\d{1,2}\s*(al|hasta)\s*\d{1,2}|para\s+\d+|huespedes|personas)\b/i.test(t)) return true;
+  // Mascotas
+  if (/\b(mascotas?|perros?|gatos?|llevamos|traemos|2 mascot|sin mascot)\b/i.test(t)) return true;
+  // Personal / Servicios
+  if (/\b(personal|servicio|empleada|cocinera|aseo)\b/i.test(t)) return true;
+  // Intención de reserva / Convivencia
+  if (/\b(confirmo|de\s+acuerdo|entendido|leido|requerimientos|convivencia)\b/i.test(t)) return true;
+  return false;
 }
 
 /**
@@ -165,7 +182,7 @@ export const processInboundMessage = internalAction({
       });
       const catalogIntentSnippet = recentForCatalogIntent
         .map(
-          (m) =>
+          (m: any) =>
             `${m.sender === "user" ? "Cliente" : "Asistente"}: ${m.content.slice(0, 320)}`
         )
         .join("\n");
@@ -181,14 +198,15 @@ export const processInboundMessage = internalAction({
 
       // Enviar ficha de una finca (IA o regex como respaldo).
       // PERO NO re-enviar si el usuario está dando datos de seguimiento (fechas, personas) SIN mencionar finca
-      const isProvidingFollowUpData = /\b(\d{1,2}\s*(al|hasta)\s*\d{1,2}|para\s+\d+\s)/i.test(args.text) 
+      const followUpData = isProvidingFollowUpData(args.text) 
         && catalogIntent.intent !== "single_finca";
       try {
-        if (!isProvidingFollowUpData) {
+        if (!followUpData) {
           const result = await ctx.runAction(
             internal.ycloud.maybeSendSingleFincaCatalogForUserMessage,
             {
               phone: args.phone,
+              conversationId,
               userMessage: args.text,
               wamid: args.wamid,
               extractedFincaName:
@@ -253,7 +271,7 @@ export const processInboundMessage = internalAction({
         const dynamicLocationsList_pre = await ctx.runQuery(api.fincas.getAllUniqueLocations, {});
         const msgLower_pre = args.text.toLowerCase().normalize("NFD").replace(/\p{M}/gu, "");
         const matchedCity = dynamicLocationsList_pre.find(
-          (loc) => msgLower_pre.includes(loc.toLowerCase().normalize("NFD").replace(/\p{M}/gu, ""))
+          (loc: string) => msgLower_pre.includes(loc.toLowerCase().normalize("NFD").replace(/\p{M}/gu, ""))
         );
         if (matchedCity) {
           console.log("[catalog-fallback] Ciudad detectada sin catálogo, forzando envío:", matchedCity);
@@ -293,7 +311,7 @@ export const processInboundMessage = internalAction({
       const dynamicLocationsList = await ctx.runQuery(api.fincas.getAllUniqueLocations, {});
       const msgLower = args.text.toLowerCase().normalize("NFD").replace(/\p{M}/gu, "");
       const mentionsCityOrFinca = dynamicLocationsList.some(
-        (loc) => msgLower.includes(loc.toLowerCase().normalize("NFD").replace(/\p{M}/gu, ""))
+        (loc: string) => msgLower.includes(loc.toLowerCase().normalize("NFD").replace(/\p{M}/gu, ""))
       );
       const mentionsDatesOrPersonas = /\b(\d{1,2}\s*(al|hasta)\s*\d{1,2}|personas?|fin de semana)\b/i.test(args.text);
       // También detectar intención de reserva con ubicación: "finca en X", "reservar en X"
@@ -556,7 +574,7 @@ export const generateReplyWithRagAndFincas = internalAction({
     if (fincasList.length > 0 && !catalogAlreadyShown) {
       // Buscar fechas en el mensaje actual Y en los mensajes recientes de la conversación
       const fullConversationText = [
-        ...recentMessages.map((m) => m.content),
+        ...recentMessages.map((m: any) => m.content),
         args.userMessage,
       ].join(" ");
 
@@ -572,7 +590,10 @@ export const generateReplyWithRagAndFincas = internalAction({
       }
 
       const pricingBlocks: string[] = [];
+      const availabilityBlocks: string[] = [];
+
       for (const finca of fincasList.slice(0, 8)) {
+        // 1. Precios y Temporadas
         try {
           const rules = await ctx.runQuery(api.fincas.getPropertyPricingRules, {
             propertyId: finca._id as any,
@@ -597,7 +618,6 @@ export const generateReplyWithRagAndFincas = internalAction({
               }
             }
 
-            // Líneas de temporadas con rangos y precios
             const reglaLines = rules.map((r: any) => {
               const rango = r.fechaDesde && r.fechaHasta
                 ? `${r.fechaDesde} al ${r.fechaHasta}`
@@ -618,12 +638,36 @@ export const generateReplyWithRagAndFincas = internalAction({
         } catch (e) {
           console.log("[pricing] Error fetching seasonal rules for", finca.title, e);
         }
+
+        // 2. Disponibilidad (Calendario)
+        try {
+          const availability = await ctx.runQuery(api.fincas.getPropertyAvailability, {
+            propertyId: finca._id as any,
+            monthsAhead: 3,
+          });
+          if (availability.length > 0) {
+            const busyLines = availability.map((b: any) => {
+              const d1 = new Date(b.fechaEntrada).toLocaleDateString("es-CO", { day: "2-digit", month: "2-digit" });
+              const d2 = new Date(b.fechaSalida).toLocaleDateString("es-CO", { day: "2-digit", month: "2-digit" });
+              return `  - [${d1} al ${d2}] (${b.reason})`;
+            }).join("\n");
+            availabilityBlocks.push(`🗓️ CALENDARIO DE OCUPACIÓN (${finca.title}):\n${busyLines}`);
+          } else {
+            availabilityBlocks.push(`🗓️ CALENDARIO DE OCUPACIÓN (${finca.title}): Totalmente disponible por ahora.`);
+          }
+        } catch (e) {
+          console.log("[availability] Error fetching availability for", finca.title, e);
+        }
       }
 
       if (pricingBlocks.length > 0) {
         fincasContext += `\n\n## 📅 REGLAS DE TEMPORADA Y PRECIOS POR FINCA\n${pricingBlocks.join("\n\n")}\n\nUSA siempre el PRECIO APLICABLE marcado con ⚠️ si existe. Si no, usa el precio Base de la finca. NUNCA inventes precios.`;
       } else {
         fincasContext += `\n\n⚠️ **INSTRUCCIÓN DE PRECIOS:** SIEMPRE usa el precio Base que aparece en cada finca. NUNCA inventes un precio diferente al que está en los datos.`;
+      }
+
+      if (availabilityBlocks.length > 0) {
+        fincasContext += `\n\n## 🏘️ DISPONIBILIDAD (FECHAS RESERVADAS/OCUPADAS)\n${availabilityBlocks.join("\n\n")}\n\n**IMPORTANTE:** Si el cliente solicita fechas que se solapan con las ocupadas arribas, infórmale que la finca NO está disponible para esos días de forma amable. **PROHIBIDO** dar detalles de quién hizo la reserva.`;
       }
     }
 
@@ -642,7 +686,7 @@ export const generateReplyWithRagAndFincas = internalAction({
       currentDate,
       dynamicLocations: args.dynamicLocations,
     });
-    const messages = recentMessages.map((m) => ({
+    const messages = recentMessages.map((m: any) => ({
       role: m.sender === "user" ? ("user" as const) : ("assistant" as const),
       content: m.content,
     }));
@@ -1282,7 +1326,7 @@ export const maybeSendWhatsappTemplateReply = internalAction({
     });
     const snippet = recent
       .map(
-        (m) =>
+        (m: any) =>
           `${m.sender === "user" ? "Cliente" : "Asistente"}: ${m.content.slice(0, 280)}`
       )
       .join("\n");
@@ -1613,7 +1657,9 @@ function shouldBlockCatalogMultiFincaSearch(userMessage: string): boolean {
     ) ||
     /\b(qu[eé]\s+metodos|cu[aá]les\s+son\s+los\s+pagos|donde\s+pago|a\s+donde\s+consigno|puedo\s+pagar)\b/.test(
       lower
-    )
+    ) ||
+    // Bloquear si responde a preguntas de seguimiento (mascotas/servicio)
+    /\b(mascotas?|perros?|personal|servicio|empleada|convivencia|requerimientos|sonido|decoracion)\b/i.test(lower)
   );
 }
 
@@ -1633,6 +1679,7 @@ function looksLikeContractDataSubmission(userMessage: string): boolean {
 export const maybeSendSingleFincaCatalogForUserMessage = internalAction({
   args: {
     phone: v.string(),
+    conversationId: v.id("conversations"),
     userMessage: v.string(),
     wamid: v.optional(v.string()),
     /** Si la IA ya detectó el nombre de la finca, usarlo en lugar de parsear del mensaje. */
@@ -1650,13 +1697,11 @@ export const maybeSendSingleFincaCatalogForUserMessage = internalAction({
     if (!searchTerm) return { sent: false };
     console.log("[single-finca] buscando:", searchTerm);
 
-    const searchResults = await ctx.runQuery(api.fincas.search, {
-      query: searchTerm,
-      limit: 5,
+    const fincaToSend = await ctx.runQuery(api.fincas.findBySearchTerm, {
+      term: searchTerm,
     });
-    console.log("[single-finca] resultados de búsqueda:", searchResults.map((p) => p.title));
-    if (searchResults.length === 0) {
-      console.log("[single-finca] sin resultados, abortando");
+    if (!fincaToSend) {
+      console.log("[single-finca] sin resultados para:", searchTerm, "abortando");
       return { sent: false };
     }
 
@@ -1666,8 +1711,6 @@ export const maybeSendSingleFincaCatalogForUserMessage = internalAction({
       return { sent: false };
     }
 
-    // Always use the top search result (most relevant to user's query).
-    const fincaToSend = searchResults[0];
     console.log("[single-finca] finca seleccionada:", fincaToSend.title);
 
     const productEntries = await ctx.runQuery(
@@ -1690,6 +1733,26 @@ export const maybeSendSingleFincaCatalogForUserMessage = internalAction({
       bodyText: `Aquí está ${fincaToSend.title} 🏡`,
       catalogId: catalog.whatsappCatalogId,
       wamid: args.wamid,
+    });
+
+    // Obtener la primera imagen para los metadatos
+    const firstImage = await ctx.runQuery(api.fincas.getPropertyImage, { 
+      propertyId: fincaToSend._id 
+    });
+
+    await ctx.runMutation(internal.messages.insertAssistantMessageWithMedia, {
+      conversationId: args.conversationId,
+      content: `Catálogo enviado: ${fincaToSend.title}`,
+      type: "product",
+      metadata: {
+        product: {
+          title: fincaToSend.title,
+          image: firstImage?.url || "",
+          price: fincaToSend.priceBase,
+          slug: fincaToSend.slug || fincaToSend.code || fincaToSend._id,
+        }
+      },
+      createdAt: Date.now(),
     });
     return { sent: true, fincaTitle: fincaToSend.title };
   },
@@ -1794,7 +1857,7 @@ export const maybeSendCatalogForUserMessage = internalAction({
             conversationId: args.conversationId,
             limit: 5,
           });
-          const lastAssistant = recentMsgs.find((m) => m.sender === "assistant");
+          const lastAssistant = recentMsgs.find((m: any) => m.sender === "assistant");
           const isInClosingFlow = lastAssistant && (
             /avancemos con la reserva|elaborar tu contrato|datos de la persona/i.test(lastAssistant.content)
           );
@@ -1804,8 +1867,8 @@ export const maybeSendCatalogForUserMessage = internalAction({
               limit: 30,
             });
             const merged = recent
-              .filter((m) => m.sender === "user")
-              .map((m) => m.content)
+              .filter((m: any) => m.sender === "user")
+              .map((m: any) => m.content)
               .join("\n");
             parsed =
               parseLocationAndDates(merged) ?? parseSearchFilters(merged);
@@ -1847,7 +1910,7 @@ export const maybeSendCatalogForUserMessage = internalAction({
       api.propertyWhatsAppCatalog.getProductRetailerIdsForProperties,
       {
         catalogId: chosenCatalog._id,
-        propertyIds: fincas.map((f) => f._id),
+        propertyIds: fincas.map((f: any) => f._id),
       }
     );
     if (productEntries.length === 0) {
@@ -1856,14 +1919,14 @@ export const maybeSendCatalogForUserMessage = internalAction({
         chosenCatalog = defaultCatalog;
         productEntries = await ctx.runQuery(
           api.propertyWhatsAppCatalog.getProductRetailerIdsForProperties,
-          { catalogId: chosenCatalog._id, propertyIds: fincas.map((f) => f._id) }
+          { catalogId: chosenCatalog._id, propertyIds: fincas.map((f: any) => f._id) }
         );
       }
     }
     // Per-finca fallback: use catalog productRetailerId if registered, else use the Convex ID.
     // This ensures ALL found fincas appear in the catalog, not just those with catalog entries.
-    const catalogEntryMap = new Map(productEntries.map((e) => [e.propertyId as string, e.productRetailerId]));
-    const productRetailerIds = fincas.map((f) => catalogEntryMap.get(f._id) ?? (f._id as string));
+    const catalogEntryMap = new Map(productEntries.map((e: any) => [e.propertyId as string, e.productRetailerId]));
+    const productRetailerIds = fincas.map((f: any) => catalogEntryMap.get(f._id) ?? (f._id as string));
     if (catalogEntryMap.size === 0) {
       console.log("[catalog-search] sin entries en propertyWhatsAppCatalog, usando IDs de Convex como fallback:", productRetailerIds.length);
     } else if (catalogEntryMap.size < fincas.length) {
@@ -1884,12 +1947,27 @@ export const maybeSendCatalogForUserMessage = internalAction({
 
     await ctx.runMutation(internal.conversations.setLastCatalogSent, {
       conversationId: args.conversationId,
-      propertyIds: fincas.map((f) => f._id),
+      propertyIds: fincas.map((f: any) => f._id),
       location,
       fechaEntrada,
       fechaSalida,
       minCapacity,
       sortByPrice,
+    });
+
+    await ctx.runMutation(internal.messages.insertAssistantMessageWithMedia, {
+      conversationId: args.conversationId,
+      content: bodyText,
+      type: "product",
+      metadata: {
+        catalog: fincas.slice(0, 3).map((f: any) => ({
+          title: f.title,
+          image: f.image,
+          price: f.priceBase,
+          slug: f.slug || f.code || f._id,
+        }))
+      },
+      createdAt: Date.now(),
     });
 
     return { sent: true, location, fincasCount: productRetailerIds.length };
@@ -1976,15 +2054,117 @@ export const sendWhatsAppCatalogList = internalAction({
  */
 export const extractContractData = action({
   args: { conversationId: v.id("conversations") },
-  handler: async (ctx, args) => {
+  handler: async (ctx, args): Promise<any> => {
     const messages = await ctx.runQuery(api.messages.listRecent, {
       conversationId: args.conversationId,
       limit: 30,
     });
 
+    // Helper para normalizar los datos extraídos
+    const normalizeData = async (parsed: any, historyMessages: any[]): Promise<any> => {
+      const currentYear = new Date().getFullYear();
+      const fixYear = (d: string) => {
+        if (!d) return d;
+        const match = d.match(/^(\d{4})-(.*)/);
+        if (match && Number(match[1]) < currentYear) {
+          return `${currentYear}-${match[2]}`;
+        }
+        return d;
+      };
+
+      // Resolución de propiedad
+      let resolvedPropertyId = String(parsed.propertyId || "");
+      if (!resolvedPropertyId || !resolvedPropertyId.includes(":")) {
+        const fincaName = String(parsed.finca || parsed.fincaName || "");
+        const searchTerms = [resolvedPropertyId, fincaName].filter(
+          (t) => t && t.length > 2,
+        );
+        for (const term of searchTerms) {
+          const found = await ctx.runQuery(api.fincas.findBySearchTerm, {
+            term,
+          });
+          if (found) {
+            resolvedPropertyId = found._id;
+            break;
+          }
+        }
+      }
+
+      // Datos de contacto existentes
+      const conv: any = await ctx.runQuery(api.conversations.getById, {
+        conversationId: args.conversationId,
+      });
+      const contact: any = conv
+        ? await ctx.runQuery(api.contacts.getById, {
+            contactId: conv.contactId,
+          })
+        : null;
+
+      // Intentar extraer numeroPersonas de la historia si falta en el JSON
+      let numeroPersonas = Number(parsed.numeroPersonas || parsed.personas || 0);
+      if (numeroPersonas === 0 && historyMessages.length > 0) {
+        // Buscar en los últimos mensajes (orden cronológico)
+        for (const msg of [...historyMessages].reverse()) {
+          const text = msg.content.toLowerCase();
+          // Regex para: "Huéspedes: 10", "10 personas", "pax: 8", "para 5 personas"
+          const match = text.match(/(?:huéspedes|personas|pax|cupo)(?:\s*[:\-]\s*|\s+)(\d{1,2})/i) 
+                     || text.match(/(\d{1,2})\s+(?:personas|adultos|huéspedes)/i);
+          if (match) {
+            numeroPersonas = parseInt(match[1], 10);
+            break;
+          }
+        }
+      }
+
+      return {
+        clientName: String(
+          parsed.nombre || parsed.clientName || contact?.name || "",
+        ),
+        clientId: String(
+          parsed.cedula || parsed.clientId || contact?.cedula || "",
+        ),
+        clientPhone: String(
+          parsed.celular || parsed.clientPhone || contact?.phone || "",
+        ),
+        clientEmail: String(
+          parsed.correo || parsed.clientEmail || contact?.email || "",
+        ),
+        clientCity: String(
+          parsed.ciudad || parsed.clientCity || contact?.city || "",
+        ),
+        clientAddress: String(parsed.direccion || parsed.clientAddress || ""),
+        checkInDate: fixYear(
+          String(parsed.entrada || parsed.checkInDate || ""),
+        ),
+        checkOutDate: fixYear(
+          String(parsed.salida || parsed.checkOutDate || ""),
+        ),
+        checkInTime: formatTimeTo24h(
+          String(parsed.entradaHora || parsed.checkInTime || ""),
+        ),
+        checkOutTime: formatTimeTo24h(
+          String(parsed.salidaHora || parsed.checkOutTime || ""),
+        ),
+        nightlyPrice: String(
+          parsed.nightlyPrice ||
+            (parsed.precioTotal && parsed.noches
+              ? String(
+                  Math.round(Number(parsed.precioTotal) / Number(parsed.noches)),
+                )
+              : ""),
+        ),
+        totalPrice: String(parsed.totalPrice || parsed.precioTotal || ""),
+        numeroPersonas,
+        propertyId: resolvedPropertyId,
+      };
+    };
+
     // 1. Intentar encontrar un bloque [CONTRACT_PDF:...] ya generado
     for (const msg of [...messages].reverse()) {
-      if (msg.sender === "assistant" && msg.content.includes("[CONTRACT_PDF:")) {
+      if (
+        msg.sender === "assistant" &&
+        msg.content.includes("[CONTRACT_PDF:")
+      ) {
         const tag = "[CONTRACT_PDF:";
         const idx = msg.content.indexOf(tag);
         const jsonStart = msg.content.indexOf("{", idx);
@@ -2005,32 +2185,9 @@ export const extractContractData = action({
         if (jsonEnd > 0) {
           try {
             const parsed = JSON.parse(msg.content.slice(jsonStart, jsonEnd));
-            
-            const currentYear = new Date().getFullYear();
-            const fixYear = (d: string) => {
-              if (!d) return d;
-              const match = d.match(/^(\d{4})-(.*)/);
-              if (match && Number(match[1]) < currentYear) {
-                return `${currentYear}-${match[2]}`;
-              }
-              return d;
-            };
-
+            const normalized = await normalizeData(parsed, messages);
             return {
-              clientName: String(parsed.nombre || parsed.clientName || ""),
-              clientId: String(parsed.cedula || parsed.clientId || ""),
-              clientPhone: String(parsed.celular || parsed.clientPhone || ""),
-              clientEmail: String(parsed.correo || parsed.clientEmail || ""),
-              clientCity: String(parsed.ciudad || ""),
-              clientAddress: String(parsed.direccion || ""),
-              checkInDate: fixYear(String(parsed.entrada || parsed.checkInDate || "")),
-              checkOutDate: fixYear(String(parsed.salida || parsed.checkOutDate || "")),
-              checkInTime: String(parsed.entradaHora || ""),
-              checkOutTime: String(parsed.salidaHora || ""),
-              nightlyPrice: parsed.nightlyPrice || (parsed.precioTotal && parsed.noches 
-                ? String(Math.round(Number(parsed.precioTotal) / Number(parsed.noches))) 
-                : ""),
-              totalPrice: String(parsed.totalPrice || parsed.precioTotal || ""),
+              ...normalized,
               source: "finalized_block",
             };
           } catch (e) {
@@ -2042,7 +2199,7 @@ export const extractContractData = action({
 
     // 2. Usar IA para extraer del historial si no hay bloque final
     const history = messages
-      .map((m) => `${m.sender.toUpperCase()}: ${m.content}`)
+      .map((m: any) => `${m.sender.toUpperCase()}: ${m.content}`)
       .join("\n");
 
     const currentDate = new Date().toLocaleDateString("es-CO", {
@@ -2058,16 +2215,18 @@ Responde ÚNICAMENTE con un objeto JSON válido con estas llaves (si no conoces 
 - clientName: nombre completo
 - clientId: cédula o ID
 - clientEmail: correo electrónico
-- clientPhone: celular
+- clientPhone: celular principal
 - ciudad: ciudad de residencia
 - direccion: dirección completa
 - checkInDate: fecha de entrada (YYYY-MM-DD)
 - checkOutDate: fecha de salida (YYYY-MM-DD)
-- entradaHora: hora de entrada aproximada (ej. 03:00 PM)
-- salidaHora: hora de salida aproximada (ej. 01:00 PM)
+- entradaHora: hora de entrada aproximada en formato 24h (HH:mm, ej. 10:00, 15:30)
+- salidaHora: hora de salida aproximada en formato 24h (HH:mm, ej. 09:00, 16:00)
 - nightlyPrice: precio por noche/día (solo números)
 - totalPrice: precio total (solo números)
-- propertyId: ID de la finca (si se menciona)
+- numeroPersonas: cantidad TOTAL de personas/huéspedes (solo el número, ej. 10)
+- fincaName: nombre de la finca que quiere reservar (si se menciona por nombre)
+- propertyId: ID de la finca (si se menciona explícitamente el ID)
 
 Mensajes:\n${history}`;
 
@@ -2080,31 +2239,9 @@ Mensajes:\n${history}`;
     try {
       const raw = text.trim().replace(/^```\w*\n?|\n?```$/g, "").trim();
       const parsed = JSON.parse(raw);
-      
-      const currentYear = new Date().getFullYear();
-      const fixYear = (d: string) => {
-        if (!d) return d;
-        const match = d.match(/^(\d{4})-(.*)/);
-        if (match && Number(match[1]) < currentYear) {
-          return `${currentYear}-${match[2]}`;
-        }
-        return d;
-      };
-
+      const normalized = await normalizeData(parsed, messages);
       return {
-        clientName: String(parsed.clientName || parsed.nombre || ""),
-        clientId: String(parsed.clientId || parsed.cedula || ""),
-        clientPhone: String(parsed.clientPhone || parsed.celular || ""),
-        clientEmail: String(parsed.clientEmail || parsed.correo || ""),
-        clientCity: String(parsed.ciudad || ""),
-        clientAddress: String(parsed.direccion || ""),
-        checkInDate: fixYear(String(parsed.checkInDate || parsed.fechaEntrada || "")),
-        checkOutDate: fixYear(String(parsed.checkOutDate || parsed.fechaSalida || "")),
-        checkInTime: String(parsed.entradaHora || ""),
-        checkOutTime: String(parsed.salidaHora || ""),
-        nightlyPrice: String(parsed.nightlyPrice || ""),
-        totalPrice: String(parsed.totalPrice || parsed.precioTotal || ""),
-        propertyId: String(parsed.propertyId || ""),
+        ...normalized,
         source: "ai_extraction",
       };
     } catch (e) {
@@ -2113,6 +2250,27 @@ Mensajes:\n${history}`;
     }
   },
 });
+
+function formatTimeTo24h(timeStr: string): string {
+  if (!timeStr) return "";
+  const t = timeStr.trim().toUpperCase();
+  const match = t.match(/^(\d{1,2}):(\d{2})\s*(AM|PM)?$/i);
+  if (!match) {
+    // Si ya parece HH:mm (24h)
+    if (/^\d{2}:\d{2}$/.test(t)) return t;
+    return timeStr;
+  }
+  let [_, hours, minutes, ampm] = match;
+  let h = parseInt(hours, 10);
+  if (ampm === "PM" && h < 12) h += 12;
+  if (ampm === AmPM.AM && h === 12) h = 0;
+  return `${h.toString().padStart(2, "0")}:${minutes}`;
+}
+
+enum AmPM {
+  AM = "AM",
+  PM = "PM"
+}
 
 /**
  * Busca mensajes del asistente que solo tengan el marcador [Plantilla WhatsApp: ...]

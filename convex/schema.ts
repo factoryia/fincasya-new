@@ -359,10 +359,13 @@ export default defineSchema({
         v.literal('audio'),
         v.literal('video'),
         v.literal('document'),
+        v.literal('product'),
       ),
     ),
     /** URL de media cuando type es image/audio/document */
     mediaUrl: v.optional(v.string()),
+    /** Metadatos del mensaje (ej: para catálogos, datos de finca) */
+    metadata: v.optional(v.any()),
     createdAt: v.number(),
   }).index('by_conversation', ['conversationId', 'createdAt']),
 
