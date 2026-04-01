@@ -148,13 +148,15 @@ export default defineSchema({
   // Tabla de reservas (bookings)
   bookings: defineTable({
     propertyId: v.id('properties'),
-    userId: v.optional(v.string()),
+    userId: v.optional(v.id('contacts')),
     nombreCompleto: v.string(),
     cedula: v.string(),
     celular: v.string(),
     correo: v.string(),
     fechaEntrada: v.number(),
     fechaSalida: v.number(),
+    horaEntrada: v.optional(v.string()), // Ej: "15:00"
+    horaSalida: v.optional(v.string()), // Ej: "11:00"
     numeroNoches: v.number(),
     numeroPersonas: v.number(),
     personasAdicionales: v.optional(v.number()),
@@ -188,10 +190,12 @@ export default defineSchema({
     transactionId: v.optional(v.string()),
     reference: v.optional(v.string()),
     observaciones: v.optional(v.string()),
+    city: v.optional(v.string()),
+    purpose: v.optional(v.string()),
     googleEventId: v.optional(v.string()),
     googleCalendarId: v.optional(v.string()),
     createdAt: v.number(),
-    updatedAt: v.number(),
+    updatedAt: v.optional(v.number()),
   })
     .index('by_property', ['propertyId'])
     .index('by_status', ['status'])
@@ -299,8 +303,15 @@ export default defineSchema({
   contacts: defineTable({
     phone: v.string(),
     name: v.string(),
+    email: v.optional(v.string()),
+    cedula: v.optional(v.string()),
+    city: v.optional(v.string()),
+    lastReservationAt: v.optional(v.number()),
     createdAt: v.number(),
-  }).index('by_phone', ['phone']),
+    updatedAt: v.optional(v.number()),
+  })
+    .index('by_phone', ['phone'])
+    .index('by_cedula', ['cedula']),
 
   conversations: defineTable({
     contactId: v.id('contacts'),

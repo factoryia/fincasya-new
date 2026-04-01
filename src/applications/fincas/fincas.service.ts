@@ -114,6 +114,25 @@ export class FincasService {
     }
   }
 
+  async calculateStayPrice(
+    propertyId: string,
+    fechaEntrada: string,
+    fechaSalida: string,
+    numeroPersonas?: number,
+  ) {
+    try {
+      return await this.convexService.query('fincas:calculateStayPrice', {
+        propertyId,
+        fechaEntrada,
+        fechaSalida,
+        numeroPersonas,
+      });
+    } catch (error) {
+      throw new BadRequestException(error.message);
+    }
+  }
+
+
   /**
    * Lista de fincas para feed de catálogo (Meta/WhatsApp). Solo incluye las que tienen al menos una imagen.
    */

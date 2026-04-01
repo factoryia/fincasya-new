@@ -122,4 +122,16 @@ export class GoogleCalendarService {
       requestBody,
     });
   }
+
+  async deleteEvent(eventId: string): Promise<void> {
+    const calendar = await this.getAuthorizedCalendar();
+    try {
+      await calendar.events.delete({
+        calendarId: 'primary',
+        eventId,
+      });
+    } catch (e: any) {
+      console.error(`Failed to delete Google Calendar Event (${eventId}):`, e.message);
+    }
+  }
 }

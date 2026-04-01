@@ -22,6 +22,8 @@ export const list = query({
     ),
     limit: v.optional(v.number()),
     cursor: v.optional(v.id('bookings')),
+    month: v.optional(v.string()),
+    year: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
     const limit = args.limit ?? 50;
@@ -44,11 +46,24 @@ export const list = query({
               .collect()
           : await ctx.db.query('bookings').collect();
 
-    // Aplicar cursor si existe (filtrar manualmente después de obtener los resultados)
     let filtered = allBookings;
+
+    // Filtrar por mes y año si se proporcionan (rango de fechas)
+    if (args.month && args.year) {
+      const year = parseInt(args.year, 10);
+      const month = parseInt(args.month, 10) - 1; // 0-based
+      const startMs = new Date(year, month, 1).getTime();
+      const endMs = new Date(year, month + 1, 0, 23, 59, 59, 999).getTime();
+
+      filtered = filtered.filter(
+        (b) => b.fechaEntrada <= endMs && b.fechaSalida >= startMs
+      );
+    }
+
+    // Aplicar cursor si existe (filtrar manualmente después de obtener los resultados)
     if (args.cursor) {
       filtered = filtered.filter(
-        (b: (typeof allBookings)[number]) => b._id > args.cursor!,
+        (b) => b._id > args.cursor!,
       );
     }
 
@@ -63,6 +78,17 @@ export const list = query({
     const bookingsWithDetails = await Promise.all(
       bookingsToReturn.map(async (booking: (typeof allBookings)[number]) => {
         const property = await ctx.db.get(booking.propertyId);
+        let firstImage = null;
+        if (property) {
+          const images = await ctx.db
+            .query('propertyImages')
+            .withIndex('by_property', (q) => q.eq('propertyId', property._id))
+            .collect();
+          if (images.length > 0) {
+            firstImage = images.sort((a,b) => (a.order || 0) - (b.order || 0))[0]?.url;
+          }
+        }
+        
         return {
           ...booking,
           property: property
@@ -70,6 +96,7 @@ export const list = query({
                 id: property._id,
                 title: property.title,
                 location: property.location,
+                image: firstImage,
               }
             : null,
         };
@@ -200,7 +227,7 @@ export const checkAvailability = query({
 export const create = mutation({
   args: {
     propertyId: v.id('properties'),
-    userId: v.optional(v.id('user')),
+    userId: v.optional(v.string()),
     nombreCompleto: v.string(),
     cedula: v.string(),
     celular: v.string(),
@@ -225,9 +252,21 @@ export const create = mutation({
     currency: v.optional(v.string()),
     temporada: v.string(),
     observaciones: v.optional(v.string()),
+    city: v.optional(v.string()),
+    purpose: v.optional(v.string()),
     reference: v.optional(v.string()),
     googleEventId: v.optional(v.string()),
     googleCalendarId: v.optional(v.string()),
+    horaEntrada: v.optional(v.string()), // "15:00"
+    horaSalida: v.optional(v.string()), // "11:00"
+    fechaCheckOut: v.optional(v.number()), // Para compatibilidad con nombres de UI
+    status: v.optional(v.union(
+      v.literal('PENDING'),
+      v.literal('CONFIRMED'),
+      v.literal('PAID'),
+      v.literal('CANCELLED'),
+      v.literal('COMPLETED'),
+    )),
   },
   handler: async (ctx, args) => {
     const now = Date.now();
@@ -245,15 +284,71 @@ export const create = mutation({
       );
     }
 
+    let resolvedUserId: any | undefined;
+    
+    // Crear/Enlazar cliente (Contacto CRM)
+    if (args.celular) {
+      // Buscar por celular
+      const contactByPhone = await ctx.db
+        .query('contacts')
+        .withIndex('by_phone', (q) => q.eq('phone', args.celular))
+        .first();
+
+      if (contactByPhone) {
+        resolvedUserId = contactByPhone._id;
+        // Actualizar datos del contacto existente
+        await ctx.db.patch(resolvedUserId, {
+          name: args.nombreCompleto,
+          email: args.correo || contactByPhone.email,
+          cedula: args.cedula || contactByPhone.cedula,
+          city: args.city || contactByPhone.city,
+          lastReservationAt: now,
+          updatedAt: now,
+        });
+      } else if (args.correo) {
+        // Buscar por email
+        const contactByEmail = await ctx.db
+          .query('contacts')
+          .filter((q) => q.eq(q.field('email'), args.correo))
+          .first();
+
+        if (contactByEmail) {
+          resolvedUserId = contactByEmail._id;
+          await ctx.db.patch(resolvedUserId, {
+            name: args.nombreCompleto,
+            phone: args.celular || contactByEmail.phone,
+            cedula: args.cedula || contactByEmail.cedula,
+            city: args.city || contactByEmail.city,
+            lastReservationAt: now,
+            updatedAt: now,
+          });
+        }
+      }
+
+      // Si no existe de ninguna forma, crearlo
+      if (!resolvedUserId) {
+        resolvedUserId = await ctx.db.insert('contacts', {
+          name: args.nombreCompleto,
+          phone: args.celular,
+          email: args.correo,
+          cedula: args.cedula,
+          city: args.city,
+          createdAt: now,
+          lastReservationAt: now,
+          updatedAt: now,
+        });
+      }
+    }
+
     const bookingId = await ctx.db.insert('bookings', {
       propertyId: args.propertyId,
-      userId: args.userId as any,
+      userId: resolvedUserId as any,
       nombreCompleto: args.nombreCompleto,
       cedula: args.cedula,
       celular: args.celular,
       correo: args.correo,
       fechaEntrada: args.fechaEntrada,
-      fechaSalida: args.fechaSalida,
+      fechaSalida: args.fechaCheckOut || args.fechaSalida,
       numeroNoches: args.numeroNoches,
       numeroPersonas: args.numeroPersonas,
       personasAdicionales: args.personasAdicionales ?? 0,
@@ -271,12 +366,16 @@ export const create = mutation({
       precioTotal: args.precioTotal,
       currency: args.currency ?? 'COP',
       temporada: args.temporada,
-      status: 'PENDING',
+      status: args.status ?? 'PENDING',
       paymentStatus: 'PENDING',
       reference: args.reference,
       observaciones: args.observaciones,
+      city: args.city,
+      purpose: args.purpose,
       googleEventId: args.googleEventId,
       googleCalendarId: args.googleCalendarId,
+      horaEntrada: args.horaEntrada,
+      horaSalida: args.horaSalida,
       createdAt: now,
       updatedAt: now,
     });
@@ -327,6 +426,8 @@ export const update = mutation({
     observaciones: v.optional(v.string()),
     googleEventId: v.optional(v.string()),
     googleCalendarId: v.optional(v.string()),
+    horaEntrada: v.optional(v.string()),
+    horaSalida: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
     const { id, ...updates } = args;
@@ -462,5 +563,50 @@ export const createPayment = mutation({
     }
 
     return paymentId;
+  },
+});
+
+/**
+ * Eliminar una reserva y sus pagos
+ */
+export const remove = mutation({
+  args: { id: v.id('bookings') },
+  handler: async (ctx, args) => {
+    const booking = await ctx.db.get(args.id);
+    if (!booking) return null;
+
+    const payments = await ctx.db
+      .query('payments')
+      .withIndex('by_booking', (q) => q.eq('bookingId', args.id))
+      .collect();
+    
+    for (const p of payments) {
+      await ctx.db.delete(p._id);
+    }
+
+    // Eliminar bloque de disponibilidad
+    const availability = await ctx.db
+      .query('propertyAvailability')
+      .withIndex('by_booking', (q) => q.eq('bookingId', args.id))
+      .collect();
+
+    for (const a of availability) {
+      await ctx.db.delete(a._id);
+    }
+
+    // Eliminar de Google Calendar si existe (background worker)
+    if (booking.googleEventId) {
+      await ctx.scheduler.runAfter(
+        0,
+        internal.googleCalendar.deleteBookingFromCalendar,
+        {
+          googleEventId: booking.googleEventId,
+          googleCalendarId: booking.googleCalendarId,
+        },
+      );
+    }
+
+    await ctx.db.delete(args.id);
+    return booking;
   },
 });

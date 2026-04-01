@@ -343,6 +343,18 @@ export class FincasController {
     return this.fincasService.calculateSuggestedPrice(id, checkInDate);
   }
 
+  @Get(':id/calculate-stay-price')
+  async calculateStayPrice(
+    @Param('id') id: string,
+    @Query('fechaEntrada') fechaEntrada: string,
+    @Query('fechaSalida') fechaSalida: string,
+    @Query('numeroPersonas') numeroPersonas?: string,
+  ) {
+    const numPers = numeroPersonas ? parseInt(numeroPersonas, 10) : undefined;
+    return this.fincasService.calculateStayPrice(id, fechaEntrada, fechaSalida, numPers);
+  }
+
+
   @Get(':id')
   async getById(
     @Param('id') id: string,

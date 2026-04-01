@@ -9,6 +9,14 @@ export class BookingsSyncService {
     private readonly googleCalendarService: GoogleCalendarService,
   ) {}
 
+  async checkAvailability(propertyId: string, fechaEntrada: number, fechaSalida: number) {
+    return this.convexService.query('bookings:checkAvailability', {
+      propertyId: propertyId as any,
+      fechaEntrada,
+      fechaSalida,
+    });
+  }
+
   /**
    * Crear una reserva en Convex y sincronizarla con Google Calendar.
    */
@@ -41,26 +49,8 @@ export class BookingsSyncService {
       subtotal: params.precioTotal, // Simplificado para este flujo
     });
 
-    // 3. Crear evento en Google Calendar
-    try {
-      const eventId = await this.googleCalendarService.createEvent({
-        summary: `Reserva: ${property.title} - ${params.nombreCompleto}`,
-        location: property.location,
-        description: `Cliente: ${params.nombreCompleto}\nCédula: ${params.cedula}\nCelular: ${params.celular}\nCorreo: ${params.correo}\nPrecio: $${params.precioTotal.toLocaleString('es-CO')}\nObservaciones: ${params.observaciones || 'Ninguna'}`,
-        start: new Date(params.fechaEntrada),
-        end: new Date(params.fechaSalida),
-      });
-
-      // 4. Actualizar reserva en Convex con el ID de Google
-      await this.convexService.mutation('bookings:update', {
-        id: bookingId,
-        googleEventId: eventId,
-        googleCalendarId: process.env.GOOGLE_CALENDAR_ID || 'primary',
-      });
-    } catch (error) {
-      console.error('Error syncing with Google Calendar:', error);
-      // No fallamos la creación de la reserva si falla Google, pero lo logueamos
-    }
+    // 3. (Google Calendar sync is handled asynchronously by Convex itself in background)
+    // El background worker `syncBookingToCalendar` hace la sincronización evitando delays aquí.
 
     return { bookingId };
   }
@@ -69,21 +59,21 @@ export class BookingsSyncService {
    * Sincronizar una reserva existente (por ejemplo, si se actualizan fechas).
    */
   async syncBooking(bookingId: string) {
-    const booking = await this.convexService.query('bookings:getById', {
-      id: bookingId as any,
-    });
-    if (!booking || !booking.googleEventId) return;
+    // La sincronización también ocurre automáticamente al usar el mutation `bookings:update`
+    // desde Convex con el worker `syncBookingToCalendar`.
+  }
 
-    const property = await this.convexService.query('fincas:getById', {
-      id: booking.propertyId as any,
+  /**
+   * Eliminar una reserva
+   */
+  async deleteBooking(bookingId: string) {
+    await this.convexService.mutation('bookings:remove', {
+      id: bookingId,
     });
 
-    await this.googleCalendarService.updateEvent(booking.googleEventId, {
-      summary: `Reserva: ${property.title} - ${booking.nombreCompleto}`,
-      location: property.location,
-      start: new Date(booking.fechaEntrada),
-      end: new Date(booking.fechaSalida),
-    });
+    // La eliminación de Google Calendar se maneja asíncronamente en Convex (background worker)
+    
+    return { success: true, deletedId: bookingId };
   }
 
   /**

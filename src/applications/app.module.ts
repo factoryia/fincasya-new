@@ -9,6 +9,8 @@ import { UsersModule } from './users/users.module';
 import { ReviewsModule } from './reviews/reviews.module';
 import { QuienesSomosModule } from './quienes-somos/quienes-somos.module';
 import { AdminModule } from './admin/admin.module';
+import { ContactsModule } from './contacts/contacts.module';
+import { BookingsModule } from './bookings/bookings.module';
 
 @Module({
   imports: [
@@ -22,7 +24,10 @@ import { AdminModule } from './admin/admin.module';
     ReviewsModule,
     QuienesSomosModule,
     AdminModule,
+    ContactsModule,
+    BookingsModule,
   ],
+
   controllers: [],
   providers: [],
 })

@@ -59,6 +59,7 @@ export const getOrCreateContact = internalMutation({
       phone: args.phone,
       name: args.name || args.phone,
       createdAt: now,
+      updatedAt: now,
     });
   },
 });

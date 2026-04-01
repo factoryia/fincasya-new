@@ -366,6 +366,70 @@ export const getById = query({
  * Calcular el precio sugerido por noche para una finca en una fecha dada
  * Basado en reglas de temporada (propertyPricing + globalPricing)
  */
+/**
+ * Helper interno para obtener las reglas de precio activas de una propiedad
+ */
+async function getActivePricingRules(ctx: any, propertyId: any) {
+  const pricingRules = await ctx.db
+    .query('propertyPricing')
+    .withIndex('by_property', (q: any) => q.eq('propertyId', propertyId))
+    .collect();
+
+  const activeRules = [];
+  for (const rule of pricingRules) {
+    let globalData = null;
+    if (rule.globalRuleId) {
+      globalData = await ctx.db.get(rule.globalRuleId);
+    }
+    
+    const isActive = (globalData?.activa !== false) && (rule.activa ?? true);
+    if (isActive) {
+      activeRules.push({
+        ...rule,
+        fechaDesde: globalData?.fechaDesde || rule.fechaDesde,
+        fechaHasta: globalData?.fechaHasta || rule.fechaHasta,
+        fechas: globalData?.fechas || rule.fechas,
+      });
+    }
+  }
+  return activeRules.sort((a, b) => (a.order ?? 999) - (b.order ?? 999));
+}
+
+/**
+ * Helper interno para calcular el precio de una sola noche
+ */
+function getPriceForDate(dateStr: string, basePrice: number, activeRules: any[]) {
+  // Extraer MM-DD de la fecha (YYYY-MM-DD)
+  const parts = dateStr.split('-');
+  if (parts.length < 3) return { price: basePrice, ruleName: "Estándar" };
+  const mmdd = `${parts[1]}-${parts[2]}`;
+
+  for (const rule of activeRules) {
+    // 1. Coincidencia por lista de fechas específicas
+    if (rule.fechas?.includes(mmdd)) {
+      return { price: rule.valorUnico ?? basePrice, ruleName: rule.nombre || "Especial" };
+    }
+
+    // 2. Coincidencia por rango MM-DD
+    if (rule.fechaDesde && rule.fechaHasta) {
+      if (rule.fechaDesde <= rule.fechaHasta) {
+        if (mmdd >= rule.fechaDesde && mmdd <= rule.fechaHasta) {
+          return { price: rule.valorUnico ?? basePrice, ruleName: rule.nombre || "Especial" };
+        }
+      } else {
+        // Rango que cruza el año
+        if (mmdd >= rule.fechaDesde || mmdd <= rule.fechaHasta) {
+          return { price: rule.valorUnico ?? basePrice, ruleName: rule.nombre || "Especial" };
+        }
+      }
+    }
+  }
+  return { price: basePrice, ruleName: "Estándar" };
+}
+
+/**
+ * Calcular el precio sugerido por noche para una finca en una fecha dada
+ */
 export const calculateSuggestedPrice = query({
   args: {
     propertyId: v.id('properties'),
@@ -375,65 +439,63 @@ export const calculateSuggestedPrice = query({
     const property = await ctx.db.get(args.propertyId);
     if (!property) return null;
 
-    const pricingRules = await ctx.db
-      .query('propertyPricing')
-      .withIndex('by_property', (q) => q.eq('propertyId', args.propertyId))
-      .collect();
-
-    // Solo reglas activas (considerando la herencia global)
-    const activeRules = [];
-    for (const rule of pricingRules) {
-      let globalData = null;
-      if (rule.globalRuleId) {
-        globalData = await ctx.db.get(rule.globalRuleId);
-      }
-      
-      const isActive = (globalData?.activa !== false) && (rule.activa ?? true);
-      if (isActive) {
-        activeRules.push({
-          ...rule,
-          fechaDesde: globalData?.fechaDesde || rule.fechaDesde,
-          fechaHasta: globalData?.fechaHasta || rule.fechaHasta,
-          fechas: globalData?.fechas || rule.fechas,
-        });
-      }
-    }
-
-    if (!activeRules.length) return property.priceBase;
-
-    // Extraer MM-DD de la fecha de entrada
-    const parts = args.checkInDate.split('-');
-    if (parts.length < 3) return property.priceBase;
-    const dateStr = `${parts[1]}-${parts[2]}`; // MM-DD
-
-    // Ordenar por el campo order si existe (prioridad)
-    const sortedRules = activeRules.sort((a, b) => (a.order ?? 999) - (b.order ?? 999));
-
-    // Buscar coincidencia
-    for (const rule of sortedRules) {
-      // 1. Coincidencia por lista de fechas específicas
-      if (rule.fechas?.includes(dateStr)) {
-        return rule.valorUnico ?? property.priceBase;
-      }
-
-      // 2. Coincidencia por rango MM-DD
-      if (rule.fechaDesde && rule.fechaHasta) {
-        if (rule.fechaDesde <= rule.fechaHasta) {
-          if (dateStr >= rule.fechaDesde && dateStr <= rule.fechaHasta) {
-            return rule.valorUnico ?? property.priceBase;
-          }
-        } else {
-          // Rango que cruza el año (ej: 12-15 a 01-15)
-          if (dateStr >= rule.fechaDesde || dateStr <= rule.fechaHasta) {
-            return rule.valorUnico ?? property.priceBase;
-          }
-        }
-      }
-    }
-
-    return property.priceBase;
+    const activeRules = await getActivePricingRules(ctx, args.propertyId);
+    const result = getPriceForDate(args.checkInDate, property.priceBase, activeRules);
+    return result.price;
   },
 });
+
+/**
+ * Calcular el precio total de una estadía (rango de fechas)
+ */
+export const calculateStayPrice = query({
+  args: {
+    propertyId: v.id('properties'),
+    fechaEntrada: v.string(), // YYYY-MM-DD
+    fechaSalida: v.string(),  // YYYY-MM-DD
+    numeroPersonas: v.optional(v.number()),
+  },
+  handler: async (ctx, args) => {
+    const property = await ctx.db.get(args.propertyId);
+    if (!property) return { total: 0, nights: [] };
+
+    const activeRules = await getActivePricingRules(ctx, args.propertyId);
+    
+    const start = new Date(args.fechaEntrada + "T12:00:00");
+    const end = new Date(args.fechaSalida + "T12:00:00");
+    
+    if (isNaN(start.getTime()) || isNaN(end.getTime()) || start >= end) {
+      return { total: 0, nights: [] };
+    }
+
+    const nights = [];
+    let current = new Date(start);
+    let total = 0;
+
+    // Iterar día por día hasta el día ANTERIOR a la salida
+    while (current < end) {
+      const dateStr = current.toISOString().split('T')[0];
+      const { price, ruleName } = getPriceForDate(dateStr, property.priceBase, activeRules);
+      
+      nights.push({
+        date: dateStr,
+        price: price,
+        ruleName: ruleName
+      });
+      total += price;
+      
+      current.setDate(current.getDate() + 1);
+    }
+
+    return {
+      total,
+      nightsCount: nights.length,
+      nights,
+      basePrice: property.priceBase
+    };
+  },
+});
+
 
 /**
  * Obtener una finca por código
