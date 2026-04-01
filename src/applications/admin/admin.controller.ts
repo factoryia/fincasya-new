@@ -1,4 +1,5 @@
-import { Controller, Get, Post, Query, UseGuards } from '@nestjs/common';
+import { Controller, Get, Post, Query, Res, UseGuards } from '@nestjs/common';
+import { Response } from 'express';
 import { GoogleCalendarService } from '../shared/services/google-calendar.service';
 // import { ConvexAuthGuard } from '../shared/guards/convex-auth.guard';
 // import { AdminGuard } from '../shared/guards/admin.guard';
@@ -26,6 +27,34 @@ export class AdminController {
     @Query('redirectUri') redirectUri: string,
   ) {
     return this.googleCalendarService.exchangeCode(code, redirectUri);
+  }
+
+  // Callback legacy/directo para producción donde /api/* va directo al backend
+  @Get('calendar-callback')
+  async legacyCalendarCallback(
+    @Query('code') code: string,
+    @Query('error') error: string,
+    @Res() res: Response,
+  ) {
+    const appUrl = process.env.SITE_URL || 'https://app.fincasya.cloud';
+
+    if (error) {
+      return res.redirect(`${appUrl}/admin/reservations?error=${error}`);
+    }
+
+    if (!code) {
+      return res.redirect(`${appUrl}/admin/reservations?error=no_code`);
+    }
+
+    try {
+      // Usar exactamente el mismo URI que el frontend para validar ante Google
+      const redirectUri = `${appUrl}/api/admin/calendar-callback`;
+      await this.googleCalendarService.exchangeCode(code, redirectUri);
+      return res.redirect(`${appUrl}/admin/reservations?success=true`);
+    } catch (err) {
+      console.error('Error exchanging code in backend:', err);
+      return res.redirect(`${appUrl}/admin/reservations?error=exchange_failed`);
+    }
   }
 
   @Post('google-calendar/disconnect')
