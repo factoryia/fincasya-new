@@ -36,7 +36,15 @@ export class AdminController {
     @Query('error') error: string,
     @Res() res: Response,
   ) {
-    const appUrl = process.env.SITE_URL || 'https://app.fincasya.cloud';
+    // Verificar la URL del frontend (priorizar env, pero asegurar que no sea la de la API)
+    let appUrl = process.env.SITE_URL || process.env.NEXT_PUBLIC_SITE_URL || 'https://app.fincasya.cloud';
+    
+    // Si la URL apunta accidentalmente al puerto de la API (3001), forzar la de producción en el despliegue
+    if (appUrl.includes(':3001')) {
+      appUrl = 'https://app.fincasya.cloud';
+    }
+    
+    appUrl = appUrl.replace(/\/$/, '');
 
     if (error) {
       return res.redirect(`${appUrl}/admin/reservations?error=${error}`);
