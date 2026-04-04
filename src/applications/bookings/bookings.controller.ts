@@ -7,7 +7,10 @@ import {
   Query,
   Param,
   UseGuards,
+  UseInterceptors,
+  UploadedFiles,
 } from '@nestjs/common';
+import { FilesInterceptor } from '@nestjs/platform-express';
 import { BookingsSyncService } from '../shared/services/bookings-sync.service';
 import { ConvexAuthGuard } from '../shared/guards/convex-auth.guard';
 import { AdminGuard } from '../shared/guards/admin.guard';
@@ -28,8 +31,12 @@ export class BookingsController {
   }
 
   @Post()
-  async create(@Body() body: any) {
-    return this.bookingsSyncService.createBooking(body);
+  @UseInterceptors(FilesInterceptor('multimedia'))
+  async create(
+    @Body() body: any,
+    @UploadedFiles() files?: Express.Multer.File[],
+  ) {
+    return this.bookingsSyncService.createBooking(body, files);
   }
 
   @Delete(':id')

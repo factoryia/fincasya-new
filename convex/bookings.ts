@@ -267,6 +267,15 @@ export const create = mutation({
       v.literal('CANCELLED'),
       v.literal('COMPLETED'),
     )),
+    multimedia: v.optional(
+      v.array(
+        v.object({
+          url: v.string(),
+          name: v.string(),
+          type: v.string(),
+        }),
+      ),
+    ),
   },
   handler: async (ctx, args) => {
     const now = Date.now();
@@ -376,6 +385,7 @@ export const create = mutation({
       googleCalendarId: args.googleCalendarId,
       horaEntrada: args.horaEntrada,
       horaSalida: args.horaSalida,
+      multimedia: args.multimedia,
       createdAt: now,
       updatedAt: now,
     });

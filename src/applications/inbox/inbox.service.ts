@@ -171,25 +171,21 @@ export class InboxService {
     cedula: string;
     celular: string;
     correo: string;
-    fechaEntrada: string; // YYYY-MM-DD
-    fechaSalida: string; // YYYY-MM-DD
-    numeroPersonas: number;
-    precioTotal: number;
+    fechaEntrada: string | number;
+    fechaSalida: string | number;
+    numeroPersonas: number | string;
+    precioTotal: number | string;
     temporada: string;
     observaciones?: string;
+    multimediaFiles?: Express.Multer.File[];
   }) {
-    const { conversationId, fechaEntrada, fechaSalida, ...bookingParams } = params;
-
-    // 1. Convertir fechas a timestamps
-    const startTs = new Date(fechaEntrada).getTime();
-    const endTs = new Date(fechaSalida).getTime();
+    const { conversationId, multimediaFiles, ...bookingParams } = params;
 
     // 2. Crear la reserva y sincronizar con Google
-    const result = await this.bookingsSyncService.createBooking({
-      ...bookingParams,
-      fechaEntrada: startTs,
-      fechaSalida: endTs,
-    });
+    const result = await this.bookingsSyncService.createBooking(
+      bookingParams as any,
+      multimediaFiles,
+    );
 
     // 3. Marcar la conversación como resuelta
     await this.setStatus(conversationId, 'resolved');

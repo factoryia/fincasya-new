@@ -1,12 +1,14 @@
-import { Injectable, InternalServerErrorException } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import { ConvexService } from './convex.service';
 import { GoogleCalendarService } from './google-calendar.service';
+import { S3Service } from './s3.service';
 
 @Injectable()
 export class BookingsSyncService {
   constructor(
     private readonly convexService: ConvexService,
     private readonly googleCalendarService: GoogleCalendarService,
+    private readonly s3Service: S3Service,
   ) {}
 
   async checkAvailability(propertyId: string, fechaEntrada: number, fechaSalida: number) {
@@ -20,37 +22,67 @@ export class BookingsSyncService {
   /**
    * Crear una reserva en Convex y sincronizarla con Google Calendar.
    */
-  async createBooking(params: {
-    propertyId: string;
-    nombreCompleto: string;
-    cedula: string;
-    celular: string;
-    correo: string;
-    fechaEntrada: number; // ms
-    fechaSalida: number; // ms
-    numeroPersonas: number;
-    precioTotal: number;
-    temporada: string;
-    observaciones?: string;
-  }) {
+  async createBooking(
+    params: {
+      propertyId: string;
+      nombreCompleto: string;
+      cedula: string;
+      celular: string;
+      correo: string;
+      fechaEntrada: number | string; // ms or string if from FormBody
+      fechaSalida: number | string; // ms
+      numeroPersonas: number | string;
+      precioTotal: number | string;
+      temporada: string;
+      observaciones?: string;
+      horaEntrada?: string;
+      horaSalida?: string;
+      city?: string;
+      purpose?: string;
+    },
+    multimediaFiles?: Express.Multer.File[],
+  ) {
     const { propertyId, ...rest } = params;
 
-    // 1. Obtener info de la propiedad para el título del evento
+    // Normalize types if they come as strings from FormData
+    const fechaEntradaNum = typeof params.fechaEntrada === 'string' ? parseInt(params.fechaEntrada, 10) : params.fechaEntrada;
+    const fechaSalidaNum = typeof params.fechaSalida === 'string' ? parseInt(params.fechaSalida, 10) : params.fechaSalida;
+    const numeroPersonasNum = typeof params.numeroPersonas === 'string' ? parseInt(params.numeroPersonas, 10) : params.numeroPersonas;
+    const precioTotalNum = typeof params.precioTotal === 'string' ? parseInt(params.precioTotal, 10) : params.precioTotal;
+
+    // 1. Obtener info de la propiedad
     const property = await this.convexService.query('fincas:getById', {
       id: propertyId as any,
     });
     if (!property) throw new Error('Propiedad no encontrada');
 
-    // 2. Crear reserva en Convex (PENDING por defecto)
+    // 2. Subir multimedia si existe
+    let multimedia: { url: string; name: string; type: string }[] | undefined;
+    if (multimediaFiles && multimediaFiles.length > 0) {
+      multimedia = await Promise.all(
+        multimediaFiles.map(async (file) => {
+          const url = await this.s3Service.uploadFile(file, 'bookings/multimedia');
+          return {
+            url,
+            name: file.originalname,
+            type: file.mimetype,
+          };
+        }),
+      );
+    }
+
+    // 3. Crear reserva en Convex
     const bookingId = await this.convexService.mutation('bookings:create', {
       propertyId: propertyId as any,
       ...rest,
-      numeroNoches: Math.ceil((params.fechaSalida - params.fechaEntrada) / (1000 * 60 * 60 * 24)),
-      subtotal: params.precioTotal, // Simplificado para este flujo
+      fechaEntrada: fechaEntradaNum,
+      fechaSalida: fechaSalidaNum,
+      numeroPersonas: numeroPersonasNum,
+      precioTotal: precioTotalNum,
+      numeroNoches: Math.ceil((fechaSalidaNum - fechaEntradaNum) / (1000 * 60 * 60 * 24)),
+      subtotal: precioTotalNum,
+      multimedia,
     });
-
-    // 3. (Google Calendar sync is handled asynchronously by Convex itself in background)
-    // El background worker `syncBookingToCalendar` hace la sincronización evitando delays aquí.
 
     return { bookingId };
   }

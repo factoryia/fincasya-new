@@ -194,6 +194,15 @@ export default defineSchema({
     purpose: v.optional(v.string()),
     googleEventId: v.optional(v.string()),
     googleCalendarId: v.optional(v.string()),
+    multimedia: v.optional(
+      v.array(
+        v.object({
+          url: v.string(),
+          name: v.string(),
+          type: v.string(),
+        }),
+      ),
+    ),
     createdAt: v.number(),
     updatedAt: v.optional(v.number()),
   })

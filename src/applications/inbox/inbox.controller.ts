@@ -9,9 +9,10 @@ import {
   UseGuards,
   UseInterceptors,
   UploadedFile,
+  UploadedFiles,
   BadRequestException,
 } from '@nestjs/common';
-import { FileInterceptor } from '@nestjs/platform-express';
+import { FileInterceptor, FilesInterceptor } from '@nestjs/platform-express';
 import { memoryStorage } from 'multer';
 import { InboxService } from './inbox.service';
 import { ConvexAuthGuard } from '../shared/guards/convex-auth.guard';
@@ -135,13 +136,21 @@ export class InboxController {
    * POST /api/inbox/:conversationId/create-booking
    */
   @Post(':conversationId/create-booking')
+  @UseInterceptors(
+    FilesInterceptor('multimedia', 10, {
+      storage: memoryStorage(),
+      limits: { fileSize: 16 * 1024 * 1024 }, // 16MB per file
+    }),
+  )
   async createBookingFromConversation(
     @Param('conversationId') conversationId: string,
     @Body() body: any,
+    @UploadedFiles() files?: Express.Multer.File[],
   ) {
     return this.inboxService.createBookingFromConversation({
       conversationId,
       ...body,
+      multimediaFiles: files,
     });
   }
 
