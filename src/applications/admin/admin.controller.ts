@@ -57,10 +57,10 @@ export class AdminController {
     // URI canónico: el MISMO que se usó en generateAuthUrl y en route.ts
     const redirectUri = isLocalhost ? LOCAL_REDIRECT_URI : PROD_REDIRECT_URI;
 
-    // URL base para redirigir al usuario de vuelta
+    // URL base para redirigir al usuario de vuelta al frontend
     const appUrl = isLocalhost
       ? 'http://localhost:3000'
-      : 'https://app.fincasya.cloud';
+      : 'https://fincasya.com';
 
     console.log('[calendar-callback] redirectUri usado:', redirectUri);
 
