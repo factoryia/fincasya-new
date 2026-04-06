@@ -15,6 +15,34 @@ export const getByPropertyId = query({
 });
 
 /**
+ * Get the properties owned by a specific user
+ */
+export const getOwnedProperties = query({
+  args: { ownerUserId: v.string() },
+  handler: async (ctx, args) => {
+    const infos = await ctx.db
+      .query('propertyOwnerInfo')
+      .withIndex('by_owner', (q) => q.eq('ownerUserId', args.ownerUserId))
+      .collect();
+
+    if (infos.length === 0) return [];
+
+    const properties = [];
+    for (const info of infos) {
+      const prop = await ctx.db.get(info.propertyId);
+      if (prop) {
+        properties.push({
+          id: prop._id,
+          title: prop.title,
+          code: prop.code,
+        });
+      }
+    }
+    return properties;
+  },
+});
+
+/**
  * Upsert owner information for a property
  */
 export const upsert = mutation({

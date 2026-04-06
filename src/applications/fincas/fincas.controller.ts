@@ -33,6 +33,7 @@ import { UpdateOwnerInfoDto } from './dto/owner-info.dto';
 import { GenerateContractDto } from './dto/generate-contract.dto';
 import { ConvexAuthGuard } from '../shared/guards/convex-auth.guard';
 import { AdminGuard } from '../shared/guards/admin.guard';
+import { OwnerOrAdminGuard } from '../shared/guards/owner-or-admin.guard';
 
 @Controller('fincas')
 export class FincasController {
@@ -364,13 +365,13 @@ export class FincasController {
   }
 
   @Get(':id/owner')
-  @UseGuards(ConvexAuthGuard, AdminGuard)
+  @UseGuards(ConvexAuthGuard, OwnerOrAdminGuard)
   async getOwnerInfo(@Param('id') id: string) {
     return this.fincasService.getOwnerInfo(id);
   }
 
   @Post(':id/owner')
-  @UseGuards(ConvexAuthGuard, AdminGuard)
+  @UseGuards(ConvexAuthGuard, OwnerOrAdminGuard)
   @UseInterceptors(
     FileFieldsInterceptor(
       [
@@ -411,5 +412,10 @@ export class FincasController {
     @Body() dto: GenerateContractDto,
   ) {
     return this.fincasService.generateContract(id, dto);
+  }
+
+  @Get('owned-properties/:userId')
+  async getOwnedProperties(@Param('userId') userId: string) {
+    return this.fincasService.getOwnedProperties(userId);
   }
 }

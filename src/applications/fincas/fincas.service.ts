@@ -15,7 +15,10 @@ import { CreateFincaDto } from './dto/create-finca.dto';
 import { UpdateFincaDto } from './dto/update-finca.dto';
 import { ListFincasDto } from './dto/list-fincas.dto';
 import { parseExcelToFincas } from './excel-parser';
-import { GlobalPricingRuleDto, UpdateGlobalPricingRuleDto } from './dto/global-pricing.dto';
+import {
+  GlobalPricingRuleDto,
+  UpdateGlobalPricingRuleDto,
+} from './dto/global-pricing.dto';
 import { UpdateOwnerInfoDto } from './dto/owner-info.dto';
 import { GenerateContractDto } from './dto/generate-contract.dto';
 
@@ -134,7 +137,9 @@ export class FincasService {
 
   async listSimple() {
     try {
-      const data = (await this.convexService.query('fincas:list', { limit: 1000 })) as any;
+      const data = (await this.convexService.query('fincas:list', {
+        limit: 1000,
+      })) as any;
       const properties = data?.properties || [];
       return properties.map((p: any) => ({
         _id: p._id,
@@ -272,7 +277,14 @@ export class FincasService {
         );
       }
 
-      const { catalogIds, pricing, features, featuredIcons, zoneOrder, ...rest } = createDto;
+      const {
+        catalogIds,
+        pricing,
+        features,
+        featuredIcons,
+        zoneOrder,
+        ...rest
+      } = createDto;
       const base = rest.priceBase ?? 0;
       const fincaData: Record<string, unknown> = {
         ...rest,
@@ -376,7 +388,15 @@ export class FincasService {
 
       // Actualizar la finca
       // Pasamos pricing por separado si existe, y el resto de campos (incluyendo features y catalogIds) a la mutación update.
-      const { pricing, catalogIds, features, featuredIcons, active, zoneOrder, ...updateData } = updateDto as any;
+      const {
+        pricing,
+        catalogIds,
+        features,
+        featuredIcons,
+        active,
+        zoneOrder,
+        ...updateData
+      } = updateDto as any;
       if (videoUrl) {
         updateData.video = videoUrl;
       }
@@ -709,7 +729,9 @@ export class FincasService {
 
   async getGlobalPricingRuleById(id: string) {
     try {
-      const rule = await this.convexService.query('globalPricing:getById', { id });
+      const rule = await this.convexService.query('globalPricing:getById', {
+        id,
+      });
       if (!rule) throw new NotFoundException('Regla global no encontrada');
       return rule;
     } catch (error) {
@@ -720,7 +742,9 @@ export class FincasService {
 
   async createGlobalPricingRule(dto: GlobalPricingRuleDto) {
     try {
-      return await this.convexService.mutation('globalPricing:create', { ...dto });
+      return await this.convexService.mutation('globalPricing:create', {
+        ...dto,
+      });
     } catch (error) {
       throw new BadRequestException(error.message);
     }
@@ -728,7 +752,10 @@ export class FincasService {
 
   async updateGlobalPricingRule(id: string, dto: UpdateGlobalPricingRuleDto) {
     try {
-      return await this.convexService.mutation('globalPricing:update', { id, ...dto });
+      return await this.convexService.mutation('globalPricing:update', {
+        id,
+        ...dto,
+      });
     } catch (error) {
       throw new BadRequestException(error.message);
     }
@@ -801,6 +828,18 @@ export class FincasService {
     }
   }
 
+  async getOwnedProperties(ownerUserId: string) {
+    try {
+      return await this.convexService.query(
+        'propertyOwners:getOwnedProperties',
+        {
+          ownerUserId,
+        },
+      );
+    } catch (error) {
+      throw new BadRequestException(error.message);
+    }
+  }
   async generateContract(propertyId: string, dto: GenerateContractDto) {
     try {
       // 1. Obtener la finca y su plantilla
@@ -835,8 +874,18 @@ export class FincasService {
 
       const now = new Date();
       const months = [
-        'Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio',
-        'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'
+        'Enero',
+        'Febrero',
+        'Marzo',
+        'Abril',
+        'Mayo',
+        'Junio',
+        'Julio',
+        'Agosto',
+        'Septiembre',
+        'Octubre',
+        'Noviembre',
+        'Diciembre',
       ];
       const formattedDate = `${now.getDate()} dias del mes de ${months[now.getMonth()]} del ${now.getFullYear()}`;
 
@@ -851,7 +900,10 @@ export class FincasService {
           const start = new Date(dto.checkInDate);
           const end = new Date(dto.checkOutDate);
           const diffTime = Math.abs(end.getTime() - start.getTime());
-          totalNights = Math.max(1, Math.ceil(diffTime / (1000 * 60 * 60 * 24)));
+          totalNights = Math.max(
+            1,
+            Math.ceil(diffTime / (1000 * 60 * 60 * 24)),
+          );
           totalDays = totalNights;
 
           const formatMini = (d: Date) => {
@@ -871,8 +923,9 @@ export class FincasService {
       // Según instrucción del usuario: "multiplicado por los dias de reserva"
       const unitPriceNum = parseInt(dto.nightlyPrice) || 0;
       const totalPriceNum = unitPriceNum * totalDays;
-      
-      const totalPriceText = this.numberToSpanishText(totalPriceNum).toUpperCase();
+
+      const totalPriceText =
+        this.numberToSpanishText(totalPriceNum).toUpperCase();
       const totalPriceFormatted = new Intl.NumberFormat('es-CO', {
         style: 'currency',
         currency: 'COP',
@@ -921,11 +974,11 @@ export class FincasService {
         [mappingKeys.clientCity]: dto.clientCity || '',
         [mappingKeys.clientAddress]: dto.clientAddress || '',
         // Fallbacks genéricos
-        'Text6': dto.contractNumber,
-        'Text9': totalPriceText,
-        'Text10': totalPriceFormatted,
-        'Text11': dto.accountNumber,
-        'Text13': dto.bankName,
+        Text6: dto.contractNumber,
+        Text9: totalPriceText,
+        Text10: totalPriceFormatted,
+        Text11: dto.accountNumber,
+        Text13: dto.bankName,
       };
 
       // --- DETECCIÓN DE FORMATO Y PROCESAMIENTO ---
@@ -937,7 +990,7 @@ export class FincasService {
       if (isDocx) {
         console.log('[api] Detectado formato Word (.docx)');
         const zip = new PizZip(pdfBytes);
-        
+
         // --- LIMPIEZA DE XML (Para evitar errores por formato de Word) ---
         try {
           const docXml = zip.file('word/document.xml')?.asText();
@@ -950,7 +1003,9 @@ export class FincasService {
             zip.file('word/document.xml', cleanedXml);
           }
         } catch (e) {
-          console.warn('[api] No se pudo limpiar el XML del Word, procediendo normal');
+          console.warn(
+            '[api] No se pudo limpiar el XML del Word, procediendo normal',
+          );
         }
 
         const doc = new Docxtemplater(zip, {
@@ -986,8 +1041,10 @@ export class FincasService {
           fechaSalidaMini: checkOutMini,
           horaLlegada: dto.checkInTime || '03:00 PM',
           horaSalida: dto.checkOutTime || '01:00 PM',
-          ciudadCliente: valuesMapping[mappingKeys.clientCity] || dto.clientCity || '',
-          direccionCliente: valuesMapping[mappingKeys.clientAddress] || dto.clientAddress || '',
+          ciudadCliente:
+            valuesMapping[mappingKeys.clientCity] || dto.clientCity || '',
+          direccionCliente:
+            valuesMapping[mappingKeys.clientAddress] || dto.clientAddress || '',
           clienteNombre: valuesMapping[mappingKeys.clientName],
           clienteCedula: valuesMapping[mappingKeys.clientId],
           clienteId: valuesMapping[mappingKeys.clientId],
@@ -1004,36 +1061,51 @@ export class FincasService {
             const errorMessages = error.properties.errors
               .map((e: any) => e.explanation)
               .join(', ');
-            throw new BadRequestException(`Error en la plantilla Word: ${errorMessages}`);
+            throw new BadRequestException(
+              `Error en la plantilla Word: ${errorMessages}`,
+            );
           }
-          throw new BadRequestException(`Error al procesar la plantilla Word: ${error.message}`);
+          throw new BadRequestException(
+            `Error al procesar la plantilla Word: ${error.message}`,
+          );
         }
 
-        finalBuffer = doc.getZip().generate({ type: 'nodebuffer', compression: 'DEFLATE' });
+        finalBuffer = doc
+          .getZip()
+          .generate({ type: 'nodebuffer', compression: 'DEFLATE' });
         finalFilename = `Contrato_${finca.title.replace(/\s+/g, '_')}_${dto.contractNumber}.docx`;
-        finalMimeType = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+        finalMimeType =
+          'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
       } else {
         // --- PROCESAMIENTO PDF ---
         const pdfDoc = await PDFDocument.load(pdfBytes);
         const helveticaFont = await pdfDoc.embedFont('Helvetica');
         const form = pdfDoc.getForm();
         const allFields = form.getFields();
-        const allFieldNames = allFields.map(f => f.getName());
+        const allFieldNames = allFields.map((f) => f.getName());
 
         console.log('=== DIAGNÓSTICO PDF ===');
-        console.log(`Campos detectados (${allFieldNames.length}):`, allFieldNames);
+        console.log(
+          `Campos detectados (${allFieldNames.length}):`,
+          allFieldNames,
+        );
         if (allFieldNames.length === 0) {
-          console.error('¡ADVERTENCIA! El PDF no parece tener campos de formulario (AcroForm).');
+          console.error(
+            '¡ADVERTENCIA! El PDF no parece tener campos de formulario (AcroForm).',
+          );
         }
 
         // Rellenar campos usando búsqueda robusta (con y sin corchetes)
-        allFieldNames.forEach(fieldName => {
+        allFieldNames.forEach((fieldName) => {
           try {
             const field = form.getTextField(fieldName);
             if (!field) return;
 
             // Limpiar el nombre del campo en el PDF para comparar
-            const cleanPdfName = fieldName.replace(/^\[/, '').replace(/\]$/, '').trim();
+            const cleanPdfName = fieldName
+              .replace(/^\[/, '')
+              .replace(/\]$/, '')
+              .trim();
 
             // Buscar coincidencia en nuestro mapeo
             for (const [key, val] of Object.entries(valuesMapping)) {
@@ -1054,7 +1126,9 @@ export class FincasService {
                 field.setFontSize(10);
                 field.updateAppearances(helveticaFont);
 
-                console.log(`Campo llenado y estilizado: "${fieldName}" con valor: "${val}"`);
+                console.log(
+                  `Campo llenado y estilizado: "${fieldName}" con valor: "${val}"`,
+                );
                 break;
               }
             }
@@ -1105,10 +1179,15 @@ export class FincasService {
         message: 'Contrato generado y enviado exitosamente.',
       };
     } catch (error) {
-      if (error instanceof BadRequestException || error instanceof NotFoundException) {
+      if (
+        error instanceof BadRequestException ||
+        error instanceof NotFoundException
+      ) {
         throw error;
       }
-      throw new BadRequestException(`Error al generar contrato: ${error.message}`);
+      throw new BadRequestException(
+        `Error al generar contrato: ${error.message}`,
+      );
     }
   }
 

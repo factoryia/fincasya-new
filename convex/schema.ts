@@ -450,7 +450,8 @@ export default defineSchema({
     chamberOfCommerceUrl: v.optional(v.string()),
     createdAt: v.number(),
     updatedAt: v.number(),
-  }).index('by_property', ['propertyId']),
+  }).index('by_property', ['propertyId'])
+    .index('by_owner', ['ownerUserId']),
   
   // Tabla para gestionar el contenido de la página "¿Quiénes Somos?"
   quienes_somos: defineTable({
