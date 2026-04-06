@@ -1,5 +1,5 @@
 import { openai } from "@ai-sdk/openai";
-import { generateText } from "ai";
+import { generateText, type CoreMessage } from "ai";
 import { v } from "convex/values";
 import { action, internalAction, internalMutation, internalQuery } from "./_generated/server";
 import { internal, api } from "./_generated/api";
@@ -205,13 +205,66 @@ export const processInboundMessage = internalAction({
         )
         .join("\n");
 
+      // ── VISIÓN: Si el usuario envió una imagen, analizar primero para identificar la finca ──
+      let imageIdentifiedFincaName: string | undefined;
+      if (args.type === "image" && args.mediaUrl) {
+        try {
+          console.log("[vision] Analizando imagen del usuario...");
+          const allFincas = await ctx.runQuery(api.fincas.search, {
+            query: " ", // traer todas
+            limit: 50,
+          });
+          const fincaNames = allFincas.map((f: any) => f.title).join(", ");
+
+          const { text: visionResult } = await generateText({
+            model: openai.chat("gpt-5-mini"),
+            temperature: 0,
+            system: `Eres un asistente que identifica propiedades (fincas) a partir de imágenes.
+Se te dará una imagen y la lista de fincas disponibles. Tu ÚNICA tarea es responder con el NOMBRE EXACTO de la finca que aparece en la imagen.
+Si ves el nombre de la finca escrito en la imagen (en un letrero, banner, overlay del catálogo, etc.), úsalo.
+Si no puedes identificar la finca con certeza, responde SOLO: "NO_IDENTIFICADA".
+NO expliques nada, NO agregues texto extra. Solo el nombre exacto o "NO_IDENTIFICADA".
+
+Fincas disponibles: ${fincaNames}`,
+            messages: [
+              {
+                role: "user",
+                content: [
+                  { type: "text", text: args.text === "[Imagen]" ? "¿Qué finca es esta?" : args.text },
+                  { type: "image", image: new URL(args.mediaUrl) },
+                ],
+              },
+            ],
+          });
+
+          const trimmed = visionResult.trim();
+          if (trimmed && trimmed !== "NO_IDENTIFICADA") {
+            imageIdentifiedFincaName = trimmed;
+            console.log("[vision] Finca identificada:", imageIdentifiedFincaName);
+            // Override catalog intent para que se envíe la ficha
+            catalogIntent = { intent: "single_finca", fincaName: imageIdentifiedFincaName };
+          } else {
+            console.log("[vision] No se pudo identificar la finca de la imagen");
+          }
+        } catch (e) {
+          console.error("[vision] Error analizando imagen:", e);
+        }
+      }
+
       try {
         catalogIntent = await ctx.runAction(internal.ycloud.detectCatalogIntentWithAI, {
-          userMessage: args.text,
+          userMessage: imageIdentifiedFincaName
+            ? `Quiero reservar la finca ${imageIdentifiedFincaName}`
+            : args.text,
           conversationSnippet: catalogIntentSnippet,
         });
       } catch (e) {
         console.error("YCloud detectCatalogIntentWithAI error:", e);
+      }
+
+      // Si la visión ya identificó la finca, forzar el intent
+      if (imageIdentifiedFincaName) {
+        catalogIntent = { intent: "single_finca", fincaName: imageIdentifiedFincaName };
       }
 
       // Enviar ficha de una finca (IA o regex como respaldo).
@@ -225,7 +278,9 @@ export const processInboundMessage = internalAction({
             {
               phone: args.phone,
               conversationId,
-              userMessage: args.text,
+              userMessage: imageIdentifiedFincaName
+                ? `Quiero reservar la finca ${imageIdentifiedFincaName}`
+                : args.text,
               wamid: args.wamid,
               extractedFincaName:
                 catalogIntent.intent === "single_finca"
@@ -393,6 +448,7 @@ export const processInboundMessage = internalAction({
           catalogLocation,
           catalogFincasCount,
           catalogFoundFincasButFailed,
+          imageUrl: args.type === "image" && args.mediaUrl ? args.mediaUrl : undefined,
         }
       );
 
@@ -553,6 +609,8 @@ export const generateReplyWithRagAndFincas = internalAction({
     catalogFincasCount: v.optional(v.number()),
     /** True si se encontraron fincas pero no se pudo enviar el catálogo (sin productRetailerIds). En este caso el AI puede listar las fincas en texto. */
     catalogFoundFincasButFailed: v.optional(v.boolean()),
+    /** URL de la imagen enviada por el usuario (para análisis visual). */
+    imageUrl: v.optional(v.string()),
   },
   handler: async (ctx, args): Promise<string> => {
     const ragResult = await rag.search(ctx, {
@@ -703,6 +761,7 @@ export const generateReplyWithRagAndFincas = internalAction({
       catalogFoundFincasButFailed: catalogFailed,
       currentDate,
       dynamicLocations: args.dynamicLocations,
+      hasImage: !!args.imageUrl,
     });
     // ── TTL de historial: solo incluir mensajes de las últimas 12 horas ──
     // Si han pasado más de 12h desde el último mensaje, el agente arranca
@@ -711,10 +770,28 @@ export const generateReplyWithRagAndFincas = internalAction({
     const historyCutoff = Date.now() - HISTORY_TTL_MS;
     const freshMessages = recentMessages.filter((m: any) => m.createdAt >= historyCutoff);
     console.log("[history-ttl] mensajes en contexto:", freshMessages.length, "/", recentMessages.length);
-    const messages = freshMessages.map((m: any) => ({
-      role: m.sender === "user" ? ("user" as const) : ("assistant" as const),
-      content: m.content,
-    }));
+    const messages: CoreMessage[] = [];
+
+    for (let idx = 0; idx < freshMessages.length; idx++) {
+      const m = freshMessages[idx] as any;
+      const isUser = m.sender === "user";
+      const isLastUserMsg = isUser && idx === freshMessages.length - 1;
+
+      // Only attach image to the LAST user message (current message) to save costs
+      if (isLastUserMsg && args.imageUrl) {
+        messages.push({
+          role: "user",
+          content: [
+            { type: "text", text: m.content || "El usuario envió esta imagen." },
+            { type: "image", image: new URL(args.imageUrl) },
+          ],
+        });
+      } else if (isUser) {
+        messages.push({ role: "user", content: m.content as string });
+      } else {
+        messages.push({ role: "assistant", content: m.content as string });
+      }
+    }
 
     const { text } = await generateText({
       model: openai.chat("gpt-5-mini"),
@@ -765,6 +842,7 @@ function buildSystemPrompt(
     catalogFoundFincasButFailed?: boolean;
     currentDate?: string;
     dynamicLocations?: string;
+    hasImage?: boolean;
   }
 ): string {
   let basePrompt = CONSULTANT_SYSTEM_PROMPT;
@@ -821,7 +899,19 @@ function buildSystemPrompt(
 4. **PRECIOS DE TEMPORADA:** Si en el CONTEXTO DE FINCAS aparecen REGLAS DE TEMPORADA para una finca, DEBES usar el valorUnico de la temporada que aplique a las fechas del cliente. Si no aplica ninguna temporada, usa el precio Base.
 `;
 
-  return `${basePrompt}${dynamicLocationsText}${priorityInstructions}${singleFincaHint}${multiCatalogHint}
+  const visionHint = opts?.hasImage
+    ? `
+---
+## 📷 ANÁLISIS DE IMAGEN
+El usuario te ha enviado una imagen. DEBES analizarla visualmente:
+- Si parece una finca/propiedad, compara sus características (piscina, jardín, estilo, ubicación, paisaje) con las fincas listadas en tu CONTEXTO DE FINCAS para intentar identificarla.
+- Si logras identificar la finca, respóndele con entusiasmo mencionando el nombre de la finca y ofreciendo enviar la ficha o más información.
+- Si no logras identificarla con certeza, describe lo que ves en la imagen y pregunta si es alguna de tus fincas disponibles o si busca algo similar.
+- Si la imagen no es una finca (ej: comprobante de pago, documento, selfie), responde acorde al contexto de la conversación.
+`
+    : "";
+
+  return `${basePrompt}${dynamicLocationsText}${priorityInstructions}${singleFincaHint}${multiCatalogHint}${visionHint}
 
 ---
 ## REGLA DE LISTAS DE FINCAS
@@ -858,7 +948,7 @@ export const markOutboundAsHuman = internalMutation({
       .order("desc")
       .first();
     if (conv && (conv.status === "ai" || conv.status === "human")) {
-      await ctx.db.patch(conv._id, { status: "human" });
+      await ctx.db.patch(conv._id, { status: "human", attended: false });
     }
   },
 });
