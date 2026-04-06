@@ -1,21 +1,23 @@
-import { Controller, Get, Post, Query, Res, UseGuards } from '@nestjs/common';
-import { Response } from 'express';
+import { Controller, Get, Post, Query, Req, Res } from '@nestjs/common';
+import { Request, Response } from 'express';
 import { GoogleCalendarService } from '../shared/services/google-calendar.service';
-// import { ConvexAuthGuard } from '../shared/guards/convex-auth.guard';
-// import { AdminGuard } from '../shared/guards/admin.guard';
 
 @Controller('admin')
 export class AdminController {
   constructor(private readonly googleCalendarService: GoogleCalendarService) {}
 
   @Get('google-calendar/status')
-  // @UseGuards(ConvexAuthGuard, AdminGuard)
   async getGoogleCalendarStatus() {
     return this.googleCalendarService.validateConnection();
   }
 
+  /** Alias que llama el frontend: /api/admin/calendar-status */
+  @Get('calendar-status')
+  async getCalendarStatus() {
+    return this.googleCalendarService.validateConnection();
+  }
+
   @Get('google-calendar/auth-url')
-  // @UseGuards(ConvexAuthGuard, AdminGuard)
   async getAuthUrl(@Query('redirectUri') redirectUri: string) {
     const url = await this.googleCalendarService.getAuthUrl(redirectUri);
     return { url };
@@ -29,23 +31,35 @@ export class AdminController {
     return this.googleCalendarService.exchangeCode(code, redirectUri);
   }
 
+  /**
+   * Callback directo de Google OAuth para producción
+   * (donde /api/* va al backend sin pasar por Next.js).
+   *
+   * El redirectUri DEBE ser idéntico al que se usó en generateAuthUrl.
+   * Lo reconstruimos desde el host real de la request entrante para soportar
+   * cualquier dominio registrado en GCP (fincasya.com, app.fincasya.cloud, etc.)
+   */
   @Get('calendar-callback')
   async legacyCalendarCallback(
     @Query('code') code: string,
     @Query('error') error: string,
+    @Req() req: Request,
     @Res() res: Response,
   ) {
-    // URL del frontend para redirigir al usuario después del OAuth
-    let appUrl =
-      process.env.SITE_URL ||
-      process.env.NEXT_PUBLIC_SITE_URL ||
-      'https://app.fincasya.cloud';
+    // Detectar proto y host reales (detrás de proxy/CDN)
+    const proto = (req.headers['x-forwarded-proto'] as string) || 'https';
+    const host =
+      (req.headers['x-forwarded-host'] as string) ||
+      req.headers['host'] ||
+      'app.fincasya.cloud';
 
-    // Nunca redirigir al usuario al puerto del backend (3001)
-    if (appUrl.includes(':3001')) {
-      appUrl = 'https://app.fincasya.cloud';
-    }
-    appUrl = appUrl.replace(/\/$/, '');
+    // Debe coincidir exactamente con el URI que generó la auth URL
+    const redirectUri = `${proto}://${host}/api/admin/calendar-callback`;
+
+    // URL base para redirigir al usuario de vuelta al dashboard
+    const appUrl = `${proto}://${host}`;
+
+    console.log('[calendar-callback] redirectUri reconstruido:', redirectUri);
 
     if (error) {
       return res.redirect(`${appUrl}/admin/reservations?error=${error}`);
@@ -56,20 +70,18 @@ export class AdminController {
     }
 
     try {
-      // URI exacto registrado en Google Cloud Console (Authorized redirect URIs)
-      const redirectUri = `https://app.fincasya.cloud/api/admin/calendar-callback`;
-
       await this.googleCalendarService.exchangeCode(code, redirectUri);
       return res.redirect(`${appUrl}/admin/reservations?success=true`);
     } catch (err) {
-      console.error('Error exchanging code in backend:', err);
-      const msg = err.message || 'exchange_failed';
-      return res.redirect(`${appUrl}/admin/reservations?error=${encodeURIComponent(msg)}`);
+      console.error('[calendar-callback] Error intercambiando código:', err);
+      const msg = (err as any).message || 'exchange_failed';
+      return res.redirect(
+        `${appUrl}/admin/reservations?error=${encodeURIComponent(msg)}`,
+      );
     }
   }
 
   @Post('google-calendar/disconnect')
-  // @UseGuards(ConvexAuthGuard, AdminGuard)
   async disconnect() {
     return this.googleCalendarService.disconnect();
   }
