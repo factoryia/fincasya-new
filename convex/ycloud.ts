@@ -161,11 +161,29 @@ export const processInboundMessage = internalAction({
       mediaUrl: args.mediaUrl,
     });
 
-    const conv = await ctx.runQuery(api.conversations.getById, {
+    // ── Debounce: esperar 5s para agrupar mensajes rápidos del mismo cliente ──
+    // Si el usuario envía varios mensajes seguidos (ej. "Hola" + "Quiero reservar"),
+    // solo el último evento genera respuesta con todo el contexto acumulado.
+    const DEBOUNCE_MS = 5_000;
+    await new Promise((resolve) => setTimeout(resolve, DEBOUNCE_MS));
+
+    // Releer la conversación para obtener el lastMessageAt más actualizado
+    const convAfterDebounce = await ctx.runQuery(api.conversations.getById, {
       conversationId,
     });
-    if (!conv) return;
+    if (!convAfterDebounce) return;
 
+    // Si llegó un mensaje más nuevo durante la espera, este handler cede el turno
+    if ((convAfterDebounce.lastMessageAt ?? 0) > now) {
+      console.log("[debounce] Mensaje más nuevo detectado, cediendo turno al handler posterior", {
+        phone: args.phone,
+        theirMessageAt: now,
+        newerMessageAt: convAfterDebounce.lastMessageAt,
+      });
+      return;
+    }
+
+    const conv = convAfterDebounce;
     const shouldReply = conv.status === "ai";
     if (shouldReply) {
       let singleFincaSent = false;
@@ -686,7 +704,14 @@ export const generateReplyWithRagAndFincas = internalAction({
       currentDate,
       dynamicLocations: args.dynamicLocations,
     });
-    const messages = recentMessages.map((m: any) => ({
+    // ── TTL de historial: solo incluir mensajes de las últimas 12 horas ──
+    // Si han pasado más de 12h desde el último mensaje, el agente arranca
+    // sin contexto previo (como una conversación nueva).
+    const HISTORY_TTL_MS = 12 * 60 * 60 * 1000; // 12 horas
+    const historyCutoff = Date.now() - HISTORY_TTL_MS;
+    const freshMessages = recentMessages.filter((m: any) => m.createdAt >= historyCutoff);
+    console.log("[history-ttl] mensajes en contexto:", freshMessages.length, "/", recentMessages.length);
+    const messages = freshMessages.map((m: any) => ({
       role: m.sender === "user" ? ("user" as const) : ("assistant" as const),
       content: m.content,
     }));
