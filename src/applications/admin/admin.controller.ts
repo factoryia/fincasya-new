@@ -2,6 +2,11 @@ import { Controller, Get, Post, Query, Req, Res } from '@nestjs/common';
 import { Request, Response } from 'express';
 import { GoogleCalendarService } from '../shared/services/google-calendar.service';
 
+// URI canónico único registrado en Google Cloud Console.
+// Debe coincidir exactamente con handleConnect() en el frontend y con route.ts.
+const PROD_REDIRECT_URI = 'https://app.fincasya.cloud/api/admin/calendar-callback';
+const LOCAL_REDIRECT_URI = 'http://localhost:3000/api/admin/calendar-callback';
+
 @Controller('admin')
 export class AdminController {
   constructor(private readonly googleCalendarService: GoogleCalendarService) {}
@@ -32,12 +37,8 @@ export class AdminController {
   }
 
   /**
-   * Callback directo de Google OAuth para producción
-   * (donde /api/* va al backend sin pasar por Next.js).
-   *
-   * El redirectUri DEBE ser idéntico al que se usó en generateAuthUrl.
-   * Lo reconstruimos desde el host real de la request entrante para soportar
-   * cualquier dominio registrado en GCP (fincasya.com, app.fincasya.cloud, etc.)
+   * Callback directo para producción cuando /api/* va al NestJS sin pasar por Next.js.
+   * Usa siempre el URI canónico fijo para que coincida con el que generó la auth URL.
    */
   @Get('calendar-callback')
   async legacyCalendarCallback(
@@ -46,20 +47,22 @@ export class AdminController {
     @Req() req: Request,
     @Res() res: Response,
   ) {
-    // Detectar proto y host reales (detrás de proxy/CDN)
-    const proto = (req.headers['x-forwarded-proto'] as string) || 'https';
+    // Detectar entorno para el redirect de vuelta al dashboard del usuario
     const host =
       (req.headers['x-forwarded-host'] as string) ||
       req.headers['host'] ||
-      'app.fincasya.cloud';
+      '';
+    const isLocalhost = host.includes('localhost');
 
-    // Debe coincidir exactamente con el URI que generó la auth URL
-    const redirectUri = `${proto}://${host}/api/admin/calendar-callback`;
+    // URI canónico: el MISMO que se usó en generateAuthUrl y en route.ts
+    const redirectUri = isLocalhost ? LOCAL_REDIRECT_URI : PROD_REDIRECT_URI;
 
-    // URL base para redirigir al usuario de vuelta al dashboard
-    const appUrl = `${proto}://${host}`;
+    // URL base para redirigir al usuario de vuelta
+    const appUrl = isLocalhost
+      ? 'http://localhost:3000'
+      : 'https://app.fincasya.cloud';
 
-    console.log('[calendar-callback] redirectUri reconstruido:', redirectUri);
+    console.log('[calendar-callback] redirectUri usado:', redirectUri);
 
     if (error) {
       return res.redirect(`${appUrl}/admin/reservations?error=${error}`);
