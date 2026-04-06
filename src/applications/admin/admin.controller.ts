@@ -29,21 +29,22 @@ export class AdminController {
     return this.googleCalendarService.exchangeCode(code, redirectUri);
   }
 
-  // Callback legacy/directo para producción donde /api/* va directo al backend
   @Get('calendar-callback')
   async legacyCalendarCallback(
     @Query('code') code: string,
     @Query('error') error: string,
     @Res() res: Response,
   ) {
-    // Verificar la URL del frontend (priorizar env, pero asegurar que no sea la de la API)
-    let appUrl = process.env.SITE_URL || process.env.NEXT_PUBLIC_SITE_URL || 'https://app.fincasya.cloud';
-    
-    // Si la URL apunta accidentalmente al puerto de la API (3001), forzar la de producción en el despliegue
+    // URL del frontend para redirigir al usuario después del OAuth
+    let appUrl =
+      process.env.SITE_URL ||
+      process.env.NEXT_PUBLIC_SITE_URL ||
+      'https://app.fincasya.cloud';
+
+    // Nunca redirigir al usuario al puerto del backend (3001)
     if (appUrl.includes(':3001')) {
       appUrl = 'https://app.fincasya.cloud';
     }
-    
     appUrl = appUrl.replace(/\/$/, '');
 
     if (error) {
@@ -55,8 +56,9 @@ export class AdminController {
     }
 
     try {
-      // Usar exactamente el mismo URI que el frontend para validar ante Google
-      const redirectUri = `${appUrl}/api/admin/calendar-callback`;
+      // URI exacto registrado en Google Cloud Console (Authorized redirect URIs)
+      const redirectUri = `https://app.fincasya.cloud/api/admin/calendar-callback`;
+
       await this.googleCalendarService.exchangeCode(code, redirectUri);
       return res.redirect(`${appUrl}/admin/reservations?success=true`);
     } catch (err) {
