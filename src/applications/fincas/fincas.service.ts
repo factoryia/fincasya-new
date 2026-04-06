@@ -32,6 +32,20 @@ export class FincasService {
 
   async list(listDto: ListFincasDto) {
     try {
+      // Si hay un término de búsqueda, usamos la query de búsqueda de Convex
+      if (listDto.search) {
+        const results = await this.convexService.query('fincas:search', {
+          query: listDto.search,
+          limit: listDto.limit || 50,
+        });
+        // Normalizar la respuesta para que coincida con el formato paginado del frontend
+        return {
+          properties: results,
+          hasMore: false,
+          total: results.length,
+        };
+      }
+
       // Filtrar propiedades undefined para evitar errores en Convex
       const args = Object.fromEntries(
         Object.entries(listDto).filter(

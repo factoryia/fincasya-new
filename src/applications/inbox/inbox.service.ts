@@ -63,19 +63,20 @@ export class InboxService {
   async sendMessage(
     conversationId: string,
     params: {
-      type: 'text' | 'image' | 'audio' | 'document';
+      type: 'text' | 'image' | 'audio' | 'document' | 'product';
       text?: string;
       mediaUrl?: string;
+      metadata?: any;
       file?: Express.Multer.File;
     },
   ) {
-    const { type, text, mediaUrl, file } = params;
+    const { type, text, mediaUrl, metadata, file } = params;
     if (type === 'text' && !text?.trim()) {
       throw new BadRequestException(
         'Texto requerido para mensaje de tipo text',
       );
     }
-    if (type !== 'text' && !file && !mediaUrl?.trim()) {
+    if (type !== 'text' && type !== 'product' && !file && !mediaUrl?.trim()) {
       throw new BadRequestException(
         'Archivo o mediaUrl requerido para imagen/audio/documento',
       );
@@ -93,7 +94,7 @@ export class InboxService {
     let finalMediaUrl = mediaUrl;
     let mediaUrlForStorage: string | undefined;
     let filename: string | undefined;
-    if (file && type !== 'text') {
+    if (file && type !== 'text' && type !== 'product') {
       let fileToUpload = file;
       if (type === 'image') {
         fileToUpload = await this.ensureImageCompatible(file);
@@ -113,6 +114,7 @@ export class InboxService {
       phone,
       type,
       text: text?.trim() || undefined,
+      metadata,
       mediaUrl: finalMediaUrl,
       mediaUrlForStorage,
       filename,

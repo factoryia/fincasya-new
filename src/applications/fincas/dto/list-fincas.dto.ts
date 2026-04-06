@@ -53,4 +53,8 @@ export class ListFincasDto {
   @Type(() => Boolean)
   @IsBoolean()
   all?: boolean;
+
+  @IsOptional()
+  @IsString()
+  search?: string;
 }

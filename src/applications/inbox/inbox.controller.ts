@@ -101,14 +101,25 @@ export class InboxController {
   async sendMessage(
     @Param('conversationId') conversationId: string,
     @Body('text') text?: string,
-    @Body('type') type?: 'text' | 'image' | 'audio' | 'document',
+    @Body('type') type?: 'text' | 'image' | 'audio' | 'document' | 'product',
+    @Body('metadata') metadata?: any,
     @UploadedFile() file?: Express.Multer.File,
   ) {
     const msgType = (type || (file ? this.inferTypeFromFile(file) : 'text'));
 
+    let parsedMetadata = metadata;
+    if (typeof metadata === 'string') {
+      try {
+        parsedMetadata = JSON.parse(metadata);
+      } catch (e) {
+        // Ignorar si no es JSON válido
+      }
+    }
+
     return this.inboxService.sendMessage(conversationId, {
       type: msgType,
       text: text?.trim() || undefined,
+      metadata: parsedMetadata,
       file,
     });
   }

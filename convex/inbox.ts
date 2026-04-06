@@ -1,6 +1,6 @@
 import { v } from "convex/values";
 import { action } from "./_generated/server";
-import { internal } from "./_generated/api";
+import { api, internal } from "./_generated/api";
 
 /**
  * Enviar mensaje a WhatsApp vía YCloud desde el inbox (dashboard).
@@ -15,7 +15,8 @@ export const sendMessage = action({
       v.literal("text"),
       v.literal("image"),
       v.literal("audio"),
-      v.literal("document")
+      v.literal("document"),
+      v.literal("product")
     ),
     text: v.optional(v.string()),
     /** URL para descargar el media (pre-firmada o pública) */
@@ -23,6 +24,7 @@ export const sendMessage = action({
     /** URL permanente para guardar en DB (S3 público); si no, se usa mediaUrl */
     mediaUrlForStorage: v.optional(v.string()),
     filename: v.optional(v.string()),
+    metadata: v.optional(v.any()),
   },
   handler: async (ctx, args) => {
     const apiKey = process.env.YCLOUD_API_KEY;
@@ -46,6 +48,72 @@ export const sendMessage = action({
       await ctx.runMutation(internal.messages.insertAssistantMessage, {
         conversationId: args.conversationId,
         content: args.text,
+        createdAt: now,
+      });
+      await ctx.runMutation(internal.conversations.updateLastMessageAt, {
+        conversationId: args.conversationId,
+      });
+      return { ok: true };
+    }
+
+    if (args.type === "product") {
+      const metadata = args.metadata;
+      let productRetailerIds: string[] = [];
+      let bodyText = args.text || "Aquí tienes estas opciones:";
+
+      if (metadata?.product) {
+        // Single product
+        const finca = metadata.product;
+        bodyText = args.text || `Aquí tienes ${finca.title} 🏡`;
+        // We need to resolve the productRetailerId. 
+        // For simplicity in the manual flow, we'll try to find it or use a default catalog.
+        const catalog = await ctx.runQuery(api.whatsappCatalogs.getDefault, {});
+        if (catalog) {
+          const property = await ctx.runQuery(api.fincas.getBySlug, { slug: finca.slug });
+          if (property) {
+            const entries = await ctx.runQuery(
+              api.propertyWhatsAppCatalog.getProductRetailerIdsForProperties,
+              { catalogId: catalog._id, propertyIds: [property._id] }
+            );
+            productRetailerIds = [entries[0]?.productRetailerId || (property._id as string)];
+          }
+        }
+      } else if (metadata?.catalog) {
+        // Multiple products
+        const fincas = metadata.catalog;
+        const catalog = await ctx.runQuery(api.whatsappCatalogs.getDefault, {});
+        if (catalog) {
+          const propertyIds: any[] = [];
+          for (const f of fincas) {
+            const property = await ctx.runQuery(api.fincas.getBySlug, { slug: f.slug });
+            if (property) propertyIds.push(property._id);
+          }
+          if (propertyIds.length > 0) {
+            const entries = await ctx.runQuery(
+              api.propertyWhatsAppCatalog.getProductRetailerIdsForProperties,
+              { catalogId: catalog._id, propertyIds }
+            );
+            const entryMap = new Map(entries.map((e: any) => [e.propertyId, e.productRetailerId]));
+            productRetailerIds = propertyIds.map(id => (entryMap.get(id) as string) || (id as string));
+          }
+        }
+      }
+
+      if (productRetailerIds.length > 0) {
+        const catalog = await ctx.runQuery(api.whatsappCatalogs.getDefault, {});
+        await ctx.runAction(internal.ycloud.sendWhatsAppCatalogList, {
+          to: args.phone,
+          productRetailerIds,
+          bodyText,
+          catalogId: catalog?.whatsappCatalogId,
+        });
+      }
+
+      await ctx.runMutation(internal.messages.insertAssistantMessageWithMedia, {
+        conversationId: args.conversationId,
+        content: bodyText,
+        type: "product",
+        metadata: args.metadata,
         createdAt: now,
       });
       await ctx.runMutation(internal.conversations.updateLastMessageAt, {
@@ -108,8 +176,9 @@ export const sendMessage = action({
     await ctx.runMutation(internal.messages.insertAssistantMessageWithMedia, {
       conversationId: args.conversationId,
       content: caption,
-      type: args.type,
+      type: args.type as "image" | "audio" | "document" | "text" | "video" | "product",
       mediaUrl: args.mediaUrlForStorage ?? args.mediaUrl,
+      metadata: args.metadata,
       createdAt: now,
     });
     await ctx.runMutation(internal.conversations.updateLastMessageAt, {
