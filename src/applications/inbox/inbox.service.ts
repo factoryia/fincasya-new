@@ -18,6 +18,7 @@ export class InboxService {
 
   async listConversations(params: {
     status?: 'ai' | 'human' | 'resolved';
+    attended?: boolean;
     priority?: 'urgent' | 'low' | 'medium' | 'resolved';
     limit?: number;
   }) {
@@ -195,6 +196,12 @@ export class InboxService {
     return result;
   }
  
+  async markAsAttended(conversationId: string) {
+    return this.convexService.mutation('conversations:markAsAttended', {
+      conversationId,
+    });
+  }
+
   private normalizePhoneE164(phone: string): string {
     let p = (phone || '').replace(/\D/g, '');
     if (p.startsWith('57') && p.length <= 12) {

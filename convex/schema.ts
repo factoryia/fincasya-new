@@ -350,6 +350,7 @@ export default defineSchema({
       }),
     ),
     createdAt: v.number(),
+    attended: v.optional(v.boolean()),
   })
     .index('by_contact', ['contactId'])
     .index('by_status', ['status'])

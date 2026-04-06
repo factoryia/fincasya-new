@@ -47,7 +47,7 @@ export const setLastCatalogSent = internalMutation({
 export const escalate = internalMutation({
   args: { conversationId: v.id("conversations") },
   handler: async (ctx, args) => {
-    await ctx.db.patch(args.conversationId, { status: "human" });
+    await ctx.db.patch(args.conversationId, { status: "human", attended: false });
   },
 });
 
@@ -87,7 +87,15 @@ export const getById = query({
 export const escalateToHuman = mutation({
   args: { conversationId: v.id("conversations") },
   handler: async (ctx, args) => {
-    await ctx.db.patch(args.conversationId, { status: "human" });
+    await ctx.db.patch(args.conversationId, { status: "human", attended: false });
+  },
+});
+
+/** Marcar conversación como atendida (se quita de notificaciones). */
+export const markAsAttended = mutation({
+  args: { conversationId: v.id("conversations") },
+  handler: async (ctx, args) => {
+    await ctx.db.patch(args.conversationId, { attended: true });
   },
 });
 
@@ -129,6 +137,7 @@ export const list = query({
     status: v.optional(
       v.union(v.literal("ai"), v.literal("human"), v.literal("resolved"))
     ),
+    attended: v.optional(v.boolean()),
     priority: v.optional(
       v.union(
         v.literal("urgent"),
@@ -147,6 +156,11 @@ export const list = query({
           .withIndex("by_status", (q) => q.eq("status", args.status!))
           .collect()
       : await ctx.db.query("conversations").collect();
+    
+    if (args.attended !== undefined) {
+      convs = convs.filter((c) => (c.attended ?? false) === args.attended);
+    }
+
     if (args.priority) {
       convs = convs.filter((c) => c.priority === args.priority);
     }

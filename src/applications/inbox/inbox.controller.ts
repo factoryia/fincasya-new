@@ -33,11 +33,18 @@ export class InboxController {
   @Get()
   async list(
     @Query('status') status?: 'ai' | 'human' | 'resolved',
+    @Query('attended') attended?: string,
     @Query('priority') priority?: 'urgent' | 'low' | 'medium' | 'resolved',
     @Query('limit') limit?: string,
   ) {
     const limitNum = limit ? parseInt(limit, 10) : undefined;
-    return this.inboxService.listConversations({ status, priority, limit: limitNum });
+    const attendedBool = attended === 'true' ? true : attended === 'false' ? false : undefined;
+    return this.inboxService.listConversations({ 
+      status, 
+      attended: attendedBool,
+      priority, 
+      limit: limitNum 
+    });
   }
 
   /**
@@ -163,6 +170,15 @@ export class InboxController {
       ...body,
       multimediaFiles: files,
     });
+  }
+
+  /**
+   * Marcar como atendida
+   * PATCH /api/inbox/:conversationId/attended
+   */
+  @Patch(':conversationId/attended')
+  async markAsAttended(@Param('conversationId') conversationId: string) {
+    return this.inboxService.markAsAttended(conversationId);
   }
 
   private inferTypeFromFile(file: Express.Multer.File): 'image' | 'audio' | 'document' {
