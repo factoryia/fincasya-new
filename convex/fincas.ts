@@ -14,6 +14,45 @@ const slugify = (text: string) => {
     .replace(/--+/g, "-"); // Replace multiple - with single -
 };
 
+const SEARCH_STOPWORDS = new Set([
+  'estoy',
+  'buscando',
+  'en',
+  'una',
+  'para',
+  'el',
+  'la',
+  'los',
+  'las',
+  'que',
+  'más',
+  'mas',
+  'personas',
+  'grupo',
+  'amigos',
+  'dame',
+  'buen',
+  'precio',
+  'este',
+  'fin',
+  'de',
+  'semana',
+  'viene',
+  'o',
+  'y',
+  'con',
+  'del',
+  'al',
+  'por',
+  'necesito',
+  'quiero',
+  'ver',
+  'opciones',
+  'me',
+  'gusta',
+  'gustan',
+]);
+
 // ============ QUERIES ============
 
 /**
@@ -446,35 +485,108 @@ export const calculateSuggestedPrice = query({
 });
 
 /**
- * Busca una finca por término de búsqueda (título, slug o código)
+ * Busca una finca por término de búsqueda (título, slug o código).
+ * Implementa una búsqueda tolerante a errores (fuzzy match por palabras).
  */
 export const findBySearchTerm = query({
   args: { term: v.string() },
   handler: async (ctx, args) => {
-    const term = args.term.toLowerCase().trim();
-    if (!term) return null;
+    const rawTerm = args.term.toLowerCase().trim();
+    if (!rawTerm) return null;
 
+    // Normalización: quitar acentos y caracteres especiales extraños
+    const normalize = (s: string) => 
+      s.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
+    
+    const term = normalize(rawTerm);
     const all = await ctx.db.query('properties').collect();
 
-    // 1. Intento por slug exacto
-    const bySlug = all.find((p: any) => p.slug?.toLowerCase() === term);
-    if (bySlug) return bySlug;
-
-    // 2. Intento por código exacto
-    const byCode = all.find((p: any) => p.code?.toLowerCase() === term);
-    if (byCode) return byCode;
-
-    // 3. Intento por título exacto
-    const byTitle = all.find((p: any) => p.title.toLowerCase() === term);
-    if (byTitle) return byTitle;
-
-    // 4. Intento por inclusión
-    const byInclusion = all.find((p: any) =>
-      p.title.toLowerCase().includes(term) ||
-      p.slug?.toLowerCase().includes(term)
+    // 1. Coincidencia exacta (Slug, Código, Título) - Prioridad máxima
+    const exact = all.find((p: any) => 
+      (p.slug && normalize(p.slug) === term) ||
+      (p.code && normalize(p.code) === term) ||
+      normalize(p.title) === term
     );
+    if (exact) return exact;
 
-    return byInclusion ?? null;
+    // 2. Coincidencia de palabras (Scoring)
+    // Dividir término en palabras y filtrar stopwords
+    const termWords = term.split(/\s+/).filter(w => w.length > 2 && !SEARCH_STOPWORDS.has(w));
+    if (termWords.length === 0) {
+      // Si no quedan palabras "clave", intentar inclusión simple con el término original
+      return all.find((p: any) => normalize(p.title).includes(term)) ?? null;
+    }
+
+    let bestMatch: any = null;
+    let highestScore = 0;
+
+    for (const p of all) {
+      const pTitle = normalize(p.title);
+      const pSlug = p.slug ? normalize(p.slug) : "";
+      const pCode = p.code ? normalize(p.code) : "";
+      
+      let score = 0;
+      let matchedWords = 0;
+      const pWords = new Set([...pTitle.split(/\s+/), ...pSlug.split("-"), pCode].filter(w => w.length > 2));
+
+      for (const word of termWords) {
+        // Coincidencia de palabra completa (exacta) - MUY FUERTE
+        if (pWords.has(word)) {
+          matchedWords++;
+          score += 10; // Base por palabra exacta
+          
+          if (pTitle.startsWith(word) || pSlug.startsWith(word) || pCode === word) {
+            score += 5; // Bonus por posición prominente
+          }
+        } 
+        // Coincidencia por inclusión parcial - DEBIL
+        else if (pTitle.includes(word) || pSlug.includes(word) || pCode.includes(word)) {
+          matchedWords++;
+          score += 3;
+        }
+      }
+
+      if (matchedWords > 0) {
+        // Multiplicador por cobertura: Si coinciden TODAS las palabras del usuario, el puntaje sube exponencialmente
+        const coverage = matchedWords / termWords.length;
+        const coverageMultiplier = coverage === 1 ? 3 : coverage >= 0.5 ? 1.5 : 1;
+        
+        const finalScore = score * coverageMultiplier;
+
+        if (finalScore > highestScore) {
+          highestScore = finalScore;
+          bestMatch = p;
+        }
+      }
+    }
+
+    // 2.5 Fallback: Coincidencia por "texto condensado" (sin espacios) para casos como "bioluxury" vs "bio luxury"
+    if (!bestMatch || highestScore < 15) {
+      const condensedTerm = term.replace(/\s+/g, "");
+      if (condensedTerm.length >= 4) {
+        for (const p of all) {
+          const condensedTitle = normalize(p.title).replace(/\s+/g, "");
+          const condensedSlug = (p.slug ? normalize(p.slug) : "").replace(/[^a-z0-9]/g, "");
+          
+          if (condensedTitle.includes(condensedTerm) || condensedSlug.includes(condensedTerm) || condensedTerm.includes(condensedTitle)) {
+            // Si encontramos una coincidencia por condensación, le damos un puntaje decente
+            // Pero solo si no teníamos un match previo MUY bueno
+            bestMatch = p;
+            highestScore = 20; 
+            break;
+          }
+        }
+      }
+    }
+
+    // 3. Fallback: Búsqueda por inclusión simple si no hubo match por scoring
+    if (!bestMatch) {
+      bestMatch = all.find((p: any) => 
+        normalize(p.title).includes(term) || (p.slug && normalize(p.slug).includes(term))
+      );
+    }
+
+    return bestMatch ?? null;
   },
 });
 
@@ -774,44 +886,6 @@ export const getBySlug = query({
   },
 });
 
-const SEARCH_STOPWORDS = new Set([
-  'estoy',
-  'buscando',
-  'en',
-  'una',
-  'para',
-  'el',
-  'la',
-  'los',
-  'las',
-  'que',
-  'más',
-  'mas',
-  'personas',
-  'grupo',
-  'amigos',
-  'dame',
-  'buen',
-  'precio',
-  'este',
-  'fin',
-  'de',
-  'semana',
-  'viene',
-  'o',
-  'y',
-  'con',
-  'del',
-  'al',
-  'por',
-  'necesito',
-  'quiero',
-  'ver',
-  'opciones',
-  'me',
-  'gusta',
-  'gustan',
-]);
 
 /**
  * Buscar fincas por texto. Acepta mensajes largos: extrae palabras clave y devuelve fincas que coincidan con alguna.

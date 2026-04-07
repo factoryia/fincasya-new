@@ -6,6 +6,7 @@ import { internal, api } from "./_generated/api";
 import type { Id, Doc } from "./_generated/dataModel";
 import rag from "./rag";
 import { CONSULTANT_SYSTEM_PROMPT } from "./lib/consultantPrompt";
+import { transcribeAudio } from "./lib/transcription";
 
 /**
  * Solo afirmación corta (confirmación), sin datos nuevos de búsqueda.
@@ -153,9 +154,31 @@ export const processInboundMessage = internalAction({
     );
 
     const now = Date.now();
+    let finalContent = args.text;
+
+    // ── TRANSCRIPCIÓN: Si es audio, intentar transcribir antes de guardar ──
+    if (args.type === "audio" && args.mediaUrl) {
+      try {
+        console.log("[transcription] Iniciando transcripción...");
+        // Obtener nombres de fincas para el prompt de Whisper
+        const allFincas = await ctx.runQuery(api.fincas.search, { query: " ", limit: 1000 });
+        const fincaNames = allFincas.map(p => p.title).join(", ");
+        
+        const contextualPrompt = `FincasYa, reservación de fincas, hospedaje, fin de semana. Fincas: ${fincaNames}. Palabras clave: mascotas, adultos, niños, personas, depósito, reserva, entrada, salida, disponibilidad.`;
+        
+        const transcription = await transcribeAudio(args.mediaUrl, contextualPrompt);
+        console.log("[transcription] Resultado:", transcription);
+        finalContent = `[Voz] ${transcription}`;
+      } catch (err) {
+        console.error("[voice] Error transcribiendo audio:", err);
+        // Fallback a [Audio] si falla la transcripción
+        finalContent = "[Audio] (Transcripción fallida)";
+      }
+    }
+
     await ctx.runMutation(internal.messages.insertUserMessage, {
       conversationId,
-      content: args.text,
+      content: finalContent,
       createdAt: now,
       type: args.type,
       mediaUrl: args.mediaUrl,
@@ -186,6 +209,10 @@ export const processInboundMessage = internalAction({
     const conv = convAfterDebounce;
     const shouldReply = conv.status === "ai";
     if (shouldReply) {
+      // Contexto para la IA
+      let currentMessageText = (args.type === "audio" && finalContent.startsWith("[Voz]")) 
+        ? finalContent 
+        : (args.text || "");
       let singleFincaSent = false;
       let fincaTitle = "";
       let whatsappCatalogSentForSearch = false;
@@ -207,6 +234,7 @@ export const processInboundMessage = internalAction({
 
       // ── VISIÓN: Si el usuario envió una imagen, analizar primero para identificar la finca ──
       let imageIdentifiedFincaName: string | undefined;
+      let confirmedFincaTitle: string | undefined; // Título oficial encontrado en DB
       if (args.type === "image" && args.mediaUrl) {
         try {
           console.log("[vision] Analizando imagen del usuario...");
@@ -230,7 +258,7 @@ Fincas disponibles: ${fincaNames}`,
               {
                 role: "user",
                 content: [
-                  { type: "text", text: args.text === "[Imagen]" ? "¿Qué finca es esta?" : args.text },
+                  { type: "text", text: currentMessageText === "[Imagen]" ? "¿Qué finca es esta?" : currentMessageText },
                   { type: "image", image: new URL(args.mediaUrl) },
                 ],
               },
@@ -255,7 +283,7 @@ Fincas disponibles: ${fincaNames}`,
         catalogIntent = await ctx.runAction(internal.ycloud.detectCatalogIntentWithAI, {
           userMessage: imageIdentifiedFincaName
             ? `Quiero reservar la finca ${imageIdentifiedFincaName}`
-            : args.text,
+            : currentMessageText,
           conversationSnippet: catalogIntentSnippet,
         });
       } catch (e) {
@@ -269,7 +297,7 @@ Fincas disponibles: ${fincaNames}`,
 
       // Enviar ficha de una finca (IA o regex como respaldo).
       // PERO NO re-enviar si el usuario está dando datos de seguimiento (fechas, personas) SIN mencionar finca
-      const followUpData = isProvidingFollowUpData(args.text) 
+      const followUpData = isProvidingFollowUpData(currentMessageText) 
         && catalogIntent.intent !== "single_finca";
       try {
         if (!followUpData) {
@@ -280,7 +308,7 @@ Fincas disponibles: ${fincaNames}`,
               conversationId,
               userMessage: imageIdentifiedFincaName
                 ? `Quiero reservar la finca ${imageIdentifiedFincaName}`
-                : args.text,
+                : currentMessageText,
               wamid: args.wamid,
               extractedFincaName:
                 catalogIntent.intent === "single_finca"
@@ -288,8 +316,11 @@ Fincas disponibles: ${fincaNames}`,
                   : undefined,
             }
           );
-          singleFincaSent = result?.sent ?? false;
-          fincaTitle = result?.fincaTitle ?? "";
+          if (result && result.sent && result.fincaTitle) {
+            singleFincaSent = true;
+            fincaTitle = result.fincaTitle;
+            confirmedFincaTitle = result.fincaTitle;
+          }
         }
       } catch (e) {
         console.error("YCloud single-finca catalog error:", e);
@@ -314,7 +345,7 @@ Fincas disponibles: ${fincaNames}`,
             {
               conversationId,
               phone: args.phone,
-              userMessage: args.text,
+              userMessage: currentMessageText,
               wamid: args.wamid,
               catalogIntent: catalogIntentArg,
             }
@@ -342,7 +373,7 @@ Fincas disponibles: ${fincaNames}`,
         catalogIntent.intent !== "single_finca"
       ) {
         const dynamicLocationsList_pre = await ctx.runQuery(api.fincas.getAllUniqueLocations, {});
-        const msgLower_pre = args.text.toLowerCase().normalize("NFD").replace(/\p{M}/gu, "");
+        const msgLower_pre = currentMessageText.toLowerCase().normalize("NFD").replace(/\p{M}/gu, "");
         const matchedCity = dynamicLocationsList_pre.find(
           (loc: string) => msgLower_pre.includes(loc.toLowerCase().normalize("NFD").replace(/\p{M}/gu, ""))
         );
@@ -354,7 +385,7 @@ Fincas disponibles: ${fincaNames}`,
               {
                 conversationId,
                 phone: args.phone,
-                userMessage: args.text,
+                userMessage: currentMessageText,
                 wamid: args.wamid,
                 catalogIntent: {
                   intent: "search_catalog" as const,
@@ -377,18 +408,18 @@ Fincas disponibles: ${fincaNames}`,
 
       // Plantillas: no pisar el flujo cuando ya mandamos catálogo interactivo, el cliente pide finca específica, o envía datos.
       let templateSent = false;
-      const isProvidingData = /\\d{7,}/.test(args.text) || /@\\w+\\.\\w+/.test(args.text);
+      const isProvidingData = /\d{7,}/.test(currentMessageText) || /@\w+\.\w+/.test(currentMessageText);
       const isSpecificFinca = singleFincaSent || catalogIntent.intent === "single_finca";
       
       // Detectar si el usuario menciona una ubicación o datos de reserva (no enviar template genérica)
       const dynamicLocationsList = await ctx.runQuery(api.fincas.getAllUniqueLocations, {});
-      const msgLower = args.text.toLowerCase().normalize("NFD").replace(/\p{M}/gu, "");
+      const msgLower = currentMessageText.toLowerCase().normalize("NFD").replace(/\p{M}/gu, "");
       const mentionsCityOrFinca = dynamicLocationsList.some(
         (loc: string) => msgLower.includes(loc.toLowerCase().normalize("NFD").replace(/\p{M}/gu, ""))
       );
-      const mentionsDatesOrPersonas = /\b(\d{1,2}\s*(al|hasta)\s*\d{1,2}|personas?|fin de semana)\b/i.test(args.text);
+      const mentionsDatesOrPersonas = /\b(\d{1,2}\s*(al|hasta)\s*\d{1,2}|personas?|fin de semana)\b/i.test(currentMessageText);
       // También detectar intención de reserva con ubicación: "finca en X", "reservar en X"
-      const mentionsBookingIntent = /\b(reservar|alquilar|arrendar|finca\s+en|fincas\s+en|fincas\s+de|finca\s+de|finca\s+para)\b/i.test(args.text);
+      const mentionsBookingIntent = /\b(reservar|alquilar|arrendar|finca\s+en|fincas\s+en|fincas\s+de|finca\s+de|finca\s+para)\b/i.test(currentMessageText);
       const hasBookingContext = mentionsCityOrFinca || mentionsDatesOrPersonas || mentionsBookingIntent;
       
       console.log("[template-guard]", {
@@ -409,7 +440,7 @@ Fincas disponibles: ${fincaNames}`,
               phone: args.phone,
               wamid: args.wamid,
               conversationId,
-              userMessage: args.text,
+              userMessage: currentMessageText,
             }
           );
           templateSent = routed?.sent ?? false;
@@ -439,7 +470,7 @@ Fincas disponibles: ${fincaNames}`,
         internal.ycloud.generateReplyWithRagAndFincas,
         {
           conversationId,
-          userMessage: args.text,
+          userMessage: currentMessageText,
           singleFincaCatalogSent: singleFincaSent,
           fincaTitle,
           searchQueryOverride: searchOverride,
@@ -655,64 +686,66 @@ export const generateReplyWithRagAndFincas = internalAction({
       ].join(" ");
 
       const monthNames: Record<string, number> = { enero:0,febrero:1,marzo:2,abril:3,mayo:4,junio:5,julio:6,agosto:7,septiembre:8,octubre:9,noviembre:10,diciembre:11 };
-      const dateMatch = fullConversationText.match(/(?:del\s+)?(\d{1,2})\s*(?:al|hasta el|hasta)\s*(\d{1,2})/i);
-      const monthMatch = fullConversationText.match(/(?:de\s+)?(enero|febrero|marzo|abril|mayo|junio|julio|agosto|septiembre|octubre|noviembre|diciembre)/i);
-      const now = new Date();
-      let checkDateMMDD: string | null = null;
-      if (dateMatch) {
-        const d1 = parseInt(dateMatch[1], 10);
-        const month = monthMatch ? monthNames[monthMatch[1].toLowerCase()] ?? now.getMonth() : now.getMonth();
-        checkDateMMDD = `${String(month + 1).padStart(2, '0')}-${String(d1).padStart(2, '0')}`;
+      // Regex más robusta para fechas: "20 al 25 de abril", "del 20 al 25", "20 hasta el 25 de mayo"
+      const dateRangeMatch = fullConversationText.match(/(?:del\s+|desde el\s+|desde\s+)?(\d{1,2})\s*(?:al|hasta el|hasta|a)\s*(\d{1,2})/i);
+      const monthMatch = fullConversationText.match(/\b(enero|febrero|marzo|abril|mayo|junio|julio|agosto|septiembre|octubre|noviembre|diciembre)\b/i);
+      
+      let parsedDates: { start: string, end: string } | null = null;
+      if (dateRangeMatch) {
+        const d1 = parseInt(dateRangeMatch[1], 10);
+        const d2 = parseInt(dateRangeMatch[2], 10);
+        const now = new Date();
+        const monthIndex = monthMatch ? monthNames[monthMatch[1].toLowerCase()] ?? now.getMonth() : now.getMonth();
+        const year = now.getFullYear();
+        
+        const monthNum = String(monthIndex + 1).padStart(2, '0');
+        
+        // Formato YYYY-MM-DD manual para evitar desfases de zona horaria
+        parsedDates = {
+          start: `${year}-${monthNum}-${String(d1).padStart(2, '0')}`,
+          end: `${year}-${monthNum}-${String(d2).padStart(2, '0')}`
+        };
       }
 
       const pricingBlocks: string[] = [];
       const availabilityBlocks: string[] = [];
 
       for (const finca of fincasList.slice(0, 8)) {
-        // 1. Precios y Temporadas
+        // 1. Precios y Temporadas (Usando la lógica oficial)
         try {
+          if (parsedDates) {
+            const pricingRes = await ctx.runQuery(api.fincas.calculateStayPrice, {
+              propertyId: finca._id as any,
+              fechaEntrada: parsedDates.start,
+              fechaSalida: parsedDates.end,
+            });
+
+            if (pricingRes && pricingRes.total > 0) {
+              const breakdown = pricingRes.nights.map((n: any) => 
+                `    - ${n.date} (${n.ruleName}): $${n.price.toLocaleString("es-CO")}`
+              ).join("\n");
+
+              pricingBlocks.push(`📋 DESGLOSE DE PRECIOS PARA ${finca.title} (${parsedDates.start} al ${parsedDates.end}):
+    Total: $${pricingRes.total.toLocaleString("es-CO")} (${pricingRes.nightsCount} noches)
+    Desglose:
+${breakdown}
+  ⚠️ INSTRUCCIÓN: Informa al cliente este TOTAL EXACTO de $${pricingRes.total.toLocaleString("es-CO")} y menciona brevemente por qué varía el precio (ej. noches de fin de semana o temporada).`);
+            }
+          }
+
+          // Mostrar reglas generales de todos modos si no hay fechas o como contexto extra
           const rules = await ctx.runQuery(api.fincas.getPropertyPricingRules, {
             propertyId: finca._id as any,
           });
-          if (rules.length > 0) {
-            // Determinar precio aplicable si hay fechas detectadas
-            let precioAplicable: string | null = null;
-            if (checkDateMMDD) {
-              const aplicable = rules.find((r: any) => {
-                if (r.fechaDesde && r.fechaHasta) {
-                  if (r.fechaDesde <= r.fechaHasta) {
-                    return checkDateMMDD! >= r.fechaDesde && checkDateMMDD! <= r.fechaHasta;
-                  } else {
-                    return checkDateMMDD! >= r.fechaDesde || checkDateMMDD! <= r.fechaHasta;
-                  }
-                }
-                if (r.fechas?.length) return r.fechas.includes(checkDateMMDD);
-                return false;
-              });
-              if (aplicable?.valorUnico) {
-                precioAplicable = `$${aplicable.valorUnico.toLocaleString("es-CO")}/noche (Temporada: ${aplicable.nombre})`;
-              }
-            }
-
+          if (rules.length > 0 && (!parsedDates || pricingBlocks.length === 0)) {
             const reglaLines = rules.map((r: any) => {
-              const rango = r.fechaDesde && r.fechaHasta
-                ? `${r.fechaDesde} al ${r.fechaHasta}`
-                : r.fechas?.length
-                  ? `fechas: ${r.fechas.join(", ")}`
-                  : "sin rango";
-              const precio = r.valorUnico ? `$${r.valorUnico.toLocaleString("es-CO")}/noche` : "precio base";
-              const cond = r.condiciones ? ` | Condiciones: ${r.condiciones}` : "";
-              return `  - ${r.nombre} (${rango}): ${precio}${cond}`;
+              const rango = r.fechaDesde && r.fechaHasta ? `${r.fechaDesde} al ${r.fechaHasta}` : "general";
+              return `  - ${r.nombre} (${rango}): $${(r.valorUnico || 0).toLocaleString("es-CO")}/noche`;
             }).join("\n");
-
-            let block = `📋 Temporadas de ${finca.title}:\n${reglaLines}`;
-            if (precioAplicable) {
-              block += `\n  ⚠️ PRECIO APLICABLE PARA LAS FECHAS DEL CLIENTE: ${precioAplicable}. USA ESTE PRECIO.`;
-            }
-            pricingBlocks.push(block);
+            pricingBlocks.push(`📋 Tarifas generales de ${finca.title}:\n${reglaLines}`);
           }
         } catch (e) {
-          console.log("[pricing] Error fetching seasonal rules for", finca.title, e);
+          console.log("[pricing] Error calculating price for", finca.title, e);
         }
 
         // 2. Disponibilidad (Calendario)
@@ -911,7 +944,19 @@ El usuario te ha enviado una imagen. DEBES analizarla visualmente:
 `
     : "";
 
-  return `${basePrompt}${dynamicLocationsText}${priorityInstructions}${singleFincaHint}${multiCatalogHint}${visionHint}
+  const voiceHint = `
+---
+## 🎙️ MENSAJES DE VOZ (Transcripción)
+Si el mensaje del usuario empieza con "[Voz]", significa que fue transcrito automáticamente desde un audio de WhatsApp. 
+- Sé natural y amigable. 
+- Si la transcripción parece tener errores fonéticos (ej: nombres de fincas mal escritos), intenta inferir lo que el cliente quiso decir basándote en el catálogo.
+`;
+
+  const officialNameHint = opts?.fincaTitle
+    ? `\n**REGLA DE NOMBRE:** Has identificado que el usuario se refiere a la finca "${opts.fincaTitle}". USA SIEMPRE este nombre exacto en tu respuesta, ignorando errores ortográficos o de transcripción que el usuario pueda tener en su mensaje original.`
+    : "";
+
+  return `${basePrompt}${dynamicLocationsText}${priorityInstructions}${singleFincaHint}${multiCatalogHint}${visionHint}${voiceHint}${officialNameHint}
 
 ---
 ## REGLA DE LISTAS DE FINCAS
@@ -1546,9 +1591,9 @@ export const detectCatalogIntentWithAI = internalAction({
       system: `Eres un clasificador. Del mensaje del usuario extrae la intención y datos. Responde SOLO con un JSON válido, sin markdown, sin explicación.
 
 Reglas:
-- intent: "single_finca" si pide VER o RESERVAR una finca específica por nombre (ej. "quiero ver villa green", "me gustaría reservar la finca X", "quinto la finca X", "esta es la finca que elegí"). También si el mensaje es una confirmación de datos (fechas/personas) para una finca mencionada justo antes en el chat. En fincaName pon solo el nombre de la finca en minúsculas, sin "finca" ni "la".
+- intent: "single_finca" si pide VER o RESERVAR una finca específica por nombre (ej. "quiero ver villa green", "me gustaría reservar la finca X", "quinto la finca X", "esta es la finca que elegí"). **CRÍTICO:** Aunque el mensaje incluya fechas, personas u otros datos de reserva, si menciona un nombre de finca específico, DEBES marcarlo como "single_finca". También si es una confirmación para una finca mencionada justo antes. En fincaName pon solo el nombre de la finca en minúsculas.
 - intent: "more_options" si pide otras opciones, más opciones, no le gustan, envía más, otras fincas, dame otras.
-- intent: "search_catalog" SOLO SI MENCIONA EXPLÍCITAMENTE UN MUNICIPIO O CIUDAD (ej. Villeta, Melgar, etc.). Si el usuario pide "una finca" pero NO EXPRESA NINGUNA CIUDAD NI FINCA, DEBES DEVOLVER intent "none". Extrae: location (solo nombre del lugar, minúsculas, sin emojis; "mergal" u errores similares a Melgar → location "melgar"), hasWeekend (true si dice fin de semana / este fin / próximo fin / viernes a domingo), dateD1 y dateD2 (números del 1 al 31 si dice "del X al Y"), minCapacity (número si dice "X personas" o "X o más personas"), sortByPrice (true si dice buen precio, económico, barato).
+- intent: "search_catalog" SOLO SI MENCIONA EXPLÍCITAMENTE UN MUNICIPIO O CIUDAD (ej. Villeta, Melgar, etc.) Y NO MENCIONA UNA FINCA CONCRETA. Si menciona una finca, prioriza "single_finca".
 - Si el mensaje ACTUAL es solo confirmación (sí, si, ok, dale, por favor, procede, claro, listo): Analiza el CONTEXTO para determinar qué confirma el usuario. CASOS: (1) Si el Asistente preguntó "¿Te gustaría ver/mostrar las fincas en [Ciudad]?" o "¿Te gustaría que te muestre opciones en [Ciudad]?" → devuelve search_catalog con esa ciudad inferida del contexto. (2) Si el Asistente preguntó "¿Te gustaría avanzar con la reserva?" o "¿Deseas continuar?" → devuelve "none". (3) Si el Asistente solicitó datos del contrato → devuelve "none". (4) Si hay ubicación en el contexto y el asistente estaba enviando/mostrando catálogo de fincas → devuelve search_catalog con esa ubicación. Si no se puede inferir la ciudad, devuelve "none".
 - Si pregunta por métodos de pago, datos bancarios, Nequi, PSE, transferencia, firma de contrato o PDF del contrato, devuelve SIEMPRE intent "none" (no catálogo).
 - intent: "none" si no aplica ninguna de las anteriores.
@@ -1808,8 +1853,11 @@ export const maybeSendSingleFincaCatalogForUserMessage = internalAction({
       return { sent: false };
     }
 
-    const searchTerm = args.extractedFincaName?.trim();
-    if (!searchTerm) return { sent: false };
+    const searchTerm = args.extractedFincaName?.trim() || parseSingleFincaRequest(args.userMessage);
+    if (!searchTerm) {
+      console.log("[single-finca] no se encontró término de búsqueda en mensaje ni extracción IA");
+      return { sent: false };
+    }
     console.log("[single-finca] buscando:", searchTerm);
 
     const fincaToSend = await ctx.runQuery(api.fincas.findBySearchTerm, {
