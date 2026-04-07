@@ -347,4 +347,9 @@ export class PricingItemDto {
   @IsOptional()
   @IsNumber()
   order?: number;
+
+  /** Sub-reglas de precio por capacidad (cada una con su propio precio) */
+  @IsOptional()
+  @IsArray()
+  subReglasCapacidad?: { capacidadMin: number; capacidadMax: number; valorUnico: number }[];
 }
