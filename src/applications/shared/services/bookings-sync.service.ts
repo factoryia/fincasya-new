@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { ConvexService } from './convex.service';
 import { GoogleCalendarService } from './google-calendar.service';
 import { S3Service } from './s3.service';
+import * as crypto from 'crypto';
 
 @Injectable()
 export class BookingsSyncService {
@@ -34,21 +35,28 @@ export class BookingsSyncService {
       numeroPersonas: number | string;
       precioTotal: number | string;
       temporada: string;
+      numeroMascotas?: number | string;
+      costoMascotas?: number | string;
       observaciones?: string;
       horaEntrada?: string;
       horaSalida?: string;
       city?: string;
       purpose?: string;
+      reference?: string;
+      address?: string;
+      isDirect?: boolean;
     },
     multimediaFiles?: Express.Multer.File[],
   ) {
-    const { propertyId, ...rest } = params;
+    const { propertyId, temporada, ...rest } = params;
 
     // Normalize types if they come as strings from FormData
     const fechaEntradaNum = typeof params.fechaEntrada === 'string' ? parseInt(params.fechaEntrada, 10) : params.fechaEntrada;
     const fechaSalidaNum = typeof params.fechaSalida === 'string' ? parseInt(params.fechaSalida, 10) : params.fechaSalida;
     const numeroPersonasNum = typeof params.numeroPersonas === 'string' ? parseInt(params.numeroPersonas, 10) : params.numeroPersonas;
-    const precioTotalNum = typeof params.precioTotal === 'string' ? parseInt(params.precioTotal, 10) : params.precioTotal;
+    const precioTotalNum = typeof params.precioTotal === 'string' ? parseFloat(params.precioTotal) : params.precioTotal;
+    const numeroMascotasNum = typeof params.numeroMascotas === 'string' ? parseInt(params.numeroMascotas, 10) : (params.numeroMascotas || 0);
+    const costoMascotasNum = typeof params.costoMascotas === 'string' ? parseFloat(params.costoMascotas) : (params.costoMascotas || 0);
 
     // 1. Obtener info de la propiedad
     const property = await this.convexService.query('fincas:getById', {
@@ -82,9 +90,23 @@ export class BookingsSyncService {
       numeroNoches: Math.ceil((fechaSalidaNum - fechaEntradaNum) / (1000 * 60 * 60 * 24)),
       subtotal: precioTotalNum,
       multimedia,
+      temporada,
+      numeroMascotas: numeroMascotasNum,
+      costoMascotas: costoMascotasNum,
     });
 
-    return { bookingId };
+    // 4. Generar firma de integridad para Bold (opcional pero recomendado si viene de la web)
+    let integritySignature = null;
+    const boldSecret = process.env.BOLD_SHARED_SECRET;
+    
+    if (params.reference && boldSecret) {
+      const amount = Math.floor(precioTotalNum);
+      const currency = 'COP';
+      const dataToHash = `${params.reference}${amount}${currency}${boldSecret}`;
+      integritySignature = crypto.createHash('sha256').update(dataToHash).digest('hex');
+    }
+
+    return { bookingId, integritySignature };
   }
 
   /**

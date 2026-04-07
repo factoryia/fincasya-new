@@ -17,24 +17,39 @@ import { AdminGuard } from '../shared/guards/admin.guard';
 import { OwnerOrAdminGuard } from '../shared/guards/owner-or-admin.guard';
 
 @Controller('bookings')
-@UseGuards(ConvexAuthGuard)
 export class BookingsController {
   constructor(private readonly bookingsSyncService: BookingsSyncService) {}
 
   @Get()
-  @UseGuards(OwnerOrAdminGuard)
+  @UseGuards(ConvexAuthGuard, OwnerOrAdminGuard)
   async list(@Query() query: any) {
     return this.bookingsSyncService.listBookings(query);
   }
 
   @Post('check-availability')
-  @UseGuards(AdminGuard)
+  @UseGuards(ConvexAuthGuard, AdminGuard)
   async checkAvailability(@Body() body: { propertyId: string; fechaEntrada: number; fechaSalida: number }) {
     return this.bookingsSyncService.checkAvailability(body.propertyId, body.fechaEntrada, body.fechaSalida);
   }
 
+  /**
+   * Endpoint público para verificar disponibilidad (desde la web)
+   */
+  @Post('check-availability-public')
+  async checkAvailabilityPublic(@Body() body: { propertyId: string; fechaEntrada: number; fechaSalida: number }) {
+    return this.bookingsSyncService.checkAvailability(body.propertyId, body.fechaEntrada, body.fechaSalida);
+  }
+
+  /**
+   * Endpoint público para reservas directas (desde la web)
+   */
+  @Post('direct')
+  async createDirect(@Body() body: any) {
+    return this.bookingsSyncService.createBooking(body);
+  }
+
   @Post()
-  @UseGuards(AdminGuard)
+  @UseGuards(ConvexAuthGuard, AdminGuard)
   @UseInterceptors(FilesInterceptor('multimedia'))
   async create(
     @Body() body: any,
@@ -44,7 +59,7 @@ export class BookingsController {
   }
 
   @Delete(':id')
-  @UseGuards(AdminGuard)
+  @UseGuards(ConvexAuthGuard, AdminGuard)
   async remove(@Param('id') id: string) {
     return this.bookingsSyncService.deleteBooking(id);
   }

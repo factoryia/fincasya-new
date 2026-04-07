@@ -157,6 +157,7 @@ export default defineSchema({
     fechaSalida: v.number(),
     horaEntrada: v.optional(v.string()), // Ej: "15:00"
     horaSalida: v.optional(v.string()), // Ej: "11:00"
+    address: v.optional(v.string()),
     numeroNoches: v.number(),
     numeroPersonas: v.number(),
     personasAdicionales: v.optional(v.number()),
@@ -176,6 +177,7 @@ export default defineSchema({
     temporada: v.string(),
     status: v.union(
       v.literal('PENDING'),
+      v.literal('PENDING_PAYMENT'),
       v.literal('CONFIRMED'),
       v.literal('PAID'),
       v.literal('CANCELLED'),
@@ -205,11 +207,13 @@ export default defineSchema({
     ),
     createdAt: v.number(),
     updatedAt: v.optional(v.number()),
+    isDirect: v.optional(v.boolean()),
   })
     .index('by_property', ['propertyId'])
     .index('by_status', ['status'])
     .index('by_cedula', ['cedula'])
     .index('by_reference', ['reference'])
+    .index('by_is_direct', ['isDirect'])
     .index('by_user', ['userId'])
     .index('by_dates', ['fechaEntrada', 'fechaSalida']),
 
@@ -230,6 +234,7 @@ export default defineSchema({
     checkoutUrl: v.optional(v.string()),
     status: v.optional(v.string()),
     wompiData: v.optional(v.any()),
+    boldData: v.optional(v.any()),
     receiptUrl: v.optional(v.string()),
     verifiedBy: v.optional(v.string()),
     verifiedAt: v.optional(v.number()),

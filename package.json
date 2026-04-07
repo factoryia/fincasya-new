@@ -38,6 +38,7 @@
     "cookie-parser": "^1.4.7",
     "date-fns": "^4.1.0",
     "docxtemplater": "^3.68.3",
+    "docxtemplater-image-module-free": "^1.1.1",
     "dotenv": "^16.4.5",
     "form-data": "^3.0.1",
     "googleapis": "^171.4.0",

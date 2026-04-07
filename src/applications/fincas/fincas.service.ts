@@ -6,6 +6,7 @@ import {
 import { PDFDocument, StandardFonts } from 'pdf-lib';
 const PizZip = require('pizzip');
 const Docxtemplater = require('docxtemplater');
+const ImageModule = require('docxtemplater-image-module-free');
 import { format as formatDate } from 'date-fns';
 import axios from 'axios';
 import { ConvexService } from '../shared/services/convex.service';
@@ -1022,10 +1023,30 @@ export class FincasService {
           );
         }
 
+        // --- CONFIGURACIÓN DE MÓDULO DE IMAGEN ---
+        let imageModule: any;
+        if (dto.signature) {
+          console.log('[api] Configurando módulo de imagen para firma');
+          const opts = {
+            centered: false,
+            getImage: (tagValue: string) => {
+              // Limpiar el prefijo base64 si existe
+              const base64Data = tagValue.replace(
+                /^data:image\/\w+;base64,/,
+                '',
+              );
+              return Buffer.from(base64Data, 'base64');
+            },
+            getSize: () => [150, 150], // Tamaño por defecto de la firma
+          };
+          imageModule = new ImageModule(opts);
+        }
+
         const doc = new Docxtemplater(zip, {
           paragraphLoop: true,
           linebreaks: true,
           delimiters: { start: '{{', end: '}}' },
+          modules: imageModule ? [imageModule] : [],
         });
 
         // Mapeo limpio para Word
@@ -1065,6 +1086,7 @@ export class FincasService {
           clienteIdentificacion: valuesMapping[mappingKeys.clientId],
           clientCorreo: valuesMapping[mappingKeys.clientEmail],
           clienteCelular: valuesMapping[mappingKeys.clientPhone],
+          firmaCliente: dto.signature || '',
         };
 
         try {

@@ -12,9 +12,24 @@ import { json, urlencoded } from 'express';
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
   
-  // Aumentar límites del body parser para uploads grandes
-  app.use(json({ limit: '150mb' }));
-  app.use(urlencoded({ limit: '150mb', extended: true }));
+  // Aumentar límites del body parser para uploads grandes y capturar raw body para webhooks
+  app.use(json({ 
+    limit: '150mb',
+    verify: (req: any, res, buf) => {
+      if (req.url && req.url.includes('/payments/bold-webhook')) {
+        req.rawBody = buf;
+      }
+    }
+  }));
+  app.use(urlencoded({ 
+    limit: '150mb', 
+    extended: true,
+    verify: (req: any, res, buf) => {
+      if (req.url && req.url.includes('/payments/bold-webhook')) {
+        req.rawBody = buf;
+      }
+    }
+  }));
   
   // Establecer prefijo global para todas las rutas
   app.setGlobalPrefix('api');
