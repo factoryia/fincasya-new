@@ -132,6 +132,7 @@ export default defineSchema({
     fechaDesde: v.optional(v.string()),
     fechaHasta: v.optional(v.string()),
     fechas: v.optional(v.array(v.string())),
+    /** Precio base (usado cuando no hay sub-reglas de capacidad) */
     valorUnico: v.optional(v.number()),
     condiciones: v.optional(v.string()),
     /** Si true, el cliente final ve esta temporada; el admin puede activar/desactivar */
@@ -139,6 +140,12 @@ export default defineSchema({
     /** JSON: reglas de la temporada (rangos fechas, días semana, mín noches, excepciones, descripción) */
     reglas: v.optional(v.string()),
     order: v.optional(v.number()),
+    /** Sub-reglas de precio por capacidad (cada una con su propio precio) */
+    subReglasCapacidad: v.optional(v.array(v.object({
+      capacidadMin: v.number(),
+      capacidadMax: v.number(),
+      valorUnico: v.number(),
+    }))),
     createdAt: v.number(),
     updatedAt: v.number(),
   })
@@ -193,7 +200,10 @@ export default defineSchema({
     reference: v.optional(v.string()),
     observaciones: v.optional(v.string()),
     city: v.optional(v.string()),
+    address: v.optional(v.string()),
     purpose: v.optional(v.string()),
+    isDirect: v.optional(v.boolean()),
+    isDirectBooking: v.optional(v.boolean()),
     googleEventId: v.optional(v.string()),
     googleCalendarId: v.optional(v.string()),
     multimedia: v.optional(

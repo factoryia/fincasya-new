@@ -252,19 +252,20 @@ export const list = query({
                 }
               }
 
-              return {
-                id: p._id,
-                globalRuleId: p.globalRuleId,
-                nombre: globalData?.nombre || p.nombre,
-                fechaDesde: globalData?.fechaDesde || p.fechaDesde,
-                fechaHasta: globalData?.fechaHasta || p.fechaHasta,
-                fechas: globalData?.fechas || p.fechas,
-                valorUnico: p.valorUnico,
-                condiciones: condicionesParsed,
-                activa: (globalData?.activa !== false) && (p.activa ?? true),
-                reglas: reglasParsed,
-                order: p.order,
-              };
+        return {
+          id: p._id,
+          globalRuleId: p.globalRuleId,
+          nombre: globalData?.nombre || p.nombre,
+          fechaDesde: globalData?.fechaDesde || p.fechaDesde,
+          fechaHasta: globalData?.fechaHasta || p.fechaHasta,
+          fechas: globalData?.fechas || p.fechas,
+          valorUnico: p.valorUnico,
+          condiciones: condicionesParsed,
+          activa: (globalData?.activa !== false) && (p.activa ?? true),
+          reglas: reglasParsed,
+          order: p.order,
+          subReglasCapacidad: p.subReglasCapacidad,
+        };
             })),
             metaCatalogs: catalogLinks.map((link, index) => {
               const catalog = catalogs[index];
@@ -395,6 +396,7 @@ export const getById = query({
           activa: (globalData?.activa !== false) && (p.activa ?? true),
           reglas: reglasParsed,
           order: p.order,
+          subReglasCapacidad: p.subReglasCapacidad,
         };
       })),
     };
@@ -761,6 +763,7 @@ export const getByCode = query({
           activa: (globalData?.activa !== false) && (p.activa ?? true),
           reglas: reglasParsed,
           order: p.order,
+          subReglasCapacidad: p.subReglasCapacidad,
         };
       })),
     };
@@ -880,6 +883,7 @@ export const getBySlug = query({
           activa: (globalData?.activa !== false) && (p.activa ?? true),
           reglas: reglasParsed,
           order: p.order,
+          subReglasCapacidad: p.subReglasCapacidad,
         };
       })),
     };
@@ -1534,6 +1538,11 @@ export const setPricing = mutation({
         activa: v.optional(v.boolean()),
         reglas: v.optional(v.string()),
         order: v.optional(v.number()),
+        subReglasCapacidad: v.optional(v.array(v.object({
+          capacidadMin: v.number(),
+          capacidadMax: v.number(),
+          valorUnico: v.number(),
+        }))),
       }),
     ),
   },
@@ -1567,6 +1576,7 @@ export const setPricing = mutation({
         activa: p.activa ?? true,
         reglas: p.reglas,
         order: p.order ?? i,
+        subReglasCapacidad: p.subReglasCapacidad,
         createdAt: now,
         updatedAt: now,
       });
@@ -1592,6 +1602,11 @@ export const addTemporada = mutation({
     activa: v.optional(v.boolean()),
     reglas: v.optional(v.string()),
     order: v.optional(v.number()),
+    subReglasCapacidad: v.optional(v.array(v.object({
+      capacidadMin: v.number(),
+      capacidadMax: v.number(),
+      valorUnico: v.number(),
+    }))),
   },
   handler: async (ctx, args) => {
     const { propertyId, ...rest } = args;
@@ -1636,6 +1651,11 @@ export const updateTemporada = mutation({
     activa: v.optional(v.boolean()),
     reglas: v.optional(v.string()),
     order: v.optional(v.number()),
+    subReglasCapacidad: v.optional(v.array(v.object({
+      capacidadMin: v.number(),
+      capacidadMax: v.number(),
+      valorUnico: v.number(),
+    }))),
   },
   handler: async (ctx, args) => {
     const { pricingId, ...updates } = args;

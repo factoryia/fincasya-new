@@ -335,6 +335,7 @@ export class FincasService {
             reglas,
             order,
             globalRuleId,
+            subReglasCapacidad,
           } = p;
           const out: Record<string, unknown> = {};
           if (nombre !== undefined) out.nombre = nombre;
@@ -347,6 +348,7 @@ export class FincasService {
           if (activa !== undefined) out.activa = activa;
           if (reglas !== undefined) out.reglas = reglas;
           if (order !== undefined) out.order = order;
+          if (subReglasCapacidad !== undefined) out.subReglasCapacidad = subReglasCapacidad;
           return out;
         });
       }
@@ -472,6 +474,7 @@ export class FincasService {
             reglas,
             order,
             globalRuleId,
+            subReglasCapacidad,
           } = p;
           const out: Record<string, unknown> = {};
           if (nombre !== undefined) out.nombre = nombre;
@@ -484,6 +487,7 @@ export class FincasService {
           if (activa !== undefined) out.activa = activa;
           if (reglas !== undefined) out.reglas = reglas;
           if (order !== undefined) out.order = order;
+          if (subReglasCapacidad !== undefined) out.subReglasCapacidad = subReglasCapacidad;
           return out;
         });
 
@@ -512,6 +516,7 @@ export class FincasService {
       activa?: boolean;
       reglas?: string;
       order?: number;
+      subReglasCapacidad?: { capacidadMin: number; capacidadMax: number; valorUnico: number }[];
     }>,
   ) {
     try {
@@ -537,6 +542,7 @@ export class FincasService {
       activa?: boolean;
       reglas?: string;
       order?: number;
+      subReglasCapacidad?: { capacidadMin: number; capacidadMax: number; valorUnico: number }[];
     },
   ) {
     try {
@@ -562,6 +568,7 @@ export class FincasService {
       activa?: boolean;
       reglas?: string;
       order?: number;
+      subReglasCapacidad?: { capacidadMin: number; capacidadMax: number; valorUnico: number }[];
     },
   ) {
     try {
