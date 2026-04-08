@@ -141,11 +141,15 @@ export default defineSchema({
     reglas: v.optional(v.string()),
     order: v.optional(v.number()),
     /** Sub-reglas de precio por capacidad (cada una con su propio precio) */
-    subReglasCapacidad: v.optional(v.array(v.object({
-      capacidadMin: v.number(),
-      capacidadMax: v.number(),
-      valorUnico: v.number(),
-    }))),
+    subReglasCapacidad: v.optional(
+      v.array(
+        v.object({
+          capacidadMin: v.number(),
+          capacidadMax: v.number(),
+          valorUnico: v.number(),
+        }),
+      ),
+    ),
     createdAt: v.number(),
     updatedAt: v.number(),
   })
@@ -164,6 +168,7 @@ export default defineSchema({
     fechaSalida: v.number(),
     horaEntrada: v.optional(v.string()), // Ej: "15:00"
     horaSalida: v.optional(v.string()), // Ej: "11:00"
+    address: v.optional(v.string()),
     numeroNoches: v.number(),
     numeroPersonas: v.number(),
     personasAdicionales: v.optional(v.number()),
@@ -183,6 +188,7 @@ export default defineSchema({
     temporada: v.string(),
     status: v.union(
       v.literal('PENDING'),
+      v.literal('PENDING_PAYMENT'),
       v.literal('CONFIRMED'),
       v.literal('PAID'),
       v.literal('CANCELLED'),
@@ -198,7 +204,6 @@ export default defineSchema({
     reference: v.optional(v.string()),
     observaciones: v.optional(v.string()),
     city: v.optional(v.string()),
-    address: v.optional(v.string()),
     purpose: v.optional(v.string()),
     isDirect: v.optional(v.boolean()),
     isDirectBooking: v.optional(v.boolean()),
@@ -220,6 +225,7 @@ export default defineSchema({
     .index('by_status', ['status'])
     .index('by_cedula', ['cedula'])
     .index('by_reference', ['reference'])
+    .index('by_is_direct', ['isDirect'])
     .index('by_user', ['userId'])
     .index('by_dates', ['fechaEntrada', 'fechaSalida']),
 
@@ -240,6 +246,7 @@ export default defineSchema({
     checkoutUrl: v.optional(v.string()),
     status: v.optional(v.string()),
     wompiData: v.optional(v.any()),
+    boldData: v.optional(v.any()),
     receiptUrl: v.optional(v.string()),
     verifiedBy: v.optional(v.string()),
     verifiedAt: v.optional(v.number()),
@@ -461,9 +468,10 @@ export default defineSchema({
     chamberOfCommerceUrl: v.optional(v.string()),
     createdAt: v.number(),
     updatedAt: v.number(),
-  }).index('by_property', ['propertyId'])
+  })
+    .index('by_property', ['propertyId'])
     .index('by_owner', ['ownerUserId']),
-  
+
   // Tabla para gestionar el contenido de la página "¿Quiénes Somos?"
   quienes_somos: defineTable({
     queEsFincasYa: v.string(),
@@ -473,10 +481,12 @@ export default defineSchema({
     politicas: v.union(v.string(), v.array(v.string())),
     trayectoriaTitle: v.string(),
     trayectoriaParagraphs: v.string(),
-    stats: v.array(v.object({
-      label: v.string(),
-      value: v.string(),
-    })),
+    stats: v.array(
+      v.object({
+        label: v.string(),
+        value: v.string(),
+      }),
+    ),
     recognitionTitle: v.string(),
     recognitionSubtitle: v.string(),
     presenciaInstitucional: v.string(),

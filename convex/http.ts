@@ -9,7 +9,7 @@ const YCLOUD_TEMPLATES_BASE = 'https://api.ycloud.com/v2/whatsapp/templates';
 function jsonResponse(
   body: unknown,
   status: number,
-  headers?: Record<string, string>
+  headers?: Record<string, string>,
 ) {
   return new Response(JSON.stringify(body), {
     status,
@@ -23,7 +23,7 @@ function requireYCloudApiKey(request: Request): Response | null {
   if (!expected) {
     return jsonResponse(
       { error: 'YCLOUD_API_KEY no está configurada en Convex' },
-      503
+      503,
     );
   }
   const provided = request.headers.get('X-API-Key');
@@ -188,7 +188,7 @@ http.route({
     if (!apiKey) {
       return jsonResponse(
         { error: 'YCLOUD_API_KEY no está configurada en Convex' },
-        503
+        503,
       );
     }
 
@@ -261,7 +261,7 @@ http.route({
     } catch {
       return jsonResponse(
         { error: 'Body esperado: multipart/form-data con el archivo' },
-        400
+        400,
       );
     }
 
@@ -271,7 +271,7 @@ http.route({
     if (!file || typeof file.arrayBuffer !== 'function') {
       return jsonResponse(
         { error: 'Adjunta el Excel en el campo file (o documento)' },
-        400
+        400,
       );
     }
 
@@ -279,7 +279,7 @@ http.route({
     if (!name.endsWith('.xlsx') && !name.endsWith('.xls')) {
       return jsonResponse(
         { error: 'Solo se admiten archivos .xlsx o .xls' },
-        400
+        400,
       );
     }
 
@@ -291,7 +291,7 @@ http.route({
           error:
             'No hay hojas importables (usa hojas con nombre que no empiece por _ y con body/texto)',
         },
-        400
+        400,
       );
     }
 

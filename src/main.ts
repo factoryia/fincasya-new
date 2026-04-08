@@ -11,17 +11,39 @@ import { json, urlencoded } from 'express';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
-  
+
   // Aumentar límites del body parser para uploads grandes
-  app.use(json({ limit: '150mb' }));
-  app.use(urlencoded({ limit: '150mb', extended: true }));
-  
+  app.use(
+    json({
+      limit: '150mb',
+      verify: (req: any, res, buf) => {
+        const url = req.originalUrl || req.url || '';
+        if (url.includes('/payments/bold-webhook')) {
+          req.rawBody = buf;
+        }
+      },
+    }),
+  );
+
+  app.use(
+    urlencoded({
+      limit: '150mb',
+      extended: true,
+      verify: (req: any, res, buf) => {
+        const url = req.originalUrl || req.url || '';
+        if (url.includes('/payments/bold-webhook')) {
+          req.rawBody = buf;
+        }
+      },
+    }),
+  );
+
   // Establecer prefijo global para todas las rutas
   app.setGlobalPrefix('api');
-  
+
   // Habilitar cookie parser
   app.use(cookieParser());
-  
+
   // Habilitar CORS
   app.enableCors({
     origin: true,
@@ -39,6 +61,8 @@ async function bootstrap() {
 
   const port = process.env.PORT ?? 3001;
   await app.listen(port);
-  console.log(`[DEBUG] Application is running on: http://localhost:${port}/api - V2 Slugs Active`);
+  console.log(
+    `[DEBUG] Application is running on: http://localhost:${port}/api - V2 Slugs Active`,
+  );
 }
 bootstrap();

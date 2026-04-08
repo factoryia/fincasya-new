@@ -3,10 +3,12 @@ import {
   NotFoundException,
   BadRequestException,
 } from '@nestjs/common';
-import { PDFDocument, StandardFonts } from 'pdf-lib';
+import { PDFDocument } from 'pdf-lib';
+
 const PizZip = require('pizzip');
 const Docxtemplater = require('docxtemplater');
-import { format as formatDate } from 'date-fns';
+const ImageModule = require('docxtemplater-image-module-free');
+
 import axios from 'axios';
 import { ConvexService } from '../shared/services/convex.service';
 import { S3Service } from '../shared/services/s3.service';
@@ -347,7 +349,8 @@ export class FincasService {
           if (activa !== undefined) out.activa = activa;
           if (reglas !== undefined) out.reglas = reglas;
           if (order !== undefined) out.order = order;
-          if (subReglasCapacidad !== undefined) out.subReglasCapacidad = subReglasCapacidad;
+          if (subReglasCapacidad !== undefined)
+            out.subReglasCapacidad = subReglasCapacidad;
           return out;
         });
       }
@@ -486,7 +489,8 @@ export class FincasService {
           if (activa !== undefined) out.activa = activa;
           if (reglas !== undefined) out.reglas = reglas;
           if (order !== undefined) out.order = order;
-          if (subReglasCapacidad !== undefined) out.subReglasCapacidad = subReglasCapacidad;
+          if (subReglasCapacidad !== undefined)
+            out.subReglasCapacidad = subReglasCapacidad;
           return out;
         });
 
@@ -515,7 +519,11 @@ export class FincasService {
       activa?: boolean;
       reglas?: string;
       order?: number;
-      subReglasCapacidad?: { capacidadMin: number; capacidadMax: number; valorUnico: number }[];
+      subReglasCapacidad?: {
+        capacidadMin: number;
+        capacidadMax: number;
+        valorUnico: number;
+      }[];
     }>,
   ) {
     try {
@@ -541,7 +549,11 @@ export class FincasService {
       activa?: boolean;
       reglas?: string;
       order?: number;
-      subReglasCapacidad?: { capacidadMin: number; capacidadMax: number; valorUnico: number }[];
+      subReglasCapacidad?: {
+        capacidadMin: number;
+        capacidadMax: number;
+        valorUnico: number;
+      }[];
     },
   ) {
     try {
@@ -567,7 +579,11 @@ export class FincasService {
       activa?: boolean;
       reglas?: string;
       order?: number;
-      subReglasCapacidad?: { capacidadMin: number; capacidadMax: number; valorUnico: number }[];
+      subReglasCapacidad?: {
+        capacidadMin: number;
+        capacidadMax: number;
+        valorUnico: number;
+      }[];
     },
   ) {
     try {
@@ -994,6 +1010,8 @@ export class FincasService {
         [mappingKeys.city]: finca.location || '',
         [mappingKeys.clientCity]: dto.clientCity || '',
         [mappingKeys.clientAddress]: dto.clientAddress || '',
+        'HORA ENTRADA': dto.checkInTime || '',
+        'HORA SALIDA': dto.checkOutTime || '',
         // Fallbacks genéricos
         Text6: dto.contractNumber,
         Text9: totalPriceText,
@@ -1029,10 +1047,30 @@ export class FincasService {
           );
         }
 
+        // --- CONFIGURACIÓN DE MÓDULO DE IMAGEN ---
+        let imageModule: any;
+        if (dto.signature) {
+          console.log('[api] Configurando módulo de imagen para firma');
+          const opts = {
+            centered: false,
+            getImage: (tagValue: string) => {
+              // Limpiar el prefijo base64 si existe
+              const base64Data = tagValue.replace(
+                /^data:image\/\w+;base64,/,
+                '',
+              );
+              return Buffer.from(base64Data, 'base64');
+            },
+            getSize: () => [150, 150], // Tamaño por defecto de la firma
+          };
+          imageModule = new ImageModule(opts);
+        }
+
         const doc = new Docxtemplater(zip, {
           paragraphLoop: true,
           linebreaks: true,
           delimiters: { start: '{{', end: '}}' },
+          modules: imageModule ? [imageModule] : [],
         });
 
         // Mapeo limpio para Word
@@ -1072,6 +1110,7 @@ export class FincasService {
           clienteIdentificacion: valuesMapping[mappingKeys.clientId],
           clientCorreo: valuesMapping[mappingKeys.clientEmail],
           clienteCelular: valuesMapping[mappingKeys.clientPhone],
+          firmaCliente: dto.signature || '',
         };
 
         try {
@@ -1186,13 +1225,26 @@ export class FincasService {
         'contracts/generated',
       );
 
-      // 5. Enviar mensaje a la conversación
-      await this.inboxService.sendMessage(dto.conversationId, {
-        type: 'document',
-        text: `¡Hola! 👋 Aquí tienes el documento del contrato para la finca ${finca.title}. Por favor revísalo y quedamos atentos a cualquier duda. ✨`,
-        mediaUrl: publicUrl,
-        file: generatedFile,
-      });
+      // 5. Enviar mensaje a la conversación (solo si es una conversación válida)
+      if (dto.conversationId && dto.conversationId !== 'direct-reservation') {
+        try {
+          await this.inboxService.sendMessage(dto.conversationId, {
+            type: 'document',
+            text: `¡Hola! 👋 Aquí tienes el documento del contrato para la finca ${finca.title}. Por favor revísalo y quedamos atentos a cualquier duda. ✨`,
+            mediaUrl: publicUrl,
+            file: generatedFile,
+          });
+        } catch (msgErr) {
+          console.error(
+            `[api] No se pudo enviar mensaje al inbox ${dto.conversationId}:`,
+            msgErr.message,
+          );
+        }
+      } else {
+        console.log(
+          '[api] Reserva directa: Omitiendo envío de mensaje a Inbox local.',
+        );
+      }
 
       return {
         success: true,

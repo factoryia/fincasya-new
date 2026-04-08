@@ -24,6 +24,7 @@ export const list = query({
     cursor: v.optional(v.id('bookings')),
     month: v.optional(v.string()),
     year: v.optional(v.string()),
+    isDirect: v.optional(v.boolean()),
   },
   handler: async (ctx, args) => {
     const limit = args.limit ?? 50;
@@ -44,7 +45,14 @@ export const list = query({
               .query('bookings')
               .withIndex('by_user', (q) => q.eq('userId', args.userId as any))
               .collect()
-          : await ctx.db.query('bookings').collect();
+          : args.isDirect !== undefined
+            ? await ctx.db
+                .query('bookings')
+                .withIndex('by_is_direct', (q) =>
+                  q.eq('isDirect', args.isDirect!),
+                )
+                .collect()
+            : await ctx.db.query('bookings').collect();
 
     let filtered = allBookings;
 
@@ -56,15 +64,17 @@ export const list = query({
       const endMs = new Date(year, month + 1, 0, 23, 59, 59, 999).getTime();
 
       filtered = filtered.filter(
-        (b) => b.fechaEntrada <= endMs && b.fechaSalida >= startMs
+        (b) => b.fechaEntrada <= endMs && b.fechaSalida >= startMs,
       );
+    }
+
+    if (args.isDirect !== undefined) {
+      filtered = filtered.filter((b) => b.isDirect === args.isDirect);
     }
 
     // Aplicar cursor si existe (filtrar manualmente después de obtener los resultados)
     if (args.cursor) {
-      filtered = filtered.filter(
-        (b) => b._id > args.cursor!,
-      );
+      filtered = filtered.filter((b) => b._id > args.cursor!);
     }
 
     // Ordenar por fecha de creación (más recientes primero)
@@ -85,10 +95,12 @@ export const list = query({
             .withIndex('by_property', (q) => q.eq('propertyId', property._id))
             .collect();
           if (images.length > 0) {
-            firstImage = images.sort((a,b) => (a.order || 0) - (b.order || 0))[0]?.url;
+            firstImage = images.sort(
+              (a, b) => (a.order || 0) - (b.order || 0),
+            )[0]?.url;
           }
         }
-        
+
         return {
           ...booking,
           property: property
@@ -187,20 +199,20 @@ export const checkAvailability = query({
       .withIndex('by_property', (q) => q.eq('propertyId', args.propertyId))
       .filter((q) =>
         q.or(
-          // Reserva empieza antes y termina durante el período solicitado
+          // La nueva fecha de entrada cae dentro de una reserva existente (incluyendo el día de salida)
           q.and(
             q.lte(q.field('fechaEntrada'), args.fechaEntrada),
-            q.gt(q.field('fechaSalida'), args.fechaEntrada),
+            q.gte(q.field('fechaSalida'), args.fechaEntrada),
           ),
-          // Reserva está completamente dentro del período solicitado
+          // La nueva fecha de salida cae dentro de una reserva existente (incluyendo el día de entrada)
+          q.and(
+            q.lte(q.field('fechaEntrada'), args.fechaSalida),
+            q.gte(q.field('fechaSalida'), args.fechaSalida),
+          ),
+          // Una reserva existente está completamente contenida en el nuevo rango
           q.and(
             q.gte(q.field('fechaEntrada'), args.fechaEntrada),
             q.lte(q.field('fechaSalida'), args.fechaSalida),
-          ),
-          // Reserva empieza durante el período solicitado
-          q.and(
-            q.gte(q.field('fechaEntrada'), args.fechaEntrada),
-            q.lt(q.field('fechaEntrada'), args.fechaSalida),
           ),
         ),
       )
@@ -253,6 +265,8 @@ export const create = mutation({
     temporada: v.string(),
     observaciones: v.optional(v.string()),
     city: v.optional(v.string()),
+    address: v.optional(v.string()),
+    isDirect: v.optional(v.boolean()),
     purpose: v.optional(v.string()),
     reference: v.optional(v.string()),
     googleEventId: v.optional(v.string()),
@@ -260,13 +274,16 @@ export const create = mutation({
     horaEntrada: v.optional(v.string()), // "15:00"
     horaSalida: v.optional(v.string()), // "11:00"
     fechaCheckOut: v.optional(v.number()), // Para compatibilidad con nombres de UI
-    status: v.optional(v.union(
-      v.literal('PENDING'),
-      v.literal('CONFIRMED'),
-      v.literal('PAID'),
-      v.literal('CANCELLED'),
-      v.literal('COMPLETED'),
-    )),
+    status: v.optional(
+      v.union(
+        v.literal('PENDING'),
+        v.literal('PENDING_PAYMENT'),
+        v.literal('CONFIRMED'),
+        v.literal('PAID'),
+        v.literal('CANCELLED'),
+        v.literal('COMPLETED'),
+      ),
+    ),
     multimedia: v.optional(
       v.array(
         v.object({
@@ -294,7 +311,7 @@ export const create = mutation({
     }
 
     let resolvedUserId: any | undefined;
-    
+
     // Crear/Enlazar cliente (Contacto CRM)
     if (args.celular) {
       // Buscar por celular
@@ -383,9 +400,10 @@ export const create = mutation({
       purpose: args.purpose,
       googleEventId: args.googleEventId,
       googleCalendarId: args.googleCalendarId,
-      horaEntrada: args.horaEntrada,
       horaSalida: args.horaSalida,
+      address: args.address,
       multimedia: args.multimedia,
+      isDirect: args.isDirect,
       createdAt: now,
       updatedAt: now,
     });
@@ -402,9 +420,13 @@ export const create = mutation({
     });
 
     // Sincronizar con Google Calendar en segundo plano
-    await ctx.scheduler.runAfter(0, internal.googleCalendar.syncBookingToCalendar, {
-      bookingId,
-    });
+    await ctx.scheduler.runAfter(
+      0,
+      internal.googleCalendar.syncBookingToCalendar,
+      {
+        bookingId,
+      },
+    );
 
     return bookingId;
   },
@@ -419,6 +441,7 @@ export const update = mutation({
     status: v.optional(
       v.union(
         v.literal('PENDING'),
+        v.literal('PENDING_PAYMENT'),
         v.literal('CONFIRMED'),
         v.literal('PAID'),
         v.literal('CANCELLED'),
@@ -438,6 +461,7 @@ export const update = mutation({
     googleCalendarId: v.optional(v.string()),
     horaEntrada: v.optional(v.string()),
     horaSalida: v.optional(v.string()),
+    isDirect: v.optional(v.boolean()),
   },
   handler: async (ctx, args) => {
     const { id, ...updates } = args;
@@ -453,9 +477,13 @@ export const update = mutation({
     });
 
     // Sincronizar cambios con Google Calendar
-    await ctx.scheduler.runAfter(0, internal.googleCalendar.syncBookingToCalendar, {
-      bookingId: id,
-    });
+    await ctx.scheduler.runAfter(
+      0,
+      internal.googleCalendar.syncBookingToCalendar,
+      {
+        bookingId: id,
+      },
+    );
 
     return id;
   },
@@ -526,6 +554,7 @@ export const createPayment = mutation({
     checkoutUrl: v.optional(v.string()),
     status: v.optional(v.string()),
     wompiData: v.optional(v.any()),
+    boldData: v.optional(v.any()),
   },
   handler: async (ctx, args) => {
     const now = Date.now();
@@ -541,6 +570,7 @@ export const createPayment = mutation({
       checkoutUrl: args.checkoutUrl,
       status: args.status ?? 'pending',
       wompiData: args.wompiData,
+      boldData: args.boldData,
       createdAt: now,
       updatedAt: now,
     });
@@ -589,7 +619,7 @@ export const remove = mutation({
       .query('payments')
       .withIndex('by_booking', (q) => q.eq('bookingId', args.id))
       .collect();
-    
+
     for (const p of payments) {
       await ctx.db.delete(p._id);
     }

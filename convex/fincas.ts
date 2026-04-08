@@ -6,12 +6,12 @@ const slugify = (text: string) => {
   return text
     .toString()
     .toLowerCase()
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "") // Remove accents
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '') // Remove accents
     .trim()
-    .replace(/\s+/g, "-") // Replace spaces with -
-    .replace(/[^\w-]+/g, "") // Remove all non-word chars
-    .replace(/--+/g, "-"); // Replace multiple - with single -
+    .replace(/\s+/g, '-') // Replace spaces with -
+    .replace(/[^\w-]+/g, '') // Remove all non-word chars
+    .replace(/--+/g, '-'); // Replace multiple - with single -
 };
 
 const SEARCH_STOPWORDS = new Set([
@@ -129,13 +129,13 @@ export const list = query({
 
     const allProperties = await allPropertiesQuery.collect();
     const showAll = args.all === true;
-    
+
     // Solo mostrar fincas cuando (active !== false && visible !== false)
     // Para administradores (args.all === true), se muestran todas
-    const filteredByVisibility = showAll 
-      ? allProperties 
+    const filteredByVisibility = showAll
+      ? allProperties
       : allProperties.filter(
-          (p: { active?: boolean; visible?: boolean }) => 
+          (p: { active?: boolean; visible?: boolean }) =>
             p.active !== false && p.visible !== false,
         );
 
@@ -229,44 +229,46 @@ export const list = query({
             images: sortedImages.map((img) => img.url),
             features: enrichedFeatures,
             featuredIcons: property.featuredIcons ?? [],
-            pricing: await Promise.all(sortedPricing.map(async (p) => {
-              let globalData = null;
-              if (p.globalRuleId) {
-                globalData = await ctx.db.get(p.globalRuleId);
-              }
-
-              let condicionesParsed: unknown;
-              if (p.condiciones) {
-                try {
-                  condicionesParsed = JSON.parse(p.condiciones);
-                } catch {
-                  condicionesParsed = undefined;
+            pricing: await Promise.all(
+              sortedPricing.map(async (p) => {
+                let globalData = null;
+                if (p.globalRuleId) {
+                  globalData = await ctx.db.get(p.globalRuleId);
                 }
-              }
-              let reglasParsed: unknown;
-              if (p.reglas) {
-                try {
-                  reglasParsed = JSON.parse(p.reglas);
-                } catch {
-                  reglasParsed = undefined;
-                }
-              }
 
-        return {
-          id: p._id,
-          globalRuleId: p.globalRuleId,
-          nombre: globalData?.nombre || p.nombre,
-          fechaDesde: globalData?.fechaDesde || p.fechaDesde,
-          fechaHasta: globalData?.fechaHasta || p.fechaHasta,
-          fechas: globalData?.fechas || p.fechas,
-          valorUnico: p.valorUnico,
-          condiciones: condicionesParsed,
-          activa: (globalData?.activa !== false) && (p.activa ?? true),
-          reglas: reglasParsed,
-          order: p.order,
-          subReglasCapacidad: p.subReglasCapacidad,
-        };
-            })),
+                let condicionesParsed: unknown;
+                if (p.condiciones) {
+                  try {
+                    condicionesParsed = JSON.parse(p.condiciones);
+                  } catch {
+                    condicionesParsed = undefined;
+                  }
+                }
+                let reglasParsed: unknown;
+                if (p.reglas) {
+                  try {
+                    reglasParsed = JSON.parse(p.reglas);
+                  } catch {
+                    reglasParsed = undefined;
+                  }
+                }
+
+                return {
+                  id: p._id,
+                  globalRuleId: p.globalRuleId,
+                  nombre: globalData?.nombre || p.nombre,
+                  fechaDesde: globalData?.fechaDesde || p.fechaDesde,
+                  fechaHasta: globalData?.fechaHasta || p.fechaHasta,
+                  fechas: globalData?.fechas || p.fechas,
+                  valorUnico: p.valorUnico,
+                  condiciones: condicionesParsed,
+                  activa: globalData?.activa !== false && (p.activa ?? true),
+                  reglas: reglasParsed,
+                  order: p.order,
+                  subReglasCapacidad: p.subReglasCapacidad,
+                };
+              }),
+            ),
             metaCatalogs: catalogLinks.map((link, index) => {
               const catalog = catalogs[index];
               return {
@@ -362,43 +364,45 @@ export const getById = query({
       features: enrichedFeatures,
       featuredIcons: property.featuredIcons ?? [],
       additionalCosts,
-      pricing: await Promise.all(sortedPricing.map(async (p) => {
-        let globalData = null;
-        if (p.globalRuleId) {
-          globalData = await ctx.db.get(p.globalRuleId);
-        }
+      pricing: await Promise.all(
+        sortedPricing.map(async (p) => {
+          let globalData = null;
+          if (p.globalRuleId) {
+            globalData = await ctx.db.get(p.globalRuleId);
+          }
 
-        let condicionesParsed: unknown;
-        if (p.condiciones) {
-          try {
-            condicionesParsed = JSON.parse(p.condiciones);
-          } catch {
-            condicionesParsed = undefined;
+          let condicionesParsed: unknown;
+          if (p.condiciones) {
+            try {
+              condicionesParsed = JSON.parse(p.condiciones);
+            } catch {
+              condicionesParsed = undefined;
+            }
           }
-        }
-        let reglasParsed: unknown;
-        if (p.reglas) {
-          try {
-            reglasParsed = JSON.parse(p.reglas);
-          } catch {
-            reglasParsed = undefined;
+          let reglasParsed: unknown;
+          if (p.reglas) {
+            try {
+              reglasParsed = JSON.parse(p.reglas);
+            } catch {
+              reglasParsed = undefined;
+            }
           }
-        }
-        return {
-          id: p._id,
-          globalRuleId: p.globalRuleId,
-          nombre: globalData?.nombre || p.nombre,
-          fechaDesde: globalData?.fechaDesde || p.fechaDesde,
-          fechaHasta: globalData?.fechaHasta || p.fechaHasta,
-          fechas: globalData?.fechas || p.fechas,
-          valorUnico: p.valorUnico,
-          condiciones: condicionesParsed,
-          activa: (globalData?.activa !== false) && (p.activa ?? true),
-          reglas: reglasParsed,
-          order: p.order,
-          subReglasCapacidad: p.subReglasCapacidad,
-        };
-      })),
+          return {
+            id: p._id,
+            globalRuleId: p.globalRuleId,
+            nombre: globalData?.nombre || p.nombre,
+            fechaDesde: globalData?.fechaDesde || p.fechaDesde,
+            fechaHasta: globalData?.fechaHasta || p.fechaHasta,
+            fechas: globalData?.fechas || p.fechas,
+            valorUnico: p.valorUnico,
+            condiciones: condicionesParsed,
+            activa: globalData?.activa !== false && (p.activa ?? true),
+            reglas: reglasParsed,
+            order: p.order,
+            subReglasCapacidad: p.subReglasCapacidad,
+          };
+        }),
+      ),
     };
   },
 });
@@ -422,8 +426,8 @@ async function getActivePricingRules(ctx: any, propertyId: any) {
     if (rule.globalRuleId) {
       globalData = await ctx.db.get(rule.globalRuleId);
     }
-    
-    const isActive = (globalData?.activa !== false) && (rule.activa ?? true);
+
+    const isActive = globalData?.activa !== false && (rule.activa ?? true);
     if (isActive) {
       activeRules.push({
         ...rule,
@@ -439,33 +443,46 @@ async function getActivePricingRules(ctx: any, propertyId: any) {
 /**
  * Helper interno para calcular el precio de una sola noche
  */
-function getPriceForDate(dateStr: string, basePrice: number, activeRules: any[]) {
+function getPriceForDate(
+  dateStr: string,
+  basePrice: number,
+  activeRules: any[],
+) {
   // Extraer MM-DD de la fecha (YYYY-MM-DD)
   const parts = dateStr.split('-');
-  if (parts.length < 3) return { price: basePrice, ruleName: "Estándar" };
+  if (parts.length < 3) return { price: basePrice, ruleName: 'Estándar' };
   const mmdd = `${parts[1]}-${parts[2]}`;
 
   for (const rule of activeRules) {
     // 1. Coincidencia por lista de fechas específicas
     if (rule.fechas?.includes(mmdd)) {
-      return { price: rule.valorUnico ?? basePrice, ruleName: rule.nombre || "Especial" };
+      return {
+        price: rule.valorUnico ?? basePrice,
+        ruleName: rule.nombre || 'Especial',
+      };
     }
 
     // 2. Coincidencia por rango MM-DD
     if (rule.fechaDesde && rule.fechaHasta) {
       if (rule.fechaDesde <= rule.fechaHasta) {
         if (mmdd >= rule.fechaDesde && mmdd <= rule.fechaHasta) {
-          return { price: rule.valorUnico ?? basePrice, ruleName: rule.nombre || "Especial" };
+          return {
+            price: rule.valorUnico ?? basePrice,
+            ruleName: rule.nombre || 'Especial',
+          };
         }
       } else {
         // Rango que cruza el año
         if (mmdd >= rule.fechaDesde || mmdd <= rule.fechaHasta) {
-          return { price: rule.valorUnico ?? basePrice, ruleName: rule.nombre || "Especial" };
+          return {
+            price: rule.valorUnico ?? basePrice,
+            ruleName: rule.nombre || 'Especial',
+          };
         }
       }
     }
   }
-  return { price: basePrice, ruleName: "Estándar" };
+  return { price: basePrice, ruleName: 'Estándar' };
 }
 
 /**
@@ -481,7 +498,11 @@ export const calculateSuggestedPrice = query({
     if (!property) return null;
 
     const activeRules = await getActivePricingRules(ctx, args.propertyId);
-    const result = getPriceForDate(args.checkInDate, property.priceBase, activeRules);
+    const result = getPriceForDate(
+      args.checkInDate,
+      property.priceBase,
+      activeRules,
+    );
     return result.price;
   },
 });
@@ -497,23 +518,30 @@ export const findBySearchTerm = query({
     if (!rawTerm) return null;
 
     // Normalización: quitar acentos y caracteres especiales extraños
-    const normalize = (s: string) => 
-      s.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
-    
+    const normalize = (s: string) =>
+      s
+        .toLowerCase()
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .trim();
+
     const term = normalize(rawTerm);
     const all = await ctx.db.query('properties').collect();
 
     // 1. Coincidencia exacta (Slug, Código, Título) - Prioridad máxima
-    const exact = all.find((p: any) => 
-      (p.slug && normalize(p.slug) === term) ||
-      (p.code && normalize(p.code) === term) ||
-      normalize(p.title) === term
+    const exact = all.find(
+      (p: any) =>
+        (p.slug && normalize(p.slug) === term) ||
+        (p.code && normalize(p.code) === term) ||
+        normalize(p.title) === term,
     );
     if (exact) return exact;
 
     // 2. Coincidencia de palabras (Scoring)
     // Dividir término en palabras y filtrar stopwords
-    const termWords = term.split(/\s+/).filter(w => w.length > 2 && !SEARCH_STOPWORDS.has(w));
+    const termWords = term
+      .split(/\s+/)
+      .filter((w) => w.length > 2 && !SEARCH_STOPWORDS.has(w));
     if (termWords.length === 0) {
       // Si no quedan palabras "clave", intentar inclusión simple con el término original
       return all.find((p: any) => normalize(p.title).includes(term)) ?? null;
@@ -524,25 +552,37 @@ export const findBySearchTerm = query({
 
     for (const p of all) {
       const pTitle = normalize(p.title);
-      const pSlug = p.slug ? normalize(p.slug) : "";
-      const pCode = p.code ? normalize(p.code) : "";
-      
+      const pSlug = p.slug ? normalize(p.slug) : '';
+      const pCode = p.code ? normalize(p.code) : '';
+
       let score = 0;
       let matchedWords = 0;
-      const pWords = new Set([...pTitle.split(/\s+/), ...pSlug.split("-"), pCode].filter(w => w.length > 2));
+      const pWords = new Set(
+        [...pTitle.split(/\s+/), ...pSlug.split('-'), pCode].filter(
+          (w) => w.length > 2,
+        ),
+      );
 
       for (const word of termWords) {
         // Coincidencia de palabra completa (exacta) - MUY FUERTE
         if (pWords.has(word)) {
           matchedWords++;
           score += 10; // Base por palabra exacta
-          
-          if (pTitle.startsWith(word) || pSlug.startsWith(word) || pCode === word) {
+
+          if (
+            pTitle.startsWith(word) ||
+            pSlug.startsWith(word) ||
+            pCode === word
+          ) {
             score += 5; // Bonus por posición prominente
           }
-        } 
+        }
         // Coincidencia por inclusión parcial - DEBIL
-        else if (pTitle.includes(word) || pSlug.includes(word) || pCode.includes(word)) {
+        else if (
+          pTitle.includes(word) ||
+          pSlug.includes(word) ||
+          pCode.includes(word)
+        ) {
           matchedWords++;
           score += 3;
         }
@@ -551,8 +591,9 @@ export const findBySearchTerm = query({
       if (matchedWords > 0) {
         // Multiplicador por cobertura: Si coinciden TODAS las palabras del usuario, el puntaje sube exponencialmente
         const coverage = matchedWords / termWords.length;
-        const coverageMultiplier = coverage === 1 ? 3 : coverage >= 0.5 ? 1.5 : 1;
-        
+        const coverageMultiplier =
+          coverage === 1 ? 3 : coverage >= 0.5 ? 1.5 : 1;
+
         const finalScore = score * coverageMultiplier;
 
         if (finalScore > highestScore) {
@@ -564,17 +605,24 @@ export const findBySearchTerm = query({
 
     // 2.5 Fallback: Coincidencia por "texto condensado" (sin espacios) para casos como "bioluxury" vs "bio luxury"
     if (!bestMatch || highestScore < 15) {
-      const condensedTerm = term.replace(/\s+/g, "");
+      const condensedTerm = term.replace(/\s+/g, '');
       if (condensedTerm.length >= 4) {
         for (const p of all) {
-          const condensedTitle = normalize(p.title).replace(/\s+/g, "");
-          const condensedSlug = (p.slug ? normalize(p.slug) : "").replace(/[^a-z0-9]/g, "");
-          
-          if (condensedTitle.includes(condensedTerm) || condensedSlug.includes(condensedTerm) || condensedTerm.includes(condensedTitle)) {
+          const condensedTitle = normalize(p.title).replace(/\s+/g, '');
+          const condensedSlug = (p.slug ? normalize(p.slug) : '').replace(
+            /[^a-z0-9]/g,
+            '',
+          );
+
+          if (
+            condensedTitle.includes(condensedTerm) ||
+            condensedSlug.includes(condensedTerm) ||
+            condensedTerm.includes(condensedTitle)
+          ) {
             // Si encontramos una coincidencia por condensación, le damos un puntaje decente
             // Pero solo si no teníamos un match previo MUY bueno
             bestMatch = p;
-            highestScore = 20; 
+            highestScore = 20;
             break;
           }
         }
@@ -583,8 +631,10 @@ export const findBySearchTerm = query({
 
     // 3. Fallback: Búsqueda por inclusión simple si no hubo match por scoring
     if (!bestMatch) {
-      bestMatch = all.find((p: any) => 
-        normalize(p.title).includes(term) || (p.slug && normalize(p.slug).includes(term))
+      bestMatch = all.find(
+        (p: any) =>
+          normalize(p.title).includes(term) ||
+          (p.slug && normalize(p.slug).includes(term)),
       );
     }
 
@@ -613,7 +663,7 @@ export const calculateStayPrice = query({
   args: {
     propertyId: v.id('properties'),
     fechaEntrada: v.string(), // YYYY-MM-DD
-    fechaSalida: v.string(),  // YYYY-MM-DD
+    fechaSalida: v.string(), // YYYY-MM-DD
     numeroPersonas: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
@@ -621,10 +671,10 @@ export const calculateStayPrice = query({
     if (!property) return { total: 0, nights: [] };
 
     const activeRules = await getActivePricingRules(ctx, args.propertyId);
-    
-    const start = new Date(args.fechaEntrada + "T12:00:00");
-    const end = new Date(args.fechaSalida + "T12:00:00");
-    
+
+    const start = new Date(args.fechaEntrada + 'T12:00:00');
+    const end = new Date(args.fechaSalida + 'T12:00:00');
+
     if (isNaN(start.getTime()) || isNaN(end.getTime()) || start >= end) {
       return { total: 0, nights: [] };
     }
@@ -636,15 +686,19 @@ export const calculateStayPrice = query({
     // Iterar día por día hasta el día ANTERIOR a la salida
     while (current < end) {
       const dateStr = current.toISOString().split('T')[0];
-      const { price, ruleName } = getPriceForDate(dateStr, property.priceBase, activeRules);
-      
+      const { price, ruleName } = getPriceForDate(
+        dateStr,
+        property.priceBase,
+        activeRules,
+      );
+
       nights.push({
         date: dateStr,
         price: price,
-        ruleName: ruleName
+        ruleName: ruleName,
       });
       total += price;
-      
+
       current.setDate(current.getDate() + 1);
     }
 
@@ -652,11 +706,10 @@ export const calculateStayPrice = query({
       total,
       nightsCount: nights.length,
       nights,
-      basePrice: property.priceBase
+      basePrice: property.priceBase,
     };
   },
 });
-
 
 /**
  * Obtener una finca por código
@@ -729,47 +782,48 @@ export const getByCode = query({
       features: enrichedFeatures,
       featuredIcons: property.featuredIcons ?? [],
       additionalCosts,
-      pricing: await Promise.all(sortedPricing.map(async (p) => {
-        let globalData = null;
-        if (p.globalRuleId) {
-          globalData = await ctx.db.get(p.globalRuleId);
-        }
+      pricing: await Promise.all(
+        sortedPricing.map(async (p) => {
+          let globalData = null;
+          if (p.globalRuleId) {
+            globalData = await ctx.db.get(p.globalRuleId);
+          }
 
-        let condicionesParsed: unknown;
-        if (p.condiciones) {
-          try {
-            condicionesParsed = JSON.parse(p.condiciones);
-          } catch {
-            condicionesParsed = undefined;
+          let condicionesParsed: unknown;
+          if (p.condiciones) {
+            try {
+              condicionesParsed = JSON.parse(p.condiciones);
+            } catch {
+              condicionesParsed = undefined;
+            }
           }
-        }
-        let reglasParsed: unknown;
-        if (p.reglas) {
-          try {
-            reglasParsed = JSON.parse(p.reglas);
-          } catch {
-            reglasParsed = undefined;
+          let reglasParsed: unknown;
+          if (p.reglas) {
+            try {
+              reglasParsed = JSON.parse(p.reglas);
+            } catch {
+              reglasParsed = undefined;
+            }
           }
-        }
-        return {
-          id: p._id,
-          globalRuleId: p.globalRuleId,
-          nombre: globalData?.nombre || p.nombre,
-          fechaDesde: globalData?.fechaDesde || p.fechaDesde,
-          fechaHasta: globalData?.fechaHasta || p.fechaHasta,
-          fechas: globalData?.fechas || p.fechas,
-          valorUnico: p.valorUnico,
-          condiciones: condicionesParsed,
-          activa: (globalData?.activa !== false) && (p.activa ?? true),
-          reglas: reglasParsed,
-          order: p.order,
-          subReglasCapacidad: p.subReglasCapacidad,
-        };
-      })),
+          return {
+            id: p._id,
+            globalRuleId: p.globalRuleId,
+            nombre: globalData?.nombre || p.nombre,
+            fechaDesde: globalData?.fechaDesde || p.fechaDesde,
+            fechaHasta: globalData?.fechaHasta || p.fechaHasta,
+            fechas: globalData?.fechas || p.fechas,
+            valorUnico: p.valorUnico,
+            condiciones: condicionesParsed,
+            activa: globalData?.activa !== false && (p.activa ?? true),
+            reglas: reglasParsed,
+            order: p.order,
+            subReglasCapacidad: p.subReglasCapacidad,
+          };
+        }),
+      ),
     };
   },
 });
-
 
 /**
  * Obtener una finca por slug
@@ -849,47 +903,48 @@ export const getBySlug = query({
       features: enrichedFeatures,
       featuredIcons: property.featuredIcons ?? [],
       additionalCosts,
-      pricing: await Promise.all(sortedPricing.map(async (p) => {
-        let globalData = null;
-        if (p.globalRuleId) {
-          globalData = await ctx.db.get(p.globalRuleId);
-        }
+      pricing: await Promise.all(
+        sortedPricing.map(async (p) => {
+          let globalData = null;
+          if (p.globalRuleId) {
+            globalData = await ctx.db.get(p.globalRuleId);
+          }
 
-        let condicionesParsed: unknown;
-        if (p.condiciones) {
-          try {
-            condicionesParsed = JSON.parse(p.condiciones);
-          } catch {
-            condicionesParsed = undefined;
+          let condicionesParsed: unknown;
+          if (p.condiciones) {
+            try {
+              condicionesParsed = JSON.parse(p.condiciones);
+            } catch {
+              condicionesParsed = undefined;
+            }
           }
-        }
-        let reglasParsed: unknown;
-        if (p.reglas) {
-          try {
-            reglasParsed = JSON.parse(p.reglas);
-          } catch {
-            reglasParsed = undefined;
+          let reglasParsed: unknown;
+          if (p.reglas) {
+            try {
+              reglasParsed = JSON.parse(p.reglas);
+            } catch {
+              reglasParsed = undefined;
+            }
           }
-        }
-        return {
-          id: p._id,
-          globalRuleId: p.globalRuleId,
-          nombre: globalData?.nombre || p.nombre,
-          fechaDesde: globalData?.fechaDesde || p.fechaDesde,
-          fechaHasta: globalData?.fechaHasta || p.fechaHasta,
-          fechas: globalData?.fechas || p.fechas,
-          valorUnico: p.valorUnico,
-          condiciones: condicionesParsed,
-          activa: (globalData?.activa !== false) && (p.activa ?? true),
-          reglas: reglasParsed,
-          order: p.order,
-          subReglasCapacidad: p.subReglasCapacidad,
-        };
-      })),
+          return {
+            id: p._id,
+            globalRuleId: p.globalRuleId,
+            nombre: globalData?.nombre || p.nombre,
+            fechaDesde: globalData?.fechaDesde || p.fechaDesde,
+            fechaHasta: globalData?.fechaHasta || p.fechaHasta,
+            fechas: globalData?.fechas || p.fechas,
+            valorUnico: p.valorUnico,
+            condiciones: condicionesParsed,
+            activa: globalData?.activa !== false && (p.activa ?? true),
+            reglas: reglasParsed,
+            order: p.order,
+            subReglasCapacidad: p.subReglasCapacidad,
+          };
+        }),
+      ),
     };
   },
 });
-
 
 /**
  * Buscar fincas por texto. Acepta mensajes largos: extrae palabras clave y devuelve fincas que coincidan con alguna.
@@ -924,7 +979,7 @@ export const search = query({
       searchTerms.filter((term) => matchesTerm(p, term)).length;
 
     const visibleProperties = allProperties.filter(
-      (p: { active?: boolean; visible?: boolean }) => 
+      (p: { active?: boolean; visible?: boolean }) =>
         p.active !== false && p.visible !== false,
     );
     const filtered = visibleProperties
@@ -992,8 +1047,8 @@ export const searchAvailableByLocationAndDates = query({
         .filter((q) =>
           q.and(
             q.lt(q.field('fechaEntrada'), args.fechaSalida),
-            q.gt(q.field('fechaSalida'), args.fechaEntrada)
-          )
+            q.gt(q.field('fechaSalida'), args.fechaEntrada),
+          ),
         )
         .first();
 
@@ -1013,13 +1068,15 @@ export const searchAvailableByLocationAndDates = query({
       filteredAvailable.map(async (property) => {
         const image = await ctx.db
           .query('propertyImages')
-          .withIndex('by_property', (q: any) => q.eq('propertyId', property._id))
+          .withIndex('by_property', (q: any) =>
+            q.eq('propertyId', property._id),
+          )
           .first();
         return {
           ...property,
           image: image?.url,
         };
-      })
+      }),
     );
 
     return withDetails;
@@ -1036,12 +1093,14 @@ export const getAllUniqueLocations = query({
       .query('properties')
       .withIndex('by_createdAt')
       .collect();
-    
+
     // Solo activas y visibles
-    const filtered = properties.filter(p => p.active !== false && p.visible !== false);
-    const locations = filtered.map(p => p.location.trim().toUpperCase());
+    const filtered = properties.filter(
+      (p) => p.active !== false && p.visible !== false,
+    );
+    const locations = filtered.map((p) => p.location.trim().toUpperCase());
     const unique = [...new Set(locations)]
-      .map(loc => loc.charAt(0).toUpperCase() + loc.slice(1).toLowerCase())
+      .map((loc) => loc.charAt(0).toUpperCase() + loc.slice(1).toLowerCase())
       .sort();
     return unique;
   },
@@ -1059,7 +1118,7 @@ export const getPropertyPricingRules = query({
       .query('propertyPricing')
       .withIndex('by_property', (q) => q.eq('propertyId', args.propertyId))
       .collect();
-    
+
     // Solo reglas activas
     return rules
       .filter((r) => r.activa !== false)
@@ -1085,7 +1144,7 @@ export const getPropertyAvailability = query({
   handler: async (ctx, args) => {
     const now = Date.now();
     const months = args.monthsAhead ?? 3;
-    const futureLimit = now + (months * 30 * 24 * 60 * 60 * 1000);
+    const futureLimit = now + months * 30 * 24 * 60 * 60 * 1000;
 
     const bookings = await ctx.db
       .query('propertyAvailability')
@@ -1095,13 +1154,13 @@ export const getPropertyAvailability = query({
 
     // Ordenar por fecha de entrada y filtrar por límite futuro si se desea
     return bookings
-      .filter(b => b.fechaEntrada < futureLimit)
+      .filter((b) => b.fechaEntrada < futureLimit)
       .sort((a, b) => a.fechaEntrada - b.fechaEntrada)
-      .map(b => ({
+      .map((b) => ({
         fechaEntrada: b.fechaEntrada,
         fechaSalida: b.fechaSalida,
         blocked: b.blocked,
-        reason: b.reason || (b.bookingId ? "Reservada" : "Bloqueada"),
+        reason: b.reason || (b.bookingId ? 'Reservada' : 'Bloqueada'),
       }));
   },
 });
@@ -1397,12 +1456,22 @@ export const update = mutation({
           activa: v.optional(v.boolean()),
           reglas: v.optional(v.string()),
           order: v.optional(v.number()),
+          subReglasCapacidad: v.optional(
+            v.array(
+              v.object({
+                capacidadMin: v.number(),
+                capacidadMax: v.number(),
+                valorUnico: v.number(),
+              }),
+            ),
+          ),
         }),
       ),
     ),
   },
   handler: async (ctx, args) => {
-    const { id, features, catalogIds, featuredIcons, pricing, ...updates } = args;
+    const { id, features, catalogIds, featuredIcons, pricing, ...updates } =
+      args;
     const property = await ctx.db.get(id);
 
     if (!property) {
@@ -1411,7 +1480,9 @@ export const update = mutation({
 
     await ctx.db.patch(id, {
       ...updates,
-      ...(updates.title !== undefined && updates.slug === undefined ? { slug: slugify(updates.title) } : {}),
+      ...(updates.title !== undefined && updates.slug === undefined
+        ? { slug: slugify(updates.title) }
+        : {}),
       ...(featuredIcons !== undefined ? { featuredIcons } : {}),
       updatedAt: Date.now(),
     });
@@ -1538,11 +1609,15 @@ export const setPricing = mutation({
         activa: v.optional(v.boolean()),
         reglas: v.optional(v.string()),
         order: v.optional(v.number()),
-        subReglasCapacidad: v.optional(v.array(v.object({
-          capacidadMin: v.number(),
-          capacidadMax: v.number(),
-          valorUnico: v.number(),
-        }))),
+        subReglasCapacidad: v.optional(
+          v.array(
+            v.object({
+              capacidadMin: v.number(),
+              capacidadMax: v.number(),
+              valorUnico: v.number(),
+            }),
+          ),
+        ),
       }),
     ),
   },
@@ -1602,11 +1677,15 @@ export const addTemporada = mutation({
     activa: v.optional(v.boolean()),
     reglas: v.optional(v.string()),
     order: v.optional(v.number()),
-    subReglasCapacidad: v.optional(v.array(v.object({
-      capacidadMin: v.number(),
-      capacidadMax: v.number(),
-      valorUnico: v.number(),
-    }))),
+    subReglasCapacidad: v.optional(
+      v.array(
+        v.object({
+          capacidadMin: v.number(),
+          capacidadMax: v.number(),
+          valorUnico: v.number(),
+        }),
+      ),
+    ),
   },
   handler: async (ctx, args) => {
     const { propertyId, ...rest } = args;
@@ -1651,11 +1730,15 @@ export const updateTemporada = mutation({
     activa: v.optional(v.boolean()),
     reglas: v.optional(v.string()),
     order: v.optional(v.number()),
-    subReglasCapacidad: v.optional(v.array(v.object({
-      capacidadMin: v.number(),
-      capacidadMax: v.number(),
-      valorUnico: v.number(),
-    }))),
+    subReglasCapacidad: v.optional(
+      v.array(
+        v.object({
+          capacidadMin: v.number(),
+          capacidadMax: v.number(),
+          valorUnico: v.number(),
+        }),
+      ),
+    ),
   },
   handler: async (ctx, args) => {
     const { pricingId, ...updates } = args;
@@ -1955,5 +2038,3 @@ export const updateTabOrder = mutation({
     }
   },
 });
-
-

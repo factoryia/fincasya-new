@@ -73,4 +73,9 @@ export class GenerateContractDto {
   @IsString()
   @IsOptional()
   clientAddress?: string;
+
+  /** Imagen de la firma del cliente en base64 */
+  @IsString()
+  @IsOptional()
+  signature?: string;
 }
