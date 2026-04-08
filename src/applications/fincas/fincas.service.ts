@@ -995,6 +995,8 @@ export class FincasService {
         [mappingKeys.city]: finca.location || '',
         [mappingKeys.clientCity]: dto.clientCity || '',
         [mappingKeys.clientAddress]: dto.clientAddress || '',
+        'HORA ENTRADA': dto.checkInTime || '',
+        'HORA SALIDA': dto.checkOutTime || '',
         // Fallbacks genéricos
         Text6: dto.contractNumber,
         Text9: totalPriceText,
@@ -1208,13 +1210,21 @@ export class FincasService {
         'contracts/generated',
       );
 
-      // 5. Enviar mensaje a la conversación
-      await this.inboxService.sendMessage(dto.conversationId, {
-        type: 'document',
-        text: `¡Hola! 👋 Aquí tienes el documento del contrato para la finca ${finca.title}. Por favor revísalo y quedamos atentos a cualquier duda. ✨`,
-        mediaUrl: publicUrl,
-        file: generatedFile,
-      });
+      // 5. Enviar mensaje a la conversación (solo si es una conversación válida)
+      if (dto.conversationId && dto.conversationId !== 'direct-reservation') {
+        try {
+          await this.inboxService.sendMessage(dto.conversationId, {
+            type: 'document',
+            text: `¡Hola! 👋 Aquí tienes el documento del contrato para la finca ${finca.title}. Por favor revísalo y quedamos atentos a cualquier duda. ✨`,
+            mediaUrl: publicUrl,
+            file: generatedFile,
+          });
+        } catch (msgErr) {
+          console.error(`[api] No se pudo enviar mensaje al inbox ${dto.conversationId}:`, msgErr.message);
+        }
+      } else {
+        console.log('[api] Reserva directa: Omitiendo envío de mensaje a Inbox local.');
+      }
 
       return {
         success: true,

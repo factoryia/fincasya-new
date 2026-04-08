@@ -1397,6 +1397,11 @@ export const update = mutation({
           activa: v.optional(v.boolean()),
           reglas: v.optional(v.string()),
           order: v.optional(v.number()),
+          subReglasCapacidad: v.optional(v.array(v.object({
+            capacidadMin: v.number(),
+            capacidadMax: v.number(),
+            valorUnico: v.number(),
+          }))),
         }),
       ),
     ),

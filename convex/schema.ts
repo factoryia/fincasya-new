@@ -200,7 +200,6 @@ export default defineSchema({
     reference: v.optional(v.string()),
     observaciones: v.optional(v.string()),
     city: v.optional(v.string()),
-    address: v.optional(v.string()),
     purpose: v.optional(v.string()),
     isDirect: v.optional(v.boolean()),
     isDirectBooking: v.optional(v.boolean()),
@@ -217,7 +216,6 @@ export default defineSchema({
     ),
     createdAt: v.number(),
     updatedAt: v.optional(v.number()),
-    isDirect: v.optional(v.boolean()),
   })
     .index('by_property', ['propertyId'])
     .index('by_status', ['status'])

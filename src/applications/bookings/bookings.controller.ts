@@ -48,6 +48,11 @@ export class BookingsController {
     return this.bookingsSyncService.createBooking(body);
   }
 
+  @Get('status/:reference')
+  async getStatus(@Param('reference') reference: string) {
+    return this.bookingsSyncService.checkPaymentStatus(reference);
+  }
+
   @Post()
   @UseGuards(ConvexAuthGuard, AdminGuard)
   @UseInterceptors(FilesInterceptor('multimedia'))

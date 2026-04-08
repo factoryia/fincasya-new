@@ -110,6 +110,49 @@ export class BookingsSyncService {
   }
 
   /**
+   * Consultar el estado de un pago en Bold usando la referencia.
+   */
+  async checkPaymentStatus(reference: string) {
+    const boldApiKey = process.env.BOLD_IDENTIDAD_KEY;
+    if (!boldApiKey) throw new Error('BOLD_IDENTIDAD_KEY no configurada');
+
+    try {
+      const response = await fetch(`https://payments.api.bold.co/v2/payment-voucher/${reference}`, {
+        method: 'GET',
+        headers: {
+          'Authorization': `x-api-key ${boldApiKey}`,
+        },
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        console.error('Error consultando estado en Bold:', errorData);
+        return { payment_status: 'ERROR', detail: errorData };
+      }
+
+      const data = await response.json();
+      console.log(`Estado de pago para ${reference}:`, data.payment_status);
+
+      // Si el pago es aprobado, actualizamos la reserva en Convex
+      if (data.payment_status === 'APPROVED') {
+        const booking = await this.convexService.query('bookings:getByReference', { reference } as any);
+        if (booking && booking.status !== 'PAID') {
+          await this.convexService.mutation('bookings:update', {
+            id: booking._id,
+            status: 'PAID',
+          });
+          console.log(`Reserva ${booking._id} marcada como PAGADA.`);
+        }
+      }
+
+      return data;
+    } catch (error) {
+      console.error('Error en checkPaymentStatus:', error);
+      throw error;
+    }
+  }
+
+  /**
    * Sincronizar una reserva existente (por ejemplo, si se actualizan fechas).
    */
   async syncBooking(bookingId: string) {
