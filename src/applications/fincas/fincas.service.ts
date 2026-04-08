@@ -1102,18 +1102,23 @@ export class FincasService {
 
         try {
           doc.render(wordData);
-        } catch (error) {
+        } catch (error: unknown) {
           console.error('[api] Error al renderizar Word:', error);
-          if (error.properties && error.properties.errors instanceof Array) {
-            const errorMessages = error.properties.errors
-              .map((e: any) => e.explanation)
+          const docxError = error as {
+            message?: string;
+            properties?: { errors?: Array<{ explanation?: string }> };
+          };
+          if (docxError.properties?.errors instanceof Array) {
+            const errorMessages = docxError.properties.errors
+              .map((e) => e?.explanation || '')
+              .filter(Boolean)
               .join(', ');
             throw new BadRequestException(
               `Error en la plantilla Word: ${errorMessages}`,
             );
           }
           throw new BadRequestException(
-            `Error al procesar la plantilla Word: ${error.message}`,
+            `Error al procesar la plantilla Word: ${docxError.message || 'Error desconocido'}`,
           );
         }
 
@@ -1232,10 +1237,42 @@ export class FincasService {
       // 5. Enviar mensaje a la conversación (solo si es una conversación válida)
       if (dto.conversationId && dto.conversationId !== 'direct-reservation') {
         try {
+      const contractMetadata = {
+        kind: 'generated_contract',
+        contractData: {
+          propertyId: dto.propertyId,
+          propertyTitle: finca.title || '',
+          propertyLocation: finca.location || '',
+          contractNumber: dto.contractNumber || '',
+          generatedFileName: finalFilename,
+          bankName: dto.bankName || '',
+          accountNumber: dto.accountNumber || '',
+          accountHolder: dto.accountHolder || '',
+          idNumber: dto.idNumber || '',
+          clientName: dto.clientName || contact?.name || '',
+          clientId: dto.clientId || '',
+          clientEmail: dto.clientEmail || '',
+          clientPhone: dto.clientPhone || '',
+          clientCity: dto.clientCity || '',
+          clientAddress: dto.clientAddress || '',
+          checkInDate: dto.checkInDate || '',
+          checkOutDate: dto.checkOutDate || '',
+          checkInTime: dto.checkInTime || '',
+          checkOutTime: dto.checkOutTime || '',
+          nightlyPrice: unitPriceNum,
+          totalNights,
+          totalDays,
+          totalPrice: totalPriceNum,
+          generatedAt: Date.now(),
+        },
+      };
+
           await this.inboxService.sendMessage(dto.conversationId, {
             type: 'document',
             text: `¡Hola! 👋 Aquí tienes el documento del contrato para la finca ${finca.title}. Por favor revísalo y quedamos atentos a cualquier duda. ✨`,
             mediaUrl: publicUrl,
+        filename: finalFilename,
+        metadata: contractMetadata,
             file: generatedFile,
           });
         } catch (msgErr) {

@@ -11,9 +11,12 @@ import {
   UploadedFile,
   UploadedFiles,
   BadRequestException,
+  Res,
+  StreamableFile,
 } from '@nestjs/common';
 import { FileInterceptor, FilesInterceptor } from '@nestjs/platform-express';
 import { memoryStorage } from 'multer';
+import { Response } from 'express';
 import { InboxService } from './inbox.service';
 import { ConvexAuthGuard } from '../shared/guards/convex-auth.guard';
 import { RolesGuard } from '../shared/guards/roles.guard';
@@ -109,6 +112,8 @@ export class InboxController {
     @Param('conversationId') conversationId: string,
     @Body('text') text?: string,
     @Body('type') type?: 'text' | 'image' | 'audio' | 'document' | 'product',
+    @Body('mediaUrl') mediaUrl?: string,
+    @Body('filename') filename?: string,
     @Body('metadata') metadata?: any,
     @UploadedFile() file?: Express.Multer.File,
   ) {
@@ -126,6 +131,8 @@ export class InboxController {
     return this.inboxService.sendMessage(conversationId, {
       type: msgType,
       text: text?.trim() || undefined,
+      mediaUrl: mediaUrl?.trim() || undefined,
+      filename: filename?.trim() || undefined,
       metadata: parsedMetadata,
       file,
     });
@@ -147,6 +154,47 @@ export class InboxController {
   @Get(':conversationId/booking-data')
   async getSuggestedBookingData(@Param('conversationId') conversationId: string) {
     return this.inboxService.getSuggestedBookingData(conversationId);
+  }
+
+  /**
+   * Obtener datos precargados para la confirmacion de reserva.
+   * GET /api/inbox/:conversationId/reservation-confirmation-data
+   */
+  @Get(':conversationId/reservation-confirmation-data')
+  async getReservationConfirmationData(
+    @Param('conversationId') conversationId: string,
+  ) {
+    return this.inboxService.getReservationConfirmationData(conversationId);
+  }
+
+  /**
+   * Generar PDF de previsualizacion para confirmacion de reserva.
+   * POST /api/inbox/:conversationId/reservation-confirmation-preview
+   */
+  @Post(':conversationId/reservation-confirmation-preview')
+  async generateReservationConfirmationPreview(
+    @Param('conversationId') conversationId: string,
+    @Body() body: any,
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    const result = await this.inboxService.generateReservationConfirmationPreview(
+      conversationId,
+      body,
+    );
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader(
+      'Content-Disposition',
+      `attachment; filename="${result.filename}"`,
+    );
+    return new StreamableFile(result.buffer);
+  }
+
+  @Post(':conversationId/reservation-confirmation-send')
+  async sendReservationConfirmation(
+    @Param('conversationId') conversationId: string,
+    @Body() body: any,
+  ) {
+    return this.inboxService.sendReservationConfirmation(conversationId, body);
   }
 
   /**
