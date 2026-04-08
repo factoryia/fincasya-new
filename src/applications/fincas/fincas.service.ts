@@ -7,6 +7,8 @@ import { PDFDocument, StandardFonts } from 'pdf-lib';
 const PizZip = require('pizzip');
 const Docxtemplater = require('docxtemplater');
 const ImageModule = require('docxtemplater-image-module-free');
+const ILovePDFApi = require('@ilovepdf/ilovepdf-nodejs');
+const ILovePDFFile = require('@ilovepdf/ilovepdf-nodejs/ILovePDFFile');
 import { format as formatDate } from 'date-fns';
 import axios from 'axios';
 import { ConvexService } from '../shared/services/convex.service';
@@ -1118,9 +1120,26 @@ export class FincasService {
         finalBuffer = doc
           .getZip()
           .generate({ type: 'nodebuffer', compression: 'DEFLATE' });
+
         finalFilename = `Contrato_${finca.title.replace(/\s+/g, '_')}_${dto.contractNumber}.docx`;
         finalMimeType =
           'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+
+        // Si es una reserva directa, convertimos el Word resultante a PDF usando iLovePDF
+        if (dto.conversationId === 'direct-reservation') {
+          console.log('[api] Reserva directa detectada, convirtiendo Word a PDF...');
+          try {
+            const pdfBuffer = await this.convertDocxToPdf(finalBuffer, finalFilename);
+            finalBuffer = pdfBuffer;
+            finalFilename = finalFilename.replace('.docx', '.pdf');
+            finalMimeType = 'application/pdf';
+            console.log('[api] Conversión a PDF completada con éxito.');
+          } catch (e: any) {
+            console.error('[api] Error en conversión iLovePDF:', e.message || e);
+            // Si falla la conversión, enviamos el Word como fallback
+            console.warn('[api] Fallback: enviando archivo Word original.');
+          }
+        }
       } else {
         // --- PROCESAMIENTO PDF ---
         const pdfDoc = await PDFDocument.load(pdfBytes);
@@ -1348,5 +1367,47 @@ export class FincasService {
 
     const text = processNum(n).toUpperCase();
     return addCurrency ? `${text} PESOS M/CTE` : text;
+  }
+
+  /**
+   * Convierte un buffer de Word (.docx) a PDF usando iLovePDF.
+   */
+  private async convertDocxToPdf(
+    docxBuffer: Buffer,
+    filename: string,
+  ): Promise<Buffer> {
+    const publicKey = process.env.ILOVEPDF_PUBLIC_KEY;
+    const secretKey = process.env.ILOVEPDF_SECRET_KEY;
+
+    if (!publicKey || !secretKey) {
+      throw new Error('iLovePDF keys not configured in environment variables');
+    }
+
+    const instance = new ILovePDFApi(publicKey, secretKey);
+    const task = instance.newTask('officepdf');
+
+    await task.start();
+
+    // Crear un archivo temporal para el SDK (es lo más seguro para este SDK)
+    const tmp = require('os').tmpdir();
+    const fs = require('fs');
+    const path = require('path');
+    const tmpFilePath = path.join(tmp, `${Date.now()}_${filename}`);
+    
+    fs.writeFileSync(tmpFilePath, docxBuffer);
+    
+    try {
+      const file = new ILovePDFFile(tmpFilePath);
+      await task.addFile(file);
+      await task.process();
+      const pdfBuffer = await task.download();
+      
+      return pdfBuffer as Buffer;
+    } finally {
+      // Limpiar archivo temporal
+      if (fs.existsSync(tmpFilePath)) {
+        fs.unlinkSync(tmpFilePath);
+      }
+    }
   }
 }
