@@ -9,7 +9,7 @@
     "dev:api": "ts-node-dev --respawn --transpile-only src/main.ts",
     "deploy": "bunx convex deploy",
     "build": "tsc -p tsconfig.build.json",
-    "start": "bun dist/src/main.js",
+    "start": "node dist/main.js",
     "importar-fincas": "bun scripts/importar-fincas.js",
     "format": "prettier --write \"src/**/*.ts\" \"convex/**/*.ts\" \"scripts/**/*.ts\"",
     "lint": "eslint \"{src,convex,scripts}/**/*.ts\" --fix"
