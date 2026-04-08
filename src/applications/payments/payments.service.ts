@@ -2,7 +2,7 @@ import { Injectable, Logger, BadRequestException } from '@nestjs/common';
 import axios from 'axios';
 import * as crypto from 'crypto';
 import { ConvexHttpClient } from 'convex/browser';
-import { api } from '../../../convex/_generated/api';
+import { api } from '../../../convex-api-stub';
 import { FincasService } from '../fincas/fincas.service';
 
 @Injectable()
@@ -36,11 +36,11 @@ export class PaymentsService {
     // Comparación segura en tiempo constante
     try {
       if (digest === signature) {
-         return true;
+        return true;
       }
       return crypto.timingSafeEqual(
         Buffer.from(digest, 'hex'),
-        Buffer.from(signature, 'hex')
+        Buffer.from(signature, 'hex'),
       );
     } catch (e) {
       // Fallback a comparación de strings si falla por longitud
@@ -52,7 +52,9 @@ export class PaymentsService {
    * Procesa la notificación del webhook de Bold
    */
   async handleWebhook(payload: any) {
-    this.logger.log(`Procesando webhook de Bold: ${payload.type} para el subject ${payload.subject}`);
+    this.logger.log(
+      `Procesando webhook de Bold: ${payload.type} para el subject ${payload.subject}`,
+    );
 
     const bookingReference = payload.subject; // Según documentación, subject es la referencia
     const status = payload.type; // SALE_APPROVED, etc.
@@ -75,14 +77,19 @@ export class PaymentsService {
 
     try {
       // Nota: Según la doc, se usa la llave de identidad con el header x-api-key
-      const response = await axios.get(`https://payments.api.bold.co/v2/payment-voucher/${referenceId}`, {
-        headers: {
-          'Authorization': `x-api-key ${identityKey}`,
+      const response = await axios.get(
+        `https://payments.api.bold.co/v2/payment-voucher/${referenceId}`,
+        {
+          headers: {
+            Authorization: `x-api-key ${identityKey}`,
+          },
         },
-      });
+      );
 
       const data = response.data;
-      this.logger.log(`Respuesta de API Bold para ${referenceId}: ${data.payment_status}`);
+      this.logger.log(
+        `Respuesta de API Bold para ${referenceId}: ${data.payment_status}`,
+      );
 
       if (data.payment_status === 'APPROVED') {
         await this.activateBooking(referenceId, data);
@@ -91,8 +98,12 @@ export class PaymentsService {
 
       return { success: false, status: data.payment_status };
     } catch (error) {
-      this.logger.error(`Error consultando API de Bold para ${referenceId}: ${error.message}`);
-      throw new BadRequestException(`Error en Bold API: ${error.response?.data?.message || error.message}`);
+      this.logger.error(
+        `Error consultando API de Bold para ${referenceId}: ${error.message}`,
+      );
+      throw new BadRequestException(
+        `Error en Bold API: ${error.response?.data?.message || error.message}`,
+      );
     }
   }
 
@@ -101,7 +112,9 @@ export class PaymentsService {
    */
   private async activateBooking(reference: string, boldData: any) {
     // 1. Buscar la reserva en Convex
-    const booking = await this.convex.query(api.bookings.getByReference, { reference });
+    const booking = await this.convex.query(api.bookings.getByReference, {
+      reference,
+    });
 
     if (!booking) {
       this.logger.error(`No se encontró reserva con referencia: ${reference}`);
@@ -139,7 +152,7 @@ export class PaymentsService {
     // Extraemos la firma que se guardó en la reserva (si existe)
     // Nota: El DirectBookingModal debería haber guardado la firma en la reserva o pasarla aquí.
     // Como el contrato requiere la firma, si no la tenemos aquí, la buscamos.
-    
+
     try {
       await this.fincasService.generateContract(booking.propertyId, {
         propertyId: booking.propertyId,
@@ -160,8 +173,10 @@ export class PaymentsService {
         nightlyPrice: (booking.subtotal || 0).toString(),
         // La firma debería estar en algún lado. Si no, el FincasService fallará elegantemente o usará placeholder
       });
-      
-      this.logger.log(`Contrato generado y notificaciones enviadas para reserva ${reference}`);
+
+      this.logger.log(
+        `Contrato generado y notificaciones enviadas para reserva ${reference}`,
+      );
     } catch (e) {
       this.logger.error(`Error al generar contrato tras pago: ${e.message}`);
     }
