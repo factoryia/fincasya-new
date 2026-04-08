@@ -2,7 +2,7 @@ import { Injectable, Logger, BadRequestException } from '@nestjs/common';
 import axios from 'axios';
 import * as crypto from 'crypto';
 import { ConvexHttpClient } from 'convex/browser';
-import { api } from '../../../convex-api-stub';
+import { api } from '../../convex-api-stub';
 import { FincasService } from '../fincas/fincas.service';
 
 @Injectable()
