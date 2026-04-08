@@ -22,12 +22,18 @@ export class S3Service {
     });
   }
 
-  async uploadFile(file: Express.Multer.File, folder: string = 'uploads'): Promise<string> {
+  async uploadFile(
+    file: Express.Multer.File,
+    folder: string = 'uploads',
+    customFileName?: string,
+  ): Promise<string> {
     if (!file || !file.buffer) {
       throw new BadRequestException('No file provided');
     }
     const ext = file.originalname?.split('.').pop() || 'bin';
-    const fileName = `${folder}/${randomUUID()}.${ext}`;
+    const fileName = customFileName
+      ? `${folder}/${customFileName}`
+      : `${folder}/${randomUUID()}.${ext}`;
 
     try {
       const command = new PutObjectCommand({
@@ -35,6 +41,7 @@ export class S3Service {
         Key: fileName,
         Body: file.buffer,
         ContentType: file.mimetype || 'application/octet-stream',
+        ContentDisposition: `attachment; filename="${customFileName || file.originalname || 'download.pdf'}"`,
       });
 
       await this.s3Client.send(command);

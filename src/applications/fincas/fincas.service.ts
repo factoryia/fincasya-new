@@ -899,17 +899,19 @@ export class FincasService {
       // 3. Modificar el PDF con pdf-lib
       // 2. Obtener información de la conversación y contacto para el cliente
       let contact: any = null;
-      try {
-        const conv = await this.convexService.query('conversations:getById', {
-          conversationId: dto.conversationId,
-        });
-        if (conv) {
-          contact = await this.convexService.query('contacts:getById', {
-            contactId: conv.contactId,
+      if (dto.conversationId && dto.conversationId !== 'direct-reservation') {
+        try {
+          const conv = await this.convexService.query('conversations:getById', {
+            conversationId: dto.conversationId,
           });
+          if (conv) {
+            contact = await this.convexService.query('contacts:getById', {
+              contactId: conv.contactId,
+            });
+          }
+        } catch (e) {
+          console.warn('No se pudo obtener el contacto para el contrato');
         }
-      } catch (e) {
-        console.warn('No se pudo obtener el contacto para el contrato');
       }
 
       const now = new Date();
@@ -1162,8 +1164,9 @@ export class FincasService {
             console.log('[api] Conversión a PDF completada con éxito.');
           } catch (e: any) {
             console.error('[api] Error en conversión iLovePDF:', e.message || e);
-            // Si falla la conversión, enviamos el Word como fallback
-            console.warn('[api] Fallback: enviando archivo Word original.');
+            throw new BadRequestException(
+              'No se pudo generar el contrato en formato PDF seguro. Por favor, intente de nuevo o contacte a soporte.',
+            );
           }
         }
       } else {
@@ -1253,6 +1256,7 @@ export class FincasService {
       const publicUrl = await this.s3Service.uploadFile(
         generatedFile,
         'contracts/generated',
+        finalFilename,
       );
 
       // 5. Enviar mensaje a la conversación (solo si es una conversación válida)
@@ -1311,6 +1315,7 @@ export class FincasService {
       return {
         success: true,
         url: publicUrl,
+        filename: finalFilename,
         message: 'Contrato generado y enviado exitosamente.',
       };
     } catch (error) {
