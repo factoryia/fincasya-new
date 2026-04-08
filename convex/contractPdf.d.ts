@@ -1,0 +1,66 @@
+export declare const contractDataValidator: import("convex/values").VObject<{
+    entradaHora?: string;
+    salidaHora?: string;
+    cedula: string;
+    celular: string;
+    correo: string;
+    precioTotal: number;
+    nombre: string;
+    noches: number;
+    ciudad: string;
+    finca: string;
+    ubicacion: string;
+    direccion: string;
+    entrada: string;
+    salida: string;
+}, {
+    finca: import("convex/values").VString<string, "required">;
+    ubicacion: import("convex/values").VString<string, "required">;
+    nombre: import("convex/values").VString<string, "required">;
+    cedula: import("convex/values").VString<string, "required">;
+    celular: import("convex/values").VString<string, "required">;
+    correo: import("convex/values").VString<string, "required">;
+    ciudad: import("convex/values").VString<string, "required">;
+    direccion: import("convex/values").VString<string, "required">;
+    entradaHora: import("convex/values").VString<string, "optional">;
+    salidaHora: import("convex/values").VString<string, "optional">;
+    entrada: import("convex/values").VString<string, "required">;
+    salida: import("convex/values").VString<string, "required">;
+    noches: import("convex/values").VFloat64<number, "required">;
+    precioTotal: import("convex/values").VFloat64<number, "required">;
+}, "required", "cedula" | "celular" | "correo" | "precioTotal" | "nombre" | "noches" | "ciudad" | "finca" | "ubicacion" | "direccion" | "entradaHora" | "salidaHora" | "entrada" | "salida">;
+export type ContractData = {
+    finca: string;
+    ubicacion: string;
+    nombre: string;
+    cedula: string;
+    celular: string;
+    correo: string;
+    ciudad: string;
+    direccion: string;
+    entrada: string;
+    salida: string;
+    noches: number;
+    precioTotal: number;
+};
+export declare const sendContractPdfAndPaymentMethods: import("convex/server").RegisteredAction<"internal", {
+    wamid?: string;
+    contractData: {
+        entradaHora?: string;
+        salidaHora?: string;
+        cedula: string;
+        celular: string;
+        correo: string;
+        precioTotal: number;
+        nombre: string;
+        noches: number;
+        ciudad: string;
+        finca: string;
+        ubicacion: string;
+        direccion: string;
+        entrada: string;
+        salida: string;
+    };
+    to: string;
+    paymentMessageText: string;
+}, Promise<void>>;

@@ -1,0 +1,95 @@
+export declare const getById: import("convex/server").RegisteredQuery<"public", {
+    contactId: import("convex/values").GenericId<"contacts">;
+}, Promise<{
+    _id: import("convex/values").GenericId<"contacts">;
+    _creationTime: number;
+    email?: string;
+    cedula?: string;
+    city?: string;
+    updatedAt?: number;
+    lastReservationAt?: number;
+    name: string;
+    phone: string;
+    createdAt: number;
+}>>;
+export declare const list: import("convex/server").RegisteredQuery<"public", {
+    limit?: number;
+    search?: string;
+}, Promise<{
+    _id: import("convex/values").GenericId<"contacts">;
+    _creationTime: number;
+    email?: string;
+    cedula?: string;
+    city?: string;
+    updatedAt?: number;
+    lastReservationAt?: number;
+    name: string;
+    phone: string;
+    createdAt: number;
+}[]>>;
+export declare const getWithHistory: import("convex/server").RegisteredQuery<"public", {
+    contactId: import("convex/values").GenericId<"contacts">;
+}, Promise<{
+    bookings: {
+        propertyTitle: string;
+        propertyImage: string;
+        _id: import("convex/values").GenericId<"bookings">;
+        _creationTime: number;
+        numeroMascotas?: number;
+        costoMascotas?: number;
+        observaciones?: string;
+        horaEntrada?: string;
+        horaSalida?: string;
+        city?: string;
+        purpose?: string;
+        reference?: string;
+        address?: string;
+        isDirect?: boolean;
+        currency?: string;
+        userId?: import("convex/values").GenericId<"contacts">;
+        multimedia?: {
+            name: string;
+            type: string;
+            url: string;
+        }[];
+        updatedAt?: number;
+        personasAdicionales?: number;
+        tieneMascotas?: boolean;
+        detallesMascotas?: string;
+        costoPersonasAdicionales?: number;
+        costoPersonalServicio?: number;
+        depositoGarantia?: number;
+        depositoAseo?: number;
+        discountCode?: string;
+        discountAmount?: number;
+        transactionId?: string;
+        isDirectBooking?: boolean;
+        googleEventId?: string;
+        googleCalendarId?: string;
+        status: "PAID" | "PENDING" | "PENDING_PAYMENT" | "CONFIRMED" | "CANCELLED" | "COMPLETED";
+        fechaEntrada: number;
+        fechaSalida: number;
+        propertyId: import("convex/values").GenericId<"properties">;
+        temporada: string;
+        nombreCompleto: string;
+        cedula: string;
+        celular: string;
+        correo: string;
+        numeroPersonas: number;
+        precioTotal: number;
+        createdAt: number;
+        numeroNoches: number;
+        subtotal: number;
+        paymentStatus: "PAID" | "PENDING" | "PARTIAL" | "REFUNDED";
+    }[];
+    _id: import("convex/values").GenericId<"contacts">;
+    _creationTime: number;
+    email?: string;
+    cedula?: string;
+    city?: string;
+    updatedAt?: number;
+    lastReservationAt?: number;
+    name: string;
+    phone: string;
+    createdAt: number;
+}>>;
