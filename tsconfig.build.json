@@ -19,7 +19,12 @@
     "resolveJsonModule": true,
     "noEmitOnError": false,
     "typeRoots": ["node_modules/@types"],
-    "types": ["node", "multer"]
+    "types": ["node", "multer"],
+    "paths": {
+      "@convex-dev/better-auth/*": ["./node_modules/@convex-dev/better-auth/dist/*", "./node_modules/@convex-dev/better-auth/dist/*/index.d.ts"],
+      "better-auth/*": ["./node_modules/better-auth/dist/*", "./node_modules/better-auth/dist/*/index.d.ts"],
+      "convex-helpers": ["./node_modules/convex-helpers/dist/index.d.ts"]
+    }
   },
   "include": ["src/**/*"],
   "exclude": ["node_modules", "dist", "test", "convex", "**/*spec.ts"]

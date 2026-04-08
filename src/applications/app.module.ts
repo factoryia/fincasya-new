@@ -11,6 +11,7 @@ import { QuienesSomosModule } from './quienes-somos/quienes-somos.module';
 import { AdminModule } from './admin/admin.module';
 import { ContactsModule } from './contacts/contacts.module';
 import { BookingsModule } from './bookings/bookings.module';
+import { PaymentsModule } from './payments/payments.module';
 
 @Module({
   imports: [
@@ -26,6 +27,7 @@ import { BookingsModule } from './bookings/bookings.module';
     AdminModule,
     ContactsModule,
     BookingsModule,
+    PaymentsModule,
   ],
 
   controllers: [],

@@ -34,3 +34,7 @@ convex/_generated/
 *.swp
 *.swo
 *~
+
+# Convex Compiled Files
+convex/**/*.js
+convex/**/*.js.map

@@ -309,7 +309,7 @@ http.route({
         results.push({
           sheet: item.sheet,
           ok: false,
-          error: item.error,
+          error: (item as any).error,
         });
         continue;
       }

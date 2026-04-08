@@ -1,16 +1,29 @@
 import { Injectable, Logger, BadRequestException } from '@nestjs/common';
 import axios from 'axios';
 import * as crypto from 'crypto';
+<<<<<<< HEAD
 import { ConvexService } from '../shared/services/convex.service';
+=======
+import { ConvexHttpClient } from 'convex/browser';
+import { api } from '../../convex-api-stub';
+>>>>>>> a54323cd7029aaa2b1d36e7099c65661d52107ab
 import { FincasService } from '../fincas/fincas.service';
 
 @Injectable()
 export class PaymentsService {
   private readonly logger = new Logger(PaymentsService.name);
+<<<<<<< HEAD
   constructor(
     private readonly fincasService: FincasService,
     private readonly convexService: ConvexService,
   ) {}
+=======
+  private readonly convex: ConvexHttpClient;
+
+  constructor(private readonly fincasService: FincasService) {
+    this.convex = new ConvexHttpClient(process.env.CONVEX_URL!);
+  }
+>>>>>>> a54323cd7029aaa2b1d36e7099c65661d52107ab
 
   /**
    * Verifica la firma HMAC-SHA256 enviada por Bold
@@ -110,7 +123,11 @@ export class PaymentsService {
    */
   private async activateBooking(reference: string, boldData: any) {
     // 1. Buscar la reserva en Convex
+<<<<<<< HEAD
     const booking = await this.convexService.query('bookings:getByReference', {
+=======
+    const booking = await this.convex.query(api.bookings.getByReference, {
+>>>>>>> a54323cd7029aaa2b1d36e7099c65661d52107ab
       reference,
     });
 
@@ -127,14 +144,22 @@ export class PaymentsService {
     this.logger.log(`Activando reserva ${booking._id} (Ref: ${reference})`);
 
     // 2. Actualizar estado en Convex
+<<<<<<< HEAD
     await this.convexService.mutation('bookings:update', {
+=======
+    await this.convex.mutation(api.bookings.update, {
+>>>>>>> a54323cd7029aaa2b1d36e7099c65661d52107ab
       id: booking._id,
       status: 'PAID',
       isDirect: true,
     });
 
     // 3. Registrar el pago
+<<<<<<< HEAD
     await this.convexService.mutation('bookings:createPayment', {
+=======
+    await this.convex.mutation(api.bookings.createPayment, {
+>>>>>>> a54323cd7029aaa2b1d36e7099c65661d52107ab
       bookingId: booking._id,
       type: 'COMPLETO',
       amount: booking.precioTotal,
@@ -142,6 +167,10 @@ export class PaymentsService {
       transactionId: boldData.transaction_id || boldData.id,
       reference: reference,
       status: 'PAID',
+<<<<<<< HEAD
+=======
+      // @ts-ignore - bypassing strict type check
+>>>>>>> a54323cd7029aaa2b1d36e7099c65661d52107ab
       boldData: boldData,
     });
 
