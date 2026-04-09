@@ -2216,32 +2216,71 @@ export const sendWhatsAppCatalogList = internalAction({
  * Prioriza bloques [CONTRACT_PDF:...] existentes o usa la IA para inferir.
  */
 export const extractContractData = action({
-  args: { conversationId: v.id("conversations") },
+  args: { 
+    conversationId: v.id("conversations"),
+    forceFresh: v.optional(v.boolean()),
+  },
   handler: async (ctx, args): Promise<any> => {
+    const { conversationId, forceFresh } = args;
     const messages = await ctx.runQuery(api.messages.listRecent, {
-      conversationId: args.conversationId,
+      conversationId: conversationId,
       limit: 30,
     });
 
     // Helper para normalizar los datos extraídos
     const normalizeData = async (parsed: any, historyMessages: any[]): Promise<any> => {
       const currentYear = new Date().getFullYear();
-      const fixYear = (d: string) => {
+
+      // MEJORA: Convertir cualquier formato común a YYYY-MM-DD
+      const ensureISODate = (d: string) => {
         if (!d) return d;
-        const match = d.match(/^(\d{4})-(.*)/);
-        if (match && Number(match[1]) < currentYear) {
-          return `${currentYear}-${match[2]}`;
+        // 1. Si ya es YYYY-MM-DD
+        if (/^\d{4}-\d{2}-\d{2}/.test(d)) return d;
+        // 2. Si es DD/MM/YYYY o DD-MM-YYYY
+        const slashMatch = d.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})/);
+        if (slashMatch) {
+          return `${slashMatch[3]}-${slashMatch[2].padStart(2, "0")}-${slashMatch[1].padStart(2, "0")}`;
+        }
+        // 3. Si es DD/MM/YY
+        const shortslashMatch = d.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2})$/);
+        if (shortslashMatch) {
+          return `20${shortslashMatch[3]}-${shortslashMatch[2].padStart(2, "0")}-${shortslashMatch[1].padStart(2, "0")}`;
         }
         return d;
       };
 
+      const fixYear = (d: string) => {
+        const iso = ensureISODate(d);
+        if (!iso) return iso;
+        const match = iso.match(/^(\d{4})-(.*)/);
+        if (match && Number(match[1]) < currentYear) {
+          return `${currentYear}-${match[2]}`;
+        }
+        return iso;
+      };
+
+      // Normalizar fechas de entrada/salida inmediatamente
+      parsed.checkInDate = fixYear(parsed.entrada || parsed.checkInDate || "");
+      parsed.checkOutDate = fixYear(parsed.salida || parsed.checkOutDate || "");
+
       // Resolución de propiedad
       let resolvedPropertyId = String(parsed.propertyId || "");
       if (!resolvedPropertyId || !resolvedPropertyId.includes(":")) {
-        const fincaName = String(parsed.finca || parsed.fincaName || "");
-        const searchTerms = [resolvedPropertyId, fincaName].filter(
+        const fincaName = String(parsed.finca || parsed.fincaName || parsed.nombreFinca || "");
+        let searchTerms = [resolvedPropertyId, fincaName].filter(
           (t) => t && t.length > 2,
         );
+
+        // MEJORA: Si no hay nombre de finca en el JSON, buscarlo en los últimos mensajes
+        if (searchTerms.length === 0 && historyMessages.length > 0) {
+          const recentText = historyMessages.slice(-10).map((m: any) => m.content).join("\n");
+          // Buscar patrones como "Finca: Villa Barbosa", "en la Villa Barbosa", "seleccionaste Villa Barbosa"
+          const fincaMatch = recentText.match(/(?:finca|propiedad|en la|seleccionaste|para|de)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)/i);
+          if (fincaMatch) {
+            searchTerms.push(fincaName === "" ? fincaMatch[1] : fincaName);
+          }
+        }
+
         for (const term of searchTerms) {
           const found = await ctx.runQuery(api.fincas.findBySearchTerm, {
             term,
@@ -2295,6 +2334,52 @@ export const extractContractData = action({
         }
       }
 
+      // Calcular noches si hay fechas
+      let calculatedNoches = 0;
+      if (parsed.checkInDate && parsed.checkOutDate) {
+        try {
+          const start = new Date(parsed.checkInDate + "T12:00:00");
+          const end = new Date(parsed.checkOutDate + "T12:00:00");
+          if (!isNaN(start.getTime()) && !isNaN(end.getTime()) && end > start) {
+            calculatedNoches = Math.round(
+              (end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24),
+            );
+          }
+        } catch (e) {
+          console.error("Error calculating nights:", e);
+        }
+      } else if (parsed.noches) {
+        calculatedNoches = Number(parsed.noches);
+      }
+
+      // El total de alojamiento (sin extras)
+      const stayPrice = Number(parsed.stayPrice || parsed.precioEstadia || 0);
+
+      // 3. Obtener el precio oficial de la base de datos (Temporadas)
+      let databasePrice: number | null = null;
+      let databaseStayPrice: number | null = null;
+      let appliedRuleName: string | null = null;
+
+      if (resolvedPropertyId && parsed.checkInDate && parsed.checkOutDate) {
+        try {
+          const pricingRes = await ctx.runQuery(api.fincas.calculateStayPrice, {
+            propertyId: resolvedPropertyId as any,
+            fechaEntrada: String(parsed.checkInDate),
+            fechaSalida: String(parsed.checkOutDate),
+            numeroMascotas: petCount,
+          });
+          
+          if (pricingRes && pricingRes.subtotal !== undefined && pricingRes.nightsCount !== undefined && pricingRes.subtotal > 0) {
+            databasePrice = Math.round(pricingRes.subtotal / pricingRes.nightsCount);
+            databaseStayPrice = pricingRes.subtotal;
+            appliedRuleName = pricingRes.appliedRule || null;
+          }
+
+        } catch (e) {
+          console.error("Error fetching database seasonal price:", e);
+        }
+      }
+
       return {
         clientName: String(
           parsed.nombre || parsed.clientName || contact?.name || "",
@@ -2312,35 +2397,66 @@ export const extractContractData = action({
           parsed.ciudad || parsed.clientCity || contact?.city || "",
         ),
         clientAddress: String(parsed.direccion || parsed.clientAddress || ""),
-        checkInDate: fixYear(
-          String(parsed.entrada || parsed.checkInDate || ""),
-        ),
-        checkOutDate: fixYear(
-          String(parsed.salida || parsed.checkOutDate || ""),
-        ),
+        checkInDate: parsed.checkInDate,
+        checkOutDate: parsed.checkOutDate,
         checkInTime: formatTimeTo24h(
           String(parsed.entradaHora || parsed.checkInTime || ""),
         ),
         checkOutTime: formatTimeTo24h(
           String(parsed.salidaHora || parsed.checkOutTime || ""),
         ),
-        nightlyPrice: String(
-          parsed.nightlyPrice ||
-            (parsed.precioTotal && parsed.noches
-              ? String(
-                  Math.round(Number(parsed.precioTotal) / Number(parsed.noches)),
-                )
-              : ""),
-        ),
-        totalPrice: String(parsed.totalPrice || parsed.precioTotal || ""),
+        nightlyPrice: (() => {
+          // Si tenemos un precio de base de datos (temporada), ese manda SIEMPRE
+          if (databasePrice !== null) {
+            return String(databasePrice);
+          }
+
+          const rawNightly = Number(parsed.nightlyPrice || 0);
+          const total = Number(parsed.totalPrice || parsed.precioTotal || 0);
+          
+          // REPARACIÓN AGRESIVA: Si no hay precio de DB pero tenemos noches
+          if (calculatedNoches > 0) {
+            let effectiveStayPrice = stayPrice;
+            
+            // Si el stayPrice es sospechoso (0 o igual al total teniendo mascotas), recalculamos
+            if (effectiveStayPrice === 0 || (effectiveStayPrice === total && petCount > 0)) {
+              const pets = Number(petCount || 0);
+              let petSurcharge = 0;
+              if (pets > 0 && pets <= 2) petSurcharge = pets * 100000;
+              else if (pets >= 3) petSurcharge = pets * 30000;
+              
+              const derivedStayPrice = total - petSurcharge;
+              if (derivedStayPrice > 0) {
+                effectiveStayPrice = derivedStayPrice;
+              }
+            }
+
+            if (effectiveStayPrice > 0) {
+              const recalculated = Math.round(effectiveStayPrice / calculatedNoches);
+              // Si el recalcula es un número "limpio" o el rawNightly parece erróneo, lo usamos
+              if (rawNightly === 0 || rawNightly % 100 !== 0 || Math.abs(recalculated - rawNightly) > 100) {
+                return String(recalculated);
+              }
+            }
+          }
+          return String(parsed.nightlyPrice || "");
+        })(),
+        totalPrice: databaseStayPrice !== null 
+          ? String(databaseStayPrice + (Number(parsed.totalPrice || 0) - (stayPrice || databaseStayPrice))) // Intentar mantener extras si existen
+          : String(parsed.totalPrice || parsed.precioTotal || ""),
+        stayPrice: databaseStayPrice || (calculatedNoches > 0 && Number(parsed.totalPrice || 0) > 0 ? Number(parsed.totalPrice || 0) : stayPrice) || undefined,
+        appliedSeason: appliedRuleName || undefined,
         numeroPersonas,
         petCount,
         propertyId: resolvedPropertyId,
       };
+
+
     };
 
-    // 1. Intentar encontrar un bloque [CONTRACT_PDF:...] ya generado
-    for (const msg of [...messages].reverse()) {
+    // 1. Intentar encontrar un bloque [CONTRACT_PDF:...] ya generado (SOLUCIÓN RÁPIDA)
+    if (!forceFresh) {
+      for (const msg of [...messages].reverse()) {
       if (
         msg.sender === "assistant" &&
         msg.content.includes("[CONTRACT_PDF:")
@@ -2376,6 +2492,10 @@ export const extractContractData = action({
         }
       }
     }
+    }
+
+
+
 
     // 2. Usar IA para extraer del historial si no hay bloque final
     const history = messages
@@ -2391,6 +2511,12 @@ export const extractContractData = action({
 
     const prompt = `Analiza los siguientes mensajes de una conversación de WhatsApp y extrae los datos necesarios para un contrato de alquiler de finca.
 FECHA ACTUAL: ${currentDate}. Usa este año para fechas ambiguas.
+
+REGLAS DE PRECIO IMPORTANTES:
+- nightlyPrice: PRECIO POR NOCHE del alojamiento solamente (sin depósitos ni extras).
+- stayPrice: SUBTOTAL del alojamiento solamente (nightlyPrice * número de noches). Sin mascotas ni depósitos.
+- totalPrice: VALOR TOTAL de la operación incluyendo mascotas, depósitos y todo lo mencionado.
+
 Responde ÚNICAMENTE con un objeto JSON válido con estas llaves (si no conoces un dato, usa null o ""):
 - clientName: nombre completo
 - clientId: cédula o ID
@@ -2402,14 +2528,17 @@ Responde ÚNICAMENTE con un objeto JSON válido con estas llaves (si no conoces 
 - checkOutDate: fecha de salida (YYYY-MM-DD)
 - entradaHora: hora de entrada aproximada en formato 24h (HH:mm, ej. 10:00, 15:30)
 - salidaHora: hora de salida aproximada en formato 24h (HH:mm, ej. 09:00, 16:00)
-- nightlyPrice: precio por noche/día (solo números)
-- totalPrice: precio total (solo números)
+- nightlyPrice: precio por noche (solo números, sin extras)
+- stayPrice: total solo estadía (solo números, sin extras)
+- totalPrice: precio total final (solo números, incluyendo todo)
 - numeroPersonas: cantidad TOTAL de personas/huéspedes (solo el número, ej. 10)
-- petCount: cantidad de mascotas (perros, gatos, etc) que llevará el cliente (solo el número, ej. 2)
-- fincaName: nombre de la finca que quiere reservar (si se menciona por nombre)
-- propertyId: ID de la finca (si se menciona explícitamente el ID)
+- petCount: cantidad de mascotas (solo el número, ej. 2)
+- fincaName: nombre de la finca
+- propertyId: ID de la finca
+- noches: número de noches (opcional pero recomendado)
 
 Mensajes:\n${history}`;
+
 
     const { text } = await generateText({
       model: openai.chat("gpt-5-mini"),

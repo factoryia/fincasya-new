@@ -669,6 +669,7 @@ export const calculateStayPrice = query({
     fechaEntrada: v.string(), // YYYY-MM-DD
     fechaSalida: v.string(), // YYYY-MM-DD
     numeroPersonas: v.optional(v.number()),
+    numeroMascotas: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
     const property = await ctx.db.get(args.propertyId);
@@ -698,18 +699,15 @@ export const calculateStayPrice = query({
         activeRules,
       );
       
-      // Si encontramos una regla que no sea la base ("Estándar")
       if (ruleName !== 'Estándar') {
-        // Si aún no tenemos dominante, o si esta tiene mayor prioridad (menor order)
-        // Nota: asumo que activeRules ya vienen ordenadas por 'order' en getActivePricingRules
         if (!dominantRule) {
           dominantRule = { price, ruleName, ruleId };
         }
       }
+
       tempCurrent.setDate(tempCurrent.getDate() + 1);
     }
 
-    // El precio a aplicar es el de la regla dominante, o el base si no hay dominante
     const finalNightlyPrice = dominantRule ? dominantRule.price : property.priceBase;
     const finalRuleName = dominantRule ? dominantRule.ruleName : 'Estándar';
 
@@ -730,12 +728,25 @@ export const calculateStayPrice = query({
       current.setDate(current.getDate() + 1);
     }
 
+    // 3. Cálculo de Mascotas
+    const numeroMascotas = args.numeroMascotas ?? 0;
+    const petRefundable = Math.min(numeroMascotas, 2) * 100000;
+    const petServiceFee = Math.max(0, numeroMascotas - 2) * 30000;
+    const petTotal = petRefundable + petServiceFee;
+
     return {
-      total,
+      total: total + petTotal,
+      subtotal: total,
       nightsCount: nights.length,
       nights,
       basePrice: property.priceBase,
       appliedRule: finalRuleName,
+      pets: {
+        count: numeroMascotas,
+        refundable: petRefundable,
+        serviceFee: petServiceFee,
+        total: petTotal,
+      }
     };
   },
 });

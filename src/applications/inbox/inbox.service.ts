@@ -200,13 +200,17 @@ export class InboxService {
     }
   }
 
-  async getSuggestedContractData(conversationId: string) {
+  async getSuggestedContractData(
+    conversationId: string,
+    forceFresh: boolean = false,
+  ) {
     const [suggestedRaw, conv] = await Promise.all([
       this.convexService
-        .action('ycloud:extractContractData', { conversationId })
+        .action('ycloud:extractContractData', { conversationId, forceFresh })
         .catch(() => ({})),
       this.convexService.query('conversations:getById', { conversationId }),
     ]);
+
 
     const data: any =
       suggestedRaw && typeof suggestedRaw === 'object' && !(suggestedRaw as any).error
@@ -382,9 +386,15 @@ export class InboxService {
       depositDate: this.toIsoDate(new Date()),
       balanceAmount,
       balanceDate: checkInDate || '',
-      rentAmount: totalAmount,
-      cleaningFee: 0,
-      refundableDeposit: 0,
+      rentAmount: this.toNumber(contractData.subtotal || suggested.subtotal || totalAmount),
+      cleaningFee: this.toNumber(contractData.cleaningFee || suggested.cleaningFee || 0),
+      refundableDeposit: this.toNumber(
+        contractData.petSurchargeRefundable ||
+          contractData.depositoGarantia ||
+          suggested.petSurchargeRefundable ||
+          suggested.depositoGarantia ||
+          0,
+      ),
       totalAmount,
       paymentMethod: 'bancolombia',
       paymentStatus: 'pending',
@@ -459,8 +469,6 @@ export class InboxService {
       },
     });
 
-    await this.setStatus(conversationId, 'resolved');
-
     return {
       success: true,
       filename,
@@ -490,9 +498,6 @@ export class InboxService {
       bookingParams as any,
       multimediaFiles,
     );
-
-    // 3. Mark conversation as resolved.
-    await this.setStatus(conversationId, 'resolved');
 
     return result;
   }

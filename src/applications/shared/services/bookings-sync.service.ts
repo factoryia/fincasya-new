@@ -46,37 +46,49 @@ export class BookingsSyncService {
       purpose?: string;
       reference?: string;
       address?: string;
-      isDirect?: boolean;
+      isDirect?: boolean | string;
+      personasAdicionales?: number | string;
+      costoPersonasAdicionales?: number | string;
+      costoPersonalServicio?: number | string;
+      depositoGarantia?: number | string;
+      depositoAseo?: number | string;
+      discountAmount?: number | string;
+      subtotal?: number | string;
+      tieneMascotas?: boolean | string;
     },
     multimediaFiles?: Express.Multer.File[],
   ) {
     const { propertyId, temporada, ...rest } = params;
 
-    // Normalize types if they come as strings from FormData
-    const fechaEntradaNum =
-      typeof params.fechaEntrada === 'string'
-        ? parseInt(params.fechaEntrada, 10)
-        : params.fechaEntrada;
-    const fechaSalidaNum =
-      typeof params.fechaSalida === 'string'
-        ? parseInt(params.fechaSalida, 10)
-        : params.fechaSalida;
-    const numeroPersonasNum =
-      typeof params.numeroPersonas === 'string'
-        ? parseInt(params.numeroPersonas, 10)
-        : params.numeroPersonas;
-    const precioTotalNum =
-      typeof params.precioTotal === 'string'
-        ? parseFloat(params.precioTotal)
-        : params.precioTotal;
-    const numeroMascotasNum =
-      typeof params.numeroMascotas === 'string'
-        ? parseInt(params.numeroMascotas, 10)
-        : params.numeroMascotas || 0;
-    const costoMascotasNum =
-      typeof params.costoMascotas === 'string'
-        ? parseFloat(params.costoMascotas)
-        : params.costoMascotas || 0;
+    const parseNum = (val: any) => {
+      if (typeof val === 'string') return parseFloat(val);
+      if (typeof val === 'number') return val;
+      return undefined;
+    };
+
+    const parseBool = (val: any) => {
+      if (typeof val === 'boolean') return val;
+      if (val === 'true') return true;
+      if (val === 'false') return false;
+      return undefined;
+    };
+
+    const fechaEntradaNum = parseNum(params.fechaEntrada) || 0;
+    const fechaSalidaNum = parseNum(params.fechaSalida) || 0;
+    const numeroPersonasNum = parseNum(params.numeroPersonas) || 1;
+    const precioTotalNum = parseNum(params.precioTotal) || 0;
+    const numeroMascotasNum = parseNum(params.numeroMascotas) || 0;
+    const costoMascotasNum = parseNum(params.costoMascotas) || 0;
+
+    const personasAdicionalesNum = parseNum(params.personasAdicionales);
+    const costoPersonasAdicionalesNum = parseNum(params.costoPersonasAdicionales);
+    const costoPersonalServicioNum = parseNum(params.costoPersonalServicio);
+    const depositoGarantiaNum = parseNum(params.depositoGarantia);
+    const depositoAseoNum = parseNum(params.depositoAseo);
+    const discountAmountNum = parseNum(params.discountAmount);
+    const subtotalNum = parseNum(params.subtotal);
+    const tieneMascotasBool = parseBool(params.tieneMascotas);
+    const isDirectBool = parseBool(params.isDirect);
 
     // 1. Obtener info de la propiedad
     const property = await this.convexService.query('fincas:getById', {
@@ -113,11 +125,19 @@ export class BookingsSyncService {
       numeroNoches: Math.ceil(
         (fechaSalidaNum - fechaEntradaNum) / (1000 * 60 * 60 * 24),
       ),
-      subtotal: precioTotalNum,
+      subtotal: subtotalNum ?? precioTotalNum, // Fallback to total if not provided
       multimedia,
       temporada,
       numeroMascotas: numeroMascotasNum,
       costoMascotas: costoMascotasNum,
+      personasAdicionales: personasAdicionalesNum,
+      costoPersonasAdicionales: costoPersonasAdicionalesNum,
+      costoPersonalServicio: costoPersonalServicioNum,
+      depositoGarantia: depositoGarantiaNum,
+      depositoAseo: depositoAseoNum,
+      discountAmount: discountAmountNum,
+      tieneMascotas: tieneMascotasBool,
+      isDirect: isDirectBool,
     });
 
     // 4. Generar firma de integridad para Bold (opcional pero recomendado si viene de la web)

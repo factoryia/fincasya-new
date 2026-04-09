@@ -143,9 +143,16 @@ export class InboxController {
    * GET /api/inbox/:conversationId/suggested-data
    */
   @Get(':conversationId/suggested-data')
-  async getSuggestedData(@Param('conversationId') conversationId: string) {
-    return this.inboxService.getSuggestedContractData(conversationId);
+  async getSuggestedData(
+    @Param('conversationId') conversationId: string,
+    @Query('forceFresh') forceFresh?: string,
+  ) {
+    return this.inboxService.getSuggestedContractData(
+      conversationId,
+      forceFresh === 'true',
+    );
   }
+
 
   /**
    * Obtener sugerencias de reserva basadas en IA

@@ -141,6 +141,7 @@ export class FincasService {
     fechaEntrada: string,
     fechaSalida: string,
     numeroPersonas?: number,
+    numeroMascotas?: number,
   ) {
     try {
       return await this.convexService.query('fincas:calculateStayPrice', {
@@ -148,11 +149,13 @@ export class FincasService {
         fechaEntrada,
         fechaSalida,
         numeroPersonas,
+        numeroMascotas,
       });
     } catch (error) {
       throw new BadRequestException(error.message);
     }
   }
+
 
   async listSimple() {
     try {
@@ -1327,10 +1330,12 @@ export class FincasService {
           nightlyPrice: unitPriceNum,
           totalNights,
           totalDays,
+          subtotal: unitPriceNum * totalDays,
           totalPrice: totalPriceNum,
           petCount: petCount,
           petSurchargeRefundable,
           petSurchargeNonRefundable,
+          cleaningFee: 0, // Placeholder if needed in future
           generatedAt: Date.now(),
         },
       };
