@@ -498,6 +498,13 @@ export default defineSchema({
     updatedAt: v.number(),
   }),
 
+  /** Contenido editable para páginas internas (blog, centro-de-ayuda, contacto, etc.) */
+  internalPages: defineTable({
+    pageId: v.string(),
+    content: v.any(),
+    updatedAt: v.number(),
+  }).index('by_pageId', ['pageId']),
+
   // Integración con Google Calendar (Tokens y configuración)
   googleCalendarIntegrations: defineTable({
     accessToken: v.optional(v.string()),
