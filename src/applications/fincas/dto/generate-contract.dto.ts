@@ -78,4 +78,7 @@ export class GenerateContractDto {
   @IsString()
   @IsOptional()
   signature?: string;
+
+  @IsOptional()
+  petCount?: number;
 }

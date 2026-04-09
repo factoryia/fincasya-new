@@ -450,7 +450,8 @@ function getPriceForDate(
 ) {
   // Extraer MM-DD de la fecha (YYYY-MM-DD)
   const parts = dateStr.split('-');
-  if (parts.length < 3) return { price: basePrice, ruleName: 'Estándar' };
+  if (parts.length < 3)
+    return { price: basePrice, ruleName: 'Estándar', ruleId: null };
   const mmdd = `${parts[1]}-${parts[2]}`;
 
   for (const rule of activeRules) {
@@ -459,6 +460,7 @@ function getPriceForDate(
       return {
         price: rule.valorUnico ?? basePrice,
         ruleName: rule.nombre || 'Especial',
+        ruleId: rule._id,
       };
     }
 
@@ -469,6 +471,7 @@ function getPriceForDate(
           return {
             price: rule.valorUnico ?? basePrice,
             ruleName: rule.nombre || 'Especial',
+            ruleId: rule._id,
           };
         }
       } else {
@@ -477,12 +480,13 @@ function getPriceForDate(
           return {
             price: rule.valorUnico ?? basePrice,
             ruleName: rule.nombre || 'Especial',
+            ruleId: rule._id,
           };
         }
       }
     }
   }
-  return { price: basePrice, ruleName: 'Estándar' };
+  return { price: basePrice, ruleName: 'Estándar', ruleId: null };
 }
 
 /**
@@ -681,23 +685,47 @@ export const calculateStayPrice = query({
 
     const nights = [];
     let current = new Date(start);
-    let total = 0;
-
-    // Iterar día por día hasta el día ANTERIOR a la salida
-    while (current < end) {
-      const dateStr = current.toISOString().split('T')[0];
-      const { price, ruleName } = getPriceForDate(
+    
+    // 1. Identificar la regla dominante para toda la estancia
+    let dominantRule = null;
+    let tempCurrent = new Date(start);
+    
+    while (tempCurrent < end) {
+      const dateStr = tempCurrent.toISOString().split('T')[0];
+      const { price, ruleName, ruleId } = getPriceForDate(
         dateStr,
         property.priceBase,
         activeRules,
       );
+      
+      // Si encontramos una regla que no sea la base ("Estándar")
+      if (ruleName !== 'Estándar') {
+        // Si aún no tenemos dominante, o si esta tiene mayor prioridad (menor order)
+        // Nota: asumo que activeRules ya vienen ordenadas por 'order' en getActivePricingRules
+        if (!dominantRule) {
+          dominantRule = { price, ruleName, ruleId };
+        }
+      }
+      tempCurrent.setDate(tempCurrent.getDate() + 1);
+    }
 
+    // El precio a aplicar es el de la regla dominante, o el base si no hay dominante
+    const finalNightlyPrice = dominantRule ? dominantRule.price : property.priceBase;
+    const finalRuleName = dominantRule ? dominantRule.ruleName : 'Estándar';
+
+    // 2. Construir el desglose con el precio uniforme
+    current = new Date(start);
+    let total = 0;
+
+    while (current < end) {
+      const dateStr = current.toISOString().split('T')[0];
+      
       nights.push({
         date: dateStr,
-        price: price,
-        ruleName: ruleName,
+        price: finalNightlyPrice,
+        ruleName: finalRuleName,
       });
-      total += price;
+      total += finalNightlyPrice;
 
       current.setDate(current.getDate() + 1);
     }
@@ -707,6 +735,7 @@ export const calculateStayPrice = query({
       nightsCount: nights.length,
       nights,
       basePrice: property.priceBase,
+      appliedRule: finalRuleName,
     };
   },
 });

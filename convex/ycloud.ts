@@ -2279,6 +2279,22 @@ export const extractContractData = action({
         }
       }
 
+      // Intentar extraer numeroMascotas de la historia si falta en el JSON
+      let petCount = Number(parsed.petCount || parsed.numeroMascotas || parsed.mascotas || 0);
+      if (petCount === 0 && historyMessages.length > 0) {
+        for (const msg of [...historyMessages].reverse()) {
+          const text = msg.content.toLowerCase();
+          // Regex para: "Mascotas: 2", "llevo 2 perros", "un gato", "sin mascotas"
+          const match = text.match(/(?:mascotas|perros|gatos|animales)(?:\s*[:\-]\s*|\s+)(\d{1,2})/i)
+                     || text.match(/(\d{1,2})\s+(?:mascotas|perros|gatos|animales)/i)
+                     || (/\b(un|una)\s+(mascota|perro|gato|animal)\b/i.test(text) ? [null, "1"] : null);
+          if (match) {
+            petCount = parseInt(match[1], 10);
+            break;
+          }
+        }
+      }
+
       return {
         clientName: String(
           parsed.nombre || parsed.clientName || contact?.name || "",
@@ -2318,6 +2334,7 @@ export const extractContractData = action({
         ),
         totalPrice: String(parsed.totalPrice || parsed.precioTotal || ""),
         numeroPersonas,
+        petCount,
         propertyId: resolvedPropertyId,
       };
     };
@@ -2388,6 +2405,7 @@ Responde ÚNICAMENTE con un objeto JSON válido con estas llaves (si no conoces 
 - nightlyPrice: precio por noche/día (solo números)
 - totalPrice: precio total (solo números)
 - numeroPersonas: cantidad TOTAL de personas/huéspedes (solo el número, ej. 10)
+- petCount: cantidad de mascotas (perros, gatos, etc) que llevará el cliente (solo el número, ej. 2)
 - fincaName: nombre de la finca que quiere reservar (si se menciona por nombre)
 - propertyId: ID de la finca (si se menciona explícitamente el ID)
 

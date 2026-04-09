@@ -217,11 +217,26 @@ export class FincasService {
         .slice(0, 9999)
         .replace(/<[^>]*>/g, '');
       const priceBase = (p as { priceBase?: number }).priceBase ?? 0;
+
+      // Usar el slug si existe, de lo contrario generar uno exactamente igual al frontend
+      let slug = (p as any).slug;
+      if (!slug) {
+        slug = title
+          .toString()
+          .toLowerCase()
+          .normalize('NFD')
+          .replace(/[\u0300-\u036f]/g, '') // Quitar tildes
+          .trim()
+          .replace(/\s+/g, '-') // Espacios por -
+          .replace(/[^\w-]+/g, '') // Quitar caracteres no permitidos
+          .replace(/--+/g, '-'); // Quitar guiones repetidos
+      }
+
       rows.push({
         id,
         title,
         description,
-        link: `${baseUrl}/fincas/${id}`,
+        link: `https://fincasya.com/fincas/${slug}`,
         image_link: images[0],
         additional_image_link: images.slice(1).join(','),
         price: `${priceBase} COP`,
@@ -961,10 +976,19 @@ export class FincasService {
         }
       }
 
-      // 2. Cálculo del precio total (Precio por día * Total de días)
-      // Según instrucción del usuario: "multiplicado por los dias de reserva"
+      // 2. Cálculo del precio total (Precio por día * Total de días + Cargos por mascotas)
       const unitPriceNum = parseInt(dto.nightlyPrice) || 0;
-      const totalPriceNum = unitPriceNum * totalDays;
+      let totalPriceNum = unitPriceNum * totalDays;
+
+      // Política de mascotas:
+      // - Primeras 2: 100,000 COP c/u (Reembolsable)
+      // - 3ª en adelante: 30,000 COP c/u (No Reembolsable)
+      const petCount = Number(dto.petCount) || 0;
+      const petSurchargeRefundable = Math.min(petCount, 2) * 100000;
+      const petSurchargeNonRefundable = Math.max(0, petCount - 2) * 30000;
+
+      // Sumar al precio final (como solicitó el usuario)
+      totalPriceNum += petSurchargeRefundable + petSurchargeNonRefundable;
 
       const totalPriceText =
         this.numberToSpanishText(totalPriceNum).toUpperCase();
@@ -1023,6 +1047,10 @@ export class FincasService {
         Text10: totalPriceFormatted,
         Text11: dto.accountNumber,
         Text13: dto.bankName,
+        // Campos de mascotas
+        'NUMERO_MASCOTAS': String(petCount),
+        'DEP_MASCOTAS': String(petSurchargeRefundable),
+        'CARGO_MASCOTAS': String(petSurchargeNonRefundable),
       };
 
       // --- DETECCIÓN DE FORMATO Y PROCESAMIENTO ---
@@ -1116,6 +1144,13 @@ export class FincasService {
           clientCorreo: valuesMapping[mappingKeys.clientEmail],
           clienteCelular: valuesMapping[mappingKeys.clientPhone],
           firmaCliente: dto.signature || '',
+          // Campos de mascotas para Word
+          numeroMascotas: String(petCount),
+          depositoMascotas: String(petSurchargeRefundable),
+          cargoMascotas: String(petSurchargeNonRefundable),
+          totalMascotas: String(
+            petSurchargeRefundable + petSurchargeNonRefundable,
+          ),
         };
 
         try {
@@ -1144,14 +1179,17 @@ export class FincasService {
           .getZip()
           .generate({ type: 'nodebuffer', compression: 'DEFLATE' });
 
-        finalFilename = `Contrato_${finca.title.replace(/\s+/g, '_')}_${dto.contractNumber}.docx`;
+        // Generar nombre de archivo base usando el nombre de la finca
+        const sanitizedTitle = this.sanitizeFilename(finca.title || 'Finca');
+        const contractNumber = dto.contractNumber ? `_${dto.contractNumber}` : '';
+        finalFilename = `Contrato_${sanitizedTitle}${contractNumber}.docx`;
         finalMimeType =
           'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
 
-        // Si es una reserva directa, convertimos el Word resultante a PDF usando iLovePDF
-        if (dto.conversationId === 'direct-reservation') {
+        // Convertimos el Word resultante a PDF usando iLovePDF (Siempre que no sea nulo el buffer)
+        if (finalBuffer) {
           console.log(
-            '[api] Reserva directa detectada, convirtiendo Word a PDF...',
+            `[api] Convirtiendo contrato Word a PDF (${dto.conversationId === 'direct-reservation' ? 'Reserva Directa' : 'Conversación ' + dto.conversationId})...`,
           );
           try {
             const pdfBuffer = await this.convertDocxToPdf(
@@ -1235,7 +1273,9 @@ export class FincasService {
 
         const pdfSavedBytes = await pdfDoc.save();
         finalBuffer = Buffer.from(pdfSavedBytes);
-        finalFilename = `Contrato_${finca.title.replace(/\s+/g, '_')}_${dto.contractNumber}.pdf`;
+        const sanitizedTitle = this.sanitizeFilename(finca.title || 'Finca');
+        const contractNumber = dto.contractNumber ? `_${dto.contractNumber}` : '';
+        finalFilename = `Contrato_${sanitizedTitle}${contractNumber}.pdf`;
         finalMimeType = 'application/pdf';
       }
 
@@ -1288,6 +1328,9 @@ export class FincasService {
           totalNights,
           totalDays,
           totalPrice: totalPriceNum,
+          petCount: petCount,
+          petSurchargeRefundable,
+          petSurchargeNonRefundable,
           generatedAt: Date.now(),
         },
       };
@@ -1435,6 +1478,20 @@ export class FincasService {
 
     const text = processNum(n).toUpperCase();
     return addCurrency ? `${text} PESOS M/CTE` : text;
+  }
+
+  /**
+   * Sanitiza un string para usarlo como nombre de archivo.
+   * Remueve acentos, caracteres especiales y espacios.
+   */
+  private sanitizeFilename(text: string): string {
+    return text
+      .toString()
+      .normalize('NFD') // Descomponer caracteres con acentos
+      .replace(/[\u0300-\u036f]/g, '') // Eliminar acentos
+      .replace(/[^a-z0-9]/gi, '_') // Reemplazar caracteres no alfanuméricos por guión bajo
+      .replace(/_+/g, '_') // Reemplazar guiones bajos múltiples por uno solo
+      .replace(/^_|_$/g, ''); // Eliminar guiones bajos al inicio o final
   }
 
   /**

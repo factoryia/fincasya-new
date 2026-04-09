@@ -143,7 +143,11 @@ export class InboxService {
       if (type === 'image') {
         fileToUpload = await this.ensureImageCompatible(file);
       }
-      const publicUrl = await this.s3Service.uploadFile(fileToUpload, 'inbox');
+      const publicUrl = await this.s3Service.uploadFile(
+        fileToUpload,
+        'inbox',
+        filename,
+      );
       filename = fileToUpload.originalname;
       mediaUrlForStorage = publicUrl;
       // Presigned URL lets Convex/YCloud fetch even if bucket has restrictions.
@@ -197,17 +201,75 @@ export class InboxService {
   }
 
   async getSuggestedContractData(conversationId: string) {
-    return this.convexService.action('ycloud:extractContractData', {
-      conversationId,
-    });
+    const [suggestedRaw, conv] = await Promise.all([
+      this.convexService
+        .action('ycloud:extractContractData', { conversationId })
+        .catch(() => ({})),
+      this.convexService.query('conversations:getById', { conversationId }),
+    ]);
+
+    const data: any =
+      suggestedRaw && typeof suggestedRaw === 'object' && !(suggestedRaw as any).error
+        ? suggestedRaw
+        : {};
+
+    if (conv) {
+      const contact = await this.convexService.query('contacts:getById', {
+        contactId: conv.contactId,
+      });
+
+      if (contact) {
+        // Priorizar datos del contacto oficial sobre la extracción AI (que puede fallar)
+        if (contact.name) data.clientName = contact.name;
+        if (contact.phone) data.clientPhone = contact.phone;
+        if (contact.email && !data.clientEmail) data.clientEmail = contact.email;
+        if (contact.cedula && !data.clientId) data.clientId = contact.cedula;
+        if (contact.city && !data.clientCity) data.clientCity = contact.city;
+      }
+
+      // Si no tenemos propiedad detectada, buscarla en los mensajes recientes (Catalogos o documentos previos)
+      if (!data.propertyId) {
+        const messages = await this.convexService.query('messages:listRecent', {
+          conversationId,
+          limit: 60,
+        });
+
+        // Buscar el último mensaje que sea un producto o que tenga metadata de propiedad
+        const latestPropMatch = [...(messages || [])].reverse().find(
+          (m) =>
+            (m.type === 'product' &&
+              (m.metadata?.product?.slug || m.metadata?.product?.id)) ||
+            m.metadata?.propertyId,
+        );
+
+        if (latestPropMatch) {
+          if (latestPropMatch.metadata?.propertyId) {
+            data.propertyId = latestPropMatch.metadata.propertyId;
+          } else if (latestPropMatch.metadata?.product) {
+            const product = latestPropMatch.metadata.product;
+            const slug = product.slug || product.id;
+            // Intentar buscar la finca por slug
+            const property = await this.convexService
+              .query('fincas:getBySlug', { slug })
+              .catch(() =>
+                this.convexService.query('fincas:getByCode', { code: slug }),
+              )
+              .catch(() => null);
+
+            if (property) {
+              data.propertyId = property._id;
+            }
+          }
+        }
+      }
+    }
+
+    return data;
   }
 
   async getSuggestedBookingData(conversationId: string) {
-    // Reuse contract extraction logic for quick booking.
-    const data = await this.convexService.action('ycloud:extractContractData', {
-      conversationId,
-    });
-    return data;
+    // Reuse the enriched contract extraction logic for quick booking as well.
+    return this.getSuggestedContractData(conversationId);
   }
 
   async getReservationConfirmationData(conversationId: string) {
