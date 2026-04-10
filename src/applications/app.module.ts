@@ -12,6 +12,7 @@ import { AdminModule } from './admin/admin.module';
 import { ContactsModule } from './contacts/contacts.module';
 import { BookingsModule } from './bookings/bookings.module';
 import { PaymentsModule } from './payments/payments.module';
+import { InternalPagesModule } from './internal-pages/internal-pages.module';
 
 @Module({
   imports: [
@@ -28,6 +29,7 @@ import { PaymentsModule } from './payments/payments.module';
     ContactsModule,
     BookingsModule,
     PaymentsModule,
+    InternalPagesModule,
   ],
 
   controllers: [],
