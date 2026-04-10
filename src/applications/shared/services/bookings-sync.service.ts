@@ -55,6 +55,9 @@ export class BookingsSyncService {
       discountAmount?: number | string;
       subtotal?: number | string;
       tieneMascotas?: boolean | string;
+      multimediaLinks?:
+        | string
+        | Array<{ url: string; name?: string; type?: string }>;
     },
     multimediaFiles?: Express.Multer.File[],
   ) {
@@ -96,10 +99,36 @@ export class BookingsSyncService {
     });
     if (!property) throw new Error('Propiedad no encontrada');
 
-    // 2. Subir multimedia si existe
-    let multimedia: { url: string; name: string; type: string }[] | undefined;
+    // 2. Mezclar multimedia preexistente (URLs) y archivos subidos en esta solicitud.
+    let multimedia: { url: string; name: string; type: string }[] = [];
+
+    const rawMultimediaLinks = params.multimediaLinks;
+    if (rawMultimediaLinks) {
+      let parsedLinks: Array<{ url: string; name?: string; type?: string }> = [];
+      if (typeof rawMultimediaLinks === 'string') {
+        try {
+          const candidate = JSON.parse(rawMultimediaLinks);
+          if (Array.isArray(candidate)) parsedLinks = candidate;
+        } catch {
+          // Ignorar payload inválido para no romper la creación de la reserva.
+        }
+      } else if (Array.isArray(rawMultimediaLinks)) {
+        parsedLinks = rawMultimediaLinks;
+      }
+
+      multimedia.push(
+        ...parsedLinks
+          .filter((item) => item?.url)
+          .map((item) => ({
+            url: item.url,
+            name: item.name || 'Documento',
+            type: item.type || 'application/pdf',
+          })),
+      );
+    }
+
     if (multimediaFiles && multimediaFiles.length > 0) {
-      multimedia = await Promise.all(
+      const uploadedMedia = await Promise.all(
         multimediaFiles.map(async (file) => {
           const url = await this.s3Service.uploadFile(
             file,
@@ -112,6 +141,7 @@ export class BookingsSyncService {
           };
         }),
       );
+      multimedia.push(...uploadedMedia);
     }
 
     // 3. Crear reserva en Convex
@@ -126,7 +156,7 @@ export class BookingsSyncService {
         (fechaSalidaNum - fechaEntradaNum) / (1000 * 60 * 60 * 24),
       ),
       subtotal: subtotalNum ?? precioTotalNum, // Fallback to total if not provided
-      multimedia,
+      multimedia: multimedia.length > 0 ? multimedia : undefined,
       temporada,
       numeroMascotas: numeroMascotasNum,
       costoMascotas: costoMascotasNum,
