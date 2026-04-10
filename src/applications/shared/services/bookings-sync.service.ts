@@ -39,6 +39,8 @@ export class BookingsSyncService {
       temporada: string;
       numeroMascotas?: number | string;
       costoMascotas?: number | string;
+      depositoMascotas?: number | string;
+      sobrecargoMascotas?: number | string;
       observaciones?: string;
       horaEntrada?: string;
       horaSalida?: string;
@@ -82,6 +84,8 @@ export class BookingsSyncService {
     const precioTotalNum = parseNum(params.precioTotal) || 0;
     const numeroMascotasNum = parseNum(params.numeroMascotas) || 0;
     const costoMascotasNum = parseNum(params.costoMascotas) || 0;
+    const depositoMascotasNum = parseNum(params.depositoMascotas) || 0;
+    const sobrecargoMascotasNum = parseNum(params.sobrecargoMascotas) || 0;
 
     const personasAdicionalesNum = parseNum(params.personasAdicionales);
     const costoPersonasAdicionalesNum = parseNum(params.costoPersonasAdicionales);
@@ -160,6 +164,8 @@ export class BookingsSyncService {
       temporada,
       numeroMascotas: numeroMascotasNum,
       costoMascotas: costoMascotasNum,
+      depositoMascotas: depositoMascotasNum,
+      sobrecargoMascotas: sobrecargoMascotasNum,
       personasAdicionales: personasAdicionalesNum,
       costoPersonasAdicionales: costoPersonasAdicionalesNum,
       costoPersonalServicio: costoPersonalServicioNum,

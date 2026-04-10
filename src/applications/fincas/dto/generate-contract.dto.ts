@@ -81,4 +81,17 @@ export class GenerateContractDto {
 
   @IsOptional()
   petCount?: number;
+
+  @IsOptional()
+  serviceStaffFee?: number;
+
+  @IsOptional()
+  petDeposit?: number;
+
+  @IsOptional()
+  petSurcharge?: number;
+
+  @IsOptional()
+  @IsString()
+  totalPrice?: string;
 }

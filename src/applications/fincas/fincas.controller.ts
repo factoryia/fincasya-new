@@ -351,15 +351,18 @@ export class FincasController {
     @Query('fechaSalida') fechaSalida: string,
     @Query('numeroPersonas') numeroPersonas?: string,
     @Query('numeroMascotas') numeroMascotas?: string,
+    @Query('incluirServicio') incluirServicio?: string,
   ) {
     const numPers = numeroPersonas ? parseInt(numeroPersonas, 10) : undefined;
     const numPets = numeroMascotas ? parseInt(numeroMascotas, 10) : undefined;
+    const inclServ = incluirServicio === 'true';
     return this.fincasService.calculateStayPrice(
       id,
       fechaEntrada,
       fechaSalida,
       numPers,
       numPets,
+      inclServ,
     );
   }
 

@@ -142,6 +142,7 @@ export class FincasService {
     fechaSalida: string,
     numeroPersonas?: number,
     numeroMascotas?: number,
+    incluirServicio?: boolean,
   ) {
     try {
       return await this.convexService.query('fincas:calculateStayPrice', {
@@ -150,6 +151,7 @@ export class FincasService {
         fechaSalida,
         numeroPersonas,
         numeroMascotas,
+        incluirServicio,
       });
     } catch (error) {
       throw new BadRequestException(error.message);
@@ -169,6 +171,10 @@ export class FincasService {
         code: p.code,
         image: p.images?.[0] || p.image || null,
         location: p.location,
+        allowsPets: p.allowsPets,
+        serviceStaffAvailable: p.serviceStaffAvailable,
+        serviceStaffPrice: p.serviceStaffPrice,
+        serviceStaffMandatory: p.serviceStaffMandatory,
       }));
     } catch (error) {
       throw new BadRequestException(error.message);
@@ -991,7 +997,8 @@ export class FincasService {
       const petSurchargeNonRefundable = Math.max(0, petCount - 2) * 30000;
 
       // Sumar al precio final (como solicitó el usuario)
-      totalPriceNum += petSurchargeRefundable + petSurchargeNonRefundable;
+      const serviceStaffFee = Number(dto.serviceStaffFee) || 0;
+      totalPriceNum += petSurchargeRefundable + petSurchargeNonRefundable + serviceStaffFee;
 
       const totalPriceText =
         this.numberToSpanishText(totalPriceNum).toUpperCase();
@@ -1052,8 +1059,9 @@ export class FincasService {
         Text13: dto.bankName,
         // Campos de mascotas
         'NUMERO_MASCOTAS': String(petCount),
-        'DEP_MASCOTAS': String(petSurchargeRefundable),
-        'CARGO_MASCOTAS': String(petSurchargeNonRefundable),
+        'DEP_MASCOTAS': String(dto.petDeposit ?? petSurchargeRefundable),
+        'CARGO_MASCOTAS': String(dto.petSurcharge ?? petSurchargeNonRefundable),
+        'CARGO_SERVICIO': String(serviceStaffFee),
       };
 
       // --- DETECCIÓN DE FORMATO Y PROCESAMIENTO ---

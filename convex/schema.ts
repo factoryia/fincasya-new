@@ -71,6 +71,18 @@ export default defineSchema({
     featuredIcons: v.optional(v.array(v.id('iconography'))),
     /** Lista ordenada de nombres de zonas para renderizado. */
     zoneOrder: v.optional(v.array(v.string())),
+    /** Si true, la finca permite mascotas. */
+    allowsPets: v.optional(v.boolean()),
+    /** Si true, se permite bafles, sonido profesional o decoración para eventos. */
+    allowsEventsContent: v.optional(v.boolean()),
+    /** Si true, la finca solo permite estadías exclusivamente para descanso familiar. */
+    familyOnly: v.optional(v.boolean()),
+    /** Si true, la finca tiene personal de servicio disponible para contratación. */
+    serviceStaffAvailable: v.optional(v.boolean()),
+    /** Si true, el personal de servicio es obligatorio para la finca. */
+    serviceStaffMandatory: v.optional(v.boolean()),
+    /** Precio por estadía del personal de servicio. */
+    serviceStaffPrice: v.optional(v.number()),
     createdAt: v.number(),
     updatedAt: v.number(),
   })
@@ -178,6 +190,8 @@ export default defineSchema({
     subtotal: v.number(),
     costoPersonasAdicionales: v.optional(v.number()),
     costoMascotas: v.optional(v.number()),
+    depositoMascotas: v.optional(v.number()),
+    sobrecargoMascotas: v.optional(v.number()),
     costoPersonalServicio: v.optional(v.number()),
     depositoGarantia: v.optional(v.number()),
     depositoAseo: v.optional(v.number()),

@@ -9,4 +9,9 @@ export class PropertiesSimpleController {
   async listSimple() {
     return this.fincasService.listSimple();
   }
+
+  @Get('v3')
+  async listV3() {
+    return this.fincasService.listSimple();
+  }
 }

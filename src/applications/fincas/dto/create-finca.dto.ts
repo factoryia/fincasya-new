@@ -178,6 +178,58 @@ export class CreateFincaDto {
       : value === true || value === 'true' || value === 1,
   )
   isFavorite?: boolean;
+ politicalOnly?: boolean; // Wait, I used familyOnly in schema. Let's stick to familyOnly.
+
+  @IsOptional()
+  @IsBoolean()
+  @Transform(({ value }) =>
+    value === undefined || value === null
+      ? undefined
+      : value === true || value === 'true' || value === 1,
+  )
+  allowsPets?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  @Transform(({ value }) =>
+    value === undefined || value === null
+      ? undefined
+      : value === true || value === 'true' || value === 1,
+  )
+  allowsEventsContent?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  @Transform(({ value }) =>
+    value === undefined || value === null
+      ? undefined
+      : value === true || value === 'true' || value === 1,
+  )
+  familyOnly?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  @Transform(({ value }) =>
+    value === undefined || value === null
+      ? undefined
+      : value === true || value === 'true' || value === 1,
+  )
+  serviceStaffAvailable?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  @Transform(({ value }) =>
+    value === undefined || value === null
+      ? undefined
+      : value === true || value === 'true' || value === 1,
+  )
+  serviceStaffMandatory?: boolean;
+
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  @Transform(({ value }) => toNumber(value))
+  serviceStaffPrice?: number;
 
   @IsOptional()
   @IsNumber()

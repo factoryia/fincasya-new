@@ -670,6 +670,7 @@ export const calculateStayPrice = query({
     fechaSalida: v.string(), // YYYY-MM-DD
     numeroPersonas: v.optional(v.number()),
     numeroMascotas: v.optional(v.number()),
+    incluirServicio: v.optional(v.boolean()),
   },
   handler: async (ctx, args) => {
     const property = await ctx.db.get(args.propertyId);
@@ -734,8 +735,10 @@ export const calculateStayPrice = query({
     const petServiceFee = Math.max(0, numeroMascotas - 2) * 30000;
     const petTotal = petRefundable + petServiceFee;
 
+    const serviceStaffFee = args.incluirServicio ? (property.serviceStaffPrice || 0) : 0;
+    
     return {
-      total: total + petTotal,
+      total: total + petTotal + serviceStaffFee,
       subtotal: total,
       nightsCount: nights.length,
       nights,
@@ -746,6 +749,12 @@ export const calculateStayPrice = query({
         refundable: petRefundable,
         serviceFee: petServiceFee,
         total: petTotal,
+      },
+      serviceStaff: {
+        available: !!property.serviceStaffAvailable,
+        price: property.serviceStaffPrice || 0,
+        included: !!args.incluirServicio,
+        fee: args.incluirServicio ? (property.serviceStaffPrice || 0) : 0,
       }
     };
   },
@@ -1294,6 +1303,12 @@ export const create = mutation({
     priceOriginal: v.optional(v.number()),
     featuredIcons: v.optional(v.array(v.id('iconography'))),
     zoneOrder: v.optional(v.array(v.string())),
+    allowsPets: v.optional(v.boolean()),
+    allowsEventsContent: v.optional(v.boolean()),
+    familyOnly: v.optional(v.boolean()),
+    serviceStaffAvailable: v.optional(v.boolean()),
+    serviceStaffMandatory: v.optional(v.boolean()),
+    serviceStaffPrice: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
     const now = Date.now();
@@ -1337,6 +1352,12 @@ export const create = mutation({
       priceOriginal: args.priceOriginal,
       featuredIcons: args.featuredIcons,
       zoneOrder: args.zoneOrder,
+      allowsPets: args.allowsPets,
+      allowsEventsContent: args.allowsEventsContent,
+      familyOnly: args.familyOnly,
+      serviceStaffAvailable: args.serviceStaffAvailable,
+      serviceStaffMandatory: args.serviceStaffMandatory,
+      serviceStaffPrice: args.serviceStaffPrice,
       createdAt: now,
       updatedAt: now,
     });
@@ -1483,6 +1504,12 @@ export const update = mutation({
     catalogIds: v.optional(v.array(v.string())),
     slug: v.optional(v.string()),
     zoneOrder: v.optional(v.array(v.string())),
+    allowsPets: v.optional(v.boolean()),
+    allowsEventsContent: v.optional(v.boolean()),
+    familyOnly: v.optional(v.boolean()),
+    serviceStaffAvailable: v.optional(v.boolean()),
+    serviceStaffMandatory: v.optional(v.boolean()),
+    serviceStaffPrice: v.optional(v.number()),
     pricing: v.optional(
       v.array(
         v.object({
