@@ -108,7 +108,8 @@ export class BookingsSyncService {
 
     const rawMultimediaLinks = params.multimediaLinks;
     if (rawMultimediaLinks) {
-      let parsedLinks: Array<{ url: string; name?: string; type?: string }> = [];
+      let parsedLinks: Array<{ url: string; name?: string; type?: string }> =
+        [];
       if (typeof rawMultimediaLinks === 'string') {
         try {
           const candidate = JSON.parse(rawMultimediaLinks);

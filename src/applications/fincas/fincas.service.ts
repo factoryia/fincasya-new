@@ -904,7 +904,11 @@ export class FincasService {
       throw new BadRequestException(error.message);
     }
   }
-  async generateContract(propertyId: string, dto: GenerateContractDto) {
+  async generateContract(
+    propertyId: string,
+    dto: GenerateContractDto,
+    options?: { previewOnly?: boolean },
+  ) {
     try {
       // 1. Obtener la finca y su plantilla
       const finca = await this.getById(propertyId);
@@ -1288,6 +1292,16 @@ export class FincasService {
         const contractNumber = dto.contractNumber ? `_${dto.contractNumber}` : '';
         finalFilename = `Contrato_${sanitizedTitle}${contractNumber}.pdf`;
         finalMimeType = 'application/pdf';
+      }
+
+      if (options?.previewOnly) {
+        return {
+          success: true,
+          buffer: finalBuffer,
+          filename: finalFilename,
+          mimeType: finalMimeType,
+          message: 'Previsualización de contrato generada exitosamente.',
+        };
       }
 
       // 4. Subir el archivo generado a S3

@@ -17,6 +17,8 @@ import {
   UseGuards,
   Header,
   Req,
+  Res,
+  StreamableFile,
 } from '@nestjs/common';
 import {
   FilesInterceptor,
@@ -34,6 +36,7 @@ import { GenerateContractDto } from './dto/generate-contract.dto';
 import { ConvexAuthGuard } from '../shared/guards/convex-auth.guard';
 import { AdminGuard } from '../shared/guards/admin.guard';
 import { OwnerOrAdminGuard } from '../shared/guards/owner-or-admin.guard';
+import { Response } from 'express';
 
 @Controller('fincas')
 export class FincasController {
@@ -439,6 +442,27 @@ export class FincasController {
     console.log(`[NOTIFICATION] Sending contract to client ${dto.clientEmail} and support to jamesrgal@gmail.com`);
     
     return result;
+  }
+
+  @Post(':id/direct-booking-contract-preview')
+  async generateDirectContractPreview(
+    @Param('id') id: string,
+    @Body() dto: GenerateContractDto,
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    const result: any = await this.fincasService.generateContract(id, dto, {
+      previewOnly: true,
+    });
+
+    const filename = (result?.filename || 'Contrato_Preview.pdf').replace(
+      /\.docx$/i,
+      '.pdf',
+    );
+
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+
+    return new StreamableFile(result.buffer);
   }
 
   @Get('owned-properties/:userId')

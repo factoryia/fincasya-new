@@ -226,6 +226,9 @@ export const checkAvailability = query({
         fechaEntrada: b.fechaEntrada,
         fechaSalida: b.fechaSalida,
         status: b.status,
+        nombreCompleto: b.nombreCompleto,
+        cedula: b.cedula,
+        celular: b.celular,
       })),
     };
   },
