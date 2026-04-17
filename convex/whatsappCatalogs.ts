@@ -147,14 +147,14 @@ export const syncFromMeta = internalMutation({
 });
 
 /**
- * Seed: crea el catálogo "Catálogo_productos" (Meta 26198995209693859) y asocia la finca
+ * Seed: crea el catálogo "Catálogo_productos" (Meta 1560075992300705) y asocia la finca
  * VILLA GREEN 12 pax #vc115 (product_retailer_id quk9ne5y4o). Idempotente.
  * Ejecutar una vez: npx convex run whatsappCatalogs:seedCatalogProductos
  */
 export const seedCatalogProductos = mutation({
   args: {},
   handler: async (ctx) => {
-    const META_CATALOG_ID = "26198995209693859";
+    const META_CATALOG_ID = "15698599230700705";
     const PROPERTY_ID = "js797fftx557dg5gb9yd9et8s581g9dy" as Id<"properties">;
     const PRODUCT_RETAILER_ID = "quk9ne5y4o";
     const now = Date.now();

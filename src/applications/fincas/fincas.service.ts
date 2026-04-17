@@ -40,7 +40,7 @@ export class FincasService {
 
   async list(listDto: ListFincasDto) {
     try {
-      // Si hay un término de búsqueda, usamos la query de búsqueda de Convex
+      // Si hay un tÃ©rmino de bÃºsqueda, usamos la query de bÃºsqueda de Convex
       if (listDto.search) {
         const results = await this.convexService.query('fincas:search', {
           query: listDto.search,
@@ -185,7 +185,7 @@ export class FincasService {
   }
 
   /**
-   * Lista de fincas para feed de catálogo (Meta/WhatsApp). Solo incluye las que tienen al menos una imagen.
+   * Lista de fincas para feed de catÃ¡logo (Meta/WhatsApp). Solo incluye las que tienen al menos una imagen.
    */
   async getCatalogFeedRows(): Promise<
     {
@@ -259,7 +259,7 @@ export class FincasService {
     return rows;
   }
 
-  /** Genera el CSV del catálogo para Meta (columnas requeridas: id, title, description, link, image_link, price, availability, condition). */
+  /** Genera el CSV del catÃ¡logo para Meta (columnas requeridas: id, title, description, link, image_link, price, availability, condition). */
   async getCatalogFeedCsv(): Promise<string> {
     const rows = await this.getCatalogFeedRows();
     const escape = (s: string) => {
@@ -414,7 +414,7 @@ export class FincasService {
     contractTemplate?: Express.Multer.File,
   ) {
     try {
-      // Subir nuevas imágenes a S3 si existen
+      // Subir nuevas imÃ¡genes a S3 si existen
       let imageUrls: string[] = [];
       if (images && images.length > 0) {
         imageUrls = await this.s3Service.uploadImages(images);
@@ -436,7 +436,7 @@ export class FincasService {
       }
 
       // Actualizar la finca
-      // Pasamos pricing por separado si existe, y el resto de campos (incluyendo features y catalogIds) a la mutación update.
+      // Pasamos pricing por separado si existe, y el resto de campos (incluyendo features y catalogIds) a la mutaciÃ³n update.
       const {
         pricing,
         catalogIds,
@@ -475,7 +475,7 @@ export class FincasService {
         } as Record<string, unknown>);
       }
 
-      // Agregar nuevas imágenes a través de la mutación dedicada de Convex.
+      // Agregar nuevas imÃ¡genes a travÃ©s de la mutaciÃ³n dedicada de Convex.
       if (imageUrls.length > 0) {
         const currentFinca = await this.getById(id);
         const existingImages: string[] = currentFinca.images || [];
@@ -492,7 +492,7 @@ export class FincasService {
         );
       }
 
-      // Si se envió pricing en el update, usar la mutación dedicada setPricing.
+      // Si se enviÃ³ pricing en el update, usar la mutaciÃ³n dedicada setPricing.
       if (pricing && Array.isArray(pricing)) {
         const normalized = pricing.map((p: any) => {
           const {
@@ -638,10 +638,10 @@ export class FincasService {
 
   async delete(id: string) {
     try {
-      // Obtener la finca para eliminar las imágenes y video de S3
+      // Obtener la finca para eliminar las imÃ¡genes y video de S3
       const finca = await this.getById(id);
 
-      // Eliminar imágenes de S3
+      // Eliminar imÃ¡genes de S3
       if (finca.images && finca.images.length > 0) {
         await Promise.all(
           finca.images.map((url: string) =>
@@ -755,7 +755,7 @@ export class FincasService {
 
   /**
    * Carga masiva desde Excel (tabla de precios).
-   * Parsea el archivo y crea una finca por cada fila válida.
+   * Parsea el archivo y crea una finca por cada fila vÃ¡lida.
    */
   async importFromExcel(buffer: Buffer): Promise<{
     created: number;
@@ -772,11 +772,11 @@ export class FincasService {
       try {
         await this.create(dto);
         created++;
-        details.push(`✅ ${dto.title}`);
+        details.push(`[OK] ${dto.title}`);
       } catch (err: unknown) {
         errors++;
         const msg = err instanceof Error ? err.message : String(err);
-        details.push(`❌ ${dto.title}: ${msg}`);
+        details.push(`[ERROR] ${dto.title}: ${msg}`);
       }
     }
 
@@ -928,7 +928,7 @@ export class FincasService {
       const pdfBytes = response.data;
 
       // 3. Modificar el PDF con pdf-lib
-      // 2. Obtener información de la conversación y contacto para el cliente
+      // 2. Obtener informaciÃ³n de la conversaciÃ³n y contacto para el cliente
       let contact: any = null;
       if (dto.conversationId && dto.conversationId !== 'direct-reservation') {
         try {
@@ -962,7 +962,7 @@ export class FincasService {
       ];
       const formattedDate = `${now.getDate()} dias del mes de ${months[now.getMonth()]} del ${now.getFullYear()}`;
 
-      // 1. Cálculos de duración (necesarios para el precio total)
+      // 1. CÃ¡lculos de duraciÃ³n (necesarios para el precio total)
       let totalNights = 1;
       let totalDays = 1;
       let checkInMini = '';
@@ -999,10 +999,15 @@ export class FincasService {
         ? providedTotal 
         : (unitPriceNum * totalDays);
 
-      // Política de mascotas (Calculamos para el desglose, pero no sumamos al total si ya venía de la pasarela)
+      // Política de mascotas (Calculamos para el desglose, pero no sumamos al total si ya venía de la pasarela):
+      // - Primeras 2: 100,000 COP c/u (Reembolsable)
+      // - 3ª en adelante: 30,000 COP c/u (No Reembolsable)
       const petCount = Number(dto.petCount) || 0;
       const petSurchargeRefundable = Math.min(petCount, 2) * 100000;
       const petSurchargeNonRefundable = Math.max(0, petCount - 2) * 30000;
+
+      // Sumar al precio final si no venía de la pasarela
+
       const serviceStaffFee = Number(dto.serviceStaffFee) || 0;
 
       // Solo sumamos si el total no fue proporcionado explícitamente (ej: reservas internas)
@@ -1020,8 +1025,8 @@ export class FincasService {
 
       // Mapeo de campos solicitado por el usuario
       const mappingKeys = {
-        date: 'FECHA_GENERACIÓN DE CONTRATO (FORMATO DIA(NUMERO) MES(TEXTO) de AÑO(NUMERO))',
-        priceText: 'VALOR – PRECIO EN TEXTO',
+        date: 'FECHA_GENERACIÃ“N DE CONTRATO (FORMATO DIA(NUMERO) MES(TEXTO) de AÃ‘O(NUMERO))',
+        priceText: 'VALOR â€“ PRECIO EN TEXTO',
         priceNumeric: '($VALOR NUMERICO)',
         priceNumericAlt: '($VALOR - PRECIO NUMERICO)',
         accountHolder: 'NOMBRE TITULAR DE LA CUENTA, datos admin',
@@ -1061,7 +1066,7 @@ export class FincasService {
         [mappingKeys.clientAddress]: dto.clientAddress || '',
         'HORA ENTRADA': dto.checkInTime || '',
         'HORA SALIDA': dto.checkOutTime || '',
-        // Fallbacks genéricos
+        // Fallbacks genÃ©ricos
         Text6: dto.contractNumber,
         Text9: totalPriceText,
         Text10: totalPriceFormatted,
@@ -1074,7 +1079,7 @@ export class FincasService {
         'CARGO_SERVICIO': String(serviceStaffFee),
       };
 
-      // --- DETECCIÓN DE FORMATO Y PROCESAMIENTO ---
+      // --- DETECCIÃ“N DE FORMATO Y PROCESAMIENTO ---
       const isDocx = pdfBytes.slice(0, 2).toString() === 'PK';
       let finalBuffer: Buffer;
       let finalFilename: string;
@@ -1101,10 +1106,10 @@ export class FincasService {
           );
         }
 
-        // --- CONFIGURACIÓN DE MÓDULO DE IMAGEN ---
+        // --- CONFIGURACIÃ“N DE MÃ“DULO DE IMAGEN ---
         let imageModule: any;
         if (dto.signature) {
-          console.log('[api] Configurando módulo de imagen para firma');
+          console.log('[api] Configurando mÃ³dulo de imagen para firma');
           const opts = {
             centered: false,
             getImage: (tagValue: string) => {
@@ -1115,7 +1120,7 @@ export class FincasService {
               );
               return Buffer.from(base64Data, 'base64');
             },
-            getSize: () => [150, 150], // Tamaño por defecto de la firma
+            getSize: () => [150, 150], // TamaÃ±o por defecto de la firma
           };
           imageModule = new ImageModule(opts);
         }
@@ -1144,7 +1149,7 @@ export class FincasService {
           fechaSalida: valuesMapping[mappingKeys.checkOutDate],
           fecha_salida: valuesMapping[mappingKeys.checkOutDate],
           ciudad: valuesMapping[mappingKeys.city],
-          // Nuevos campos de duración y tiempos
+          // Nuevos campos de duraciÃ³n y tiempos
           nochesTexto: this.numberToSpanishText(totalNights, false),
           nochesNumero: String(totalNights),
           diasTexto: this.numberToSpanishText(totalDays, false),
@@ -1207,10 +1212,11 @@ export class FincasService {
         finalMimeType =
           'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
 
-        // Convertimos el Word resultante a PDF usando iLovePDF (Siempre que no sea nulo el buffer)
+        // Intentamos convertir el Word resultante a PDF seguro.
+        // Si el servicio no esta disponible, dejamos el .docx para no romper el flujo.
         if (finalBuffer) {
           console.log(
-            `[api] Convirtiendo contrato Word a PDF (${dto.conversationId === 'direct-reservation' ? 'Reserva Directa' : 'Conversación ' + dto.conversationId})...`,
+            `[api] Convirtiendo contrato Word a PDF (${dto.conversationId === 'direct-reservation' ? 'Reserva Directa' : 'ConversaciÃ³n ' + dto.conversationId})...`,
           );
           try {
             const pdfBuffer = await this.convertDocxToPdf(
@@ -1220,11 +1226,11 @@ export class FincasService {
             finalBuffer = pdfBuffer;
             finalFilename = finalFilename.replace('.docx', '.pdf');
             finalMimeType = 'application/pdf';
-            console.log('[api] Conversión a PDF completada con éxito.');
+            console.log('[api] ConversiÃ³n a PDF completada con Ã©xito.');
           } catch (e: any) {
-            console.error('[api] Error en conversión iLovePDF:', e.message || e);
-            throw new BadRequestException(
-              'No se pudo generar el contrato en formato PDF seguro. Por favor, intente de nuevo o contacte a soporte.',
+            console.error('[api] Error en conversiÃ³n iLovePDF:', e.message || e);
+            console.warn(
+              '[api] Se entregara el contrato en formato Word porque la conversion a PDF no esta disponible.',
             );
           }
         }
@@ -1236,18 +1242,18 @@ export class FincasService {
         const allFields = form.getFields();
         const allFieldNames = allFields.map((f) => f.getName());
 
-        console.log('=== DIAGNÓSTICO PDF ===');
+        console.log('=== DIAGNÃ“STICO PDF ===');
         console.log(
           `Campos detectados (${allFieldNames.length}):`,
           allFieldNames,
         );
         if (allFieldNames.length === 0) {
           console.error(
-            '¡ADVERTENCIA! El PDF no parece tener campos de formulario (AcroForm).',
+            'Â¡ADVERTENCIA! El PDF no parece tener campos de formulario (AcroForm).',
           );
         }
 
-        // Rellenar campos usando búsqueda robusta (con y sin corchetes)
+        // Rellenar campos usando bÃºsqueda robusta (con y sin corchetes)
         allFieldNames.forEach((fieldName) => {
           try {
             const field = form.getTextField(fieldName);
@@ -1268,13 +1274,13 @@ export class FincasService {
 
                 // Eliminar bordes y fondos para que parezca texto normal
                 try {
-                  // @ts-ignore - En algunas versiones de pdf-lib estos métodos existen
+                  // @ts-ignore - En algunas versiones de pdf-lib estos mÃ©todos existen
                   if (typeof (field as any).setBorderWidth === 'function') {
                     (field as any).setBorderWidth(0);
                   }
                 } catch (e) {}
 
-                // Ajustar fuente y tamaño
+                // Ajustar fuente y tamaÃ±o
                 field.setFontSize(10);
                 field.updateAppearances(helveticaFont);
 
@@ -1306,7 +1312,7 @@ export class FincasService {
           buffer: finalBuffer,
           filename: finalFilename,
           mimeType: finalMimeType,
-          message: 'Previsualización de contrato generada exitosamente.',
+          message: 'Previsualizacion de contrato generada exitosamente.',
         };
       }
 
@@ -1330,7 +1336,7 @@ export class FincasService {
         finalFilename,
       );
 
-      // 5. Enviar mensaje a la conversación (solo si es una conversación válida)
+      // 5. Enviar mensaje a la conversaciÃ³n (solo si es una conversaciÃ³n vÃ¡lida)
       if (dto.conversationId && dto.conversationId !== 'direct-reservation') {
         try {
       const contractMetadata = {
@@ -1370,10 +1376,10 @@ export class FincasService {
 
           await this.inboxService.sendMessage(dto.conversationId, {
             type: 'document',
-            text: `¡Hola! 👋 Aquí tienes el documento del contrato para la finca ${finca.title}. Por favor revísalo y quedamos atentos a cualquier duda. ✨`,
+            text: `Hola. Aqui tienes el documento del contrato para la finca ${finca.title}. Por favor revisalo y quedamos atentos a cualquier duda.`,
             mediaUrl: publicUrl,
-        filename: finalFilename,
-        metadata: contractMetadata,
+            filename: finalFilename,
+            metadata: contractMetadata,
             file: generatedFile,
           });
         } catch (msgErr) {
@@ -1384,7 +1390,7 @@ export class FincasService {
         }
       } else {
         console.log(
-          '[api] Reserva directa: Omitiendo envío de mensaje a Inbox local.',
+          '[api] Reserva directa: Omitiendo envÃ­o de mensaje a Inbox local.',
         );
 
         if (dto.bookingId) {
@@ -1458,7 +1464,7 @@ export class FincasService {
       'TRECE',
       'CATORCE',
       'QUINCE',
-      'DIECISÉIS',
+      'DIECISEIS',
       'DIECISIETE',
       'DIECIOCHO',
       'DIECINUEVE',
@@ -1518,7 +1524,7 @@ export class FincasService {
         const resto = num % 1000000;
         let res =
           millones === 1
-            ? 'UN MILLÓN'
+            ? 'UN MILLON'
             : convertirMenorA1000(millones) + ' MILLONES';
         if (resto > 0) res += ' ' + processNum(resto);
         return res;
@@ -1540,8 +1546,8 @@ export class FincasService {
       .toString()
       .normalize('NFD') // Descomponer caracteres con acentos
       .replace(/[\u0300-\u036f]/g, '') // Eliminar acentos
-      .replace(/[^a-z0-9]/gi, '_') // Reemplazar caracteres no alfanuméricos por guión bajo
-      .replace(/_+/g, '_') // Reemplazar guiones bajos múltiples por uno solo
+      .replace(/[^a-z0-9]/gi, '_') // Reemplazar caracteres no alfanumÃ©ricos por guiÃ³n bajo
+      .replace(/_+/g, '_') // Reemplazar guiones bajos mÃºltiples por uno solo
       .replace(/^_|_$/g, ''); // Eliminar guiones bajos al inicio o final
   }
 
@@ -1564,7 +1570,7 @@ export class FincasService {
 
     await task.start();
 
-    // Crear un archivo temporal para el SDK (es lo más seguro para este SDK)
+    // Crear un archivo temporal para el SDK (es lo mÃ¡s seguro para este SDK)
     const tmp = require('os').tmpdir();
     const fs = require('fs');
     const path = require('path');
@@ -1587,3 +1593,4 @@ export class FincasService {
     }
   }
 }
+

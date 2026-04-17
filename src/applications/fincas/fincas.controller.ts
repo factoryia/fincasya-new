@@ -454,12 +454,12 @@ export class FincasController {
       previewOnly: true,
     });
 
-    const filename = (result?.filename || 'Contrato_Preview.pdf').replace(
-      /\.docx$/i,
-      '.pdf',
-    );
+    const filename = result?.filename || 'Contrato_Preview.pdf';
 
-    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader(
+      'Content-Type',
+      result?.mimeType || 'application/pdf',
+    );
     res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
 
     return new StreamableFile(result.buffer);
