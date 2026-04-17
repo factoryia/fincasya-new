@@ -169,6 +169,15 @@ export default defineSchema({
           capacidadMin: v.number(),
           capacidadMax: v.number(),
           valorUnico: v.number(),
+          subReglasNoches: v.optional(
+            v.array(
+              v.object({
+                nochesMin: v.number(),
+                nochesMax: v.number(),
+                valorUnico: v.number(),
+              }),
+            ),
+          ),
         }),
       ),
     ),

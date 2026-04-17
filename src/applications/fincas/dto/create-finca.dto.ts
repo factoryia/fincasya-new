@@ -403,5 +403,10 @@ export class PricingItemDto {
   /** Sub-reglas de precio por capacidad (cada una con su propio precio) */
   @IsOptional()
   @IsArray()
-  subReglasCapacidad?: { capacidadMin: number; capacidadMax: number; valorUnico: number }[];
+  subReglasCapacidad?: {
+    capacidadMin: number;
+    capacidadMax: number;
+    valorUnico: number;
+    subReglasNoches?: { nochesMin: number; nochesMax: number; valorUnico: number }[];
+  }[];
 }
