@@ -4,6 +4,16 @@ import { tables as betterAuthTables } from './betterAuth/schema';
 
 export default defineSchema({
   ...betterAuthTables,
+  // Customizing user table to include city and address
+  user: defineTable({
+    ...betterAuthTables.user.validator.fields,
+    city: v.optional(v.string()),
+    address: v.optional(v.string()),
+  })
+    .index('email_name', ['email', 'name'])
+    .index('name', ['name'])
+    .index('userId', ['userId']),
+
   // Tabla de propiedades (fincas) - Actualizado por Antigravity para soportar featuredIcons
   properties: defineTable({
     title: v.string(),
@@ -229,6 +239,8 @@ export default defineSchema({
           url: v.string(),
           name: v.string(),
           type: v.string(),
+          size: v.optional(v.number()),
+          uploadedAt: v.optional(v.number()),
         }),
       ),
     ),
@@ -528,6 +540,7 @@ export default defineSchema({
     connected: v.boolean(),
     connectedEmail: v.optional(v.string()),
     connectedName: v.optional(v.string()),
+    needsReauth: v.optional(v.boolean()),
     createdAt: v.number(),
     updatedAt: v.number(),
   }),

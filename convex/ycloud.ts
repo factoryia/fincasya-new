@@ -2160,6 +2160,7 @@ export const sendWhatsAppCatalogList = internalAction({
     if (!catalogId) {
       throw new Error("catalogId es requerido (viene de whatsappCatalogs en la BD)");
     }
+    console.log("[ycloud] Enviando catálogo:", catalogId, "con productos:", args.productRetailerIds.length);
     const bodyText = args.bodyText ?? "Estas son nuestras fincas disponibles para tus fechas:";
     const body: Record<string, unknown> =
       args.productRetailerIds.length === 1

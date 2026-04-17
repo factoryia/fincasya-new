@@ -61,6 +61,26 @@ export const createAuthOptions = (ctx: GenericCtx<DataModel>) => {
           defaultValue: 'user', // Predeterminado para clientes
           input: true,
         },
+        documentId: {
+          type: 'string',
+          required: false,
+          input: true,
+        },
+        phone: {
+          type: 'string',
+          required: false,
+          input: true,
+        },
+        city: {
+          type: 'string',
+          required: false,
+          input: true,
+        },
+        address: {
+          type: 'string',
+          required: false,
+          input: true,
+        },
       },
     },
     session: {

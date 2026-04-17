@@ -132,8 +132,13 @@ export class AuthService {
             email: registerDto.email,
             password: registerDto.password,
             name: registerDto.name,
-            role: 'user', // Por defecto nuevo usuario es "user", nunca "admin"
+            documentId: registerDto.documentId,
+            phone: registerDto.phone,
+            city: registerDto.city,
+            address: registerDto.address,
           }),
+
+
           cookies,
           headers: {
             Origin: process.env.NEXT_PUBLIC_SITE_URL || 'http://localhost:3000',

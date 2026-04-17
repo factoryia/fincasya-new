@@ -7,4 +7,6 @@ export enum UserRole {
   ASSISTANT = 'assistant',
   VENDEDOR = 'vendedor',
   PROPIETARIO = 'propietario',
+  CLIENT = 'client',
 }
+

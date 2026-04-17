@@ -61,7 +61,7 @@ export class GoogleCalendarService {
   /**
    * Validar la conexión con Google Calendar (Leyendo de Convex).
    */
-  async validateConnection(): Promise<{ connected: boolean; calendarId: string; connectedEmail?: string; connectedName?: string; error?: string }> {
+  async validateConnection(): Promise<{ connected: boolean; calendarId: string; connectedEmail?: string; connectedName?: string; error?: string; needsReauth?: boolean }> {
     try {
       const gc = await this.convexService.query('googleCalendar:get', {});
       
@@ -78,6 +78,7 @@ export class GoogleCalendarService {
         calendarId: gc.calendarId || 'primary',
         connectedEmail: gc.connectedEmail,
         connectedName: gc.connectedName,
+        needsReauth: !!gc.needsReauth,
       };
     } catch (error: any) {
       console.error('Error validating Google connection from Convex:', error);

@@ -2,13 +2,15 @@ import {
   Injectable,
   BadRequestException,
   NotFoundException,
+  forwardRef,
+  Inject,
 } from '@nestjs/common';
 import sharp from 'sharp';
 import * as path from 'path';
 import { promises as fs } from 'fs';
 import { ConvexService } from '../shared/services/convex.service';
 import { S3Service } from '../shared/services/s3.service';
-import { BookingsSyncService } from '../shared/services/bookings-sync.service';
+import { BookingsSyncService } from '../bookings/bookings-sync.service';
 
 type ReservationPaymentMethod =
   | 'bbva'
@@ -54,6 +56,7 @@ export class InboxService {
   constructor(
     private readonly convexService: ConvexService,
     private readonly s3Service: S3Service,
+    @Inject(forwardRef(() => BookingsSyncService))
     private readonly bookingsSyncService: BookingsSyncService,
   ) {}
 

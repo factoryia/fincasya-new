@@ -9,16 +9,40 @@ import {
   UseGuards,
   UseInterceptors,
   UploadedFiles,
+  Req,
 } from '@nestjs/common';
+import { Request } from 'express';
 import { FilesInterceptor } from '@nestjs/platform-express';
-import { BookingsSyncService } from '../shared/services/bookings-sync.service';
+import { BookingsSyncService } from './bookings-sync.service';
 import { ConvexAuthGuard } from '../shared/guards/convex-auth.guard';
 import { AdminGuard } from '../shared/guards/admin.guard';
 import { OwnerOrAdminGuard } from '../shared/guards/owner-or-admin.guard';
+import { AuthService } from '../auth/auth.service';
 
 @Controller('bookings')
 export class BookingsController {
-  constructor(private readonly bookingsSyncService: BookingsSyncService) {}
+  constructor(
+    private readonly bookingsSyncService: BookingsSyncService,
+    private readonly authService: AuthService,
+  ) {}
+
+  @Get('my-bookings')
+  @UseGuards(ConvexAuthGuard)
+  async getMyBookings(@Req() req: Request) {
+    const cookies = (req.headers.cookie ?? (req.headers as any)['Cookie'] ?? '') as string;
+    const authHeader = req.headers.authorization;
+    const session = await this.authService.getSession(cookies, authHeader);
+    const sessionData = session?.data ?? session;
+    const userEmail = sessionData?.user?.email;
+    
+    if (!userEmail) {
+      throw new Error('No se pudo identificar el correo del usuario');
+    }
+    
+    // We only pass userEmail. Passing userId (BetterAuth string) would cause the database to
+    // look for a Contact with that ID, resulting in an empty list.
+    return this.bookingsSyncService.listBookings({ userEmail });
+  }
 
   @Get()
   @UseGuards(ConvexAuthGuard, OwnerOrAdminGuard)

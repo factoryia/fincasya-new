@@ -31,7 +31,9 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
           input:
             | {
                 data: {
+                  address?: null | string;
                   banned?: boolean;
+                  city?: null | string;
                   createdAt: number;
                   documentId?: null | string;
                   email: string;
@@ -128,6 +130,8 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
                     | "phone"
                     | "position"
                     | "documentId"
+                    | "city"
+                    | "address"
                     | "_id";
                   operator?:
                     | "lt"
@@ -321,6 +325,8 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
                     | "phone"
                     | "position"
                     | "documentId"
+                    | "city"
+                    | "address"
                     | "_id";
                   operator?:
                     | "lt"
@@ -570,7 +576,9 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
             | {
                 model: "user";
                 update: {
+                  address?: null | string;
                   banned?: boolean;
+                  city?: null | string;
                   createdAt?: number;
                   documentId?: null | string;
                   email?: string;
@@ -604,6 +612,8 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
                     | "phone"
                     | "position"
                     | "documentId"
+                    | "city"
+                    | "address"
                     | "_id";
                   operator?:
                     | "lt"
@@ -819,7 +829,9 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
             | {
                 model: "user";
                 update: {
+                  address?: null | string;
                   banned?: boolean;
+                  city?: null | string;
                   createdAt?: number;
                   documentId?: null | string;
                   email?: string;
@@ -853,6 +865,8 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
                     | "phone"
                     | "position"
                     | "documentId"
+                    | "city"
+                    | "address"
                     | "_id";
                   operator?:
                     | "lt"

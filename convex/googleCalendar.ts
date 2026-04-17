@@ -5,7 +5,7 @@ import { api, internal } from "./_generated/api";
 /**
  * Refresca el access token de Google usando el refresh token almacenado.
  */
-async function refreshGoogleToken(refreshToken: string): Promise<{ access_token: string; expires_in: number } | null> {
+async function refreshGoogleToken(refreshToken: string): Promise<{ access_token?: string; expires_in?: number; error?: string } | null> {
   const clientId = process.env.GOOGLE_CLIENT_ID;
   const clientSecret = process.env.GOOGLE_CLIENT_SECRET;
   if (!clientId || !clientSecret) {
@@ -26,12 +26,14 @@ async function refreshGoogleToken(refreshToken: string): Promise<{ access_token:
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
       body: params.toString(),
     });
+
+    const data = await res.json();
+
     if (!res.ok) {
-      const err = await res.text();
-      console.error("Error al refrescar token de Google:", res.status, err);
-      return null;
+      console.error("Error al refrescar token de Google:", res.status, data);
+      return { error: data.error || "unknown_error" };
     }
-    return res.json();
+    return data;
   } catch (error) {
     console.error("Excepción al refrescar token de Google:", error);
     return null;
@@ -51,6 +53,7 @@ export const get = query({
       hasTokens: !!(row.accessToken || row.refreshToken),
       connectedEmail: row.connectedEmail,
       connectedName: row.connectedName,
+      needsReauth: row.needsReauth,
     };
   },
 });
@@ -86,6 +89,7 @@ export const saveTokens = mutation({
       connected: true,
       connectedEmail: args.connectedEmail ?? existing?.connectedEmail,
       connectedName: args.connectedName ?? existing?.connectedName,
+      needsReauth: false,
       updatedAt: now,
     };
 
@@ -111,9 +115,20 @@ export const disconnect = mutation({
       connected: false,
       connectedEmail: undefined,
       connectedName: undefined,
+      needsReauth: false,
       updatedAt: Date.now(),
     });
     return existing._id;
+  },
+});
+
+export const setNeedsReauth = mutation({
+  args: { needsReauth: v.boolean() },
+  handler: async (ctx, args) => {
+    const existing = await ctx.db.query("googleCalendarIntegrations").first();
+    if (existing) {
+      await ctx.db.patch(existing._id, { needsReauth: args.needsReauth });
+    }
   },
 });
 
@@ -230,14 +245,17 @@ export const syncBookingToCalendar = internalAction({
     // Refrescar si expiró o está por expirar
     if (!accessToken || (gc.expiresAt && gc.expiresAt < Date.now() + 60 * 1000)) {
       const refreshed = await refreshGoogleToken(gc.refreshToken);
-      if (refreshed) {
+      if (refreshed?.access_token) {
         accessToken = refreshed.access_token;
         await ctx.runMutation(api.googleCalendar.saveTokens, {
           accessToken: refreshed.access_token,
-          expiresAt: Date.now() + refreshed.expires_in * 1000,
+          expiresAt: Date.now() + (refreshed.expires_in || 3600) * 1000,
         });
       } else {
-          console.error("No se pudo refrescar el token de Google");
+          if (refreshed?.error === "invalid_grant") {
+            await ctx.runMutation(api.googleCalendar.setNeedsReauth, { needsReauth: true });
+          }
+          console.error("No se pudo refrescar el token de Google:", refreshed?.error);
           return;
       }
     }
@@ -311,13 +329,16 @@ export const deleteBookingFromCalendar = internalAction({
     let accessToken = gc.accessToken;
     if (!accessToken || (gc.expiresAt && gc.expiresAt < Date.now() + 60 * 1000)) {
       const refreshed = await refreshGoogleToken(gc.refreshToken);
-      if (refreshed) {
+      if (refreshed?.access_token) {
         accessToken = refreshed.access_token;
         await ctx.runMutation(api.googleCalendar.saveTokens, {
           accessToken: refreshed.access_token,
-          expiresAt: Date.now() + refreshed.expires_in * 1000,
+          expiresAt: Date.now() + (refreshed.expires_in || 3600) * 1000,
         });
       } else {
+          if (refreshed?.error === "invalid_grant") {
+            await ctx.runMutation(api.googleCalendar.setNeedsReauth, { needsReauth: true });
+          }
           return;
       }
     }

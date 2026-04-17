@@ -35,6 +35,8 @@ export const tables = {
     phone: v.optional(v.union(v.null(), v.string())),
     position: v.optional(v.union(v.null(), v.string())),
     documentId: v.optional(v.union(v.null(), v.string())),
+    city: v.optional(v.union(v.null(), v.string())),
+    address: v.optional(v.union(v.null(), v.string())),
   })
     .index('email_name', ['email', 'name'])
     .index('name', ['name'])

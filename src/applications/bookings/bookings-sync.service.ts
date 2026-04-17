@@ -1,6 +1,7 @@
-import { Injectable } from '@nestjs/common';
-import { ConvexService } from './convex.service';
-import { S3Service } from './s3.service';
+import { Injectable, forwardRef, Inject } from '@nestjs/common';
+import { ConvexService } from '../shared/services/convex.service';
+import { S3Service } from '../shared/services/s3.service';
+import { FincasService } from '../fincas/fincas.service';
 import * as crypto from 'crypto';
 
 @Injectable()
@@ -8,6 +9,8 @@ export class BookingsSyncService {
   constructor(
     private readonly convexService: ConvexService,
     private readonly s3Service: S3Service,
+    @Inject(forwardRef(() => FincasService))
+    private readonly fincasService: FincasService,
   ) {}
 
   async checkAvailability(
@@ -143,6 +146,8 @@ export class BookingsSyncService {
             url,
             name: file.originalname,
             type: file.mimetype,
+            size: file.size,
+            uploadedAt: Date.now(),
           };
         }),
       );
@@ -175,9 +180,50 @@ export class BookingsSyncService {
       discountAmount: discountAmountNum,
       tieneMascotas: tieneMascotasBool,
       isDirect: isDirectBool,
+      status: isDirectBool ? 'PENDING_PAYMENT' : 'PENDING',
     });
+    
+    // 4. Generar contrato automáticamente para reservas directas (o todas si se desea)
+    // El usuario solicitó que "una vez creada la reserva, crea también el contrato"
+    try {
+      console.log(`[api] Generando contrato automático para la reserva ${bookingId}...`);
+      
+      const checkInDateStr = params.fechaEntrada ? (typeof params.fechaEntrada === 'number' ? new Date(params.fechaEntrada).toISOString().split('T')[0] : String(params.fechaEntrada)) : '';
+      const checkOutDateStr = params.fechaSalida ? (typeof params.fechaSalida === 'number' ? new Date(params.fechaSalida).toISOString().split('T')[0] : String(params.fechaSalida)) : '';
 
-    // 4. Generar firma de integridad para Bold (opcional pero recomendado si viene de la web)
+      await this.fincasService.generateContract(propertyId, {
+        propertyId,
+        bookingId,
+        clientName: params.nombreCompleto,
+        clientId: params.cedula,
+        clientEmail: params.correo,
+        clientPhone: params.celular,
+        idNumber: params.cedula,
+        clientCity: params.city || '',
+        clientAddress: params.address || '',
+        checkInDate: checkInDateStr,
+        checkOutDate: checkOutDateStr,
+        checkInTime: params.horaEntrada || '03:00 PM',
+        checkOutTime: params.horaSalida || '01:00 PM',
+        nightlyPrice: String(precioTotalNum / (Math.max(1, Math.ceil((fechaSalidaNum - fechaEntradaNum) / (1000 * 60 * 60 * 24))))), 
+        totalPrice: String(precioTotalNum),
+        contractNumber: params.reference || `REC-${bookingId.slice(-6)}`,
+        bankName: 'Bold/FincasYa',
+        accountNumber: 'N/A',
+        accountHolder: 'FincasYa',
+        conversationId: isDirectBool ? 'direct-reservation' : 'internal-booking',
+        petCount: numeroMascotasNum,
+        petDeposit: depositoMascotasNum,
+        petSurcharge: sobrecargoMascotasNum,
+        serviceStaffFee: costoPersonalServicioNum,
+      });
+      console.log(`[api] Contrato automático generado para ${bookingId}`);
+    } catch (contractErr) {
+      console.error(`[api] Error generando contrato automático para ${bookingId}:`, contractErr.message);
+      // No lanzamos error para no romper el flujo de creación de la reserva
+    }
+
+    // 5. Generar firma de integridad para Bold...
     let integritySignature = null;
     const boldSecret = process.env.BOLD_SHARED_SECRET;
 

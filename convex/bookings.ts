@@ -25,6 +25,7 @@ export const list = query({
     month: v.optional(v.string()),
     year: v.optional(v.string()),
     isDirect: v.optional(v.boolean()),
+    userEmail: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
     const limit = args.limit ?? 50;
@@ -70,6 +71,10 @@ export const list = query({
 
     if (args.isDirect !== undefined) {
       filtered = filtered.filter((b) => b.isDirect === args.isDirect);
+    }
+
+    if (args.userEmail !== undefined) {
+      filtered = filtered.filter((b) => b.correo === args.userEmail);
     }
 
     // Aplicar cursor si existe (filtrar manualmente después de obtener los resultados)
@@ -272,6 +277,7 @@ export const create = mutation({
     city: v.optional(v.string()),
     address: v.optional(v.string()),
     isDirect: v.optional(v.boolean()),
+    userEmail: v.optional(v.string()),
     purpose: v.optional(v.string()),
     reference: v.optional(v.string()),
     googleEventId: v.optional(v.string()),
@@ -392,8 +398,8 @@ export const create = mutation({
       depositoMascotas: args.depositoMascotas ?? 0,
       sobrecargoMascotas: args.sobrecargoMascotas ?? 0,
       costoPersonalServicio: args.costoPersonalServicio ?? 0,
-      depositoGarantia: args.depositoGarantia ?? 300000,
-      depositoAseo: args.depositoAseo ?? 90000,
+      depositoGarantia: args.depositoGarantia ?? 0,
+      depositoAseo: args.depositoAseo ?? 0,
       discountCode: args.discountCode,
       discountAmount: args.discountAmount ?? 0,
       precioTotal: args.precioTotal,
@@ -469,6 +475,7 @@ export const update = mutation({
     horaEntrada: v.optional(v.string()),
     horaSalida: v.optional(v.string()),
     isDirect: v.optional(v.boolean()),
+    userEmail: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
     const { id, ...updates } = args;
@@ -657,3 +664,28 @@ export const remove = mutation({
     return booking;
   },
 });
+
+
+export const appendMultimedia = mutation({
+  args: {
+    bookingId: v.id('bookings'),
+    file: v.object({
+      url: v.string(),
+      name: v.string(),
+      type: v.string(),
+      size: v.optional(v.number()),
+      uploadedAt: v.optional(v.number())
+    })
+  },
+  handler: async (ctx, args) => {
+    const booking = await ctx.db.get(args.bookingId);
+    if (!booking) throw new Error('Reserva no encontrada');
+    
+    const multimedia = booking.multimedia || [];
+    multimedia.push(args.file as any);
+    
+    await ctx.db.patch(args.bookingId, { multimedia });
+    return true;
+  }
+});
+

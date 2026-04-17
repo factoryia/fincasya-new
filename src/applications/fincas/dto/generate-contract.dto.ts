@@ -2,19 +2,19 @@ import { IsString, IsNotEmpty, IsOptional } from 'class-validator';
 
 export class GenerateContractDto {
   @IsString()
-  @IsNotEmpty()
+  @IsOptional()
   bankName: string;
 
   @IsString()
-  @IsNotEmpty()
+  @IsOptional()
   accountNumber: string;
 
   @IsString()
-  @IsNotEmpty()
+  @IsOptional()
   accountHolder: string;
 
   @IsString()
-  @IsNotEmpty()
+  @IsOptional()
   idNumber: string;
 
   @IsString()
@@ -22,7 +22,7 @@ export class GenerateContractDto {
   contractNumber: string;
 
   @IsString()
-  @IsNotEmpty()
+  @IsOptional()
   conversationId: string;
 
   @IsString()
@@ -94,4 +94,8 @@ export class GenerateContractDto {
   @IsOptional()
   @IsString()
   totalPrice?: string;
+
+  @IsOptional()
+  @IsString()
+  bookingId?: string;
 }

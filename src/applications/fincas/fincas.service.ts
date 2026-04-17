@@ -2,6 +2,8 @@ import {
   Injectable,
   NotFoundException,
   BadRequestException,
+  forwardRef,
+  Inject,
 } from '@nestjs/common';
 import { PDFDocument } from 'pdf-lib';
 
@@ -32,6 +34,7 @@ export class FincasService {
   constructor(
     private readonly convexService: ConvexService,
     private readonly s3Service: S3Service,
+    @Inject(forwardRef(() => InboxService))
     private readonly inboxService: InboxService,
   ) {}
 
@@ -989,20 +992,23 @@ export class FincasService {
         }
       }
 
-      // 2. Cálculo del precio total (Precio por día * Total de días + Cargos por mascotas)
+      // 2. Cálculo del precio total (Priorizamos el total de la pasarela si viene definido)
+      const providedTotal = parseInt(dto.totalPrice);
       const unitPriceNum = parseInt(dto.nightlyPrice) || 0;
-      let totalPriceNum = unitPriceNum * totalDays;
+      let totalPriceNum = !isNaN(providedTotal) && providedTotal > 0 
+        ? providedTotal 
+        : (unitPriceNum * totalDays);
 
-      // Política de mascotas:
-      // - Primeras 2: 100,000 COP c/u (Reembolsable)
-      // - 3ª en adelante: 30,000 COP c/u (No Reembolsable)
+      // Política de mascotas (Calculamos para el desglose, pero no sumamos al total si ya venía de la pasarela)
       const petCount = Number(dto.petCount) || 0;
       const petSurchargeRefundable = Math.min(petCount, 2) * 100000;
       const petSurchargeNonRefundable = Math.max(0, petCount - 2) * 30000;
-
-      // Sumar al precio final (como solicitó el usuario)
       const serviceStaffFee = Number(dto.serviceStaffFee) || 0;
-      totalPriceNum += petSurchargeRefundable + petSurchargeNonRefundable + serviceStaffFee;
+
+      // Solo sumamos si el total no fue proporcionado explícitamente (ej: reservas internas)
+      if (isNaN(providedTotal) || providedTotal <= 0) {
+        totalPriceNum += petSurchargeRefundable + petSurchargeNonRefundable + serviceStaffFee;
+      }
 
       const totalPriceText =
         this.numberToSpanishText(totalPriceNum).toUpperCase();
@@ -1380,6 +1386,24 @@ export class FincasService {
         console.log(
           '[api] Reserva directa: Omitiendo envío de mensaje a Inbox local.',
         );
+
+        if (dto.bookingId) {
+          try {
+            await this.convexService.mutation('bookings:appendMultimedia', {
+              bookingId: dto.bookingId,
+              file: {
+                url: publicUrl,
+                name: finalFilename,
+                size: generatedFile.size || 0,
+                type: 'application/pdf',
+                uploadedAt: Date.now()
+              }
+            });
+            console.log(`[api] Contrato PDF adjuntado correctamente a la reserva ${dto.bookingId}`);
+          } catch (e) {
+             console.error(`[api] Error adjuntando contrato a la reserva: ${e.message}`);
+          }
+        }
       }
 
       return {
