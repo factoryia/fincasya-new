@@ -417,7 +417,7 @@ export default defineSchema({
   /** Catálogos de WhatsApp (Meta). Se configuran desde el front; sin env vars. */
   whatsappCatalogs: defineTable({
     name: v.string(),
-    /** ID del catálogo en Meta/WhatsApp (ej. 26198995209693859). */
+    /** ID del catálogo en Meta/WhatsApp (ej. 1560075992300705). */
     whatsappCatalogId: v.string(),
     /** Si true, se usa cuando no coincide ninguna ubicación (ej. "Todas las unidades"). */
     isDefault: v.optional(v.boolean()),

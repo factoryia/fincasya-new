@@ -1294,7 +1294,7 @@ export const create = mutation({
         }),
       ),
     ),
-    /** IDs: Convex _id (m977...) o Meta whatsappCatalogId (26198995209693859). */
+    /** IDs: Convex _id (m977...) o Meta whatsappCatalogId (1560075992300705). */
     catalogIds: v.optional(v.array(v.string())),
     active: v.optional(v.boolean()),
     visible: v.optional(v.boolean()),

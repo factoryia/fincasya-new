@@ -9,7 +9,7 @@ import type { Id } from './_generated/dataModel';
  * Sincroniza catálogos de Meta a whatsappCatalogs.
  * Usa GET /{catalogId}?fields=id,name (solo requiere catalog_management, no business_management).
  * Ejecutar: npx convex run metaCatalog:syncCatalogsFromMeta
- * O con IDs: npx convex run metaCatalog:syncCatalogsFromMeta '{"catalogIds": ["26198995209693859", "803534855410286"]}'
+ * O con IDs: npx convex run metaCatalog:syncCatalogsFromMeta '{"catalogIds": ["1560075992300705", "803534855410286"]}'
  */
 export const syncCatalogsFromMeta = action({
   args: {
@@ -21,7 +21,7 @@ export const syncCatalogsFromMeta = action({
     if (!token) {
       throw new Error('META_CATALOG_ACCESS_TOKEN no configurado');
     }
-    const ids = args.catalogIds ?? ['26198995209693859', '803534855410286'];
+    const ids = args.catalogIds ?? ['1560075992300705'];
     const catalogs: Array<{ id: string; name: string }> = [];
 
     for (const catalogId of ids) {
@@ -53,7 +53,7 @@ export const syncCatalogsFromMeta = action({
 
 /**
  * Probar token y catálogo: GET graph.facebook.com/v19.0/{CATALOG_ID}?access_token=TOKEN
- * Ejecutar: npx convex run metaCatalog:testMetaCatalogToken '{"catalogId": "26198995209693859"}'
+ * Ejecutar: npx convex run metaCatalog:testMetaCatalogToken '{"catalogId": "1560075992300705"}'
  */
 export const testMetaCatalogToken = action({
   args: { catalogId: v.string() },
