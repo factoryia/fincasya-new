@@ -2,6 +2,7 @@ import { Injectable, forwardRef, Inject } from '@nestjs/common';
 import { ConvexService } from '../shared/services/convex.service';
 import { S3Service } from '../shared/services/s3.service';
 import { FincasService } from '../fincas/fincas.service';
+import { BrevoEmailService } from '../shared/services/brevo-email.service';
 import * as crypto from 'crypto';
 
 @Injectable()
@@ -11,6 +12,7 @@ export class BookingsSyncService {
     private readonly s3Service: S3Service,
     @Inject(forwardRef(() => FincasService))
     private readonly fincasService: FincasService,
+    private readonly brevoEmailService: BrevoEmailService,
   ) {}
 
   async checkAvailability(
@@ -280,6 +282,35 @@ export class BookingsSyncService {
             status: 'PAID',
           });
           console.log(`Reserva ${booking._id} marcada como PAGADA.`);
+
+          // 6. Enviar notificaciones por correo (Brevo)
+          try {
+            const contractFile = (booking.multimedia || []).find((m: any) => m.type === 'application/pdf');
+            const contractUrl = contractFile?.url || '';
+
+            // Notificación al Cliente
+            await this.brevoEmailService.sendBookingConfirmationToClient({
+              clientEmail: booking.correo,
+              clientName: booking.nombreCompleto,
+              propertyTitle: (booking as any).propertyTitle || 'tu propiedad',
+              reference: reference,
+              contractUrl: contractUrl,
+            });
+
+            // Notificación al Administrador
+            await this.brevoEmailService.sendBookingAlertToAdmin({
+              clientName: booking.nombreCompleto,
+              clientEmail: booking.correo,
+              clientPhone: booking.celular,
+              propertyTitle: (booking as any).propertyTitle || 'Propiedad Reservada',
+              checkInDate: new Date(booking.fechaEntrada).toLocaleDateString('es-CO'),
+              checkOutDate: new Date(booking.fechaSalida).toLocaleDateString('es-CO'),
+              totalAmount: booking.precioTotal,
+              reference: reference,
+            });
+          } catch (emailErr) {
+            console.error(`[api] Error enviando notificaciones para reserva ${booking._id}:`, emailErr.message);
+          }
         }
       }
 
