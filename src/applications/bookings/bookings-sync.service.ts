@@ -228,7 +228,8 @@ export class BookingsSyncService {
     const boldSecret = process.env.BOLD_SHARED_SECRET;
 
     if (params.reference && boldSecret) {
-      const amount = Math.floor(precioTotalNum);
+      // Solo cobramos el 50% inicialmente por Bold
+      const amount = Math.floor(precioTotalNum / 2);
       const currency = 'COP';
       const dataToHash = `${params.reference}${amount}${currency}${boldSecret}`;
       integritySignature = crypto
@@ -315,5 +316,37 @@ export class BookingsSyncService {
    */
   async listBookings(params: any) {
     return this.convexService.query('bookings:list', params);
+  }
+
+  async uploadMultimedia(bookingId: string, file: Express.Multer.File) {
+    const url = await this.s3Service.uploadFile(file, 'bookings/multimedia');
+    return this.convexService.mutation('bookings:appendMultimedia', {
+      bookingId: bookingId as any,
+      file: {
+        url,
+        name: file.originalname,
+        type: file.mimetype,
+        size: file.size,
+        uploadedAt: Date.now(),
+      },
+    });
+  }
+
+  async removeMultimedia(bookingId: string, url: string) {
+    // Primero removemos de Convex
+    await this.convexService.mutation('bookings:removeMultimedia', {
+      bookingId: bookingId as any,
+      url,
+    });
+
+    // Luego intentamos borrar de S3
+    try {
+      await this.s3Service.deleteFile(url);
+    } catch (error) {
+      console.error(`Error eliminando archivo de S3: ${url}`, error);
+      // No lanzamos error para no bloquear el flujo si el archivo ya no existe en S3
+    }
+
+    return { success: true };
   }
 }

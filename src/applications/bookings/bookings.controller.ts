@@ -9,10 +9,11 @@ import {
   UseGuards,
   UseInterceptors,
   UploadedFiles,
+  UploadedFile,
   Req,
 } from '@nestjs/common';
 import { Request } from 'express';
-import { FilesInterceptor } from '@nestjs/platform-express';
+import { FilesInterceptor, FileInterceptor } from '@nestjs/platform-express';
 import { BookingsSyncService } from './bookings-sync.service';
 import { ConvexAuthGuard } from '../shared/guards/convex-auth.guard';
 import { AdminGuard } from '../shared/guards/admin.guard';
@@ -113,5 +114,24 @@ export class BookingsController {
   @UseGuards(ConvexAuthGuard, AdminGuard)
   async remove(@Param('id') id: string) {
     return this.bookingsSyncService.deleteBooking(id);
+  }
+
+  @Post(':id/multimedia')
+  @UseGuards(ConvexAuthGuard)
+  @UseInterceptors(FileInterceptor('file'))
+  async uploadMultimedia(
+    @Param('id') id: string,
+    @UploadedFile() file: Express.Multer.File,
+  ) {
+    return this.bookingsSyncService.uploadMultimedia(id, file);
+  }
+
+  @Delete(':id/multimedia')
+  @UseGuards(ConvexAuthGuard)
+  async removeMultimedia(
+    @Param('id') id: string,
+    @Body('url') url: string,
+  ) {
+    return this.bookingsSyncService.removeMultimedia(id, url);
   }
 }

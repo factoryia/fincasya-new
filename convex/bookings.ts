@@ -689,3 +689,20 @@ export const appendMultimedia = mutation({
   }
 });
 
+
+export const removeMultimedia = mutation({
+  args: {
+    bookingId: v.id('bookings'),
+    url: v.string(),
+  },
+  handler: async (ctx, args) => {
+    const booking = await ctx.db.get(args.bookingId);
+    if (!booking) throw new Error('Reserva no encontrada');
+
+    const multimedia = (booking.multimedia || []).filter((m: any) => m.url !== args.url);
+
+    await ctx.db.patch(args.bookingId, { multimedia });
+    return true;
+  },
+});
+
