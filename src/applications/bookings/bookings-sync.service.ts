@@ -54,6 +54,7 @@ export class BookingsSyncService {
       reference?: string;
       address?: string;
       isDirect?: boolean | string;
+      status?: string;
       personasAdicionales?: number | string;
       costoPersonasAdicionales?: number | string;
       costoPersonalServicio?: number | string;
@@ -68,7 +69,7 @@ export class BookingsSyncService {
     },
     multimediaFiles?: Express.Multer.File[],
   ) {
-    const { propertyId, temporada, ...rest } = params;
+    const { propertyId, temporada } = params;
 
     const parseNum = (val: any) => {
       if (typeof val === 'string') return parseFloat(val);
@@ -101,6 +102,22 @@ export class BookingsSyncService {
     const subtotalNum = parseNum(params.subtotal);
     const tieneMascotasBool = parseBool(params.tieneMascotas);
     const isDirectBool = parseBool(params.isDirect);
+    const normalizedStatus =
+      typeof params.status === 'string' ? params.status.trim().toUpperCase() : undefined;
+    const allowedStatuses = new Set([
+      'PENDING',
+      'PENDING_PAYMENT',
+      'CONFIRMED',
+      'PAID',
+      'CANCELLED',
+      'COMPLETED',
+    ]);
+    const bookingStatus =
+      normalizedStatus && allowedStatuses.has(normalizedStatus)
+        ? normalizedStatus
+        : isDirectBool
+          ? 'PENDING_PAYMENT'
+          : 'PENDING';
 
     // 1. Obtener info de la propiedad
     const property = await this.convexService.query('fincas:getById', {
@@ -159,7 +176,10 @@ export class BookingsSyncService {
     // 3. Crear reserva en Convex
     const bookingId = await this.convexService.mutation('bookings:create', {
       propertyId: propertyId as any,
-      ...rest,
+      nombreCompleto: params.nombreCompleto,
+      cedula: params.cedula,
+      celular: params.celular,
+      correo: params.correo,
       fechaEntrada: fechaEntradaNum,
       fechaSalida: fechaSalidaNum,
       numeroPersonas: numeroPersonasNum,
@@ -167,6 +187,13 @@ export class BookingsSyncService {
       numeroNoches: Math.ceil(
         (fechaSalidaNum - fechaEntradaNum) / (1000 * 60 * 60 * 24),
       ),
+      observaciones: params.observaciones,
+      horaEntrada: params.horaEntrada,
+      horaSalida: params.horaSalida,
+      city: params.city,
+      purpose: params.purpose,
+      reference: params.reference,
+      address: params.address,
       subtotal: subtotalNum ?? precioTotalNum, // Fallback to total if not provided
       multimedia: multimedia.length > 0 ? multimedia : undefined,
       temporada,
@@ -182,7 +209,7 @@ export class BookingsSyncService {
       discountAmount: discountAmountNum,
       tieneMascotas: tieneMascotasBool,
       isDirect: isDirectBool,
-      status: isDirectBool ? 'PENDING_PAYMENT' : 'PENDING',
+      status: bookingStatus,
     });
     
     // 4. Generar contrato automáticamente para reservas directas (o todas si se desea)
