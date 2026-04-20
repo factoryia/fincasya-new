@@ -109,7 +109,12 @@ http.route({
         mediaUrl = evt.document.link;
       }
 
-      if (phone && (content || mediaUrl)) {
+      const normalizedContent = String(content || "").trim();
+      const isSystemPresenceNoise =
+        /^status\s*:\s*active$/i.test(normalizedContent) ||
+        /^presence\s*:\s*active$/i.test(normalizedContent);
+
+      if (phone && (content || mediaUrl) && !isSystemPresenceNoise) {
         const dedupe = await ctx.runMutation(
           internal.ycloud.recordProcessedEvent,
           { eventId },
@@ -127,6 +132,12 @@ http.route({
             mediaUrl: mediaUrl || undefined,
           });
         }
+      } else if (phone && isSystemPresenceNoise) {
+        console.log("YCloud: mensaje de presencia ignorado", {
+          eventId,
+          phone,
+          content: normalizedContent,
+        });
       }
     }
 

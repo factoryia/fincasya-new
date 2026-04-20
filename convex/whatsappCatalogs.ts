@@ -154,7 +154,7 @@ export const syncFromMeta = internalMutation({
 export const seedCatalogProductos = mutation({
   args: {},
   handler: async (ctx) => {
-    const META_CATALOG_ID = "15698599230700705";
+    const META_CATALOG_ID = "1560075992300705";
     const PROPERTY_ID = "js797fftx557dg5gb9yd9et8s581g9dy" as Id<"properties">;
     const PRODUCT_RETAILER_ID = "quk9ne5y4o";
     const now = Date.now();

@@ -26,6 +26,14 @@ export const listByProperty = query({
   },
 });
 
+/** Todas las relaciones finca-catálogos. */
+export const list = query({
+  args: {},
+  handler: async (ctx) => {
+    return await ctx.db.query("propertyWhatsAppCatalog").collect();
+  },
+});
+
 /** Todas las fincas en un catálogo con su product_retailer_id. */
 export const listByCatalog = query({
   args: { catalogId: v.id("whatsappCatalogs") },

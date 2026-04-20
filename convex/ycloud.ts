@@ -143,6 +143,19 @@ export const processInboundMessage = internalAction({
     mediaUrl: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
+    // Ignorar ruido técnico que no viene del cliente (presencia/estado del canal).
+    const rawInboundText = String(args.text ?? "").trim();
+    if (
+      /^status\s*:\s*active$/i.test(rawInboundText) ||
+      /^presence\s*:\s*active$/i.test(rawInboundText)
+    ) {
+      console.log("[inbound-filter] Mensaje técnico ignorado:", rawInboundText, {
+        phone: args.phone,
+        eventId: args.eventId,
+      });
+      return;
+    }
+
     const contactId: Id<"contacts"> = await ctx.runMutation(
       internal.ycloud.getOrCreateContact,
       { phone: args.phone, name: args.name }
@@ -176,7 +189,7 @@ export const processInboundMessage = internalAction({
       }
     }
 
-    await ctx.runMutation(internal.messages.insertUserMessage, {
+    const insertedUserMessageId = await ctx.runMutation(internal.messages.insertUserMessage, {
       conversationId,
       content: finalContent,
       createdAt: now,
@@ -184,10 +197,18 @@ export const processInboundMessage = internalAction({
       mediaUrl: args.mediaUrl,
     });
 
-    // ── Debounce: esperar 5s para agrupar mensajes rápidos del mismo cliente ──
-    // Si el usuario envía varios mensajes seguidos (ej. "Hola" + "Quiero reservar"),
-    // solo el último evento genera respuesta con todo el contexto acumulado.
-    const DEBOUNCE_MS = 5_000;
+    // ── Debounce dinámico para balancear rapidez y agrupación de mensajes ──
+    // Casos simples (saludo corto) responden casi inmediato.
+    // Mensajes normales esperan un poco para agrupar ráfagas ("hola" + detalle).
+    const rawText = (args.text ?? "").trim().toLowerCase();
+    const isShortGreeting =
+      /^(hola|buenas|buenos dias|buen día|buen dia|hi|hey)\??!?$/i.test(rawText);
+    const isTinyFollowUpFragment =
+      /^(\?|!|ok|oka+y?|dale|listo|si|sí|no|aja|ajá|mmm|hmm|👍|🙏|👀)\??!?$/i.test(
+        rawText
+      );
+    // Para fragmentos cortos esperamos más para permitir "burst-merge" y evitar doble respuesta.
+    const DEBOUNCE_MS = isTinyFollowUpFragment ? 1_800 : isShortGreeting ? 900 : 1_500;
     await new Promise((resolve) => setTimeout(resolve, DEBOUNCE_MS));
 
     // Releer la conversación para obtener el lastMessageAt más actualizado
@@ -205,6 +226,37 @@ export const processInboundMessage = internalAction({
       });
       return;
     }
+
+    // Guardia anti-duplicados: solo el handler del último mensaje de usuario responde.
+    const latestMessage = await ctx.runQuery(api.messages.getLatestUserMessage, {
+      conversationId,
+      scanLimit: 50,
+    });
+    const latest = latestMessage as any;
+    if (!latest || String(latest._id) !== String(insertedUserMessageId)) {
+      console.log("[debounce] Handler no es el último mensaje de usuario, se omite respuesta", {
+        phone: args.phone,
+        insertedUserMessageId,
+        latestUserMessageId: latest?._id,
+      });
+      return;
+    }
+    const shouldAbortIfNotLatestUser = async (stage: string) => {
+      const latestUser = (await ctx.runQuery(api.messages.getLatestUserMessage, {
+        conversationId,
+        scanLimit: 50,
+      })) as any;
+      if (!latestUser || String(latestUser._id) !== String(insertedUserMessageId)) {
+        console.log("[debounce] Handler desfasado, se cancela", {
+          stage,
+          phone: args.phone,
+          insertedUserMessageId,
+          latestUserMessageId: latestUser?._id,
+        });
+        return true;
+      }
+      return false;
+    };
 
     const conv = convAfterDebounce;
     const shouldReply = conv.status === "ai";
@@ -225,6 +277,44 @@ export const processInboundMessage = internalAction({
         conversationId,
         limit: 14,
       });
+      // Si ya estamos recolectando datos para contrato/reserva, NO reabrir catálogo.
+      const contractPromptInHistory = recentForCatalogIntent.some((m: any) => {
+        if (m.sender !== "assistant") return false;
+        const t = String(m.content ?? "").toLowerCase();
+        return (
+          /elaborar\s+tu\s+contrato|datos\s+de\s+la\s+persona|documento\s+de\s+identidad|lugar\s+de\s+expedici[oó]n|correo\s+electr[oó]nico|direcci[oó]n|hora\s+aproximada\s+de\s+ingreso|formalizar\s+la\s+reserva/.test(
+            t
+          )
+        );
+      });
+      const currentLooksLikeContractData =
+        /\b\d{6,}\b/.test(currentMessageText) ||
+        /@\w+\.\w+/.test(currentMessageText) ||
+        /#\d+/.test(currentMessageText) ||
+        /(calle|carrera|cra\.?|cl\.?|avenida|av\.?)\s*\d+/i.test(currentMessageText);
+      const shouldBlockCatalogByContractFlow =
+        contractPromptInHistory && currentLooksLikeContractData;
+      if (shouldBlockCatalogByContractFlow) {
+        console.log("[catalog-guard] Bloqueado por flujo de contrato/datos personales");
+      }
+      // Si hay varios mensajes consecutivos del cliente sin respuesta del asistente,
+      // fusionarlos en una sola entrada para evitar respuestas fragmentadas/robóticas.
+      if (args.type === "text") {
+        const burst: string[] = [];
+        for (let i = recentForCatalogIntent.length - 1; i >= 0; i--) {
+          const m: any = recentForCatalogIntent[i];
+          if (m.sender === "assistant") break;
+          if (m.sender === "user" && (m.type === "text" || !m.type)) {
+            const content = String(m.content ?? "").trim();
+            if (content) burst.push(content);
+          }
+        }
+        if (burst.length > 1) {
+          burst.reverse();
+          currentMessageText = burst.join("\n");
+          console.log("[burst-merge] mensajes de cliente fusionados:", burst.length);
+        }
+      }
       const catalogIntentSnippet = recentForCatalogIntent
         .map(
           (m: any) =>
@@ -300,7 +390,13 @@ Fincas disponibles: ${fincaNames}`,
       const followUpData = isProvidingFollowUpData(currentMessageText) 
         && catalogIntent.intent !== "single_finca";
       try {
-        if (!followUpData) {
+        const singleFincaCandidate = parseSingleFincaRequest(currentMessageText);
+        const shouldTrySingleFinca =
+          catalogIntent.intent === "single_finca" ||
+          !!imageIdentifiedFincaName ||
+          !!singleFincaCandidate;
+
+        if (!followUpData && shouldTrySingleFinca) {
           const result = await ctx.runAction(
             internal.ycloud.maybeSendSingleFincaCatalogForUserMessage,
             {
@@ -327,7 +423,7 @@ Fincas disponibles: ${fincaNames}`,
       }
 
       try {
-        if (!singleFincaSent) {
+        if (!singleFincaSent && !shouldBlockCatalogByContractFlow) {
           console.log("[catalog-intent]", JSON.stringify(catalogIntent));
           // Validar que la ubicación de search_catalog no sea una palabra genérica
           const invalidSearchLocations = /\b(dias?|personas?|fincas?|reservar?|noches?|una|los|las|el|la)\b/i;
@@ -370,7 +466,8 @@ Fincas disponibles: ${fincaNames}`,
       if (
         !whatsappCatalogSentForSearch &&
         !singleFincaSent &&
-        catalogIntent.intent !== "single_finca"
+        catalogIntent.intent !== "single_finca" &&
+        !shouldBlockCatalogByContractFlow
       ) {
         const dynamicLocationsList_pre = await ctx.runQuery(api.fincas.getAllUniqueLocations, {});
         const msgLower_pre = currentMessageText.toLowerCase().normalize("NFD").replace(/\p{M}/gu, "");
@@ -449,6 +546,10 @@ Fincas disponibles: ${fincaNames}`,
         }
       }
 
+      if (await shouldAbortIfNotLatestUser("before_generate_reply")) {
+        return;
+      }
+
       if (templateSent) {
         await ctx.runMutation(internal.conversations.updateLastMessageAt, {
           conversationId,
@@ -466,7 +567,7 @@ Fincas disponibles: ${fincaNames}`,
       // Reutilizar dynamicLocationsList ya declarado arriba (template-guard)
       const dynamicLocations = dynamicLocationsList.join(", ");
 
-      const replyText = await ctx.runAction(
+      let replyText = await ctx.runAction(
         internal.ycloud.generateReplyWithRagAndFincas,
         {
           conversationId,
@@ -483,7 +584,21 @@ Fincas disponibles: ${fincaNames}`,
         }
       );
 
+      // Regla dura de UX: después de enviar catálogo, preguntar por mascotas si aún no se mencionan.
+      if (replyText && whatsappCatalogSentForSearch) {
+        const userAlreadyMentionedPets = /\b(mascotas?|mascota|perros?|gatos?)\b/i.test(currentMessageText);
+        const assistantAlreadyAsksPets = /\b(mascotas?|mascota|perros?|gatos?)\b/i.test(replyText);
+        const looksLikeClosingFlow =
+          /\b(RNT|Proceso de reserva|50%\s+del\s+valor|CONTRACT_PDF)\b/i.test(replyText);
+        if (!userAlreadyMentionedPets && !assistantAlreadyAsksPets && !looksLikeClosingFlow) {
+          replyText = `${replyText.trim()}\n\n🐾 ¿Llevarán mascotas?`;
+        }
+      }
+
       if (replyText) {
+        if (await shouldAbortIfNotLatestUser("before_send_reply")) {
+          return;
+        }
         try {
           const tag = "[CONTRACT_PDF:";
           const idx = replyText.indexOf(tag);
@@ -1656,16 +1771,26 @@ function parseSingleFincaRequest(userMessage: string): string | null {
   const msg = userMessage.trim();
   if (msg.length < 4) return null;
   const lower = msg.toLowerCase();
+  // Frases genéricas por destino: deben seguir flujo de catálogo múltiple.
+  if (
+    /\bver\s+las\s+fincas\b/i.test(lower) ||
+    /\bmostrar\s+las\s+fincas\b/i.test(lower) ||
+    /\bfincas\s+de\s+[a-záéíóúñ]/i.test(lower) ||
+    /\bquiero\s+ver\s+fincas\b/i.test(lower)
+  ) {
+    return null;
+  }
   const patterns = [
     /(?:quiero\s+)?(?:ver|mostrar)\s+(?:la\s+)?(?:finca\s+)?(?:de\s+)?([a-záéíóúñ0-9\s#]+)/i,
     /(?:la\s+)?finca\s+(?:de\s+)?([a-záéíóúñ0-9\s#]+)/i,
-    /(?:ver|mostrar)\s+([a-záéíóúñ0-9\s#]+)/i,
   ];
   for (const re of patterns) {
     const m = msg.match(re);
     if (m) {
       const term = m[1].trim();
-      if (term.length >= 2 && !/^(la|el|de|una?)$/i.test(term)) return term;
+      if (term.length < 2 || /^(la|el|de|una?)$/i.test(term)) continue;
+      if (/\bfincas?\b/i.test(term) || /\bopciones?\b/i.test(term)) continue;
+      return term;
     }
   }
   return null;
@@ -1969,6 +2094,7 @@ export const maybeSendCatalogForUserMessage = internalAction({
     let minCapacity: number | undefined;
     let sortByPrice: boolean | undefined;
     let excludePropertyIds: Id<"properties">[] | undefined;
+    let usedInferredDates = false;
 
     const intent = args.catalogIntent;
     if (intent?.intent === "more_options" && conv.lastCatalogSearch) {
@@ -1993,6 +2119,7 @@ export const maybeSendCatalogForUserMessage = internalAction({
       } else {
         fechaEntrada = weekend.fechaEntrada;
         fechaSalida = weekend.fechaSalida;
+        usedInferredDates = true;
       }
       location = intent.location;
       minCapacity = intent.minCapacity;
@@ -2098,7 +2225,9 @@ export const maybeSendCatalogForUserMessage = internalAction({
 
     const bodyText = excludePropertyIds?.length
       ? "Aquí tienes más opciones con los mismos filtros:"
-      : "Estas son las fincas disponibles para tus fechas:";
+      : usedInferredDates
+        ? `Te comparto algunas fincas disponibles en ${location}:`
+        : "Estas son las fincas disponibles para tus fechas:";
 
     await ctx.runAction(internal.ycloud.sendWhatsAppCatalogList, {
       to: args.phone,
@@ -2154,6 +2283,7 @@ export const sendWhatsAppCatalogList = internalAction({
     const apiKey = process.env.YCLOUD_API_KEY;
     const wabaNumber = process.env.YCLOUD_WABA_NUMBER;
     const catalogId = args.catalogId;
+    const fallbackCatalogId = "1560075992300705";
     if (!apiKey || !wabaNumber) {
       throw new Error("YCLOUD_API_KEY y YCLOUD_WABA_NUMBER deben estar configurados en Convex");
     }
@@ -2162,53 +2292,82 @@ export const sendWhatsAppCatalogList = internalAction({
     }
     console.log("[ycloud] Enviando catálogo:", catalogId, "con productos:", args.productRetailerIds.length);
     const bodyText = args.bodyText ?? "Estas son nuestras fincas disponibles para tus fechas:";
-    const body: Record<string, unknown> =
-      args.productRetailerIds.length === 1
-        ? {
-            from: wabaNumber,
-            to: args.to,
-            type: "interactive",
-            interactive: {
-              type: "product",
-              body: { text: bodyText },
-              footer: { text: "FincasYa" },
-              action: {
-                catalog_id: catalogId,
-                product_retailer_id: args.productRetailerIds[0],
+    const buildBody = (catalogIdToUse: string): Record<string, unknown> => {
+      const body: Record<string, unknown> =
+        args.productRetailerIds.length === 1
+          ? {
+              from: wabaNumber,
+              to: args.to,
+              type: "interactive",
+              interactive: {
+                type: "product",
+                body: { text: bodyText },
+                footer: { text: "FincasYa" },
+                action: {
+                  catalog_id: catalogIdToUse,
+                  product_retailer_id: args.productRetailerIds[0],
+                },
               },
-            },
-          }
-        : {
-            from: wabaNumber,
-            to: args.to,
-            type: "interactive",
-            interactive: {
-              type: "product_list",
-              header: { type: "text", text: "Fincas" },
-              body: { text: bodyText },
-              footer: { text: "FincasYa" },
-              action: {
-                catalog_id: catalogId,
-                sections: [
-                  {
-                    title: "Fincas disponibles",
-                    product_items: args.productRetailerIds.map((id) => ({ product_retailer_id: id })),
-                  },
-                ],
+            }
+          : {
+              from: wabaNumber,
+              to: args.to,
+              type: "interactive",
+              interactive: {
+                type: "product_list",
+                header: { type: "text", text: "Fincas" },
+                body: { text: bodyText },
+                footer: { text: "FincasYa" },
+                action: {
+                  catalog_id: catalogIdToUse,
+                  sections: [
+                    {
+                      title: "Fincas disponibles",
+                      product_items: args.productRetailerIds.map((id) => ({ product_retailer_id: id })),
+                    },
+                  ],
+                },
               },
-            },
-          };
-    if (args.wamid) (body).context = { message_id: args.wamid };
-    const res = await fetch("https://api.ycloud.com/v2/whatsapp/messages/sendDirectly", {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "X-API-Key": apiKey },
-      body: JSON.stringify(body),
-    });
-    const textRes = await res.text();
-    if (!res.ok) {
-      throw new Error(`YCloud API error: ${res.status} - ${textRes}`);
+            };
+      if (args.wamid) body.context = { message_id: args.wamid };
+      return body;
+    };
+
+    const sendCatalogMessage = async (catalogIdToUse: string) => {
+      const res = await fetch("https://api.ycloud.com/v2/whatsapp/messages/sendDirectly", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-API-Key": apiKey },
+        body: JSON.stringify(buildBody(catalogIdToUse)),
+      });
+      const textRes = await res.text();
+      return { ok: res.ok, status: res.status, textRes };
+    };
+
+    let response = await sendCatalogMessage(catalogId);
+    const invalidCatalogError =
+      !response.ok &&
+      response.status === 400 &&
+      (
+        /invalid[_\s-]?catalog[_\s-]?id/i.test(response.textRes) ||
+        response.textRes.includes('"code":"131009"') ||
+        response.textRes.includes('"errorDataDetails":"Invalid catalog_id."')
+      );
+    if (invalidCatalogError) {
+      if (catalogId !== fallbackCatalogId) {
+        console.warn(
+          "[ycloud] catalog_id inválido en BD:",
+          catalogId,
+          "reintentando con fallback:",
+          fallbackCatalogId
+        );
+        response = await sendCatalogMessage(fallbackCatalogId);
+      }
     }
-    return JSON.parse(textRes);
+
+    if (!response.ok) {
+      throw new Error(`YCloud API error: ${response.status} - ${response.textRes}`);
+    }
+    return JSON.parse(response.textRes);
   },
 });
 

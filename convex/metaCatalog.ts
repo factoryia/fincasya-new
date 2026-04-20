@@ -122,6 +122,8 @@ function buildMetaPayload(
   }
   if (prop.video) {
     payload.video = [{ url: prop.video, tag: [] }];
+    // Compatibilidad adicional para catálogos que esperan campo directo.
+    payload.video_url = prop.video;
   }
   // Solo enviar sale_price si es un descuento real (menor que el precio)
   if (prop.priceBaja != null && prop.priceBaja > 0 && prop.priceBaja < price) {
@@ -292,6 +294,35 @@ export const syncPropertyToAllCatalogs = internalAction({
         console.error('Meta items_batch UPDATE error:', await res.text());
       }
     }
+  },
+});
+
+/**
+ * Re-sincroniza en Meta todas las fincas que tengan vínculo en propertyWhatsAppCatalog.
+ * Útil cuando se actualiza contenido multimedia (ej. video) y se quiere propagar en bloque.
+ *
+ * Ejecutar: npx convex run metaCatalog:resyncAllLinkedPropertiesToMeta
+ */
+export const resyncAllLinkedPropertiesToMeta = action({
+  args: {},
+  handler: async (ctx) => {
+    const links = await ctx.runQuery(api.propertyWhatsAppCatalog.list, {});
+    const uniquePropertyIds = Array.from(
+      new Set(links.map((l) => l.propertyId).filter(Boolean)),
+    ) as Array<Id<'properties'>>;
+
+    let scheduled = 0;
+    for (const propertyId of uniquePropertyIds) {
+      await ctx.scheduler.runAfter(0, internal.metaCatalog.syncPropertyToAllCatalogs, {
+        propertyId,
+      });
+      scheduled++;
+    }
+
+    return {
+      message: 'Re-sincronización programada',
+      propertiesScheduled: scheduled,
+    };
   },
 });
 

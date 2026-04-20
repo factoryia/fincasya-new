@@ -20,7 +20,7 @@ export const insertUserMessage = internalMutation({
     metadata: v.optional(v.any()),
   },
   handler: async (ctx, args) => {
-    await ctx.db.insert("messages", {
+    const messageId = await ctx.db.insert("messages", {
       conversationId: args.conversationId,
       sender: "user",
       content: args.content,
@@ -32,6 +32,7 @@ export const insertUserMessage = internalMutation({
     await ctx.db.patch(args.conversationId, {
       lastMessageAt: args.createdAt,
     });
+    return messageId;
   },
 });
 
@@ -98,6 +99,28 @@ export const listRecent = query({
       .order("desc")
       .take(limit);
     return list.reverse();
+  },
+});
+
+/**
+ * Devuelve el último mensaje del usuario en una conversación (si existe).
+ * Se usa para evitar respuestas duplicadas cuando llegan ráfagas.
+ */
+export const getLatestUserMessage = query({
+  args: {
+    conversationId: v.id("conversations"),
+    scanLimit: v.optional(v.number()),
+  },
+  handler: async (ctx, args) => {
+    const scanLimit = Math.max(1, Math.min(args.scanLimit ?? 50, 200));
+    const recent = await ctx.db
+      .query("messages")
+      .withIndex("by_conversation", (q) =>
+        q.eq("conversationId", args.conversationId)
+      )
+      .order("desc")
+      .take(scanLimit);
+    return recent.find((m) => m.sender === "user") ?? null;
   },
 });
 
