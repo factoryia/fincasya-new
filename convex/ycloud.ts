@@ -45,6 +45,13 @@ export function isNegativeOnly(userMessage: string): boolean {
   return /^(no(\s+.*)?|nada|ningun[oa]|tampoco|ni\s+idea|para\s+nada)$/i.test(t);
 }
 
+/** Retraso breve y aleatorio antes de enviar respuesta de texto (ritmo más humano; complementa el debounce). */
+function humanReplyPacingMs(visibleText: string): number {
+  const len = (visibleText ?? "").trim().length;
+  if (len < 72) return 240 + Math.floor(Math.random() * 420);
+  return 400 + Math.floor(Math.random() * 720);
+}
+
 /**
  * Deduplicación de eventos YCloud (reintentos).
  */
@@ -208,7 +215,7 @@ export const processInboundMessage = internalAction({
         rawText
       );
     // Para fragmentos cortos esperamos más para permitir "burst-merge" y evitar doble respuesta.
-    const DEBOUNCE_MS = isTinyFollowUpFragment ? 1_800 : isShortGreeting ? 900 : 1_500;
+    const DEBOUNCE_MS = isTinyFollowUpFragment ? 2_200 : isShortGreeting ? 900 : 1_900;
     await new Promise((resolve) => setTimeout(resolve, DEBOUNCE_MS));
 
     // Releer la conversación para obtener el lastMessageAt más actualizado
@@ -597,6 +604,16 @@ Fincas disponibles: ${fincaNames}`,
 
       if (replyText) {
         if (await shouldAbortIfNotLatestUser("before_send_reply")) {
+          return;
+        }
+        const pacingTarget =
+          replyText.indexOf("[CONTRACT_PDF:") >= 0
+            ? replyText.split("[CONTRACT_PDF:")[0]
+            : replyText;
+        await new Promise((resolve) =>
+          setTimeout(resolve, humanReplyPacingMs(pacingTarget))
+        );
+        if (await shouldAbortIfNotLatestUser("after_pacing_before_send")) {
           return;
         }
         try {
