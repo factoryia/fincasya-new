@@ -45,6 +45,33 @@ export function isNegativeOnly(userMessage: string): boolean {
   return /^(no(\s+.*)?|nada|ningun[oa]|tampoco|ni\s+idea|para\s+nada)$/i.test(t);
 }
 
+/**
+ * Detecta mensajes fuera del alcance del bot (ej. operaciones matemáticas o trivia).
+ * Busca ahorrar tokens evitando llamadas al LLM cuando no hay intención de reserva.
+ */
+export function isOutOfDomainMessage(userMessage: string): boolean {
+  const normalized = userMessage
+    .trim()
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/\p{M}/gu, "");
+  if (!normalized) return false;
+
+  // Si menciona contexto de negocio, no bloquear.
+  const domainSignals =
+    /\b(finca|fincas|reserva|reservar|alquiler|hospedaje|estad[ií]a|check[-\s]?in|check[-\s]?out|fecha|personas|huesped|hu[eé]sped|mascota|contrato|cotiza|cotizacion|precio|disponibilidad|noche|noches|catalogo|cat[aá]logo|ubicaci[oó]n|ciudad)\b/i;
+  if (domainSignals.test(normalized)) return false;
+
+  // Operaciones aritméticas típicas: "4x4", "2+2", "10/5", etc.
+  const mathExpression =
+    /(^|\s)\d{1,5}\s*([x×*+\-\/]|por)\s*\d{1,5}(\s|$)/i;
+  // Preguntas de calculadora / trivia no relacionadas al servicio.
+  const offTopicQuestion =
+    /\b(cu[aá]nto\s+es|resuelve|calcula|capital\s+de|quien\s+es|que\s+hora\s+es)\b/i;
+
+  return mathExpression.test(normalized) || offTopicQuestion.test(normalized);
+}
+
 /** Retraso breve y aleatorio antes de enviar respuesta de texto (ritmo más humano; complementa el debounce). */
 function humanReplyPacingMs(visibleText: string): number {
   const len = (visibleText ?? "").trim().length;
@@ -321,6 +348,26 @@ export const processInboundMessage = internalAction({
           currentMessageText = burst.join("\n");
           console.log("[burst-merge] mensajes de cliente fusionados:", burst.length);
         }
+      }
+
+      // Guardrail: evitar gastar tokens en consultas fuera del propósito del bot.
+      if (args.type === "text" && isOutOfDomainMessage(currentMessageText)) {
+        const outOfDomainReply =
+          "Estoy para ayudarte con reservas de fincas (disponibilidad, precios y contrato). 🏡 Compárteme por favor ciudad, fechas y número de personas para asistirte de inmediato.";
+        await ctx.runMutation(internal.messages.insertAssistantMessage, {
+          conversationId,
+          content: outOfDomainReply,
+          createdAt: Date.now(),
+        });
+        await ctx.runAction(internal.ycloud.sendWhatsAppMessage, {
+          to: args.phone,
+          text: outOfDomainReply,
+          wamid: args.wamid,
+        });
+        await ctx.runMutation(internal.conversations.updateLastMessageAt, {
+          conversationId,
+        });
+        return;
       }
       const catalogIntentSnippet = recentForCatalogIntent
         .map(
