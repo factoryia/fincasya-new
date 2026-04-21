@@ -15,10 +15,10 @@ export class BrevoEmailService {
 
   constructor() {
     this.apiKey = process.env.BREVO_API_KEY || '';
-    this.senderEmail = process.env.BREVO_SENDER_EMAIL || 'jamesrgal@gmail.com';
+    this.senderEmail = process.env.BREVO_SENDER_EMAIL || '';
     this.senderName = process.env.BREVO_SENDER_NAME || 'FincasYA';
     this.logoUrl = process.env.LOGO_URL || '';
-    this.adminEmail = process.env.ADMIN_EMAIL || 'growth@factoryim.co';
+    this.adminEmail = process.env.ADMIN_EMAIL || '';
   }
 
   async sendBookingConfirmationToClient(data: {
