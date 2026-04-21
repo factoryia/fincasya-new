@@ -83,6 +83,19 @@ export class InboxService {
       });
     }
     if (status === 'human') {
+      const contractNotice =
+        'Perfecto. En breve te compartiremos el contrato para continuar con tu reserva.';
+      try {
+        await this.sendMessage(conversationId, {
+          type: 'text',
+          text: contractNotice,
+        });
+      } catch (error) {
+        // No bloqueamos el escalamiento si falla el envío del aviso previo.
+        console.warn(
+          `[inbox] No se pudo enviar aviso previo al escalamiento de ${conversationId}: ${error?.message || error}`,
+        );
+      }
       return this.convexService.mutation('conversations:escalateToHuman', {
         conversationId,
       });
