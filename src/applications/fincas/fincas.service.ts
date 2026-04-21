@@ -390,16 +390,6 @@ export class FincasService {
         fincaData,
       );
 
-      if (catalogIds && catalogIds.length > 0) {
-        const metaSync = (await this.convexService.action(
-          'metaCatalog:syncPropertyToCatalogs',
-          {
-            propertyId,
-          } as Record<string, unknown>,
-        )) as { synced: number };
-        return { id: propertyId, metaSync };
-      }
-
       return { id: propertyId };
     } catch (error) {
       throw new BadRequestException(error.message);
@@ -468,12 +458,6 @@ export class FincasService {
         catalogIds,
       });
 
-      // Si se enviaron catalogIds en el update, sincronizar con Meta Catalog (pero sin pasarlos a Convex).
-      if (catalogIds && Array.isArray(catalogIds) && catalogIds.length > 0) {
-        await this.convexService.action('metaCatalog:syncPropertyToCatalogs', {
-          propertyId: id,
-        } as Record<string, unknown>);
-      }
 
       // Agregar nuevas imÃ¡genes a travÃ©s de la mutaciÃ³n dedicada de Convex.
       if (imageUrls.length > 0) {
