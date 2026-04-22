@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import {
   getAdminNotificationTemplate,
   getClientConfirmationTemplate,
+  getReminderTemplate,
 } from './email-templates';
 
 @Injectable()
@@ -125,6 +126,54 @@ export class BrevoEmailService {
       );
     } catch (error) {
       this.logger.error(`Error enviando alerta al admin: ${error.message}`);
+    }
+  }
+
+  async sendReservationReminder(data: {
+    clientEmail: string;
+    clientName: string;
+    propertyTitle: string;
+    checkInDate: string;
+    checkInTime: string;
+    reference: string;
+  }) {
+    const htmlContent = getReminderTemplate({
+      logoUrl: this.logoUrl,
+      clientName: data.clientName,
+      propertyTitle: data.propertyTitle,
+      checkInDate: data.checkInDate,
+      checkInTime: data.checkInTime,
+      reference: data.reference,
+    });
+
+    try {
+      const response = await fetch('https://api.brevo.com/v3/smtp/email', {
+        method: 'POST',
+        headers: {
+          'api-key': this.apiKey,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          sender: { name: this.senderName, email: this.senderEmail },
+          to: [{ email: data.clientEmail, name: data.clientName }],
+          subject: `⏰ Recordatorio: Tu reserva en ${data.propertyTitle} es en 3 días`,
+          htmlContent: htmlContent,
+        }),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(
+          errorData.message || 'Error al enviar recordatorio de email',
+        );
+      }
+
+      this.logger.log(`Recordatorio enviado a cliente: ${data.clientEmail}`);
+    } catch (error) {
+      this.logger.error(
+        `Error enviando recordatorio a cliente: ${error.message}`,
+      );
+      throw error;
     }
   }
 }

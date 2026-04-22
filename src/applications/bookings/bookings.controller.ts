@@ -12,9 +12,10 @@ import {
   UploadedFile,
   Req,
 } from '@nestjs/common';
-import { Request } from 'express';
+import type { Request } from 'express';
 import { FilesInterceptor, FileInterceptor } from '@nestjs/platform-express';
 import { BookingsSyncService } from './bookings-sync.service';
+import { BookingsRemindersService } from './bookings-reminders.service';
 import { ConvexAuthGuard } from '../shared/guards/convex-auth.guard';
 import { AdminGuard } from '../shared/guards/admin.guard';
 import { OwnerOrAdminGuard } from '../shared/guards/owner-or-admin.guard';
@@ -25,7 +26,14 @@ export class BookingsController {
   constructor(
     private readonly bookingsSyncService: BookingsSyncService,
     private readonly authService: AuthService,
+    private readonly remindersService: BookingsRemindersService,
   ) {}
+
+  @Post('trigger-reminders')
+  @UseGuards(ConvexAuthGuard, AdminGuard)
+  async triggerReminders() {
+    return this.remindersService.triggerRemindersManually();
+  }
 
   @Get('my-bookings')
   @UseGuards(ConvexAuthGuard)

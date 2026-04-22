@@ -319,3 +319,73 @@ export const getAdminNotificationTemplate = (data: {
     footerText: 'Has recibido este correo como parte de las notificaciones administrativas de FincasYa.',
   });
 };
+
+export const getReminderTemplate = (data: {
+  logoUrl: string;
+  clientName: string;
+  propertyTitle: string;
+  checkInDate: string;
+  checkInTime: string;
+  reference: string;
+}) => {
+  const preheader = `¡Faltan 3 días para tu reserva en ${data.propertyTitle}! Revisa los detalles de llegada.`;
+
+  const content = `
+    <div class="title">¡Tu aventura en <span style="color: #f15a24">${data.propertyTitle}</span> comienza pronto! 🏡</div>
+    
+    <div class="subtitle">
+      Hola <strong>${data.clientName}</strong>, falta muy poco para tu llegada. 
+      Queremos asegurarnos de que tengas todo listo para una experiencia inolvidable.
+    </div>
+    
+    <div class="card">
+      <div style="font-size: 18px; font-weight: 700; margin-bottom: 20px; color: #1a202c; border-bottom: 2px solid #f15a24; padding-bottom: 8px; display: inline-block;">
+        DETALLES DE TU LLEGADA
+      </div>
+      
+      <table class="detail-table">
+        <tr class="detail-row">
+          <td class="detail-label">Fecha de Entrada</td>
+          <td class="detail-value">${data.checkInDate}</td>
+        </tr>
+        <tr class="detail-row">
+          <td class="detail-label">Hora de Entrada</td>
+          <td class="detail-value">${data.checkInTime}</td>
+        </tr>
+        <tr class="detail-row">
+          <td class="detail-label">Referencia</td>
+          <td class="detail-value">${data.reference}</td>
+        </tr>
+      </table>
+      
+      <div style="margin-top: 20px;">
+        <div class="instruction-item">
+          <div class="icon-box">📍</div>
+          <div><strong>Ubicación:</strong> Puedes encontrar la ubicación exacta en la sección "Mis Viajes" de nuestra plataforma.</div>
+        </div>
+        <div class="instruction-item">
+          <div class="icon-box">🔑</div>
+          <div><strong>Acceso:</strong> El encargado de la finca te recibirá en la hora acordada. No olvides tener tu documento de identidad a la mano.</div>
+        </div>
+        <div class="instruction-item">
+          <div class="icon-box">📶</div>
+          <div><strong>WiFi:</strong> Las credenciales de acceso estarán disponibles dentro de la propiedad.</div>
+        </div>
+      </div>
+    </div>
+
+    <div style="text-align: center;">
+      <a href="https://fincasya.com" class="btn">Ir a Mis Viajes</a>
+    </div>
+
+    <div class="alert-box">
+      <strong>⚠️ Recordatorio:</strong> Si aún no has subido tu contrato firmado o la foto de tu cédula, por favor hazlo hoy mismo para evitar retrasos en tu ingreso.
+    </div>
+    
+    <p style="text-align: center; color: #718096; font-size: 13px; margin-top: 30px;">
+      Si tienes alguna duda, contáctanos a través de nuestro soporte por WhatsApp.
+    </p>
+  `;
+
+  return getBaseLayout({ logoUrl: data.logoUrl, preheader, content });
+};

@@ -4,11 +4,12 @@ import { SharedModule } from '../shared/shared.module';
 import { AuthModule } from '../auth/auth.module';
 import { FincasModule } from '../fincas/fincas.module';
 import { BookingsSyncService } from './bookings-sync.service';
+import { BookingsRemindersService } from './bookings-reminders.service';
 
 @Module({
   imports: [SharedModule, AuthModule, forwardRef(() => FincasModule)],
   controllers: [BookingsController],
-  providers: [BookingsSyncService],
-  exports: [BookingsSyncService],
+  providers: [BookingsSyncService, BookingsRemindersService],
+  exports: [BookingsSyncService, BookingsRemindersService],
 })
 export class BookingsModule {}

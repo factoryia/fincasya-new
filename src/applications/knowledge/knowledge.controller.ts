@@ -13,7 +13,7 @@ import {
 import { FileValidator } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { memoryStorage } from 'multer';
-import { Request } from 'express';
+import type { Request } from 'express';
 import { KnowledgeService } from './knowledge.service';
 
 // Convex Node actions limit args to 5 MiB; base64 ~+33% → max ~4 MB binario

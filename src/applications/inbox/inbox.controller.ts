@@ -16,7 +16,7 @@ import {
 } from '@nestjs/common';
 import { FileInterceptor, FilesInterceptor } from '@nestjs/platform-express';
 import { memoryStorage } from 'multer';
-import { Response } from 'express';
+import type { Response } from 'express';
 import { InboxService } from './inbox.service';
 import { ConvexAuthGuard } from '../shared/guards/convex-auth.guard';
 import { RolesGuard } from '../shared/guards/roles.guard';

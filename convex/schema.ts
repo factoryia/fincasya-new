@@ -246,6 +246,7 @@ export default defineSchema({
     ),
     createdAt: v.number(),
     updatedAt: v.optional(v.number()),
+    reminderSent: v.optional(v.boolean()),
   })
     .index('by_property', ['propertyId'])
     .index('by_status', ['status'])

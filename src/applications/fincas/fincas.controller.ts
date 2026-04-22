@@ -36,7 +36,7 @@ import { GenerateContractDto } from './dto/generate-contract.dto';
 import { ConvexAuthGuard } from '../shared/guards/convex-auth.guard';
 import { AdminGuard } from '../shared/guards/admin.guard';
 import { OwnerOrAdminGuard } from '../shared/guards/owner-or-admin.guard';
-import { Response } from 'express';
+import type { Request, Response } from 'express';
 
 @Controller('fincas')
 export class FincasController {

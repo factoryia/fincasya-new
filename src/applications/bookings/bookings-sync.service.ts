@@ -1,7 +1,7 @@
 import { Injectable, forwardRef, Inject } from '@nestjs/common';
 import { ConvexService } from '../shared/services/convex.service';
 import { S3Service } from '../shared/services/s3.service';
-import { FincasService } from '../fincas/fincas.service';
+import type { FincasService } from '../fincas/fincas.service';
 import { BrevoEmailService } from '../shared/services/brevo-email.service';
 import * as crypto from 'crypto';
 
@@ -10,7 +10,7 @@ export class BookingsSyncService {
   constructor(
     private readonly convexService: ConvexService,
     private readonly s3Service: S3Service,
-    @Inject(forwardRef(() => FincasService))
+    @Inject(forwardRef(() => require('../fincas/fincas.service').FincasService))
     private readonly fincasService: FincasService,
     private readonly brevoEmailService: BrevoEmailService,
   ) {}

@@ -17,7 +17,7 @@ import ILovePDFFile from '@ilovepdf/ilovepdf-nodejs/ILovePDFFile';
 import axios from 'axios';
 import { ConvexService } from '../shared/services/convex.service';
 import { S3Service } from '../shared/services/s3.service';
-import { InboxService } from '../inbox/inbox.service';
+import type { InboxService } from '../inbox/inbox.service';
 import { CreateFincaDto } from './dto/create-finca.dto';
 import { UpdateFincaDto } from './dto/update-finca.dto';
 import { ListFincasDto } from './dto/list-fincas.dto';
@@ -34,7 +34,7 @@ export class FincasService {
   constructor(
     private readonly convexService: ConvexService,
     private readonly s3Service: S3Service,
-    @Inject(forwardRef(() => InboxService))
+    @Inject(forwardRef(() => require('../inbox/inbox.service').InboxService))
     private readonly inboxService: InboxService,
   ) {}
 

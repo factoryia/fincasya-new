@@ -5,7 +5,7 @@ import {
   ForbiddenException,
 } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
-import { Request } from 'express';
+import type { Request } from 'express';
 import { AuthService } from '../../auth/auth.service';
 import { UserRole } from '../constants/user-role';
 import { ROLES_KEY } from '../decorators/roles.decorator';

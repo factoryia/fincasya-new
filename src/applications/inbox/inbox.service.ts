@@ -10,7 +10,7 @@ import * as path from 'path';
 import { promises as fs } from 'fs';
 import { ConvexService } from '../shared/services/convex.service';
 import { S3Service } from '../shared/services/s3.service';
-import { BookingsSyncService } from '../bookings/bookings-sync.service';
+import type { BookingsSyncService } from '../bookings/bookings-sync.service';
 
 type ReservationPaymentMethod =
   | 'bbva'
@@ -56,7 +56,7 @@ export class InboxService {
   constructor(
     private readonly convexService: ConvexService,
     private readonly s3Service: S3Service,
-    @Inject(forwardRef(() => BookingsSyncService))
+    @Inject(forwardRef(() => require('../bookings/bookings-sync.service').BookingsSyncService))
     private readonly bookingsSyncService: BookingsSyncService,
   ) {}
 

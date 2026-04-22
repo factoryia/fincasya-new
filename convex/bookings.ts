@@ -706,3 +706,54 @@ export const removeMultimedia = mutation({
   },
 });
 
+/**
+ * Listar reservas que necesitan recordatorio (3 días antes)
+ */
+export const listForReminders = query({
+  args: {
+    minDate: v.number(),
+    maxDate: v.number(),
+  },
+  handler: async (ctx, args) => {
+    const bookings = await ctx.db
+      .query('bookings')
+      .withIndex('by_dates', (q) =>
+        q.gte('fechaEntrada', args.minDate).lte('fechaEntrada', args.maxDate),
+      )
+      .filter((q) =>
+        q.and(
+          q.or(
+            q.eq(q.field('status'), 'CONFIRMED'),
+            q.eq(q.field('status'), 'PAID'),
+          ),
+          q.neq(q.field('reminderSent'), true),
+        ),
+      )
+      .collect();
+
+    // Enriquecer con título de propiedad
+    return await Promise.all(
+      bookings.map(async (b) => {
+        const property = await ctx.db.get(b.propertyId);
+        return {
+          ...b,
+          propertyTitle: property?.title || 'tu propiedad',
+        };
+      }),
+    );
+  },
+});
+
+/**
+ * Marcar recordatorio como enviado
+ */
+export const markReminderSent = mutation({
+  args: { id: v.id('bookings') },
+  handler: async (ctx, args) => {
+    await ctx.db.patch(args.id, {
+      reminderSent: true,
+      updatedAt: Date.now(),
+    });
+  },
+});
+

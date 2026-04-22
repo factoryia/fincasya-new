@@ -1,5 +1,5 @@
 import { Controller, Get, Post, Query, Req, Res } from '@nestjs/common';
-import { Request, Response } from 'express';
+import type { Request, Response } from 'express';
 import { GoogleCalendarService } from '../shared/services/google-calendar.service';
 
 // URI canónico único registrado en Google Cloud Console.
