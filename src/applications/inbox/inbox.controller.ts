@@ -3,6 +3,7 @@ import {
   Get,
   Post,
   Patch,
+  Delete,
   Param,
   Query,
   Body,
@@ -61,6 +62,53 @@ export class InboxController {
   ) {
     const limitNum = limit ? parseInt(limit, 10) : undefined;
     return this.inboxService.getMessages(conversationId, limitNum);
+  }
+
+  @Get('templates')
+  async listTemplates() {
+    return this.inboxService.listQuickReplyTemplates();
+  }
+
+  @Post('templates')
+  @UseInterceptors(
+    FileInterceptor('file', {
+      storage: memoryStorage(),
+      limits: { fileSize: 16 * 1024 * 1024 },
+    }),
+  )
+  async createTemplate(
+    @Body() body: any,
+    @UploadedFile() file?: Express.Multer.File,
+  ) {
+    return this.inboxService.createQuickReplyTemplate(body, file);
+  }
+
+  @Patch('templates/:templateId')
+  @UseInterceptors(
+    FileInterceptor('file', {
+      storage: memoryStorage(),
+      limits: { fileSize: 16 * 1024 * 1024 },
+    }),
+  )
+  async updateTemplate(
+    @Param('templateId') templateId: string,
+    @Body() body: any,
+    @UploadedFile() file?: Express.Multer.File,
+  ) {
+    return this.inboxService.updateQuickReplyTemplate(templateId, body, file);
+  }
+
+  @Delete('templates/:templateId')
+  async deleteTemplate(@Param('templateId') templateId: string) {
+    return this.inboxService.deleteQuickReplyTemplate(templateId);
+  }
+
+  @Post(':conversationId/send-template/:templateId')
+  async sendTemplateToConversation(
+    @Param('conversationId') conversationId: string,
+    @Param('templateId') templateId: string,
+  ) {
+    return this.inboxService.sendQuickTemplateToConversation(conversationId, templateId);
   }
 
   /**

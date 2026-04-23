@@ -51,6 +51,17 @@ type ReservationConfirmationData = {
   paymentStatus: ReservationPaymentStatus;
 };
 
+type QuickReplyTemplatePayload = {
+  title?: string;
+  slashCommand?: string;
+  intentKey?: string;
+  content?: string;
+  mediaType?: 'text' | 'audio';
+  mediaUrl?: string;
+  active?: boolean | string;
+  order?: number | string;
+};
+
 @Injectable()
 export class InboxService {
   constructor(
@@ -76,6 +87,72 @@ export class InboxService {
     });
   }
 
+  async listQuickReplyTemplates() {
+    return this.convexService.query('quickReplyTemplates:list', {});
+  }
+
+  async createQuickReplyTemplate(body: QuickReplyTemplatePayload, file?: Express.Multer.File) {
+    const mediaType = (body.mediaType || (file ? 'audio' : 'text')) as 'text' | 'audio';
+    let mediaUrl = body.mediaUrl?.trim();
+    if (mediaType === 'audio' && file) {
+      mediaUrl = await this.s3Service.uploadFile(file, 'inbox-templates', file.originalname);
+    }
+    return this.convexService.mutation('quickReplyTemplates:create', {
+      title: String(body.title || '').trim(),
+      slashCommand: String(body.slashCommand || '').trim(),
+      intentKey: String(body.intentKey || '').trim(),
+      content: body.content?.trim() || undefined,
+      mediaType,
+      mediaUrl: mediaUrl || undefined,
+      active: this.parseBoolean(body.active, true),
+      order: this.parseNumber(body.order),
+      language: 'es',
+    });
+  }
+
+  async updateQuickReplyTemplate(
+    templateId: string,
+    body: QuickReplyTemplatePayload,
+    file?: Express.Multer.File,
+  ) {
+    const patch: Record<string, unknown> = { id: templateId };
+    if (body.title !== undefined) patch.title = String(body.title).trim();
+    if (body.slashCommand !== undefined) patch.slashCommand = String(body.slashCommand).trim();
+    if (body.intentKey !== undefined) patch.intentKey = String(body.intentKey).trim();
+    if (body.content !== undefined) patch.content = String(body.content);
+    if (body.mediaType !== undefined) patch.mediaType = body.mediaType;
+    if (body.mediaUrl !== undefined) patch.mediaUrl = String(body.mediaUrl).trim();
+    if (body.active !== undefined) patch.active = this.parseBoolean(body.active, true);
+    if (body.order !== undefined) patch.order = this.parseNumber(body.order);
+    if (file) {
+      const uploadedUrl = await this.s3Service.uploadFile(file, 'inbox-templates', file.originalname);
+      patch.mediaUrl = uploadedUrl;
+      patch.mediaType = 'audio';
+    }
+    return this.convexService.mutation('quickReplyTemplates:update', patch);
+  }
+
+  async deleteQuickReplyTemplate(templateId: string) {
+    return this.convexService.mutation('quickReplyTemplates:remove', { id: templateId });
+  }
+
+  async sendQuickTemplateToConversation(conversationId: string, templateId: string) {
+    const templates = await this.convexService.query('quickReplyTemplates:list', {});
+    const template = (templates || []).find((t: any) => t._id === templateId);
+    if (!template) throw new NotFoundException('Plantilla no encontrada');
+    if (template.mediaType === 'audio') {
+      return this.sendMessage(conversationId, {
+        type: 'audio',
+        text: template.content || undefined,
+        mediaUrl: template.mediaUrl,
+      });
+    }
+    return this.sendMessage(conversationId, {
+      type: 'text',
+      text: template.content || '',
+    });
+  }
+
   async setStatus(conversationId: string, status: 'ai' | 'human' | 'resolved') {
     if (status === 'ai') {
       return this.convexService.mutation('conversations:setToAiPublic', {
@@ -83,19 +160,6 @@ export class InboxService {
       });
     }
     if (status === 'human') {
-      const contractNotice =
-        'Perfecto. En breve te compartiremos el contrato para continuar con tu reserva.';
-      try {
-        await this.sendMessage(conversationId, {
-          type: 'text',
-          text: contractNotice,
-        });
-      } catch (error) {
-        // No bloqueamos el escalamiento si falla el envío del aviso previo.
-        console.warn(
-          `[inbox] No se pudo enviar aviso previo al escalamiento de ${conversationId}: ${error?.message || error}`,
-        );
-      }
       return this.convexService.mutation('conversations:escalateToHuman', {
         conversationId,
       });
@@ -1074,5 +1138,17 @@ export class InboxService {
       p = '57' + p; // Colombia local.
     }
     return p ? `+${p}` : phone;
+  }
+
+  private parseBoolean(value: unknown, fallback: boolean): boolean {
+    if (typeof value === 'boolean') return value;
+    if (typeof value === 'string') return value.toLowerCase() === 'true';
+    return fallback;
+  }
+
+  private parseNumber(value: unknown): number | undefined {
+    if (value === undefined || value === null || value === '') return undefined;
+    const num = Number(value);
+    return Number.isFinite(num) ? num : undefined;
   }
 }

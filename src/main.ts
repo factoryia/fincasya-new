@@ -1,4 +1,5 @@
 // Cargar variables de entorno antes que nada (NestJS no las carga por defecto)
+// reload trigger: 22-Apr-2026 v3 (docx xml-gap placeholders)
 require('dotenv').config({ path: '.env.local' });
 require('dotenv').config({ path: '.env' });
 

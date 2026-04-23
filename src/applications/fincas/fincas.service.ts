@@ -8,8 +8,126 @@ import {
 import { PDFDocument } from 'pdf-lib';
 
 const PizZip = require('pizzip');
-const Docxtemplater = require('docxtemplater');
-const ImageModule = require('docxtemplater-image-module-free');
+
+function escapeRegExp(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/** `{{` … `}}` cuyo interior, sin XML, coincide exactamente con key (p. ej. letras + nbsp) */
+function replaceByPlainInnerKey(
+  xml: string,
+  key: string,
+  valueXmlEscaped: string,
+): string {
+  const keyNorm = key.replace(/\s+/g, ' ').trim();
+  if (!keyNorm) return xml;
+  let s = xml;
+  let from = 0;
+  for (;;) {
+    const open = s.indexOf('{{', from);
+    if (open === -1) break;
+    const close = s.indexOf('}}', open + 2);
+    if (close === -1) {
+      from = open + 2;
+      continue;
+    }
+    const inner = s.slice(open + 2, close);
+    const innerPlain = inner
+      .replace(/<[^>]+>/g, '')
+      .replace(
+        /&nbsp;|&#0*160;|&#x0*A0;|&#32;|&#x20;|&amp;#160;|&amp;#32;/gi,
+        ' ',
+      )
+      .replace(/\s+/g, ' ')
+      .trim();
+    if (innerPlain === keyNorm) {
+      s = s.slice(0, open) + valueXmlEscaped + s.slice(close + 2);
+      from = open + valueXmlEscaped.length;
+    } else {
+      from = close + 2;
+    }
+  }
+  return s;
+}
+
+/**
+ * Sustituye {key} / {{key}} en el XML de Word aunque Word haya partido el texto
+ * o las llaves entre múltiples w:r / w:t (sin docxtemplater).
+ */
+function applyWordTemplateReplacements(
+  xml: string,
+  values: Record<string, string>,
+): string {
+  let s = xml;
+  s = s.replace(/<w:proofErr[^/>]*\/>/g, '');
+  s = s.replace(/<w:proofErr[^>]*>[\s\S]*?<\/w:proofErr>/g, '');
+  s = s.replace(/<w:softHyphen\/>/g, '');
+  s = s.replace(/<w:noBreakHyphen\/>/g, '');
+  s = s.replace(/<w:tab\/>/g, ' ');
+  s = s.replace(/<w:br\/>/g, ' ');
+
+  // Entre letras, alrededor de `{{`/`}}` o entre clave y cierre: Word mete
+  // espacios / &nbsp; / w:tab, no solo etiquetas (antes solo aceptábamos XML
+  // y fallaba "llave" + espacio + `}}`).
+  const gap =
+    '(?:<[^>]+>|[\\s\\u00A0\\u200B\\uFEFF]|&nbsp;|&#0*160;|&#x0*A0;|&#32;|&#x20;)*';
+
+  const entries = Object.entries(values)
+    .filter(([k, v]) => k && v !== undefined)
+    .map(([k, v]) => [k, v ?? ''] as [string, string])
+    .sort((a, b) => b[0].length - a[0].length);
+
+  for (const [key, rawVal] of entries) {
+    if (!key.trim()) continue;
+    const val = rawVal
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
+    const keyPart = Array.from(key)
+      .map((ch) => escapeRegExp(ch))
+      .join(gap);
+    // `{{` / `}}` a veces quedan como { + { o } + } con XML/espacio entre medias
+    const reDouble = new RegExp(
+      `\\{${gap}\\{${gap}${keyPart}${gap}\\}${gap}\\}`,
+      'g',
+    );
+    s = s.replace(reDouble, val);
+    const reDoubleTight = new RegExp(
+      `\\{\\{${gap}${keyPart}${gap}\\}\\}`,
+      'g',
+    );
+    s = s.replace(reDoubleTight, val);
+    const reSingle = new RegExp(
+      `\\{${gap}${keyPart}${gap}\\}`,
+      'g',
+    );
+    s = s.replace(reSingle, val);
+  }
+  for (const [key, rawVal] of entries) {
+    if (!key.trim()) continue;
+    const val2 = (rawVal ?? '')
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
+    s = replaceByPlainInnerKey(s, key, val2);
+  }
+  s = s.replace(/\{\{[^}]*\}\}/g, '');
+  s = s.replace(/\{[A-Za-z0-9_\s\u00C0-\u024F.,()$-]+\}/g, '');
+  return s;
+}
+
+/** Axios `arraybuffer` puede devolver ArrayBuffer; sin esto `slice().toString()` no es "PK" y el .docx se trata mal. */
+function normalizeDownloadedFile(data: unknown): Buffer {
+  if (Buffer.isBuffer(data)) return data;
+  if (data instanceof ArrayBuffer) return Buffer.from(data);
+  if (ArrayBuffer.isView(data)) {
+    const v = data as ArrayBufferView;
+    return Buffer.from(v.buffer, v.byteOffset, v.byteLength);
+  }
+  return Buffer.from(String(data));
+}
 
 import ILovePDFApi from '@ilovepdf/ilovepdf-nodejs';
 import ILovePDFFile from '@ilovepdf/ilovepdf-nodejs/ILovePDFFile';
@@ -896,6 +1014,9 @@ export class FincasService {
     dto: GenerateContractDto,
     options?: { previewOnly?: boolean },
   ) {
+    console.log(
+      `[api] >>> generateContract CODE=v5-gap-plaininner propertyId=${propertyId} preview=${!!options?.previewOnly}`,
+    );
     try {
       // 1. Obtener la finca y su plantilla
       const finca = await this.getById(propertyId);
@@ -909,7 +1030,7 @@ export class FincasService {
       const response = await axios.get(finca.contractTemplateUrl, {
         responseType: 'arraybuffer',
       });
-      const pdfBytes = response.data;
+      const templateBytes = normalizeDownloadedFile(response.data);
 
       // 3. Modificar el PDF con pdf-lib
       // 2. Obtener informaciÃ³n de la conversaciÃ³n y contacto para el cliente
@@ -1064,76 +1185,30 @@ export class FincasService {
       };
 
       // --- DETECCIÃ“N DE FORMATO Y PROCESAMIENTO ---
-      const isDocx = pdfBytes.slice(0, 2).toString() === 'PK';
+      const isDocx = templateBytes.slice(0, 2).toString() === 'PK';
       let finalBuffer: Buffer;
       let finalFilename: string;
       let finalMimeType: string;
 
       if (isDocx) {
         console.log('[api] Detectado formato Word (.docx)');
-        const zip = new PizZip(pdfBytes);
 
-        // --- LIMPIEZA DE XML (Para evitar errores por formato de Word) ---
-        try {
-          const docXml = zip.file('word/document.xml')?.asText();
-          if (docXml) {
-            // Eliminar etiquetas XML que queden atrapadas dentro de { ... } o {{ ... }}
-            // Esto limpia casos donde Word fragmenta las etiquetas: {<w:t>{</w:t>...<w:t>}</w:t>}
-            const cleanedXml = docXml.replace(/\{[^}]+\}/g, (match) => {
-              return match.replace(/<[^>]+>/g, '');
-            });
-            zip.file('word/document.xml', cleanedXml);
-          }
-        } catch (e) {
-          console.warn(
-            '[api] No se pudo limpiar el XML del Word, procediendo normal',
-          );
-        }
-
-        // --- CONFIGURACIÃ“N DE MÃ“DULO DE IMAGEN ---
-        let imageModule: any;
-        if (dto.signature) {
-          console.log('[api] Configurando mÃ³dulo de imagen para firma');
-          const opts = {
-            centered: false,
-            getImage: (tagValue: string) => {
-              // Limpiar el prefijo base64 si existe
-              const base64Data = tagValue.replace(
-                /^data:image\/\w+;base64,/,
-                '',
-              );
-              return Buffer.from(base64Data, 'base64');
-            },
-            getSize: () => [150, 150], // TamaÃ±o por defecto de la firma
-          };
-          imageModule = new ImageModule(opts);
-        }
-
-        const doc = new Docxtemplater(zip, {
-          paragraphLoop: true,
-          linebreaks: true,
-          delimiters: { start: '{{', end: '}}' },
-          modules: imageModule ? [imageModule] : [],
-        });
-
-        // Mapeo limpio para Word
-        const wordData = {
-          fechaGeneracion: valuesMapping[mappingKeys.date],
-          precioLetras: valuesMapping[mappingKeys.priceText],
-          precioNumerico: valuesMapping[mappingKeys.priceNumeric],
-          bancoNombre: valuesMapping[mappingKeys.bankName],
-          cuentaNumero: valuesMapping[mappingKeys.accountNumber],
-          titularNombre: valuesMapping[mappingKeys.accountHolder],
-          titularCedula: valuesMapping[mappingKeys.idNumber],
-          contratoNumero: valuesMapping[mappingKeys.contractNumber],
-          fechaEntrada: valuesMapping[mappingKeys.checkInDate],
-          fechaLlegada: valuesMapping[mappingKeys.checkInDate], // Alias prioritario
-          fecha_entrada: valuesMapping[mappingKeys.checkInDate],
-          fecha_llegada: valuesMapping[mappingKeys.checkInDate],
-          fechaSalida: valuesMapping[mappingKeys.checkOutDate],
-          fecha_salida: valuesMapping[mappingKeys.checkOutDate],
-          ciudad: valuesMapping[mappingKeys.city],
-          // Nuevos campos de duraciÃ³n y tiempos
+        const wordValues: Record<string, string> = {
+          fechaGeneracion: valuesMapping[mappingKeys.date] ?? '',
+          precioLetras: valuesMapping[mappingKeys.priceText] ?? '',
+          precioNumerico: valuesMapping[mappingKeys.priceNumeric] ?? '',
+          bancoNombre: valuesMapping[mappingKeys.bankName] ?? '',
+          cuentaNumero: valuesMapping[mappingKeys.accountNumber] ?? '',
+          titularNombre: valuesMapping[mappingKeys.accountHolder] ?? '',
+          titularCedula: valuesMapping[mappingKeys.idNumber] ?? '',
+          contratoNumero: valuesMapping[mappingKeys.contractNumber] ?? '',
+          fechaEntrada: valuesMapping[mappingKeys.checkInDate] ?? '',
+          fechaLlegada: valuesMapping[mappingKeys.checkInDate] ?? '',
+          fecha_entrada: valuesMapping[mappingKeys.checkInDate] ?? '',
+          fecha_llegada: valuesMapping[mappingKeys.checkInDate] ?? '',
+          fechaSalida: valuesMapping[mappingKeys.checkOutDate] ?? '',
+          fecha_salida: valuesMapping[mappingKeys.checkOutDate] ?? '',
+          ciudad: valuesMapping[mappingKeys.city] ?? '',
           nochesTexto: this.numberToSpanishText(totalNights, false),
           nochesNumero: String(totalNights),
           diasTexto: this.numberToSpanishText(totalDays, false),
@@ -1143,51 +1218,60 @@ export class FincasService {
           fechaSalidaMini: checkOutMini,
           horaLlegada: dto.checkInTime || '03:00 PM',
           horaSalida: dto.checkOutTime || '01:00 PM',
-          ciudadCliente:
-            valuesMapping[mappingKeys.clientCity] || dto.clientCity || '',
-          direccionCliente:
-            valuesMapping[mappingKeys.clientAddress] || dto.clientAddress || '',
-          clienteNombre: valuesMapping[mappingKeys.clientName],
-          clienteCedula: valuesMapping[mappingKeys.clientId],
-          clienteId: valuesMapping[mappingKeys.clientId],
-          clienteIdentificacion: valuesMapping[mappingKeys.clientId],
-          clientCorreo: valuesMapping[mappingKeys.clientEmail],
-          clienteCelular: valuesMapping[mappingKeys.clientPhone],
-          firmaCliente: dto.signature || '',
-          // Campos de mascotas para Word
+          ciudadCliente: valuesMapping[mappingKeys.clientCity] || dto.clientCity || '',
+          direccionCliente: valuesMapping[mappingKeys.clientAddress] || dto.clientAddress || '',
+          clienteNombre: valuesMapping[mappingKeys.clientName] ?? '',
+          clienteCedula: valuesMapping[mappingKeys.clientId] ?? '',
+          clienteId: valuesMapping[mappingKeys.clientId] ?? '',
+          clienteIdentificacion: valuesMapping[mappingKeys.clientId] ?? '',
+          clientCorreo: valuesMapping[mappingKeys.clientEmail] ?? '',
+          clienteCelular: valuesMapping[mappingKeys.clientPhone] ?? '',
+          firmaCliente: dto.signature ?? '',
           numeroMascotas: String(petCount),
           depositoMascotas: String(petSurchargeRefundable),
           cargoMascotas: String(petSurchargeNonRefundable),
-          totalMascotas: String(
-            petSurchargeRefundable + petSurchargeNonRefundable,
-          ),
+          totalMascotas: String(petSurchargeRefundable + petSurchargeNonRefundable),
         };
-
-        try {
-          doc.render(wordData);
-        } catch (error: unknown) {
-          console.error('[api] Error al renderizar Word:', error);
-          const docxError = error as {
-            message?: string;
-            properties?: { errors?: Array<{ explanation?: string }> };
-          };
-          if (docxError.properties?.errors instanceof Array) {
-            const errorMessages = docxError.properties.errors
-              .map((e) => e?.explanation || '')
-              .filter(Boolean)
-              .join(', ');
-            throw new BadRequestException(
-              `Error en la plantilla Word: ${errorMessages}`,
-            );
+        for (const [k, v] of Object.entries(valuesMapping)) {
+          if (v === undefined || v === null) continue;
+          const t = String(v);
+          const clean = k.replace(/^\[|\]$/g, '').trim() || k;
+          wordValues[clean] = t;
+          if (k !== clean) {
+            wordValues[k] = t;
           }
-          throw new BadRequestException(
-            `Error al procesar la plantilla Word: ${docxError.message || 'Error desconocido'}`,
-          );
         }
 
-        finalBuffer = doc
-          .getZip()
-          .generate({ type: 'nodebuffer', compression: 'DEFLATE' });
+        const processXml = (xml: string) =>
+          applyWordTemplateReplacements(xml, wordValues);
+
+        try {
+          const zip = new PizZip(templateBytes);
+          console.log(
+            '[api] Docx: motor directo (sin docxtemplater) + claves mapeo PDF/Word.',
+          );
+          const xmlTargets = Object.keys(zip.files).filter(
+            (name) =>
+              !zip.files[name].dir &&
+              (name === 'word/document.xml' ||
+                /^word\/header\d+\.xml$/.test(name) ||
+                /^word\/footer\d+\.xml$/.test(name) ||
+                name === 'word/footnotes.xml' ||
+                name === 'word/endnotes.xml'),
+          );
+          for (const fileName of xmlTargets) {
+            const raw = zip.file(fileName)?.asText();
+            if (raw) {
+              (zip as any).file(fileName, processXml(raw));
+            }
+          }
+          finalBuffer = zip.generate({ type: 'nodebuffer', compression: 'DEFLATE' });
+          console.log('[api] Contrato Word generado correctamente.');
+        } catch (error: unknown) {
+          const msg = (error as Error)?.message ?? String(error);
+          console.error('[api] Error al procesar .docx:', msg);
+          throw new BadRequestException(`Error al procesar la plantilla Word: ${msg}`);
+        }
 
         // Generar nombre de archivo base usando el nombre de la finca
         const sanitizedTitle = this.sanitizeFilename(finca.title || 'Finca');
@@ -1220,7 +1304,7 @@ export class FincasService {
         }
       } else {
         // --- PROCESAMIENTO PDF ---
-        const pdfDoc = await PDFDocument.load(pdfBytes);
+        const pdfDoc = await PDFDocument.load(templateBytes);
         const helveticaFont = await pdfDoc.embedFont('Helvetica');
         const form = pdfDoc.getForm();
         const allFields = form.getFields();
@@ -1409,9 +1493,35 @@ export class FincasService {
       ) {
         throw error;
       }
-      throw new BadRequestException(
-        `Error al generar contrato: ${error.message}`,
-      );
+      // Si hay dos copias de @nestjs/common, instanceof falla; re-lanzar 4xx de Nest igual.
+      const maybeHttp = error as { getStatus?: () => number };
+      if (typeof maybeHttp.getStatus === 'function') {
+        const st = maybeHttp.getStatus();
+        if (st >= 400 && st < 500) {
+          throw error;
+        }
+      }
+      const msg =
+        error instanceof Error ? error.message : String(error ?? 'Error');
+      const withProps = error as {
+        properties?: { id?: string; errors?: Array<{ message?: string }> };
+        cause?: unknown;
+      };
+      const propErrors = withProps.properties?.errors;
+      let detail = msg;
+      if (
+        msg === 'Multi error' &&
+        Array.isArray(propErrors) &&
+        propErrors.length
+      ) {
+        detail = propErrors
+          .map((e, i) => (e as { message?: string })?.message || `#${i + 1}`)
+          .join(' | ');
+      } else if (msg === 'Multi error' && withProps.cause) {
+        detail = String(withProps.cause);
+      }
+      console.error('[api] generateContract (detalle):', detail, error);
+      throw new BadRequestException(`Error al generar contrato: ${detail}`);
     }
   }
 
