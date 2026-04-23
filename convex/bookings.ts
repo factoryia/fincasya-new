@@ -279,6 +279,17 @@ export const create = mutation({
     isDirect: v.optional(v.boolean()),
     userEmail: v.optional(v.string()),
     purpose: v.optional(v.string()),
+    groupType: v.optional(v.string()),
+    isEvento: v.optional(v.boolean()),
+    detallesEvento: v.optional(
+      v.object({
+        extraSound: v.optional(v.string()),
+        liveMusic: v.optional(v.string()),
+        dj: v.optional(v.string()),
+        decoration: v.optional(v.string()),
+        additionalGuests: v.optional(v.string()),
+      })
+    ),
     reference: v.optional(v.string()),
     googleEventId: v.optional(v.string()),
     googleCalendarId: v.optional(v.string()),
@@ -411,6 +422,9 @@ export const create = mutation({
       observaciones: args.observaciones,
       city: args.city,
       purpose: args.purpose,
+      groupType: args.groupType,
+      isEvento: args.isEvento,
+      detallesEvento: args.detallesEvento,
       googleEventId: args.googleEventId,
       googleCalendarId: args.googleCalendarId,
       horaSalida: args.horaSalida,

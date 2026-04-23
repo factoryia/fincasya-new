@@ -56,6 +56,9 @@ export class BookingsSyncService {
       isDirect?: boolean | string;
       status?: string;
       personasAdicionales?: number | string;
+      groupType?: string;
+      isEvento?: boolean | string;
+      detallesEvento?: any;
       costoPersonasAdicionales?: number | string;
       costoPersonalServicio?: number | string;
       depositoGarantia?: number | string;
@@ -102,6 +105,7 @@ export class BookingsSyncService {
     const subtotalNum = parseNum(params.subtotal);
     const tieneMascotasBool = parseBool(params.tieneMascotas);
     const isDirectBool = parseBool(params.isDirect);
+    const isEventoBool = parseBool(params.isEvento);
     const normalizedStatus =
       typeof params.status === 'string' ? params.status.trim().toUpperCase() : undefined;
     const allowedStatuses = new Set([
@@ -209,6 +213,9 @@ export class BookingsSyncService {
       discountAmount: discountAmountNum,
       tieneMascotas: tieneMascotasBool,
       isDirect: isDirectBool,
+      groupType: params.groupType,
+      isEvento: isEventoBool,
+      detallesEvento: params.detallesEvento,
       status: bookingStatus,
     });
     
