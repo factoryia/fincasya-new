@@ -434,6 +434,29 @@ export default defineSchema({
     createdAt: v.number(),
   }).index('by_conversation', ['conversationId', 'createdAt']),
 
+  /** Plantillas rápidas configurables por intención para respuestas del inbox/IA. */
+  quickReplyTemplates: defineTable({
+    title: v.string(),
+    /** Trigger corto para slash command (ej: /mascotas). */
+    slashCommand: v.string(),
+    /** Intención de negocio detectada por IA para usar esta plantilla. */
+    intentKey: v.string(),
+    /** Texto exacto a enviar cuando mediaType = text. */
+    content: v.optional(v.string()),
+    /** text o audio. Audio usa mediaUrl en S3. */
+    mediaType: v.union(v.literal('text'), v.literal('audio')),
+    /** URL pública del audio en S3 cuando mediaType = audio. */
+    mediaUrl: v.optional(v.string()),
+    language: v.optional(v.string()),
+    active: v.optional(v.boolean()),
+    order: v.optional(v.number()),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index('by_intent', ['intentKey'])
+    .index('by_slash', ['slashCommand'])
+    .index('by_active', ['active']),
+
   ycloudProcessedEvents: defineTable({
     eventId: v.string(),
   }).index('by_event_id', ['eventId']),

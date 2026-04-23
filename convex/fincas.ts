@@ -1068,6 +1068,7 @@ export const searchAvailableByLocationAndDates = query({
     minCapacity: v.optional(v.number()),
     excludePropertyIds: v.optional(v.array(v.id('properties'))),
     sortByPrice: v.optional(v.boolean()),
+    allowsPets: v.optional(v.boolean()),
   },
   handler: async (ctx, args) => {
     const limit = args.limit ?? 30;
@@ -1086,6 +1087,13 @@ export const searchAvailableByLocationAndDates = query({
 
     if (args.minCapacity != null) {
       byLocation = byLocation.filter((p) => p.capacity >= args.minCapacity!);
+    }
+
+    // Solo mostrar fincas que aceptan mascotas cuando el usuario las lleva.
+    // Si allowsPets no está definido en la finca (campo ausente), se incluye igual
+    // ya que la mayoría lo acepta; solo se excluyen las que explícitamente lo prohíben.
+    if (args.allowsPets === true) {
+      byLocation = byLocation.filter((p) => p.allowsPets !== false);
     }
 
     const available = [];

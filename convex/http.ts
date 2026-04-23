@@ -68,6 +68,16 @@ http.route({
         audio?: { link?: string };
         video?: { link?: string; caption?: string };
         document?: { link?: string; caption?: string; filename?: string };
+        order?: {
+          catalog_id?: string;
+          product_items?: Array<{
+            product_retailer_id?: string;
+            quantity?: number;
+            item_price?: number;
+            currency?: string;
+          }>;
+          text?: string;
+        };
       };
       direction?: string;
     };
@@ -107,6 +117,34 @@ http.route({
           '[Documento]';
         msgType = 'document';
         mediaUrl = evt.document.link;
+      } else if (evt.type === 'order' && evt.order?.product_items?.length) {
+        const firstItem = evt.order.product_items[0];
+        const retailerId = firstItem?.product_retailer_id?.trim();
+        const qty = firstItem?.quantity ?? 1;
+        const catalogId = evt.order.catalog_id?.trim();
+        const baseText =
+          evt.order.text?.trim() || 'Seleccioné una finca del catálogo.';
+        content = retailerId
+          ? `${baseText}\nproduct_retailer_id: ${retailerId}\nquantity: ${qty}${catalogId ? `\ncatalog_id: ${catalogId}` : ''}`
+          : baseText;
+        msgType = 'text';
+      } else {
+        // Fallback defensivo: algunos proveedores envían product_items en raíz del evento.
+        const anyEvt = evt as any;
+        const productItems = Array.isArray(anyEvt?.product_items)
+          ? anyEvt.product_items
+          : [];
+        if (productItems.length > 0) {
+          const firstItem = productItems[0];
+          const retailerId = String(firstItem?.product_retailer_id ?? '').trim();
+          const qty = Number(firstItem?.quantity ?? 1);
+          const catalogId = String(anyEvt?.catalog_id ?? '').trim();
+          const text = String(anyEvt?.text ?? '').trim() || 'Seleccioné una finca del catálogo.';
+          content = retailerId
+            ? `${text}\nproduct_retailer_id: ${retailerId}\nquantity: ${qty}${catalogId ? `\ncatalog_id: ${catalogId}` : ''}`
+            : text;
+          msgType = 'text';
+        }
       }
 
       const normalizedContent = String(content || "").trim();

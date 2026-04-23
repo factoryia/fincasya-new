@@ -1,5 +1,5 @@
 import { v } from "convex/values";
-import { query, mutation } from "./_generated/server";
+import { query, mutation, internalMutation } from "./_generated/server";
 import { internal } from "./_generated/api";
 import type { Id } from "./_generated/dataModel";
 
@@ -64,6 +64,40 @@ export const getProductRetailerIdsForProperties = query({
       }
     }
     return result;
+  },
+});
+
+/**
+ * Buscar una finca por product_retailer_id (opcionalmente acotando por whatsappCatalogId de Meta).
+ */
+export const getPropertyByRetailerId = query({
+  args: {
+    productRetailerId: v.string(),
+    whatsappCatalogId: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    const needle = args.productRetailerId.trim();
+    if (!needle) return null;
+
+    const links = await ctx.db.query("propertyWhatsAppCatalog").collect();
+    const matches = links.filter((l) => l.productRetailerId === needle);
+    if (!matches.length) return null;
+
+    for (const match of matches) {
+      if (args.whatsappCatalogId) {
+        const cat = await ctx.db.get(match.catalogId);
+        if (!cat || cat.whatsappCatalogId !== args.whatsappCatalogId) continue;
+      }
+      const property = await ctx.db.get(match.propertyId);
+      if (property) {
+        return {
+          propertyId: property._id,
+          title: property.title,
+          slug: property.slug ?? property.code ?? property._id,
+        };
+      }
+    }
+    return null;
   },
 });
 
@@ -196,5 +230,24 @@ export const setPropertyCatalogs = mutation({
       });
     }
     return args.propertyId;
+  },
+});
+
+/** Elimina vínculo roto finca-catálogo (uso interno desde acciones Node). */
+export const detachBrokenPropertyCatalogLink = internalMutation({
+  args: {
+    propertyId: v.id("properties"),
+    catalogId: v.id("whatsappCatalogs"),
+  },
+  handler: async (ctx, args) => {
+    const row = await ctx.db
+      .query("propertyWhatsAppCatalog")
+      .withIndex("by_property_and_catalog", (q) =>
+        q.eq("propertyId", args.propertyId).eq("catalogId", args.catalogId)
+      )
+      .unique();
+
+    if (!row) return;
+    await ctx.db.delete(row._id);
   },
 });

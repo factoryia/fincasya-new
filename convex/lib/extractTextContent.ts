@@ -3,11 +3,12 @@ import { generateText } from "ai";
 import type { StorageActionWriter } from "convex/server";
 import { assert } from "convex-helpers";
 import type { Id } from "../_generated/dataModel";
+import { CONVEX_OPENAI_CHAT_MODEL } from "./openaiModel";
 
 const AI_MODELS = {
-  image: openai.chat("gpt-5-mini"),
-  pdf: openai.chat("gpt-4o"),
-  html: openai.chat("gpt-4o"),
+  image: openai.chat(CONVEX_OPENAI_CHAT_MODEL),
+  pdf: openai.chat(CONVEX_OPENAI_CHAT_MODEL),
+  html: openai.chat(CONVEX_OPENAI_CHAT_MODEL),
 };
 
 const SUPPORTED_IMAGE_TYPES = [

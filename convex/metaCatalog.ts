@@ -76,6 +76,17 @@ export const testMetaCatalogToken = action({
 
 const GRAPH_API_BASE = 'https://graph.facebook.com/v19.0';
 
+function isMetaMissingObjectError(rawText: string): boolean {
+  try {
+    const data = JSON.parse(rawText) as {
+      error?: { code?: number; error_subcode?: number };
+    };
+    return data.error?.code === 100 && data.error?.error_subcode === 33;
+  } catch {
+    return false;
+  }
+}
+
 /** URL base para enlace de producto. Configurar CATALOG_PRODUCT_BASE_URL si el frontend usa otra ruta (ej. https://fincasya.cloud/fincas/). */
 const PRODUCT_BASE_URL =
   process.env.CATALOG_PRODUCT_BASE_URL ||
@@ -266,6 +277,7 @@ export const syncPropertyToAllCatalogs = internalAction({
         propertyId: args.propertyId,
       },
     )) as Array<{
+      catalogId: Id<'whatsappCatalogs'>;
       productRetailerId: string;
       whatsappCatalogId: string | null;
     }>;
@@ -291,7 +303,31 @@ export const syncPropertyToAllCatalogs = internalAction({
         }),
       });
       if (!res.ok) {
-        console.error('Meta items_batch UPDATE error:', await res.text());
+        const rawText = await res.text();
+        if (isMetaMissingObjectError(rawText)) {
+          const detachBrokenLink = (internal as Record<string, any>)[
+            'propertyWhatsAppCatalog'
+          ]?.['detachBrokenPropertyCatalogLink'];
+          if (!detachBrokenLink) {
+            console.warn(
+              'Missing internal mutation propertyWhatsAppCatalog.detachBrokenPropertyCatalogLink',
+            );
+            continue;
+          }
+          await ctx.runMutation(
+            detachBrokenLink,
+            {
+              propertyId: args.propertyId,
+              catalogId: link.catalogId,
+            },
+          );
+          console.warn(
+            'Meta catalog link removed (object missing or without permission):',
+            link.whatsappCatalogId,
+          );
+          continue;
+        }
+        console.error('Meta items_batch UPDATE error:', rawText);
       }
     }
   },
