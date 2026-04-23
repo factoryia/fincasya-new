@@ -313,6 +313,7 @@ export class FincasService {
       link: string;
       image_link: string;
       additional_image_link: string;
+      'video[0].url': string;
       price: string;
       availability: string;
       condition: string;
@@ -334,6 +335,7 @@ export class FincasService {
       link: string;
       image_link: string;
       additional_image_link: string;
+      'video[0].url': string;
       price: string;
       availability: string;
       condition: string;
@@ -362,6 +364,9 @@ export class FincasService {
           .replace(/--+/g, '-'); // Quitar guiones repetidos
       }
 
+      const videoUrl =
+        String((p as { video?: string }).video ?? '').trim() || '';
+
       rows.push({
         id,
         title,
@@ -369,6 +374,7 @@ export class FincasService {
         link: `https://fincasya.com/fincas/${slug}`,
         image_link: images[0],
         additional_image_link: images.slice(1).join(','),
+        'video[0].url': videoUrl,
         price: `${priceBase} COP`,
         availability: 'in stock',
         condition: 'new',
@@ -377,7 +383,7 @@ export class FincasService {
     return rows;
   }
 
-  /** Genera el CSV del catÃ¡logo para Meta (columnas requeridas: id, title, description, link, image_link, price, availability, condition). */
+  /** Genera el CSV del catálogo para Meta (incluye video[0].url cuando la finca tiene video; URL directa al archivo, como image_link). */
   async getCatalogFeedCsv(): Promise<string> {
     const rows = await this.getCatalogFeedRows();
     const escape = (s: string) => {
@@ -391,6 +397,7 @@ export class FincasService {
       'link',
       'image_link',
       'additional_image_link',
+      'video[0].url',
       'price',
       'availability',
       'condition',
@@ -405,6 +412,7 @@ export class FincasService {
           r.link,
           r.image_link,
           r.additional_image_link,
+          r['video[0].url'],
           r.price,
           r.availability,
           r.condition,
