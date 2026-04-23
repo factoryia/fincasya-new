@@ -3204,10 +3204,12 @@ export const maybeSendSingleFincaCatalogForUserMessage = internalAction({
 });
 
 const CATALOG_LIMIT = 30;
+/** Cuántas fichas de catálogo enviar por separado (mensajes interactive type product, no product_list). */
+const CATALOG_SEND_BATCH = 3;
 
 /**
  * Si el mensaje incluye ubicación + fechas (o "fin de semana") o pide "otras opciones",
- * busca hasta 3 fincas disponibles y envía el catálogo. Guarda en la conversación para poder enviar "otras opciones" después.
+ * busca fincas disponibles y envía hasta CATALOG_SEND_BATCH fichas, una por mensaje. Guarda en la conversación para "otras opciones".
  */
 export const maybeSendCatalogForUserMessage = internalAction({
   args: {
@@ -3356,6 +3358,8 @@ export const maybeSendCatalogForUserMessage = internalAction({
       return { sent: false, location };
     }
 
+    const fincasToSend = fincas.slice(0, CATALOG_SEND_BATCH);
+
     let chosenCatalog = await ctx.runQuery(api.whatsappCatalogs.getByLocationKeyword, {
       location,
     });
@@ -3372,7 +3376,7 @@ export const maybeSendCatalogForUserMessage = internalAction({
       api.propertyWhatsAppCatalog.getProductRetailerIdsForProperties,
       {
         catalogId: chosenCatalog._id,
-        propertyIds: fincas.map((f: any) => f._id),
+        propertyIds: fincasToSend.map((f: any) => f._id),
       }
     );
     if (productEntries.length === 0) {
@@ -3381,18 +3385,18 @@ export const maybeSendCatalogForUserMessage = internalAction({
         chosenCatalog = defaultCatalog;
         productEntries = await ctx.runQuery(
           api.propertyWhatsAppCatalog.getProductRetailerIdsForProperties,
-          { catalogId: chosenCatalog._id, propertyIds: fincas.map((f: any) => f._id) }
+          { catalogId: chosenCatalog._id, propertyIds: fincasToSend.map((f: any) => f._id) }
         );
       }
     }
     // Per-finca fallback: use catalog productRetailerId if registered, else use the Convex ID.
     // This ensures ALL found fincas appear in the catalog, not just those with catalog entries.
     const catalogEntryMap = new Map(productEntries.map((e: any) => [e.propertyId as string, e.productRetailerId]));
-    const productRetailerIds = fincas.map((f: any) => catalogEntryMap.get(f._id) ?? (f._id as string));
+    const productRetailerIds = fincasToSend.map((f: any) => catalogEntryMap.get(f._id) ?? (f._id as string));
     if (catalogEntryMap.size === 0) {
       console.log("[catalog-search] sin entries en propertyWhatsAppCatalog, usando IDs de Convex como fallback:", productRetailerIds.length);
-    } else if (catalogEntryMap.size < fincas.length) {
-      console.log("[catalog-search] fallback parcial: ", catalogEntryMap.size, "con entrada,", fincas.length - catalogEntryMap.size, "con ID Convex");
+    } else if (catalogEntryMap.size < fincasToSend.length) {
+      console.log("[catalog-search] fallback parcial: ", catalogEntryMap.size, "con entrada,", fincasToSend.length - catalogEntryMap.size, "con ID Convex");
     }
 
     const bodyText = excludePropertyIds?.length
@@ -3400,18 +3404,24 @@ export const maybeSendCatalogForUserMessage = internalAction({
       : usedInferredDates
         ? `Te comparto algunas fincas disponibles en ${location}:`
         : "Estas son las fincas disponibles para tus fechas:";
+    const followUpProductBody = excludePropertyIds?.length
+      ? "Otra opción disponible:"
+      : "Aquí tienes otra opción para tus fechas:";
 
     try {
-      await ctx.runAction(internal.ycloud.sendWhatsAppCatalogList, {
-        to: args.phone,
-        productRetailerIds,
-        bodyText,
-        catalogId: chosenCatalog.whatsappCatalogId,
-        wamid: args.wamid,
-      });
+      for (let i = 0; i < fincasToSend.length; i++) {
+        const perBody = i === 0 ? bodyText : followUpProductBody;
+        await ctx.runAction(internal.ycloud.sendWhatsAppCatalogList, {
+          to: args.phone,
+          productRetailerIds: [productRetailerIds[i]],
+          bodyText: perBody,
+          catalogId: chosenCatalog.whatsappCatalogId,
+          wamid: i === 0 ? args.wamid : undefined,
+        });
+      }
     } catch (err) {
       console.error("[catalog-search] Error enviando catálogo interactivo, fallback a texto:", err);
-      const top = fincas.slice(0, 5);
+      const top = fincas.slice(0, CATALOG_SEND_BATCH);
       const lines = top.map((f: any, idx: number) => {
         const price = Number(f.priceBase ?? 0);
         const priceLabel =
@@ -3438,7 +3448,7 @@ export const maybeSendCatalogForUserMessage = internalAction({
 
     await ctx.runMutation(internal.conversations.setLastCatalogSent, {
       conversationId: args.conversationId,
-      propertyIds: fincas.map((f: any) => f._id),
+      propertyIds: fincasToSend.map((f: any) => f._id),
       location,
       fechaEntrada,
       fechaSalida,
@@ -3446,23 +3456,24 @@ export const maybeSendCatalogForUserMessage = internalAction({
       sortByPrice,
     });
 
-    await ctx.runMutation(internal.messages.insertAssistantMessageWithMedia, {
-      conversationId: args.conversationId,
-      content: bodyText,
-      type: "product",
-      metadata: {
-        catalogCount: productRetailerIds.length,
-        catalog: fincas.slice(0, 3).map((f: any) => ({
-          title: f.title,
-          image: f.image,
-          price: f.priceBase,
-          slug: f.slug || f.code || f._id,
-        }))
-      },
-      createdAt: Date.now(),
-    });
+    for (const f of fincasToSend) {
+      await ctx.runMutation(internal.messages.insertAssistantMessageWithMedia, {
+        conversationId: args.conversationId,
+        content: `Catálogo enviado: ${f.title}`,
+        type: "product",
+        metadata: {
+          product: {
+            title: f.title,
+            image: f.image || "",
+            price: f.priceBase,
+            slug: f.slug || f.code || f._id,
+          },
+        },
+        createdAt: Date.now(),
+      });
+    }
 
-    return { sent: true, location, fincasCount: productRetailerIds.length };
+    return { sent: true, location, fincasCount: fincasToSend.length };
   },
 });
 
@@ -3622,6 +3633,34 @@ export const extractContractData = action({
       // Normalizar fechas de entrada/salida inmediatamente
       parsed.checkInDate = fixYear(parsed.entrada || parsed.checkInDate || "");
       parsed.checkOutDate = fixYear(parsed.salida || parsed.checkOutDate || "");
+
+      // Si el rango quedó en el pasado (ej. 13 abr cuando ya pasó), avanzar ambas fechas un año
+      // hasta que el check-in sea hoy o futuro en Colombia (misma duración en noches).
+      {
+        const todayBogotaStr = new Intl.DateTimeFormat("en-CA", {
+          timeZone: "America/Bogota",
+        }).format(new Date());
+        const addOneYearToIso = (iso: string): string => {
+          const [y, m, d] = iso.split("-").map(Number);
+          return `${y + 1}-${String(m).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+        };
+        let inStr = parsed.checkInDate;
+        let outStr = parsed.checkOutDate;
+        if (
+          inStr &&
+          outStr &&
+          /^\d{4}-\d{2}-\d{2}$/.test(inStr) &&
+          /^\d{4}-\d{2}-\d{2}$/.test(outStr)
+        ) {
+          let guard = 0;
+          while (inStr < todayBogotaStr && guard++ < 6) {
+            inStr = addOneYearToIso(inStr);
+            outStr = addOneYearToIso(outStr);
+          }
+          parsed.checkInDate = inStr;
+          parsed.checkOutDate = outStr;
+        }
+      }
 
       // Resolución de propiedad
       let resolvedPropertyId = String(parsed.propertyId || "");

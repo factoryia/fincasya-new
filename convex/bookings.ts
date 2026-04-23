@@ -2,6 +2,55 @@ import { v } from 'convex/values';
 import { query, mutation } from './_generated/server';
 import { api, internal } from './_generated/api';
 
+/** Fecha calendario YYYY-MM-DD en hora de Colombia (negocio). */
+function calendarDateColombia(ms: number): string {
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'America/Bogota',
+  }).format(new Date(ms));
+}
+
+function todayColombia(): string {
+  return calendarDateColombia(Date.now());
+}
+
+/**
+ * Impide reservas con entrada o salida ya pasadas (calendario Colombia) o rango inválido.
+ */
+function assertBookingDatesAreFuture(args: {
+  fechaEntrada: number;
+  fechaSalida: number;
+  fechaCheckOut?: number;
+}): void {
+  if (
+    !Number.isFinite(args.fechaEntrada) ||
+    !Number.isFinite(args.fechaSalida)
+  ) {
+    throw new Error('Las fechas de la reserva no son válidas.');
+  }
+  const salidaEfectiva = args.fechaCheckOut ?? args.fechaSalida;
+  if (!Number.isFinite(salidaEfectiva)) {
+    throw new Error('La fecha de salida no es válida.');
+  }
+  if (salidaEfectiva <= args.fechaEntrada) {
+    throw new Error(
+      'La fecha de salida debe ser posterior a la fecha de entrada.',
+    );
+  }
+  const today = todayColombia();
+  const diaEntrada = calendarDateColombia(args.fechaEntrada);
+  const diaSalida = calendarDateColombia(salidaEfectiva);
+  if (diaEntrada < today) {
+    throw new Error(
+      'La fecha de entrada no puede ser anterior a hoy (hora Colombia).',
+    );
+  }
+  if (diaSalida < today) {
+    throw new Error(
+      'La fecha de salida no puede ser anterior a hoy (hora Colombia).',
+    );
+  }
+}
+
 // ============ QUERIES ============
 
 /**
@@ -308,11 +357,19 @@ export const create = mutation({
   handler: async (ctx, args) => {
     const now = Date.now();
 
+    assertBookingDatesAreFuture({
+      fechaEntrada: args.fechaEntrada,
+      fechaSalida: args.fechaSalida,
+      fechaCheckOut: args.fechaCheckOut,
+    });
+
+    const salidaParaDisponibilidad = args.fechaCheckOut ?? args.fechaSalida;
+
     // Verificar disponibilidad antes de crear
     const availability = await ctx.runQuery(api.bookings.checkAvailability, {
       propertyId: args.propertyId,
       fechaEntrada: args.fechaEntrada,
-      fechaSalida: args.fechaSalida,
+      fechaSalida: salidaParaDisponibilidad,
     });
 
     if (!availability.available) {
@@ -426,7 +483,7 @@ export const create = mutation({
       propertyId: args.propertyId,
       bookingId,
       fechaEntrada: args.fechaEntrada,
-      fechaSalida: args.fechaSalida,
+      fechaSalida: salidaParaDisponibilidad,
       blocked: true,
       reason: 'Reserva confirmada',
       googleEventId: args.googleEventId,

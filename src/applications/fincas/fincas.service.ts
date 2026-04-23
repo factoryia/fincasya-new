@@ -303,7 +303,26 @@ export class FincasService {
   }
 
   /**
-   * Lista de fincas para feed de catÃ¡logo (Meta/WhatsApp). Solo incluye las que tienen al menos una imagen.
+   * Texto de características para el feed Meta: emojis del ícono + nombre (como en el admin).
+   */
+  private formatCatalogFeaturesBlock(
+    features: Array<{ name?: string; emoji?: string | null }> | undefined,
+  ): string {
+    if (!features?.length) return '';
+    const lines = features
+      .map((f) => {
+        const name = String(f.name ?? '').trim();
+        if (!name) return '';
+        const em = String(f.emoji ?? '').trim();
+        return em ? `${em} ${name}` : `• ${name}`;
+      })
+      .filter(Boolean);
+    if (!lines.length) return '';
+    return `\n\n${lines.join('\n')}`;
+  }
+
+  /**
+   * Lista de fincas para feed de catálogo (Meta/WhatsApp). Solo incluye las que tienen al menos una imagen.
    */
   async getCatalogFeedRows(): Promise<
     {
@@ -345,9 +364,14 @@ export class FincasService {
       if (images.length === 0) continue;
       const id = String((p as { _id: string })._id);
       const title = ((p as { title?: string }).title ?? 'Finca').slice(0, 200);
-      const description = ((p as { description?: string }).description ?? '')
-        .slice(0, 9999)
-        .replace(/<[^>]*>/g, '');
+      const rawDescription = ((p as { description?: string }).description ?? '')
+        .replace(/<[^>]*>/g, '')
+        .trim();
+      const features = (p as { features?: { name?: string; emoji?: string | null }[] })
+        .features;
+      const description = (
+        rawDescription + this.formatCatalogFeaturesBlock(features)
+      ).slice(0, 9999);
       const priceBase = (p as { priceBase?: number }).priceBase ?? 0;
 
       // Usar el slug si existe, de lo contrario generar uno exactamente igual al frontend
