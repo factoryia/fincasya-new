@@ -229,6 +229,17 @@ export default defineSchema({
     observaciones: v.optional(v.string()),
     city: v.optional(v.string()),
     purpose: v.optional(v.string()),
+    groupType: v.optional(v.string()),
+    isEvento: v.optional(v.boolean()),
+    detallesEvento: v.optional(
+      v.object({
+        extraSound: v.optional(v.string()),
+        liveMusic: v.optional(v.string()),
+        dj: v.optional(v.string()),
+        decoration: v.optional(v.string()),
+        additionalGuests: v.optional(v.string()),
+      })
+    ),
     isDirect: v.optional(v.boolean()),
     isDirectBooking: v.optional(v.boolean()),
     googleEventId: v.optional(v.string()),

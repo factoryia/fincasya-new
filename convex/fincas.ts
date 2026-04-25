@@ -735,7 +735,7 @@ export const calculateStayPrice = query({
     const petServiceFee = Math.max(0, numeroMascotas - 2) * 30000;
     const petTotal = petRefundable + petServiceFee;
 
-    const serviceStaffFee = args.incluirServicio ? (property.serviceStaffPrice || 0) : 0;
+    const serviceStaffFee = args.incluirServicio ? (property.serviceStaffPrice || 0) * Math.max(1, nights.length) : 0;
     
     return {
       total: total + petTotal + serviceStaffFee,
