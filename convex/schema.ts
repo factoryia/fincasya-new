@@ -232,13 +232,16 @@ export default defineSchema({
     groupType: v.optional(v.string()),
     isEvento: v.optional(v.boolean()),
     detallesEvento: v.optional(
-      v.object({
-        extraSound: v.optional(v.string()),
-        liveMusic: v.optional(v.string()),
-        dj: v.optional(v.string()),
-        decoration: v.optional(v.string()),
-        additionalGuests: v.optional(v.string()),
-      })
+      v.union(
+        v.null(),
+        v.object({
+          extraSound: v.optional(v.string()),
+          liveMusic: v.optional(v.string()),
+          dj: v.optional(v.string()),
+          decoration: v.optional(v.string()),
+          additionalGuests: v.optional(v.string()),
+        }),
+      )
     ),
     isDirect: v.optional(v.boolean()),
     isDirectBooking: v.optional(v.boolean()),
