@@ -215,7 +215,7 @@ export class BookingsSyncService {
       isDirect: isDirectBool,
       groupType: params.groupType,
       isEvento: isEventoBool,
-      detallesEvento: params.detallesEvento,
+      detallesEvento: params.detallesEvento ?? undefined,
       status: bookingStatus,
     });
     
