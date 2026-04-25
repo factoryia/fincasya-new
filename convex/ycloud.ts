@@ -122,6 +122,19 @@ function humanReplyPacingMs(visibleText: string): number {
   return 60 + Math.floor(Math.random() * 80);
 }
 
+function dayKeyBogota(timestamp: number): string {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/Bogota",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(new Date(timestamp));
+}
+
+function isSameBogotaDay(a: number, b: number): boolean {
+  return dayKeyBogota(a) === dayKeyBogota(b);
+}
+
 /**
  * Deduplicación de eventos YCloud (reintentos).
  */
@@ -166,6 +179,7 @@ export const getOrCreateContact = internalMutation({
 export const getOrCreateConversation = internalMutation({
   args: { contactId: v.id("contacts") },
   handler: async (ctx, args) => {
+    const now = Date.now();
     const all = await ctx.db
       .query("conversations")
       .withIndex("by_contact", (q) => q.eq("contactId", args.contactId))
@@ -174,16 +188,25 @@ export const getOrCreateConversation = internalMutation({
 
     const active = all.find((c) => c.status === "ai" || c.status === "human");
     if (active) {
-      return { conversationId: active._id, isNew: false };
+      const activeTs = Number(active.lastMessageAt ?? active.createdAt ?? 0);
+      if (activeTs > 0 && isSameBogotaDay(activeTs, now)) {
+        return { conversationId: active._id, isNew: false };
+      }
+      // Día distinto: cerramos el hilo para evitar arrastrar contexto viejo.
+      await ctx.db.patch(active._id, { status: "resolved" });
     }
 
     const latestResolved = all.find((c) => c.status === "resolved");
     if (latestResolved) {
-      await ctx.db.patch(latestResolved._id, { status: "ai" });
-      return { conversationId: latestResolved._id, isNew: false };
+      const resolvedTs = Number(
+        latestResolved.lastMessageAt ?? latestResolved.createdAt ?? 0
+      );
+      if (resolvedTs > 0 && isSameBogotaDay(resolvedTs, now)) {
+        await ctx.db.patch(latestResolved._id, { status: "ai" });
+        return { conversationId: latestResolved._id, isNew: false };
+      }
     }
 
-    const now = Date.now();
     const conversationId = await ctx.db.insert("conversations", {
       contactId: args.contactId,
       channel: "whatsapp",
@@ -1142,10 +1165,10 @@ En FincasYa.com tu alquiler siempre es seguro, respaldado y con total tranquilid
           if (cleaned.length >= 20) {
             replyText = cleaned;
           } else if (singleFincaSent && fincaTitle) {
-            replyText = `Te envié la ficha de ${fincaTitle}. ¿Confirmas la reserva? ✅`;
+            replyText = `Te envié la ficha de ${fincaTitle}. Cuéntame fechas y número de personas para validar disponibilidad y valor final. 📅👥`;
           } else if (fincaTitle) {
-            // Catálogo múltiple ya mostrado antes; finca elegida por nombre: confirmamos directo.
-            replyText = `¡Excelente elección, ${fincaTitle}! 🏡 ¿Confirmas la reserva? Para formalizarla necesito nombre completo, cédula, teléfono y correo. 📝`;
+            // Catálogo múltiple ya mostrado antes; finca elegida por nombre: primero cotizar.
+            replyText = `¡Excelente elección, ${fincaTitle}! 🏡 Para avanzar, compárteme fechas y número de personas, y te confirmo disponibilidad con el valor exacto. 📅👥`;
           } else {
             replyText = "Cuéntame fechas y número de personas para continuar. 📅👥";
           }
