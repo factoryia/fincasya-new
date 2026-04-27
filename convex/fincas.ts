@@ -1089,11 +1089,11 @@ export const searchAvailableByLocationAndDates = query({
       byLocation = byLocation.filter((p) => p.capacity >= args.minCapacity!);
     }
 
-    // Solo mostrar fincas que aceptan mascotas cuando el usuario las lleva.
-    // Si allowsPets no está definido en la finca (campo ausente), se incluye igual
-    // ya que la mayoría lo acepta; solo se excluyen las que explícitamente lo prohíben.
+    // Si el cliente llevará mascotas, mostrar solo fincas que explícitamente las permitan.
+    // Evita recomendar propiedades ambiguas (allowsPets undefined) que luego pueden
+    // terminar rechazando mascotas en el flujo de cotización.
     if (args.allowsPets === true) {
-      byLocation = byLocation.filter((p) => p.allowsPets !== false);
+      byLocation = byLocation.filter((p) => p.allowsPets === true);
     }
 
     const available = [];

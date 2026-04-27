@@ -115,24 +115,15 @@ export function isOutOfDomainMessage(userMessage: string): boolean {
   return mathExpression.test(normalized) || offTopicQuestion.test(normalized);
 }
 
+/** Ventana de tiempo para mantener conversaciones activas sin re-saludar al cliente. */
+const SESSION_ACTIVE_TTL_MS = 24 * 60 * 60 * 1000; // 24 horas: conversación activa reutilizable
+const SESSION_REACTIVATE_TTL_MS = 72 * 60 * 60 * 1000; // 72 horas: cliente que regresa, retomar con seguimiento
+
 /** Retraso breve y aleatorio antes de enviar respuesta de texto (ritmo más humano; complementa el debounce). */
 function humanReplyPacingMs(visibleText: string): number {
   const len = (visibleText ?? "").trim().length;
   if (len < 72) return 30 + Math.floor(Math.random() * 50);
   return 60 + Math.floor(Math.random() * 80);
-}
-
-function dayKeyBogota(timestamp: number): string {
-  return new Intl.DateTimeFormat("en-CA", {
-    timeZone: "America/Bogota",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  }).format(new Date(timestamp));
-}
-
-function isSameBogotaDay(a: number, b: number): boolean {
-  return dayKeyBogota(a) === dayKeyBogota(b);
 }
 
 /**
@@ -174,7 +165,9 @@ export const getOrCreateContact = internalMutation({
 
 /**
  * Obtener o crear conversación para un contacto.
- * Si hay una activa (ai o human) se reutiliza; si la más reciente está resuelta, se reactiva a "ai".
+ * - Si hay una activa (ai o human) dentro de las últimas 24h, se reutiliza.
+ * - Si la más reciente está resuelta y fue hace menos de 72h, se reactiva (isReactivated=true) para usar mensaje de seguimiento.
+ * - Si pasó más tiempo, se crea conversación nueva (isNew=true).
  */
 export const getOrCreateConversation = internalMutation({
   args: { contactId: v.id("contacts") },
@@ -189,10 +182,11 @@ export const getOrCreateConversation = internalMutation({
     const active = all.find((c) => c.status === "ai" || c.status === "human");
     if (active) {
       const activeTs = Number(active.lastMessageAt ?? active.createdAt ?? 0);
-      if (activeTs > 0 && isSameBogotaDay(activeTs, now)) {
-        return { conversationId: active._id, isNew: false };
+      const withinActiveWindow = activeTs > 0 && (now - activeTs) < SESSION_ACTIVE_TTL_MS;
+      if (withinActiveWindow) {
+        return { conversationId: active._id, isNew: false, isReactivated: false };
       }
-      // Día distinto: cerramos el hilo para evitar arrastrar contexto viejo.
+      // Fuera de ventana activa: cerrar para evitar arrastrar contexto obsoleto.
       await ctx.db.patch(active._id, { status: "resolved" });
     }
 
@@ -201,9 +195,11 @@ export const getOrCreateConversation = internalMutation({
       const resolvedTs = Number(
         latestResolved.lastMessageAt ?? latestResolved.createdAt ?? 0
       );
-      if (resolvedTs > 0 && isSameBogotaDay(resolvedTs, now)) {
+      const withinReactivateWindow = resolvedTs > 0 && (now - resolvedTs) < SESSION_REACTIVATE_TTL_MS;
+      if (withinReactivateWindow) {
         await ctx.db.patch(latestResolved._id, { status: "ai" });
-        return { conversationId: latestResolved._id, isNew: false };
+        // isReactivated=true: cliente que regresó → usar mensaje de seguimiento, NO bienvenida desde cero.
+        return { conversationId: latestResolved._id, isNew: false, isReactivated: true };
       }
     }
 
@@ -216,8 +212,7 @@ export const getOrCreateConversation = internalMutation({
     });
 
     // La bienvenida va por plantilla YCloud (elegida del listado), no por texto falso en BD.
-
-    return { conversationId, isNew: true };
+    return { conversationId, isNew: true, isReactivated: false };
   },
 });
 
@@ -261,7 +256,7 @@ export const processInboundMessage = internalAction({
       { phone: args.phone, name: args.name }
     );
 
-    const { conversationId, isNew } = await ctx.runMutation(
+    const { conversationId, isReactivated } = await ctx.runMutation(
       internal.ycloud.getOrCreateConversation,
       { contactId }
     );
@@ -883,6 +878,7 @@ Fincas disponibles: ${fincaNames}`,
               wamid: args.wamid,
               conversationId,
               userMessage: currentMessageText,
+              isReactivated: isReactivated ?? false,
             }
           );
           quickReplySent = quickReply?.sent ?? false;
@@ -1021,6 +1017,7 @@ Fincas disponibles: ${fincaNames}`,
           clientDeliveredPersonalData,
           contractDataBlob: clientDeliveredPersonalData ? contractDataBlob : undefined,
           imageUrl: args.type === "image" && args.mediaUrl ? args.mediaUrl : undefined,
+          isReactivated: isReactivated ?? false,
         }
       );
 
@@ -1397,6 +1394,8 @@ export const generateReplyWithRagAndFincas = internalAction({
     contractDataBlob: v.optional(v.string()),
     /** URL de la imagen enviada por el usuario (para análisis visual). */
     imageUrl: v.optional(v.string()),
+    /** True si el cliente regresó después de una conversación previa (dentro de la ventana de reactivación). No saludar desde cero. */
+    isReactivated: v.optional(v.boolean()),
   },
   handler: async (ctx, args): Promise<string> => {
     const ragResult = await rag.search(ctx, {
@@ -1583,8 +1582,8 @@ ${breakdown}
     });
 
     // ── INYECTAR PLANTILLAS ─────────────────────────────────────────
-    // Cargar todas las plantillas disponibles (quick-reply de BD + WhatsApp oficiales)
-    // y pasarlas al system prompt para que la IA elija la correcta y la copie VERBATIM.
+    // Plantillas = contexto de negocio (hechos, tono aproximado). La IA parafrasea
+    // salvo bloques que el prompt del consultor marca como texto legal fijo (PASO 4/5, CONTRACT_PDF).
     let templatesSection = "";
     try {
       const dbTemplates = await ctx.runQuery(api.quickReplyTemplates.listActive, {});
@@ -1594,7 +1593,7 @@ ${breakdown}
         const content = String(t.content || "").trim();
         if (!content) continue;
         dbBlocks.push(
-          `### intentKey: ${t.intentKey}\n### title: ${t.title}\n### slashCommand: /${t.slashCommand}\n--- TEXTO VERBATIM (copiar tal cual) ---\n${content}\n--- FIN ---`
+          `### intentKey: ${t.intentKey}\n### title: ${t.title}\n### slashCommand: /${t.slashCommand}\n--- REFERENCIA (contexto; parafrasear con tono humano, conservar montos y datos legales literales) ---\n${content}\n--- FIN REFERENCIA ---`
         );
       }
 
@@ -1609,7 +1608,7 @@ ${breakdown}
         const body = String(t.body || "").trim();
         if (!body) continue;
         waBlocks.push(
-          `### intentKey: ${t.name}\n### title: ${t.hint}\n### origen: WhatsApp oficial (${t.language})\n--- TEXTO VERBATIM (copiar tal cual) ---\n${body}\n--- FIN ---`
+          `### intentKey: ${t.name}\n### title: ${t.hint}\n### origen: WhatsApp oficial (${t.language})\n--- REFERENCIA (contexto; parafrasear con tono humano, conservar montos y datos legales literales) ---\n${body}\n--- FIN REFERENCIA ---`
         );
       }
 
@@ -1630,6 +1629,7 @@ ${breakdown}
       dynamicLocations: args.dynamicLocations,
       hasImage: !!args.imageUrl,
       templatesSection,
+      isReactivated: args.isReactivated ?? false,
     });
     // ── TTL de historial: solo incluir mensajes de las últimas 12 horas ──
     // Si han pasado más de 12h desde el último mensaje, el agente arranca
@@ -1692,6 +1692,8 @@ function formatFincasForPrompt(
     familyOnly?: boolean;
     serviceStaffMandatory?: boolean;
     serviceStaffPrice?: number;
+    isDirect?: boolean;
+    isDirectBooking?: boolean;
   }>
 ): string {
   if (!list?.length) return "";
@@ -1699,7 +1701,14 @@ function formatFincasForPrompt(
     n && n > 0 ? `$${n.toLocaleString("es-CO")}` : "N/A";
   return list
     .map((p) => {
-      const base = `- ${p.title} (ID: ${p._id}): ${p.description ?? ""} | Ubicación: ${p.location ?? "N/A"} | Capacidad: ${p.capacity ?? "N/A"} personas | Precio base/noche: ${money(p.priceBase)}`;
+      const propertyType =
+        p.isDirect === true || p.isDirectBooking === true
+          ? "🟢 Finca Propia (disponibilidad directa)"
+          : p.isDirect === false
+          ? "🔵 Finca de Propietario (disponibilidad a confirmar con propietario)"
+          : "";
+      const typeLine = propertyType ? ` | Tipo: ${propertyType}` : "";
+      const base = `- ${p.title} (ID: ${p._id}): ${p.description ?? ""} | Ubicación: ${p.location ?? "N/A"} | Capacidad: ${p.capacity ?? "N/A"} personas | Precio base/noche: ${money(p.priceBase)}${typeLine}`;
       const seasons: string[] = [];
       if (p.priceBaja && p.priceBaja > 0) seasons.push(`baja ${money(p.priceBaja)}`);
       if (p.priceMedia && p.priceMedia > 0) seasons.push(`media ${money(p.priceMedia)}`);
@@ -1710,7 +1719,8 @@ function formatFincasForPrompt(
         ? ` | Precios por temporada: ${seasons.join(", ")}`
         : "";
       const rules: string[] = [];
-      if (p.allowsPets === true) rules.push("✅ Permite mascotas (aplica depósito estándar $100k c/u)");
+      if (p.allowsPets === true)
+        rules.push("✅ Permite mascotas (1-2: depósito $100k c/u, desde la 3ra: +$30k c/u)");
       if (p.allowsPets === false) rules.push("❌ NO permite mascotas");
       if (p.allowsEventsContent === true) rules.push("✅ Permite sonido/eventos");
       if (p.allowsEventsContent === false) rules.push("❌ NO permite bafles ni sonido profesional");
@@ -1739,6 +1749,7 @@ function buildSystemPrompt(
     dynamicLocations?: string;
     hasImage?: boolean;
     templatesSection?: string;
+    isReactivated?: boolean;
   }
 ): string {
   let basePrompt = CONSULTANT_SYSTEM_PROMPT;
@@ -1807,11 +1818,27 @@ El usuario te ha enviado una imagen. DEBES analizarla visualmente:
 `
     : "";
 
+  const reactivatedHint = opts?.isReactivated
+    ? `
+---
+## 🔄 CLIENTE QUE REGRESA (RETOMAR CONVERSACIÓN)
+Este cliente ya tuvo una conversación previa con FincasYa.com y regresó después de un tiempo.
+
+**REGLAS OBLIGATORIAS:**
+- ❌ PROHIBIDO usar el saludo de bienvenida inicial ("¡Hola! Es un gusto saludarte. Te escribe Hernán...").
+- ❌ PROHIBIDO pedir de nuevo todos los datos de cero si ya aparecen en el historial.
+- ✅ Retoma la conversación de forma cálida y natural, como si continuaras donde se quedó.
+- ✅ Si el historial tiene datos previos (finca, fechas, personas), úsalos directamente.
+- ✅ Si no hay historial reciente, usa un mensaje breve de seguimiento. Ejemplo: "¡Hola de nuevo! ¿Te puedo ayudar con algo para tu próxima escapada? 🏡"
+- ✅ Si el cliente retoma preguntando por una finca o fechas específicas, responde directamente sin preámbulos largos.
+`
+    : "";
+
   const voiceHint = `
 ---
 ## 🎙️ MENSAJES DE VOZ (Transcripción)
-Si el mensaje del usuario empieza con "[Voz]", significa que fue transcrito automáticamente desde un audio de WhatsApp. 
-- Sé natural y amigable. 
+Si el mensaje del usuario empieza con "[Voz]", significa que fue transcrito automáticamente desde un audio de WhatsApp.
+- Sé natural y amigable.
 - Si la transcripción parece tener errores fonéticos (ej: nombres de fincas mal escritos), intenta inferir lo que el cliente quiso decir basándote en el catálogo.
 `;
 
@@ -1823,20 +1850,18 @@ Si el mensaje del usuario empieza con "[Voz]", significa que fue transcrito auto
     ? `
 
 ---
-## 📚 BIBLIOTECA DE PLANTILLAS (COPIA VERBATIM)
+## 📚 BIBLIOTECA DE PLANTILLAS (CONTEXTO + INTENCIÓN)
 
-⚠️ **REGLA SUPREMA — NO NEGOCIABLE:**
-Cuando el mensaje del cliente encaje con el **intent** o la **temática** de UNA de las plantillas listadas abajo, DEBES responder copiando su texto COMPLETAMENTE VERBATIM, palabra por palabra, emoji por emoji, salto de línea por salto de línea. **PROHIBIDO:**
-- Cambiar ni una sola palabra, emoji o signo de puntuación.
-- Añadir saludos, despedidas, aclaraciones o frases introductorias antes o después del texto de la plantilla.
-- Resumir, parafrasear, adaptar el tono ni "mejorar" la redacción.
-- Combinar fragmentos de varias plantillas en una sola respuesta (elige UNA sola plantilla por turno).
+Las entradas siguientes son **material de referencia** aprobado por FincasYa: mismos hechos, precios, pasos y restricciones que debe conocer el cliente. **NO** estás obligado a copiar el párrafo entero.
 
-**CÓMO ELEGIR:**
-1. Lee el \`intentKey\` y el \`title\` / \`hint\` de cada plantilla — ahí te dice cuándo usarla.
-2. Si más de una calza, escoge la más específica al contexto real del cliente.
-3. Si **NINGUNA** plantilla calza claramente con lo que el cliente está pidiendo, responde de forma natural siguiendo las reglas del PROMPT DEL CONSULTOR. En ese caso NO inventes ni uses una plantilla "parecida".
-4. Cuando uses una plantilla, responde SOLO con su texto — nada más.
+**CÓMO USARLAS:**
+1. Identifica la **intención** del cliente (mascotas, check-in, pago, llegada, propietario, etc.) y elige **una sola** entrada cuyo \`intentKey\` / \`title\` encaje mejor.
+2. Redacta una respuesta **nueva**, corta, humana y comercial (2–4 frases salvo PASO 4/5 del flujo principal), que **transmita la misma información** que la referencia.
+3. **Conserva literalmente** montos ($100.000, $30.000, $70.000, $90.000, 50%, RNT 163658, medios de pago listados, mínimos de noches, etc.), nombres de proceso y condiciones contractuales. No inventes cifras ni políticas que no estén en la referencia o en el resto del prompt.
+4. Puedes variar saludos, conectores y orden de ideas; evita sonar a “copiar y pegar” del bloque.
+5. Si ninguna entrada encaja, ignora la biblioteca y sigue el PROMPT DEL CONSULTOR + RAG + contexto de fincas.
+
+**Excepción (texto fijo del flujo):** Los bloques **PASO 4** (solicitud de datos para contrato), **PASO 5** (proceso de reserva + RNT) y **[CONTRACT_PDF:...]** del prompt principal siguen siendo **VERBATIM** cuando correspondan a esa etapa — no los sustituyas por un parafraseo.
 
 ${opts.templatesSection}
 
@@ -1844,7 +1869,7 @@ ${opts.templatesSection}
 `
     : "";
 
-  return `${basePrompt}${dynamicLocationsText}${priorityInstructions}${singleFincaHint}${multiCatalogHint}${visionHint}${voiceHint}${officialNameHint}${templatesBlock}
+  return `${basePrompt}${dynamicLocationsText}${priorityInstructions}${reactivatedHint}${singleFincaHint}${multiCatalogHint}${visionHint}${voiceHint}${officialNameHint}${templatesBlock}
 
 ---
 ## REGLA DE LISTAS DE FINCAS
@@ -2364,24 +2389,26 @@ export const selectQuickReplyIntentWithAI = internalAction({
     userMessage: v.string(),
     conversationSnippet: v.string(),
     intentsJson: v.string(),
+    isReactivated: v.optional(v.boolean()),
   },
   handler: async (_ctx, args): Promise<{ intentKey: string } | null> => {
+    const returningClientNote = args.isReactivated
+      ? `\n- IMPORTANTE: Este cliente ya tuvo una conversación previa con FincasYa. Si el mensaje parece un saludo o retoma la conversación, NO uses plantillas de bienvenida inicial. Usa en cambio la plantilla de "continuación" (si existe) o responde NONE para que el agente retome con mensaje de seguimiento.`
+      : "";
     const { text: modelText } = await generateText({
       model: openai.chat(CONVEX_OPENAI_CHAT_MODEL),
       temperature: 1,
-      system: `Eres un clasificador que escoge UNA plantilla de WhatsApp (quick-reply) para responder VERBATIM al cliente.
+      system: `Eres un clasificador que selecciona plantillas de WhatsApp SOLO para respuestas operacionales y de política fija (mascotas, check-in, proceso de pago, contrato, propietario, fuera de horario, etc.).
 Responde SOLO JSON válido:
 {"intentKey":"<intent_key_exacto>"} o {"intentKey":"NONE"}.
 
-Reglas de selección:
-- Lee el "content" completo de cada plantilla en la lista; no inventes intentKeys.
-- Elige la plantilla cuyo texto completo responda correctamente a la última intención del cliente.
-- Si el cliente solo saluda o abre conversación (ej. "hola", "buen día", "info", "me ayudas"):
-   → Prefiere la plantilla de **bienvenida/saludo genérica** (suele mencionar "comunicarte con FincasYa", "horario de atención", "brevedad"). Evita las plantillas que empiezan con "Te saluda HERNÁN" o que son de cotización específica, salvo que sea la única opción.
-- Si en el historial el asistente YA respondió con una plantilla de bienvenida en sus últimos 2 turnos, NO elijas otra vez bienvenida; responde NONE.
-- Si el cliente pide cotizar / ver fincas / reservar y YA dio ciudad y fechas, responde NONE (el flujo continúa por otra vía, no plantilla).
-- Si hay ambigüedad entre dos plantillas, responde NONE.
-- Si el mensaje no encaja claramente con NINGUNA plantilla, responde NONE.`,
+Reglas críticas:
+- NONE para saludos, solicitudes de info general, cotizaciones o recopilación de datos — el agente responde de forma conversacional y natural, NO con plantillas.
+- NONE si el cliente pide ver fincas, preguntar disponibilidad, o dar datos de fechas/personas/destino.
+- NONE si el historial ya tiene contexto de reserva activa (finca, fechas, personas).
+- Solo elige una plantilla si la pregunta del cliente es específicamente sobre políticas fijas: mascotas, check-in/out, formas de pago, proceso de reserva, horario de atención, personal de servicio.
+- Si hay ambigüedad, responde NONE.
+- NUNCA uses plantillas de "cotiza", "indicaciones" ni "continuación" — esas son guías para el agente, no para enviar verbatim.${returningClientNote}`,
       prompt: `Intenciones disponibles:
 ${args.intentsJson}
 
@@ -2446,6 +2473,7 @@ export const maybeSendQuickReplyTemplateByIntent = internalAction({
     wamid: v.optional(v.string()),
     conversationId: v.id("conversations"),
     userMessage: v.string(),
+    isReactivated: v.optional(v.boolean()),
   },
   handler: async (ctx, args): Promise<{ sent: boolean; templateId?: string }> => {
     if (quickReplyRoutingDisabled()) {
@@ -2519,6 +2547,7 @@ export const maybeSendQuickReplyTemplateByIntent = internalAction({
         userMessage: args.userMessage,
         conversationSnippet: snippet,
         intentsJson: intentsPayload,
+        isReactivated: args.isReactivated ?? false,
       });
       selectedIntent = selected?.intentKey ?? null;
     } catch (error) {
@@ -2534,6 +2563,32 @@ export const maybeSendQuickReplyTemplateByIntent = internalAction({
         .replace(/[^\w\s]/g, " ")
         .replace(/\s+/g, " ")
         .trim();
+
+    const OPENING_QUALIFICATION_TEXT =
+      "Hola! 👋 Que bueno tenerte por aqui en FincasYa 🏡\n\n" +
+      "Te ayudo a encontrar una finca bien linda para tu plan ✨\n" +
+      "Pasame estos daticos y te mando opciones que de verdad te sirvan:\n\n" +
+      "• Nombre\n" +
+      "• Municipio o zona que te interesa\n" +
+      "• Fechas (entrada y salida)\n" +
+      "• Cuantas personas van\n" +
+      "• Tipo de grupo (familia, amigos, pareja o empresarial)\n" +
+      "• Si van con mascotas 🐶\n\n" +
+      "Si quieres, me los puedes mandar en un solo mensaje y avanzamos mas rapido 🚀";
+
+    const isTemplateWelcomeLike = (template: any) => {
+      const meta = normalizeText(
+        `${String(template.intentKey || "")} ${String(template.title || "")}`
+      );
+      const content = normalizeText(String(template.content || ""));
+      const hasWelcomeMeta = /\b(bienvenid|saludo|inicio|welcome|apertura|informacion\s+inicial)\b/.test(
+        meta
+      );
+      const hasOperationalSignals = /\b(salida|llegada|35\s+min|equipo|destino|recorrido|sin\s+contratiempos)\b/.test(
+        content
+      );
+      return hasWelcomeMeta && !hasOperationalSignals;
+    };
 
     // Selecciona la plantilla más apropiada para un saludo/apertura.
     // Orden de preferencia:
@@ -2606,16 +2661,20 @@ export const maybeSendQuickReplyTemplateByIntent = internalAction({
         ) && normalizedUser.length <= 90;
       const hasAssistantHistory = recent.some((m: any) => m.sender === "assistant");
 
-      if (isOpeningGreeting && !hasAssistantHistory) {
-        const fallbackTemplate = pickRichOpeningTemplate();
-
-        if (fallbackTemplate) {
-          console.log(
-            "[quick-template] fallback dinámico de bienvenida por contenido:",
-            fallbackTemplate.intentKey || fallbackTemplate.title
-          );
-          return await sendTemplate(fallbackTemplate);
-        }
+      // isReactivated=true: el cliente ya habló antes → NO enviar bienvenida desde cero aunque no haya historial visible.
+      if (isOpeningGreeting && !hasAssistantHistory && !args.isReactivated) {
+        console.log("[quick-template] apertura detectada, enviando onboarding comercial");
+        await ctx.runAction(internal.ycloud.sendWhatsAppMessage, {
+          to: args.phone,
+          text: OPENING_QUALIFICATION_TEXT,
+          wamid: args.wamid,
+        });
+        await ctx.runMutation(internal.messages.insertAssistantMessage, {
+          conversationId: args.conversationId,
+          content: OPENING_QUALIFICATION_TEXT,
+          createdAt: Date.now(),
+        });
+        return { sent: true };
       }
       return { sent: false };
     }
@@ -2632,14 +2691,22 @@ export const maybeSendQuickReplyTemplateByIntent = internalAction({
     const selectedIsTooShort =
       selectedTemplate.mediaType === "text" &&
       normalizeText(String(selectedTemplate.content || "")).length < 80;
-    if (isOpeningGreeting && !hasAssistantHistory && selectedIsTooShort) {
-      const richer = pickRichOpeningTemplate();
-      if (richer) {
-        console.log(
-          "[quick-template] override saludo corto por plantilla completa:",
-          richer.intentKey || richer.title
-        );
-        return await sendTemplate(richer);
+    const selectedLooksLikeWelcome = isTemplateWelcomeLike(selectedTemplate);
+    // isReactivated=true: evitar override a bienvenida completa cuando cliente ya habló antes.
+    if (isOpeningGreeting && !hasAssistantHistory && !args.isReactivated) {
+      if (!selectedLooksLikeWelcome || selectedIsTooShort) {
+        console.log("[quick-template] saludo inicial sin template valido, enviando onboarding comercial");
+        await ctx.runAction(internal.ycloud.sendWhatsAppMessage, {
+          to: args.phone,
+          text: OPENING_QUALIFICATION_TEXT,
+          wamid: args.wamid,
+        });
+        await ctx.runMutation(internal.messages.insertAssistantMessage, {
+          conversationId: args.conversationId,
+          content: OPENING_QUALIFICATION_TEXT,
+          createdAt: Date.now(),
+        });
+        return { sent: true };
       }
     }
     return await sendTemplate(selectedTemplate);
@@ -3477,6 +3544,7 @@ export const maybeSendCatalogForUserMessage = internalAction({
       fechaSalida,
       minCapacity,
       sortByPrice,
+      hasPets,
     });
 
     for (const f of fincasToSend) {
