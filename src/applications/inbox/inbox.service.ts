@@ -71,6 +71,25 @@ export class InboxService {
     private readonly bookingsSyncService: BookingsSyncService,
   ) {}
 
+  /**
+   * `contacts.name` suele ser el apodo de perfil de WhatsApp (p. ej. "S").
+   * No debe reemplazar un nombre completo extraído del chat.
+   */
+  private pickBetterClientName(storedName: string, extractedName: string): string {
+    const db = (storedName ?? '').trim();
+    const ex = (extractedName ?? '').trim();
+    if (!ex) return db;
+    if (!db) return ex;
+    const dbT = db.split(/\s+/).filter(Boolean);
+    const exT = ex.split(/\s+/).filter(Boolean);
+    const looksLikeWhatsAppAlias =
+      db.length <= 2 || (dbT.length === 1 && db.length <= 3 && !/\d/.test(db));
+    if (looksLikeWhatsAppAlias && ex.length > db.length) return ex;
+    if (exT.length >= 2 && dbT.length === 1 && ex.length > db.length) return ex;
+    if (exT.length >= 3 && ex.length > db.length + 5) return ex;
+    return db;
+  }
+
   async listOperationalStateDefinitions() {
     return this.convexService.query('conversations:listOperationalStateDefinitions', {});
   }
@@ -86,9 +105,40 @@ export class InboxService {
       | 'pending_payment'
       | 'pending_data'
     >;
+    assignedUserIds?: string[];
+    unassignedOnly?: boolean;
+    lastMessageFrom?: number;
+    lastMessageTo?: number;
     limit?: number;
   }) {
     return this.convexService.query('conversations:list', params);
+  }
+
+  /**
+   * Usuarios que pueden aparecer como asesores en el inbox (roles de equipo).
+   */
+  async listAssignableUsers() {
+    const users = await this.convexService.query('users:list', { limit: 300 });
+    const list = Array.isArray(users) ? users : [];
+    return list
+      .filter((u: { banned?: boolean; role?: string | null }) => u.banned !== true)
+      .filter((u: { role?: string | null }) => {
+        const r = u.role;
+        return r === 'admin' || r === 'assistant' || r === 'vendedor';
+      })
+      .map((u: { _id: string; name: string; email: string; role?: string | null }) => ({
+        _id: String(u._id),
+        name: u.name,
+        email: u.email,
+        role: u.role ?? null,
+      }));
+  }
+
+  async setAssignedUser(conversationId: string, assignedUserId: string | null) {
+    return this.convexService.mutation('conversations:setAssignedUser', {
+      conversationId,
+      assignedUserId,
+    });
   }
 
   async setOperationalState(
@@ -112,6 +162,38 @@ export class InboxService {
     return this.convexService.query('messages:listRecent', {
       conversationId,
       limit,
+    });
+  }
+
+  async getContactForConversation(conversationId: string) {
+    const conv = await this.convexService.query('conversations:getById', {
+      conversationId,
+    });
+    if (!conv) throw new NotFoundException('Conversacion no encontrada');
+    const contact = await this.convexService.query('contacts:getById', {
+      contactId: (conv as { contactId: string }).contactId,
+    });
+    if (!contact) throw new NotFoundException('Contacto no encontrado');
+    return { contact, conversationId, contactId: (conv as { contactId: string }).contactId };
+  }
+
+  async updateContactForConversation(
+    conversationId: string,
+    body: {
+      name?: string;
+      cedula?: string;
+      email?: string;
+      city?: string;
+      crmType?: 'lead' | 'client';
+    },
+  ) {
+    const conv = await this.convexService.query('conversations:getById', {
+      conversationId,
+    });
+    if (!conv) throw new NotFoundException('Conversacion no encontrada');
+    return this.convexService.mutation('contacts:update', {
+      contactId: (conv as { contactId: string }).contactId,
+      ...body,
     });
   }
 
@@ -331,8 +413,13 @@ export class InboxService {
       });
 
       if (contact) {
-        // Priorizar datos del contacto oficial sobre la extracción AI (que puede fallar)
-        if (contact.name) data.clientName = contact.name;
+        // Nombre: unir CRM y extracción sin dejar que el alias de WhatsApp pise el nombre del chat
+        if (contact.name) {
+          data.clientName = this.pickBetterClientName(
+            contact.name,
+            String(data.clientName ?? ''),
+          );
+        }
         if (contact.phone) data.clientPhone = contact.phone;
         if (contact.email && !data.clientEmail) data.clientEmail = contact.email;
         if (contact.cedula && !data.clientId) data.clientId = contact.cedula;

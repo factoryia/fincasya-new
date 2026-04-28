@@ -1,4 +1,5 @@
 import { v } from "convex/values";
+import type { Id } from "./_generated/dataModel";
 import { internalMutation, mutation, query } from "./_generated/server";
 import {
   DEFAULT_OPERATIONAL_STATE,
@@ -70,6 +71,8 @@ export const escalate = internalMutation({
   args: {
     conversationId: v.id("conversations"),
     operationalState: v.optional(operationalStateValidator),
+    /** Si viene definido, asigna; si `undefined`, limpia asignación. */
+    assignedUserId: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
     const op = args.operationalState ?? "requires_advisor";
@@ -77,6 +80,7 @@ export const escalate = internalMutation({
       status: "human",
       attended: false,
       operationalState: op,
+      assignedUserId: args.assignedUserId,
     });
   },
 });
@@ -141,14 +145,30 @@ export const setOperationalStateInternal = internalMutation({
 /**
  * Obtener conversación por ID.
  */
+async function withAssignedUser(
+  ctx: { db: { get: (id: Id<"user">) => Promise<unknown> } },
+  assignedUserId: string | undefined,
+) {
+  if (!assignedUserId) return null;
+  const u = (await ctx.db.get(assignedUserId as Id<"user">)) as {
+    _id: Id<"user">;
+    name: string;
+    email: string;
+  } | null;
+  if (!u) return null;
+  return { _id: String(u._id), name: u.name, email: u.email };
+}
+
 export const getById = query({
   args: { conversationId: v.id("conversations") },
   handler: async (ctx, args) => {
     const doc = await ctx.db.get(args.conversationId);
     if (!doc) return null;
+    const assignedUser = await withAssignedUser(ctx, doc.assignedUserId);
     return {
       ...doc,
       operationalState: effectiveState(doc.operationalState as OperationalState | undefined),
+      assignedUser,
     };
   },
 });
@@ -260,6 +280,22 @@ export const setPriority = mutation({
  * Actualizar estado operativo (asesor). Requiere autenticación vía API (Nest).
  * `userId` es opcional: trazabilidad en `conversationOperationalStateEvents`.
  */
+/**
+ * Asignar o quitar asesor (documento `user` en Convex). `null` en API Nest → limpiar.
+ */
+export const setAssignedUser = mutation({
+  args: {
+    conversationId: v.id("conversations"),
+    assignedUserId: v.union(v.string(), v.null()),
+  },
+  handler: async (ctx, args) => {
+    await ctx.db.patch(args.conversationId, {
+      assignedUserId:
+        args.assignedUserId === null ? undefined : args.assignedUserId,
+    });
+  },
+});
+
 export const setOperationalState = mutation({
   args: {
     conversationId: v.id("conversations"),
@@ -320,6 +356,14 @@ export const list = query({
     ),
     /** Filtra por uno o varios estados operativos */
     operationalStates: v.optional(v.array(operationalStateValidator)),
+    /** Filtra por uno o varios asesores (Convex user _id). */
+    assignedUserIds: v.optional(v.array(v.string())),
+    /** Solo conversaciones sin asesor asignado. */
+    unassignedOnly: v.optional(v.boolean()),
+    /** Último mensaje (o createdAt si no hay): timestamp >= */
+    lastMessageFrom: v.optional(v.number()),
+    /** Último mensaje (o createdAt si no hay): timestamp <= */
+    lastMessageTo: v.optional(v.number()),
     limit: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
@@ -346,6 +390,26 @@ export const list = query({
       );
     }
 
+    if (args.unassignedOnly) {
+      convs = convs.filter((c) => !c.assignedUserId);
+    }
+
+    if (args.assignedUserIds && args.assignedUserIds.length > 0) {
+      const idSet = new Set(args.assignedUserIds);
+      convs = convs.filter(
+        (c) => c.assignedUserId && idSet.has(c.assignedUserId),
+      );
+    }
+
+    const msgTs = (c: (typeof convs)[number]) =>
+      c.lastMessageAt ?? c.createdAt ?? c._creationTime;
+    if (args.lastMessageFrom !== undefined) {
+      convs = convs.filter((c) => msgTs(c) >= args.lastMessageFrom!);
+    }
+    if (args.lastMessageTo !== undefined) {
+      convs = convs.filter((c) => msgTs(c) <= args.lastMessageTo!);
+    }
+
     convs = convs.sort(
       (a, b) =>
         (b.lastMessageAt ?? b.createdAt) - (a.lastMessageAt ?? a.createdAt)
@@ -354,11 +418,13 @@ export const list = query({
     const withContact = await Promise.all(
       slice.map(async (c) => {
         const contact = await ctx.db.get(c.contactId);
+        const assignedUser = await withAssignedUser(ctx, c.assignedUserId);
         return {
           ...c,
           operationalState: effectiveState(
             c.operationalState as OperationalState | undefined
           ),
+          assignedUser,
           contact: contact
             ? { phone: contact.phone, name: contact.name }
             : null,

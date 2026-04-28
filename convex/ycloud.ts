@@ -10,6 +10,14 @@ import { CONVEX_OPENAI_CHAT_MODEL } from "./lib/openaiModel";
 import { transcribeAudio } from "./lib/transcription";
 
 /**
+ * Convex env: `_id` del usuario asesor. Si está definido, al escalar a humano el bot asigna la conversación.
+ */
+function botEscalateAssignedUserId(): string | undefined {
+  const raw = process.env.CHATBOT_AUTO_ASSIGN_ADVISOR_ID?.trim();
+  return raw && raw.length > 0 ? raw : undefined;
+}
+
+/**
  * Solo afirmación corta (confirmación), sin datos nuevos de búsqueda.
  * Evita enrutar plantillas genéricas de catálogo cuando el usuario confirma "sí" a mostrar opciones.
  */
@@ -421,6 +429,7 @@ export const processInboundMessage = internalAction({
     if (shouldReply && wantsHumanAdvisor) {
       await ctx.runMutation(internal.conversations.escalate, {
         conversationId,
+        assignedUserId: botEscalateAssignedUserId(),
       });
       const handoffMsg =
         "Perfecto, te comunico con un asesor de nuestro equipo para ayudarte personalmente. Un agente te escribirá en breve. ✨";
@@ -592,6 +601,7 @@ export const processInboundMessage = internalAction({
       if (userRequestedHumanAdvisor(currentMessageText)) {
         await ctx.runMutation(internal.conversations.escalate, {
           conversationId,
+          assignedUserId: botEscalateAssignedUserId(),
         });
         const handoffMsg =
           "Perfecto, te comunico con un asesor de nuestro equipo para ayudarte personalmente. Un agente te escribirá en breve. ✨";
@@ -1389,6 +1399,7 @@ En FincasYa.com tu alquiler siempre es seguro, respaldado y con total tranquilid
               await ctx.runMutation(internal.conversations.escalate, {
                 conversationId,
                 operationalState: "pending_payment",
+                assignedUserId: botEscalateAssignedUserId(),
               });
 
               /* 
@@ -1471,6 +1482,7 @@ En FincasYa.com tu alquiler siempre es seguro, respaldado y con total tranquilid
               await ctx.runMutation(internal.conversations.escalate, {
                 conversationId,
                 operationalState: "ready_to_book",
+                assignedUserId: botEscalateAssignedUserId(),
               });
             } else if (closingSignals && !hasFullClientData) {
               console.log("[escalate] Se detectó cierre pero faltan datos del cliente — NO escalar aún");
@@ -1496,6 +1508,7 @@ En FincasYa.com tu alquiler siempre es seguro, respaldado y con total tranquilid
               );
               await ctx.runMutation(internal.conversations.escalate, {
                 conversationId,
+                assignedUserId: botEscalateAssignedUserId(),
               });
             }
           }

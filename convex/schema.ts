@@ -373,6 +373,8 @@ export default defineSchema({
     email: v.optional(v.string()),
     cedula: v.optional(v.string()),
     city: v.optional(v.string()),
+    /** Lead: en seguimiento. Cliente: ya con reserva o relación comercial. */
+    crmType: v.optional(v.union(v.literal('lead'), v.literal('client'))),
     lastReservationAt: v.optional(v.number()),
     createdAt: v.number(),
     updatedAt: v.optional(v.number()),
@@ -450,12 +452,15 @@ export default defineSchema({
     ),
     createdAt: v.number(),
     attended: v.optional(v.boolean()),
+    /** Convex `user._id` del asesor asignado (inbox). */
+    assignedUserId: v.optional(v.string()),
   })
     .index('by_contact', ['contactId'])
     .index('by_status', ['status'])
     .index('by_priority', ['priority'])
     .index('by_last_message', ['lastMessageAt'])
-    .index('by_operational_state', ['operationalState']),
+    .index('by_operational_state', ['operationalState'])
+    .index('by_assigned_user', ['assignedUserId']),
 
   messages: defineTable({
     conversationId: v.id('conversations'),

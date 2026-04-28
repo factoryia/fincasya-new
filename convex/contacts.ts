@@ -1,10 +1,50 @@
 import { v } from "convex/values";
-import { query } from "./_generated/server";
+import { mutation, query } from "./_generated/server";
 
 export const getById = query({
   args: { contactId: v.id("contacts") },
   handler: async (ctx, args) => {
     return await ctx.db.get(args.contactId);
+  },
+});
+
+/**
+ * Actualizar ficha de contacto (CRM / inbox). No modifica teléfono (clave de WhatsApp).
+ */
+export const update = mutation({
+  args: {
+    contactId: v.id("contacts"),
+    name: v.optional(v.string()),
+    cedula: v.optional(v.string()),
+    email: v.optional(v.string()),
+    city: v.optional(v.string()),
+    crmType: v.optional(v.union(v.literal("lead"), v.literal("client"))),
+  },
+  handler: async (ctx, args) => {
+    const { contactId, ...rest } = args;
+    const current = await ctx.db.get(contactId);
+    if (!current) throw new Error("Contacto no encontrado");
+    const patch: Record<string, unknown> = { updatedAt: Date.now() };
+    if (rest.name !== undefined) {
+      const t = String(rest.name).trim();
+      if (t.length < 1) throw new Error("El nombre no puede estar vacío");
+      patch.name = t;
+    }
+    if (rest.cedula !== undefined) {
+      const t = String(rest.cedula).trim();
+      patch.cedula = t.length > 0 ? t : undefined;
+    }
+    if (rest.email !== undefined) {
+      const t = String(rest.email).trim();
+      patch.email = t.length > 0 ? t : undefined;
+    }
+    if (rest.city !== undefined) {
+      const t = String(rest.city).trim();
+      patch.city = t.length > 0 ? t : undefined;
+    }
+    if (rest.crmType !== undefined) patch.crmType = rest.crmType;
+    await ctx.db.patch(contactId, patch);
+    return await ctx.db.get(contactId);
   },
 });
 

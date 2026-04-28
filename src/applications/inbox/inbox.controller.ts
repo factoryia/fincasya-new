@@ -53,12 +53,21 @@ export class InboxController {
     return this.inboxService.listOperationalStateDefinitions();
   }
 
+  @Get('assignable-users')
+  async listAssignableUsers() {
+    return this.inboxService.listAssignableUsers();
+  }
+
   @Get()
   async list(
     @Query('status') status?: 'ai' | 'human' | 'resolved',
     @Query('attended') attended?: string,
     @Query('priority') priority?: 'urgent' | 'low' | 'medium' | 'resolved',
     @Query('operationalStates') operationalStatesRaw?: string,
+    @Query('assignedUserIds') assignedUserIdsRaw?: string,
+    @Query('unassignedOnly') unassignedOnly?: string,
+    @Query('lastMessageFrom') lastMessageFromRaw?: string,
+    @Query('lastMessageTo') lastMessageToRaw?: string,
     @Query('limit') limit?: string,
   ) {
     const limitNum = limit ? parseInt(limit, 10) : undefined;
@@ -68,12 +77,28 @@ export class InboxController {
       .map((s) => s.trim())
       .filter((s) => s.length > 0)
       .filter(isOperationalStateParam);
+    const assignedUserIds = assignedUserIdsRaw
+      ?.split(',')
+      .map((s) => s.trim())
+      .filter((s) => s.length > 0);
+    const lastMessageFrom =
+      lastMessageFromRaw !== undefined && lastMessageFromRaw !== ''
+        ? parseInt(lastMessageFromRaw, 10)
+        : undefined;
+    const lastMessageTo =
+      lastMessageToRaw !== undefined && lastMessageToRaw !== ''
+        ? parseInt(lastMessageToRaw, 10)
+        : undefined;
     return this.inboxService.listConversations({
       status,
       attended: attendedBool,
       priority,
       operationalStates:
         operationalStates && operationalStates.length > 0 ? operationalStates : undefined,
+      assignedUserIds: assignedUserIds && assignedUserIds.length > 0 ? assignedUserIds : undefined,
+      unassignedOnly: unassignedOnly === 'true' ? true : undefined,
+      lastMessageFrom: Number.isFinite(lastMessageFrom) ? lastMessageFrom : undefined,
+      lastMessageTo: Number.isFinite(lastMessageTo) ? lastMessageTo : undefined,
       limit: limitNum,
     });
   }
@@ -89,6 +114,37 @@ export class InboxController {
   ) {
     const limitNum = limit ? parseInt(limit, 10) : undefined;
     return this.inboxService.getMessages(conversationId, limitNum);
+  }
+
+  /**
+   * Ficha CRM del contacto vinculado a la conversación (mismo contactId que WhatsApp).
+   * GET /api/inbox/:conversationId/contact
+   */
+  @Get(':conversationId/contact')
+  async getContactForConversation(@Param('conversationId') conversationId: string) {
+    return this.inboxService.getContactForConversation(conversationId);
+  }
+
+  /**
+   * Actualizar nombre, cédula/código, clasificación lead/cliente, etc.
+   * PATCH /api/inbox/:conversationId/contact
+   */
+  @Patch(':conversationId/contact')
+  async updateContactForConversation(
+    @Param('conversationId') conversationId: string,
+    @Body()
+    body: {
+      name?: string;
+      cedula?: string;
+      email?: string;
+      city?: string;
+      crmType?: 'lead' | 'client';
+    },
+  ) {
+    if (body.crmType && !['lead', 'client'].includes(body.crmType)) {
+      throw new BadRequestException('crmType debe ser lead o client');
+    }
+    return this.inboxService.updateContactForConversation(conversationId, body);
   }
 
   @Get('templates')
@@ -197,6 +253,25 @@ export class InboxController {
       body.operationalState as (typeof allowed)[number],
       body.userId,
     );
+  }
+
+  /**
+   * Asignar o quitar asesor (Convex user _id).
+   * PATCH /api/inbox/:conversationId/assigned-user
+   * Body: { "assignedUserId": "<id>" | null }
+   */
+  @Patch(':conversationId/assigned-user')
+  async setAssignedUser(
+    @Param('conversationId') conversationId: string,
+    @Body() body: { assignedUserId: string | null },
+  ) {
+    if (!body || !('assignedUserId' in body)) {
+      throw new BadRequestException('Body debe incluir assignedUserId (string o null)');
+    }
+    if (body.assignedUserId !== null && typeof body.assignedUserId !== 'string') {
+      throw new BadRequestException('assignedUserId debe ser string o null');
+    }
+    return this.inboxService.setAssignedUser(conversationId, body.assignedUserId);
   }
 
   /**
