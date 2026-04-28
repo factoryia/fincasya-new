@@ -416,6 +416,32 @@ export const processInboundMessage = internalAction({
       }
       return false;
     };
+    const shouldAbortIfAssistantAlreadyReplied = async (stage: string) => {
+      const recentMsgs = (await ctx.runQuery(api.messages.listRecent, {
+        conversationId,
+        limit: 8,
+      })) as any[];
+      const latestUserIdx = [...recentMsgs]
+        .map((m, i) => ({ m, i }))
+        .reverse()
+        .find((x) => x.m.sender === "user")?.i;
+      if (latestUserIdx === undefined) return false;
+      const latestUserMsg = recentMsgs[latestUserIdx];
+      if (String(latestUserMsg?._id) !== String(insertedUserMessageId)) return false;
+      const newerAssistantExists = recentMsgs.some((m, i) => {
+        if (i <= latestUserIdx) return false;
+        return m.sender === "assistant";
+      });
+      if (newerAssistantExists) {
+        console.log("[dedupe] ya existe respuesta de asistente para este turno, se cancela", {
+          stage,
+          phone: args.phone,
+          insertedUserMessageId,
+        });
+        return true;
+      }
+      return false;
+    };
 
     const conv = convAfterDebounce;
     const shouldReply = conv.status === "ai";
@@ -454,6 +480,35 @@ export const processInboundMessage = internalAction({
       let currentMessageText = (args.type === "audio" && finalContent.startsWith("[Voz]")) 
         ? finalContent 
         : (args.text || "");
+      const normalizedIncomingText = String(currentMessageText || "")
+        .toLowerCase()
+        .normalize("NFD")
+        .replace(/\p{M}/gu, "")
+        .trim();
+      const OPENING_QUALIFICATION_TEXT =
+        "Hola, gracias por comunicarte con FincasYa.com 🏡, con gusto te ayudamos a encontrar la finca ideal para tu estadía. ✨\n\n" +
+        "Para poder recomendarte la mejor opción, te haremos unas preguntas rápidas. Esto nos ayuda porque algunas fincas tienen restricciones sobre cantidad de personas, tipo de evento, sonido, decoración o ingreso de invitados adicionales. ✅\n\n" +
+        "¿Para cuántas personas necesitas la finca? 👥";
+      const userRequestedFlowRestart =
+        /^(clear|limpiar|reiniciar|reinicia|reset|start over|empezar de nuevo|iniciar de nuevo)$/i.test(
+          normalizedIncomingText
+        );
+      if (userRequestedFlowRestart) {
+        await ctx.runMutation(internal.messages.insertAssistantMessage, {
+          conversationId,
+          content: OPENING_QUALIFICATION_TEXT,
+          createdAt: Date.now(),
+        });
+        await ctx.runAction(internal.ycloud.sendWhatsAppMessage, {
+          to: args.phone,
+          text: OPENING_QUALIFICATION_TEXT,
+          wamid: args.wamid,
+        });
+        await ctx.runMutation(internal.conversations.updateLastMessageAt, {
+          conversationId,
+        });
+        return;
+      }
       let singleFincaSent = false;
       let fincaTitle = "";
       let confirmedFincaTitle: string | undefined; // Título oficial encontrado en DB
@@ -468,6 +523,37 @@ export const processInboundMessage = internalAction({
         conversationId,
         limit: 14,
       });
+      const normalizedAllUserTextForFilters = [currentMessageText]
+        .concat(
+          recentForCatalogIntent
+            .filter((m: any) => m.sender === "user")
+            .map((m: any) => String(m.content ?? ""))
+        )
+        .join("\n")
+        .toLowerCase()
+        .normalize("NFD")
+        .replace(/\p{M}/gu, "");
+      const lastAssistantAskedPets = [...recentForCatalogIntent]
+        .reverse()
+        .some((m: any) => {
+          if (m.sender !== "assistant") return false;
+          const t = String(m.content ?? "").toLowerCase().normalize("NFD").replace(/\p{M}/gu, "");
+          return /\bmascotas?\b|\bperros?\b|\bgatos?\b/.test(t);
+        });
+      const hasPetsInfoInHistory =
+        /\b(sin mascotas|no mascotas|no llevamos mascotas|no llevare mascotas|no llevaremos mascotas|con mascotas|llevamos mascotas|llevare mascotas|llevaremos mascotas|mascotas?|perros?|gatos?)\b/.test(
+          normalizedAllUserTextForFilters
+        ) ||
+        ((isAffirmativeOnly(currentMessageText) || isNegativeOnly(currentMessageText)) &&
+          lastAssistantAskedPets);
+      const hasDateInfoInHistory =
+        /\b(sabado|domingo|fin de semana|entrada|salida|del\s+\d{1,2}|hasta|al\s+\d{1,2}|fecha)\b/.test(
+          normalizedAllUserTextForFilters
+        );
+      const hasPeopleInfoInHistory =
+        /\bpara\s+\d+\b|\b\d+\s*personas?\b|\bsomos\s+\d+\b/.test(
+          normalizedAllUserTextForFilters
+        );
       // Si ya estamos recolectando datos para contrato/reserva, NO reabrir catálogo.
       const contractPromptInHistory = recentForCatalogIntent.some((m: any) => {
         if (m.sender !== "assistant") return false;
@@ -862,6 +948,32 @@ Fincas disponibles: ${fincaNames}`,
           !shouldBlockCatalogFincaConfirmed &&
           !skipSingleFincaCardResend
         ) {
+          const hasLocationReadyForCatalog =
+            catalogIntent.intent === "search_catalog" &&
+            String(catalogIntent.location ?? "").trim().length >= 3;
+          const mustAskPetsBeforeCatalog =
+            hasLocationReadyForCatalog &&
+            hasDateInfoInHistory &&
+            hasPeopleInfoInHistory &&
+            !hasPetsInfoInHistory;
+          if (mustAskPetsBeforeCatalog) {
+            const askPetsText =
+              "Perfecto ✅ Antes de mostrarte opciones, necesito confirmar si llevarán mascotas 🐾 (sí o no). Así evitamos ofrecerte fincas que no apliquen para tu plan.";
+            await ctx.runAction(internal.ycloud.sendWhatsAppMessage, {
+              to: args.phone,
+              text: askPetsText,
+              wamid: args.wamid,
+            });
+            await ctx.runMutation(internal.messages.insertAssistantMessage, {
+              conversationId,
+              content: askPetsText,
+              createdAt: Date.now(),
+            });
+            await ctx.runMutation(internal.conversations.updateLastMessageAt, {
+              conversationId,
+            });
+            return;
+          }
           console.log("[catalog-intent]", JSON.stringify(catalogIntent));
           const invalidSearchLocations = /\b(dias?|personas?|fincas?|reservar?|noches?|una|los|las|el|la)\b/i;
           const catalogIntentArg =
@@ -1061,7 +1173,10 @@ Fincas disponibles: ${fincaNames}`,
         }
       }
 
-      if (await shouldAbortIfNotLatestUser("before_generate_reply")) {
+      if (
+        (await shouldAbortIfNotLatestUser("before_generate_reply")) ||
+        (await shouldAbortIfAssistantAlreadyReplied("before_generate_reply"))
+      ) {
         return;
       }
 
@@ -1297,7 +1412,21 @@ En FincasYa.com tu alquiler siempre es seguro, respaldado y con total tranquilid
           /cu[aá]l\s+finca\s+te\s+llam[oó]\s+la\s+atenci[oó]n/i.test(
             String(lastAssistantMsg.content ?? "")
           );
-        const alreadySentSingleFinca = !!(singleFincaSent || isSpecificFinca);
+        const hasProductCardInHistory = recentForCatalogIntent.some(
+          (m: any) => m.sender === "assistant" && m.type === "product"
+        );
+        const hasKnownSelectedFinca =
+          !!(
+            fincaTitle ||
+            confirmedFincaInHistoryTitle ||
+            selectedCatalogPropertyTitle
+          );
+        const alreadySentSingleFinca = !!(
+          singleFincaSent ||
+          isSpecificFinca ||
+          hasProductCardInHistory ||
+          hasKnownSelectedFinca
+        );
         if (
           (assistantJustAskedWhichFinca || alreadySentSingleFinca) &&
           WHICH_FINCA_Q.test(replyText)
@@ -1309,6 +1438,9 @@ En FincasYa.com tu alquiler siempre es seguro, respaldado y con total tranquilid
             .trim();
           if (cleaned.length >= 20) {
             replyText = cleaned;
+          } else if (hasKnownSelectedFinca) {
+            replyText =
+              "Perfecto. Ya tengo la finca seleccionada. Para continuar con el filtro, indícame por favor fecha de ingreso, fecha de salida, si llevarán mascotas, zona de preferencia, presupuesto aproximado y qué te gustaría que tenga la finca (piscina, jacuzzi, kiosko u otra característica). 📅🐾💰";
           } else if (singleFincaSent && fincaTitle) {
             replyText = `Te envié la ficha de ${fincaTitle}. Cuéntame fechas y número de personas para validar disponibilidad y valor final. 📅👥`;
           } else if (fincaTitle) {
@@ -1321,7 +1453,10 @@ En FincasYa.com tu alquiler siempre es seguro, respaldado y con total tranquilid
       }
 
       if (replyText) {
-        if (await shouldAbortIfNotLatestUser("before_send_reply")) {
+        if (
+          (await shouldAbortIfNotLatestUser("before_send_reply")) ||
+          (await shouldAbortIfAssistantAlreadyReplied("before_send_reply"))
+        ) {
           return;
         }
         const pacingTarget =
@@ -1331,7 +1466,10 @@ En FincasYa.com tu alquiler siempre es seguro, respaldado y con total tranquilid
         await new Promise((resolve) =>
           setTimeout(resolve, humanReplyPacingMs(pacingTarget))
         );
-        if (await shouldAbortIfNotLatestUser("after_pacing_before_send")) {
+        if (
+          (await shouldAbortIfNotLatestUser("after_pacing_before_send")) ||
+          (await shouldAbortIfAssistantAlreadyReplied("after_pacing_before_send"))
+        ) {
           return;
         }
         let sentAssistantText: string | null = null;
@@ -2732,16 +2870,9 @@ export const maybeSendQuickReplyTemplateByIntent = internalAction({
         .trim();
 
     const OPENING_QUALIFICATION_TEXT =
-      "Hola! 👋 Que bueno tenerte por aqui en FincasYa 🏡\n\n" +
-      "Te ayudo a encontrar una finca bien linda para tu plan ✨\n" +
-      "Pasame estos daticos y te mando opciones que de verdad te sirvan:\n\n" +
-      "• Nombre\n" +
-      "• Municipio o zona que te interesa\n" +
-      "• Fechas (entrada y salida)\n" +
-      "• Cuantas personas van\n" +
-      "• Tipo de grupo (familia, amigos, pareja o empresarial)\n" +
-      "• Si van con mascotas 🐶\n\n" +
-      "Si quieres, me los puedes mandar en un solo mensaje y avanzamos mas rapido 🚀";
+      "Hola, gracias por comunicarte con FincasYa.com 🏡, con gusto te ayudamos a encontrar la finca ideal para tu estadía. ✨\n\n" +
+      "Para poder recomendarte la mejor opción, te haremos unas preguntas rápidas. Esto nos ayuda porque algunas fincas tienen restricciones sobre cantidad de personas, tipo de evento, sonido, decoración o ingreso de invitados adicionales. ✅\n\n" +
+      "¿Para cuántas personas necesitas la finca? 👥";
 
     const isTemplateWelcomeLike = (template: any) => {
       const meta = normalizeText(
@@ -2823,7 +2954,7 @@ export const maybeSendQuickReplyTemplateByIntent = internalAction({
     if (!selectedIntent) {
       const normalizedUser = normalizeText(args.userMessage || "");
       const isOpeningGreeting =
-        /^(hola|holaa|hi|hello|hey|buenos|buenas|buen dia|que tal|saludos|informacion|info|me ayudas)\b/i.test(
+        /^(hola|hol|holaa|holi|holis|hols|hi|hello|hey|buenos|buenas|buen dia|buen día|que tal|qué tal|saludos|informacion|información|info|me ayudas)\b/i.test(
           normalizedUser
         ) && normalizedUser.length <= 90;
       const hasAssistantHistory = recent.some((m: any) => m.sender === "assistant");
@@ -2848,33 +2979,28 @@ export const maybeSendQuickReplyTemplateByIntent = internalAction({
     const selectedTemplate = templates.find((t: any) => t.intentKey === selectedIntent);
     if (!selectedTemplate) return { sent: false };
 
-    // Para saludo inicial, evita escoger una plantilla demasiado corta (ej. /ho).
+    // Para saludo inicial, siempre usar el texto fijo de apertura.
+    // Esto evita variaciones por plantillas DB y garantiza un único saludo oficial.
     const normalizedUser = normalizeText(args.userMessage || "");
     const isOpeningGreeting =
-      /^(hola|holaa|hi|hello|hey|buenos|buenas|buen dia|que tal|saludos|informacion|info|me ayudas)\b/i.test(
+      /^(hola|hol|holaa|holi|holis|hols|hi|hello|hey|buenos|buenas|buen dia|buen día|que tal|qué tal|saludos|informacion|información|info|me ayudas)\b/i.test(
         normalizedUser
       ) && normalizedUser.length <= 90;
     const hasAssistantHistory = recent.some((m: any) => m.sender === "assistant");
-    const selectedIsTooShort =
-      selectedTemplate.mediaType === "text" &&
-      normalizeText(String(selectedTemplate.content || "")).length < 80;
-    const selectedLooksLikeWelcome = isTemplateWelcomeLike(selectedTemplate);
-    // isReactivated=true: evitar override a bienvenida completa cuando cliente ya habló antes.
+    // isReactivated=true: evitar bienvenida completa cuando cliente ya habló antes.
     if (isOpeningGreeting && !hasAssistantHistory && !args.isReactivated) {
-      if (!selectedLooksLikeWelcome || selectedIsTooShort) {
-        console.log("[quick-template] saludo inicial sin template valido, enviando onboarding comercial");
-        await ctx.runAction(internal.ycloud.sendWhatsAppMessage, {
-          to: args.phone,
-          text: OPENING_QUALIFICATION_TEXT,
-          wamid: args.wamid,
-        });
-        await ctx.runMutation(internal.messages.insertAssistantMessage, {
-          conversationId: args.conversationId,
-          content: OPENING_QUALIFICATION_TEXT,
-          createdAt: Date.now(),
-        });
-        return { sent: true };
-      }
+      console.log("[quick-template] saludo inicial detectado, enviando saludo fijo oficial");
+      await ctx.runAction(internal.ycloud.sendWhatsAppMessage, {
+        to: args.phone,
+        text: OPENING_QUALIFICATION_TEXT,
+        wamid: args.wamid,
+      });
+      await ctx.runMutation(internal.messages.insertAssistantMessage, {
+        conversationId: args.conversationId,
+        content: OPENING_QUALIFICATION_TEXT,
+        createdAt: Date.now(),
+      });
+      return { sent: true };
     }
     return await sendTemplate(selectedTemplate);
   },
@@ -3730,6 +3856,19 @@ export const maybeSendCatalogForUserMessage = internalAction({
         createdAt: Date.now(),
       });
     }
+
+    const postCatalogFollowUp = excludePropertyIds?.length
+      ? "¿Te gustó alguna de estas opciones? 🏡 Si quieres, te comparto más alternativas con los mismos filtros."
+      : "Ya te compartí el catálogo ✅ ¿Te gustó alguna finca? 🏡 Si quieres, también puedo mostrarte más opciones.";
+    await ctx.runAction(internal.ycloud.sendWhatsAppMessage, {
+      to: args.phone,
+      text: postCatalogFollowUp,
+    });
+    await ctx.runMutation(internal.messages.insertAssistantMessage, {
+      conversationId: args.conversationId,
+      content: postCatalogFollowUp,
+      createdAt: Date.now(),
+    });
 
     return { sent: true, location, fincasCount: fincasToSend.length };
   },
