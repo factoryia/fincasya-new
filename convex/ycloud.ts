@@ -115,6 +115,58 @@ export function isOutOfDomainMessage(userMessage: string): boolean {
   return mathExpression.test(normalized) || offTopicQuestion.test(normalized);
 }
 
+/**
+ * Cliente pide hablar con persona / asesor (incluye errores típicos: "psasar", etc.).
+ */
+export function userRequestedHumanAdvisor(text: string): boolean {
+  const t = text.trim();
+  if (!t) return false;
+  if (
+    /(hablar\s+con\s+(un\s+)?(humano|persona|asesor|agente)|quiero\s+(un\s+)?asesor|atenci[oó]n\s+humana|operador(\s+humano)?|comunicarme\s+con(\s+alguien)?)/i.test(
+      t
+    )
+  ) {
+    return true;
+  }
+  if (
+    /\b(me\s+)?(puede|podr[ií]a)s?\s+.{0,16}(pasar|psasar|pásar|pásame|pasame|conectar|transferir|comunicar).{0,24}(humano|persona|asesor|agente)/i.test(
+      t
+    )
+  ) {
+    return true;
+  }
+  if (
+    /\b(pas(ar|ame|arme|enos)|conect(ar|ame|en)|derivar)\s+(con\s+)?(un\s+)?(humano|asesor|agente|persona(\s+real)?)\b/i.test(
+      t
+    )
+  ) {
+    return true;
+  }
+  if (/\b(persona\s+real|agente\s+humano|no\s+(quiero|es)\s+(el\s+)?bot)\b/i.test(t)) {
+    return true;
+  }
+  return false;
+}
+
+/**
+ * La respuesta visible del asistente promete derivación a humano → debe ejecutarse escalate.
+ */
+export function assistantPromisesHumanHandoff(text: string): boolean {
+  const t = text.toLowerCase();
+  return (
+    /\b(te\s+paso\s+con\s+(un\s+)?(asesor|humano|agente)|paso\s+con\s+un\s+asesor|pasarte\s+con\s+un\s+asesor|comunico\s+con\s+un\s+asesor)\b/i.test(
+      t
+    ) ||
+    /\b(un\s+asesor\s+humano|asesor\s+humano\s+de\s+inmediato|con\s+un\s+asesor\s+humano)\b/i.test(
+      t
+    ) ||
+    /\b(ya\s+te\s+atiende\s+un\s+asesor|un\s+asesor\s+humano\s+te\s+atiende|un\s+asesor\s+te\s+(atender|escribir|contactar[aá]))\b/i.test(
+      t
+    ) ||
+    /\b(te\s+deriv|te\s+transfier|derivaci[oó]n\s+a\s+un\s+asesor)\b/i.test(t)
+  );
+}
+
 /** Ventana de tiempo para mantener conversaciones activas sin re-saludar al cliente. */
 const SESSION_ACTIVE_TTL_MS = 24 * 60 * 60 * 1000; // 24 horas: conversación activa reutilizable
 const SESSION_REACTIVATE_TTL_MS = 72 * 60 * 60 * 1000; // 72 horas: cliente que regresa, retomar con seguimiento
@@ -197,7 +249,10 @@ export const getOrCreateConversation = internalMutation({
       );
       const withinReactivateWindow = resolvedTs > 0 && (now - resolvedTs) < SESSION_REACTIVATE_TTL_MS;
       if (withinReactivateWindow) {
-        await ctx.db.patch(latestResolved._id, { status: "ai" });
+        await ctx.db.patch(latestResolved._id, {
+          status: "ai",
+          operationalState: "pending_data",
+        });
         // isReactivated=true: cliente que regresó → usar mensaje de seguimiento, NO bienvenida desde cero.
         return { conversationId: latestResolved._id, isNew: false, isReactivated: true };
       }
@@ -207,6 +262,7 @@ export const getOrCreateConversation = internalMutation({
       contactId: args.contactId,
       channel: "whatsapp",
       status: "ai",
+      operationalState: "pending_data",
       lastMessageAt: now,
       createdAt: now,
     });
@@ -355,6 +411,35 @@ export const processInboundMessage = internalAction({
 
     const conv = convAfterDebounce;
     const shouldReply = conv.status === "ai";
+
+    /** Usuario pide hablar con un humano → escalar y marcar "Requiere asesor". */
+    const rawForHuman =
+      args.type === "audio" && finalContent.startsWith("[Voz]")
+        ? finalContent.replace(/^\[Voz\]\s*/, "")
+        : String(args.text || "");
+    const wantsHumanAdvisor = userRequestedHumanAdvisor(rawForHuman);
+    if (shouldReply && wantsHumanAdvisor) {
+      await ctx.runMutation(internal.conversations.escalate, {
+        conversationId,
+      });
+      const handoffMsg =
+        "Perfecto, te comunico con un asesor de nuestro equipo para ayudarte personalmente. Un agente te escribirá en breve. ✨";
+      await ctx.runMutation(internal.messages.insertAssistantMessage, {
+        conversationId,
+        content: handoffMsg,
+        createdAt: Date.now(),
+      });
+      await ctx.runAction(internal.ycloud.sendWhatsAppMessage, {
+        to: args.phone,
+        text: handoffMsg,
+        wamid: args.wamid,
+      });
+      await ctx.runMutation(internal.conversations.updateLastMessageAt, {
+        conversationId,
+      });
+      return;
+    }
+
     if (shouldReply) {
       // Contexto para la IA
       let currentMessageText = (args.type === "audio" && finalContent.startsWith("[Voz]")) 
@@ -503,6 +588,29 @@ export const processInboundMessage = internalAction({
         }
       }
 
+      // Tras fusionar ráfagas: el pedido de humano puede estar solo en un segmento anterior.
+      if (userRequestedHumanAdvisor(currentMessageText)) {
+        await ctx.runMutation(internal.conversations.escalate, {
+          conversationId,
+        });
+        const handoffMsg =
+          "Perfecto, te comunico con un asesor de nuestro equipo para ayudarte personalmente. Un agente te escribirá en breve. ✨";
+        await ctx.runMutation(internal.messages.insertAssistantMessage, {
+          conversationId,
+          content: handoffMsg,
+          createdAt: Date.now(),
+        });
+        await ctx.runAction(internal.ycloud.sendWhatsAppMessage, {
+          to: args.phone,
+          text: handoffMsg,
+          wamid: args.wamid,
+        });
+        await ctx.runMutation(internal.conversations.updateLastMessageAt, {
+          conversationId,
+        });
+        return;
+      }
+
       // Si el usuario selecciona un ítem de catálogo (payload order), resolver retailer_id a nombre real.
       const catalogSelection = parseCatalogSelectionPayload(currentMessageText);
       if (catalogSelection?.productRetailerId) {
@@ -553,6 +661,10 @@ export const processInboundMessage = internalAction({
           to: args.phone,
           text: outOfDomainReply,
           wamid: args.wamid,
+        });
+        await ctx.runMutation(internal.conversations.setOperationalStateInternal, {
+          conversationId,
+          operationalState: "requires_advisor",
         });
         await ctx.runMutation(internal.conversations.updateLastMessageAt, {
           conversationId,
@@ -631,6 +743,32 @@ Fincas disponibles: ${fincaNames}`,
       // Si llegó selección desde catálogo, forzar intent de finca específica usando nombre oficial.
       if (selectedCatalogPropertyTitle) {
         catalogIntent = { intent: "single_finca", fincaName: selectedCatalogPropertyTitle };
+      }
+
+      /** Reserva / consulta que requiere validar disponibilidad con el operador. */
+      const wantsAvailabilityCheck =
+        /\b(disponibilidad|disponible|hay\s+cupo|confirm(ar|en|ame)?\s+(que\s+)?(hay|est[áa])|verificar\s+fechas?)\b/i.test(
+          currentMessageText
+        ) &&
+        /\b(reserva|reservar|alquil|finca|hosped|estad[íi]a|fechas?)\b/i.test(
+          currentMessageText
+        );
+      if (
+        wantsAvailabilityCheck &&
+        (catalogIntent.intent === "search_catalog" ||
+          catalogIntent.intent === "single_finca")
+      ) {
+        await ctx.runMutation(internal.conversations.setOperationalStateInternal, {
+          conversationId,
+          operationalState: "validate_availability",
+        });
+      }
+
+      if (contractPromptInHistory && !clientDeliveredPersonalData) {
+        await ctx.runMutation(internal.conversations.setOperationalStateInternal, {
+          conversationId,
+          operationalState: "pending_data",
+        });
       }
 
       // Enviar ficha de una finca (IA o regex como respaldo).
@@ -1247,9 +1385,10 @@ En FincasYa.com tu alquiler siempre es seguro, respaldado y con total tranquilid
               });
               sentAssistantText = textToSend;
 
-              // Escalar a humano (la IA ya hizo su trabajo de recolectar datos)
+              // Escalar a humano (la IA ya hizo su trabajo de recolectar datos) — pendiente pago
               await ctx.runMutation(internal.conversations.escalate, {
                 conversationId,
+                operationalState: "pending_payment",
               });
 
               /* 
@@ -1331,6 +1470,7 @@ En FincasYa.com tu alquiler siempre es seguro, respaldado y con total tranquilid
               console.log("[escalate] Cierre de contrato detectado con datos completos → humano");
               await ctx.runMutation(internal.conversations.escalate, {
                 conversationId,
+                operationalState: "ready_to_book",
               });
             } else if (closingSignals && !hasFullClientData) {
               console.log("[escalate] Se detectó cierre pero faltan datos del cliente — NO escalar aún");
@@ -1345,6 +1485,20 @@ En FincasYa.com tu alquiler siempre es seguro, respaldado y con total tranquilid
             content: sentAssistantText,
             createdAt: Date.now(),
           });
+          // Si el modelo prometió pasar a un humano pero no hubo escalate antes, forzar modo humano.
+          if (assistantPromisesHumanHandoff(sentAssistantText)) {
+            const convAfterSend = await ctx.runQuery(api.conversations.getById, {
+              conversationId,
+            });
+            if (convAfterSend?.status === "ai") {
+              console.log(
+                "[escalate] Respuesta del asistente promete handoff a humano → escalando",
+              );
+              await ctx.runMutation(internal.conversations.escalate, {
+                conversationId,
+              });
+            }
+          }
         }
       }
     }

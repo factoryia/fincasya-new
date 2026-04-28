@@ -71,13 +71,41 @@ export class InboxService {
     private readonly bookingsSyncService: BookingsSyncService,
   ) {}
 
+  async listOperationalStateDefinitions() {
+    return this.convexService.query('conversations:listOperationalStateDefinitions', {});
+  }
+
   async listConversations(params: {
     status?: 'ai' | 'human' | 'resolved';
     attended?: boolean;
     priority?: 'urgent' | 'low' | 'medium' | 'resolved';
+    operationalStates?: Array<
+      | 'requires_advisor'
+      | 'validate_availability'
+      | 'ready_to_book'
+      | 'pending_payment'
+      | 'pending_data'
+    >;
     limit?: number;
   }) {
     return this.convexService.query('conversations:list', params);
+  }
+
+  async setOperationalState(
+    conversationId: string,
+    operationalState:
+      | 'requires_advisor'
+      | 'validate_availability'
+      | 'ready_to_book'
+      | 'pending_payment'
+      | 'pending_data',
+    userId?: string,
+  ) {
+    return this.convexService.mutation('conversations:setOperationalState', {
+      conversationId,
+      operationalState,
+      userId,
+    });
   }
 
   async getMessages(conversationId: string, limit?: number) {

@@ -24,6 +24,20 @@ import { RolesGuard } from '../shared/guards/roles.guard';
 import { Roles } from '../shared/decorators/roles.decorator';
 import { UserRole } from '../shared/constants/user-role';
 
+const VALID_OPERATIONAL_STATES = [
+  'requires_advisor',
+  'validate_availability',
+  'ready_to_book',
+  'pending_payment',
+  'pending_data',
+] as const;
+
+type OperationalStateParam = (typeof VALID_OPERATIONAL_STATES)[number];
+
+function isOperationalStateParam(s: string): s is OperationalStateParam {
+  return (VALID_OPERATIONAL_STATES as readonly string[]).includes(s);
+}
+
 @Controller('inbox')
 @UseGuards(ConvexAuthGuard, RolesGuard)
 @Roles(UserRole.ADMIN, UserRole.ASSISTANT, UserRole.VENDEDOR)
@@ -34,20 +48,33 @@ export class InboxController {
    * Listar conversaciones (inbox)
    * GET /api/inbox?status=human&priority=urgent&limit=50
    */
+  @Get('operational-states')
+  async listOperationalStates() {
+    return this.inboxService.listOperationalStateDefinitions();
+  }
+
   @Get()
   async list(
     @Query('status') status?: 'ai' | 'human' | 'resolved',
     @Query('attended') attended?: string,
     @Query('priority') priority?: 'urgent' | 'low' | 'medium' | 'resolved',
+    @Query('operationalStates') operationalStatesRaw?: string,
     @Query('limit') limit?: string,
   ) {
     const limitNum = limit ? parseInt(limit, 10) : undefined;
     const attendedBool = attended === 'true' ? true : attended === 'false' ? false : undefined;
-    return this.inboxService.listConversations({ 
-      status, 
+    const operationalStates = operationalStatesRaw
+      ?.split(',')
+      .map((s) => s.trim())
+      .filter((s) => s.length > 0)
+      .filter(isOperationalStateParam);
+    return this.inboxService.listConversations({
+      status,
       attended: attendedBool,
-      priority, 
-      limit: limitNum 
+      priority,
+      operationalStates:
+        operationalStates && operationalStates.length > 0 ? operationalStates : undefined,
+      limit: limitNum,
     });
   }
 
@@ -141,6 +168,35 @@ export class InboxController {
       throw new BadRequestException('priority debe ser urgent, low, medium o resolved');
     }
     return this.inboxService.setPriority(conversationId, body.priority);
+  }
+
+  /**
+   * Estado operativo del embudo (etiqueta de asesor / pago / etc.)
+   * PATCH /api/inbox/:conversationId/operational-state
+   * Body: { "operationalState": "requires_advisor" }
+   */
+  @Patch(':conversationId/operational-state')
+  async setOperationalState(
+    @Param('conversationId') conversationId: string,
+    @Body() body: { operationalState: string; userId?: string },
+  ) {
+    const allowed = [
+      'requires_advisor',
+      'validate_availability',
+      'ready_to_book',
+      'pending_payment',
+      'pending_data',
+    ] as const;
+    if (!body?.operationalState || !allowed.includes(body.operationalState as (typeof allowed)[number])) {
+      throw new BadRequestException(
+        'operationalState debe ser: requires_advisor, validate_availability, ready_to_book, pending_payment, pending_data',
+      );
+    }
+    return this.inboxService.setOperationalState(
+      conversationId,
+      body.operationalState as (typeof allowed)[number],
+      body.userId,
+    );
   }
 
   /**

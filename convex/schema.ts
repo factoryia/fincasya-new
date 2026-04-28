@@ -380,11 +380,51 @@ export default defineSchema({
     .index('by_phone', ['phone'])
     .index('by_cedula', ['cedula']),
 
+  /**
+   * Eventos de cambio de estado operativo (trazabilidad).
+   * La entidad extensible es el literal en `operationalState` en `conversations` (mismos valores).
+   */
+  conversationOperationalStateEvents: defineTable({
+    conversationId: v.id('conversations'),
+    fromState: v.optional(
+      v.union(
+        v.literal('requires_advisor'),
+        v.literal('validate_availability'),
+        v.literal('ready_to_book'),
+        v.literal('pending_payment'),
+        v.literal('pending_data'),
+      ),
+    ),
+    toState: v.union(
+      v.literal('requires_advisor'),
+      v.literal('validate_availability'),
+      v.literal('ready_to_book'),
+      v.literal('pending_payment'),
+      v.literal('pending_data'),
+    ),
+    source: v.union(v.literal('bot'), v.literal('user')),
+    userId: v.optional(v.string()),
+    createdAt: v.number(),
+  }).index('by_conversation', ['conversationId', 'createdAt']),
+
   conversations: defineTable({
     contactId: v.id('contacts'),
     channel: v.union(v.literal('whatsapp')),
     /** ai = responde la IA; human = solo humano; resolved = cerrada */
     status: v.union(v.literal('ai'), v.literal('human'), v.literal('resolved')),
+    /**
+     * Estado operativo del embudo (visible en inbox). Extensible añadiendo literales + migración.
+     * Default lógico: pending_data.
+     */
+    operationalState: v.optional(
+      v.union(
+        v.literal('requires_advisor'),
+        v.literal('validate_availability'),
+        v.literal('ready_to_book'),
+        v.literal('pending_payment'),
+        v.literal('pending_data'),
+      ),
+    ),
     /** Prioridad para el inbox: urgente, baja, media, resuelto */
     priority: v.optional(
       v.union(
@@ -414,7 +454,8 @@ export default defineSchema({
     .index('by_contact', ['contactId'])
     .index('by_status', ['status'])
     .index('by_priority', ['priority'])
-    .index('by_last_message', ['lastMessageAt']),
+    .index('by_last_message', ['lastMessageAt'])
+    .index('by_operational_state', ['operationalState']),
 
   messages: defineTable({
     conversationId: v.id('conversations'),

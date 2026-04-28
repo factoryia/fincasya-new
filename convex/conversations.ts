@@ -1,6 +1,25 @@
 import { v } from "convex/values";
 import { internalMutation, mutation, query } from "./_generated/server";
-import type { Id } from "./_generated/dataModel";
+import {
+  DEFAULT_OPERATIONAL_STATE,
+  operationalStateValidator,
+  type OperationalState,
+} from "./conversationOperationalState";
+
+function effectiveState(
+  s: OperationalState | undefined,
+): OperationalState {
+  return s ?? DEFAULT_OPERATIONAL_STATE;
+}
+
+/**
+ * Estados que en inbox se leen como "pendiente de un asesor" y chocan con status=ai.
+ * Al devolver el chat a la IA, se limpian a pending_data.
+ */
+const HUMAN_INTERVENTION_STATES: OperationalState[] = [
+  "requires_advisor",
+  "validate_availability",
+];
 
 /**
  * Actualizar lastMessageAt de una conversación.
@@ -45,11 +64,20 @@ export const setLastCatalogSent = internalMutation({
 
 /**
  * Escalar a humano: la IA deja de responder; un agente debe atender.
+ * Por defecto marca también "Requiere asesor" salvo que se indique otro estado operativo.
  */
 export const escalate = internalMutation({
-  args: { conversationId: v.id("conversations") },
+  args: {
+    conversationId: v.id("conversations"),
+    operationalState: v.optional(operationalStateValidator),
+  },
   handler: async (ctx, args) => {
-    await ctx.db.patch(args.conversationId, { status: "human", attended: false });
+    const op = args.operationalState ?? "requires_advisor";
+    await ctx.db.patch(args.conversationId, {
+      status: "human",
+      attended: false,
+      operationalState: op,
+    });
   },
 });
 
@@ -59,7 +87,17 @@ export const escalate = internalMutation({
 export const setToAi = internalMutation({
   args: { conversationId: v.id("conversations") },
   handler: async (ctx, args) => {
-    await ctx.db.patch(args.conversationId, { status: "ai" });
+    const prev = await ctx.db.get(args.conversationId);
+    const op = effectiveState(
+      prev?.operationalState as OperationalState | undefined,
+    );
+    const patch: { status: "ai"; operationalState?: OperationalState } = {
+      status: "ai",
+    };
+    if (HUMAN_INTERVENTION_STATES.includes(op)) {
+      patch.operationalState = DEFAULT_OPERATIONAL_STATE;
+    }
+    await ctx.db.patch(args.conversationId, patch);
   },
 });
 
@@ -73,13 +111,84 @@ export const resolve = internalMutation({
   },
 });
 
+/** Cambio de estado operativo sin tocar ai/human/resolved (usado por el bot). */
+export const setOperationalStateInternal = internalMutation({
+  args: {
+    conversationId: v.id("conversations"),
+    operationalState: operationalStateValidator,
+    log: v.optional(v.boolean()),
+  },
+  handler: async (ctx, args) => {
+    const prev = await ctx.db.get(args.conversationId);
+    const fromState = prev
+      ? (effectiveState(prev.operationalState as OperationalState | undefined) as OperationalState)
+      : undefined;
+    await ctx.db.patch(args.conversationId, {
+      operationalState: args.operationalState,
+    });
+    if (args.log === true) {
+      await ctx.db.insert("conversationOperationalStateEvents", {
+        conversationId: args.conversationId,
+        fromState,
+        toState: args.operationalState,
+        source: "bot",
+        createdAt: Date.now(),
+      });
+    }
+  },
+});
+
 /**
  * Obtener conversación por ID.
  */
 export const getById = query({
   args: { conversationId: v.id("conversations") },
   handler: async (ctx, args) => {
-    return await ctx.db.get(args.conversationId);
+    const doc = await ctx.db.get(args.conversationId);
+    if (!doc) return null;
+    return {
+      ...doc,
+      operationalState: effectiveState(doc.operationalState as OperationalState | undefined),
+    };
+  },
+});
+
+/** Definiciones para el panel (extensible en código; en el futuro puede leer de tabla). */
+export const listOperationalStateDefinitions = query({
+  args: {},
+  handler: async () => {
+    return [
+      {
+        id: "requires_advisor" as const,
+        label: "Requiere asesor",
+        color: "rose",
+        icon: "headset",
+      },
+      {
+        id: "validate_availability" as const,
+        label: "Validar disponibilidad",
+        color: "amber",
+        icon: "calendar-check",
+      },
+      {
+        id: "ready_to_book" as const,
+        label: "Listo para reservar",
+        color: "emerald",
+        icon: "check-circle",
+      },
+      {
+        id: "pending_payment" as const,
+        label: "Pendiente pago",
+        color: "violet",
+        icon: "banknote",
+      },
+      {
+        id: "pending_data" as const,
+        label: "Pendiente datos",
+        color: "slate",
+        icon: "clipboard-list",
+      },
+    ];
   },
 });
 
@@ -89,7 +198,11 @@ export const getById = query({
 export const escalateToHuman = mutation({
   args: { conversationId: v.id("conversations") },
   handler: async (ctx, args) => {
-    await ctx.db.patch(args.conversationId, { status: "human", attended: false });
+    await ctx.db.patch(args.conversationId, {
+      status: "human",
+      attended: false,
+      operationalState: "requires_advisor",
+    });
   },
 });
 
@@ -101,11 +214,21 @@ export const markAsAttended = mutation({
   },
 });
 
-/** Volver a modo IA (respuesta automática). */
+/** Volver a modo IA (respuesta automática). Limpia etiquetas "Requiere asesor" / validar dispo. */
 export const setToAiPublic = mutation({
   args: { conversationId: v.id("conversations") },
   handler: async (ctx, args) => {
-    await ctx.db.patch(args.conversationId, { status: "ai" });
+    const prev = await ctx.db.get(args.conversationId);
+    const op = effectiveState(
+      prev?.operationalState as OperationalState | undefined,
+    );
+    const patch: { status: "ai"; operationalState?: OperationalState } = {
+      status: "ai",
+    };
+    if (HUMAN_INTERVENTION_STATES.includes(op)) {
+      patch.operationalState = DEFAULT_OPERATIONAL_STATE;
+    }
+    await ctx.db.patch(args.conversationId, patch);
   },
 });
 
@@ -133,6 +256,53 @@ export const setPriority = mutation({
   },
 });
 
+/**
+ * Actualizar estado operativo (asesor). Requiere autenticación vía API (Nest).
+ * `userId` es opcional: trazabilidad en `conversationOperationalStateEvents`.
+ */
+export const setOperationalState = mutation({
+  args: {
+    conversationId: v.id("conversations"),
+    operationalState: operationalStateValidator,
+    userId: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    const prev = await ctx.db.get(args.conversationId);
+    const fromState = prev
+      ? (effectiveState(prev.operationalState as OperationalState | undefined) as OperationalState)
+      : undefined;
+    await ctx.db.patch(args.conversationId, {
+      operationalState: args.operationalState,
+    });
+    await ctx.db.insert("conversationOperationalStateEvents", {
+      conversationId: args.conversationId,
+      fromState,
+      toState: args.operationalState,
+      source: "user",
+      userId: args.userId,
+      createdAt: Date.now(),
+    });
+  },
+});
+
+/** Migración: documentos sin campo → pending_data */
+export const backfillOperationalStateDefault = internalMutation({
+  args: {},
+  handler: async (ctx) => {
+    const convs = await ctx.db.query("conversations").collect();
+    let n = 0;
+    for (const c of convs) {
+      if (c.operationalState === undefined) {
+        await ctx.db.patch(c._id, {
+          operationalState: DEFAULT_OPERATIONAL_STATE,
+        });
+        n++;
+      }
+    }
+    return { patched: n };
+  },
+});
+
 /** Listar conversaciones (para inbox). */
 export const list = query({
   args: {
@@ -148,6 +318,8 @@ export const list = query({
         v.literal("resolved")
       )
     ),
+    /** Filtra por uno o varios estados operativos */
+    operationalStates: v.optional(v.array(operationalStateValidator)),
     limit: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
@@ -158,7 +330,7 @@ export const list = query({
           .withIndex("by_status", (q) => q.eq("status", args.status!))
           .collect()
       : await ctx.db.query("conversations").collect();
-    
+
     if (args.attended !== undefined) {
       convs = convs.filter((c) => (c.attended ?? false) === args.attended);
     }
@@ -166,6 +338,14 @@ export const list = query({
     if (args.priority) {
       convs = convs.filter((c) => c.priority === args.priority);
     }
+
+    if (args.operationalStates && args.operationalStates.length > 0) {
+      const set = new Set(args.operationalStates);
+      convs = convs.filter((c) =>
+        set.has(effectiveState(c.operationalState as OperationalState | undefined))
+      );
+    }
+
     convs = convs.sort(
       (a, b) =>
         (b.lastMessageAt ?? b.createdAt) - (a.lastMessageAt ?? a.createdAt)
@@ -176,6 +356,9 @@ export const list = query({
         const contact = await ctx.db.get(c.contactId);
         return {
           ...c,
+          operationalState: effectiveState(
+            c.operationalState as OperationalState | undefined
+          ),
           contact: contact
             ? { phone: contact.phone, name: contact.name }
             : null,
