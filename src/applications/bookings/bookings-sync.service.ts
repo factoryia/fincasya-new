@@ -130,7 +130,7 @@ export class BookingsSyncService {
     if (!property) throw new Error('Propiedad no encontrada');
 
     // 2. Mezclar multimedia preexistente (URLs) y archivos subidos en esta solicitud.
-    let multimedia: { url: string; name: string; type: string }[] = [];
+    const multimedia: { url: string; name: string; type: string }[] = [];
 
     const rawMultimediaLinks = params.multimediaLinks;
     if (rawMultimediaLinks) {
@@ -326,7 +326,7 @@ export class BookingsSyncService {
             await this.brevoEmailService.sendBookingConfirmationToClient({
               clientEmail: booking.correo,
               clientName: booking.nombreCompleto,
-              propertyTitle: (booking as any).propertyTitle || 'tu propiedad',
+              propertyTitle: (booking).propertyTitle || 'tu propiedad',
               reference: reference,
               contractUrl: contractUrl,
             });
@@ -336,7 +336,7 @@ export class BookingsSyncService {
               clientName: booking.nombreCompleto,
               clientEmail: booking.correo,
               clientPhone: booking.celular,
-              propertyTitle: (booking as any).propertyTitle || 'Propiedad Reservada',
+              propertyTitle: (booking).propertyTitle || 'Propiedad Reservada',
               checkInDate: new Date(booking.fechaEntrada).toLocaleDateString('es-CO'),
               checkOutDate: new Date(booking.fechaSalida).toLocaleDateString('es-CO'),
               totalAmount: booking.precioTotal,

@@ -123,7 +123,7 @@ function normalizeDownloadedFile(data: unknown): Buffer {
   if (Buffer.isBuffer(data)) return data;
   if (data instanceof ArrayBuffer) return Buffer.from(data);
   if (ArrayBuffer.isView(data)) {
-    const v = data as ArrayBufferView;
+    const v = data;
     return Buffer.from(v.buffer, v.byteOffset, v.byteLength);
   }
   return Buffer.from(String(data));
@@ -284,7 +284,7 @@ export class FincasService {
     try {
       const data = (await this.convexService.query('fincas:list', {
         limit: 1000,
-      })) as any;
+      }));
       const properties = data?.properties || [];
       return properties.map((p: any) => ({
         _id: p._id,
@@ -375,7 +375,7 @@ export class FincasService {
       const priceBase = (p as { priceBase?: number }).priceBase ?? 0;
 
       // Usar el slug si existe, de lo contrario generar uno exactamente igual al frontend
-      let slug = (p as any).slug;
+      let slug = (p).slug;
       if (!slug) {
         slug = title
           .toString()
@@ -1294,7 +1294,7 @@ export class FincasService {
           for (const fileName of xmlTargets) {
             const raw = zip.file(fileName)?.asText();
             if (raw) {
-              (zip as any).file(fileName, processXml(raw));
+              (zip).file(fileName, processXml(raw));
             }
           }
           finalBuffer = zip.generate({ type: 'nodebuffer', compression: 'DEFLATE' });

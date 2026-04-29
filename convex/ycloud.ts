@@ -5,7 +5,11 @@ import { action, internalAction, internalMutation, internalQuery } from "./_gene
 import { internal, api } from "./_generated/api";
 import type { Id, Doc } from "./_generated/dataModel";
 import rag from "./rag";
-import { CONSULTANT_SYSTEM_PROMPT } from "./lib/consultantPrompt";
+import {
+  CONSULTANT_SYSTEM_PROMPT,
+  DEFAULT_CONSULTANT_SYSTEM_PROMPT,
+  PROMPT_INTERNAL_PAGE_ID,
+} from "./lib/consultantPrompt";
 import { CONVEX_OPENAI_CHAT_MODEL } from "./lib/openaiModel";
 import { transcribeAudio } from "./lib/transcription";
 
@@ -15,6 +19,29 @@ import { transcribeAudio } from "./lib/transcription";
 function botEscalateAssignedUserId(): string | undefined {
   const raw = process.env.CHATBOT_AUTO_ASSIGN_ADVISOR_ID?.trim();
   return raw && raw.length > 0 ? raw : undefined;
+}
+
+function extractOfficialWelcomeMessage(promptText: string): string | null {
+  const marker =
+    "### MENSAJE DE BIENVENIDA OFICIAL (solo cuando el cliente envía únicamente un saludo simple)";
+  const start = promptText.indexOf(marker);
+  if (start < 0) return null;
+
+  const afterMarker = promptText.slice(start + marker.length);
+  const exactMsgIntro =
+    "Si el cliente envía solamente \"hola\", \"buenas\", \"buen día\", \"hello\", \"hey\" o un saludo equivalente SIN más contexto, envía EXACTAMENTE este mensaje:";
+  const introIndex = afterMarker.indexOf(exactMsgIntro);
+  if (introIndex < 0) return null;
+
+  const afterIntro = afterMarker
+    .slice(introIndex + exactMsgIntro.length)
+    .replace(/^\s+/, "");
+  const nextSectionIndex = afterIntro.indexOf("\n### ");
+  const messageBlock =
+    nextSectionIndex >= 0 ? afterIntro.slice(0, nextSectionIndex) : afterIntro;
+
+  const clean = messageBlock.trim();
+  return clean.length > 0 ? clean : null;
 }
 
 /**
@@ -480,20 +507,61 @@ export const processInboundMessage = internalAction({
       let currentMessageText = (args.type === "audio" && finalContent.startsWith("[Voz]")) 
         ? finalContent 
         : (args.text || "");
+      const promptOverrideForGreeting = await ctx.runQuery(api.internalPages.getById, {
+        pageId: PROMPT_INTERNAL_PAGE_ID,
+      });
+      const promptOverrideGreetingText =
+        promptOverrideForGreeting &&
+        typeof promptOverrideForGreeting === "object" &&
+        "prompt" in promptOverrideForGreeting &&
+        typeof (promptOverrideForGreeting as { prompt?: unknown }).prompt === "string"
+          ? (promptOverrideForGreeting as { prompt: string }).prompt.trim()
+          : "";
+      const effectivePromptForGreeting =
+        promptOverrideGreetingText.length > 0
+          ? promptOverrideGreetingText
+          : DEFAULT_CONSULTANT_SYSTEM_PROMPT;
       const normalizedIncomingText = String(currentMessageText || "")
         .toLowerCase()
         .normalize("NFD")
         .replace(/\p{M}/gu, "")
         .trim();
       const OPENING_QUALIFICATION_TEXT =
-        "Hola, gracias por comunicarte con FincasYa.com 🏡, con gusto te ayudamos a encontrar la finca ideal para tu estadía. ✨\n\n" +
-        "Para poder recomendarte la mejor opción, te haremos unas preguntas rápidas. Esto nos ayuda porque algunas fincas tienen restricciones sobre cantidad de personas, tipo de evento, sonido, decoración o ingreso de invitados adicionales. ✅\n\n" +
-        "¿Para cuántas personas necesitas la finca? 👥";
+        extractOfficialWelcomeMessage(effectivePromptForGreeting) ||
+        "¡Hola! Es un gusto saludarte. Te escribe Hernán de FincasYa.com 🏡✨\n\n" +
+          "Tenemos opciones espectaculares de fincas listas para ti 🤩 y quiero ayudarte a encontrar la ideal según tu plan.\n\n" +
+          "Compárteme por favor:\n\n" +
+          "📅 Fechas: entrada y salida\n\n" +
+          "👨‍👩‍👧‍👦 Cupo: número de personas (desde los 2 años)\n\n" +
+          "🏡 Tipo de grupo: familiar, amigos o empresarial\n\n" +
+          "🐾 Mascotas: ¿viajan con ustedes?\n\n" +
+          "Con esto te envío opciones disponibles, fotos, precios y promociones ajustadas a lo que buscas 🔥\n\n" +
+          "Estoy atento para ayudarte a reservar tu finca perfecta ✨";
       const userRequestedFlowRestart =
         /^(clear|limpiar|reiniciar|reinicia|reset|start over|empezar de nuevo|iniciar de nuevo)$/i.test(
           normalizedIncomingText
         );
+      const isSimpleGreetingOnly =
+        /^(hola|buenas|buenos dias|buen día|buen dia|hello|hi|hey)\??!?$/i.test(
+          normalizedIncomingText
+        );
       if (userRequestedFlowRestart) {
+        await ctx.runMutation(internal.messages.insertAssistantMessage, {
+          conversationId,
+          content: OPENING_QUALIFICATION_TEXT,
+          createdAt: Date.now(),
+        });
+        await ctx.runAction(internal.ycloud.sendWhatsAppMessage, {
+          to: args.phone,
+          text: OPENING_QUALIFICATION_TEXT,
+          wamid: args.wamid,
+        });
+        await ctx.runMutation(internal.conversations.updateLastMessageAt, {
+          conversationId,
+        });
+        return;
+      }
+      if (isSimpleGreetingOnly) {
         await ctx.runMutation(internal.messages.insertAssistantMessage, {
           conversationId,
           content: OPENING_QUALIFICATION_TEXT,
@@ -533,27 +601,6 @@ export const processInboundMessage = internalAction({
         .toLowerCase()
         .normalize("NFD")
         .replace(/\p{M}/gu, "");
-      const lastAssistantAskedPets = [...recentForCatalogIntent]
-        .reverse()
-        .some((m: any) => {
-          if (m.sender !== "assistant") return false;
-          const t = String(m.content ?? "").toLowerCase().normalize("NFD").replace(/\p{M}/gu, "");
-          return /\bmascotas?\b|\bperros?\b|\bgatos?\b/.test(t);
-        });
-      const hasPetsInfoInHistory =
-        /\b(sin mascotas|no mascotas|no llevamos mascotas|no llevare mascotas|no llevaremos mascotas|con mascotas|llevamos mascotas|llevare mascotas|llevaremos mascotas|mascotas?|perros?|gatos?)\b/.test(
-          normalizedAllUserTextForFilters
-        ) ||
-        ((isAffirmativeOnly(currentMessageText) || isNegativeOnly(currentMessageText)) &&
-          lastAssistantAskedPets);
-      const hasDateInfoInHistory =
-        /\b(sabado|domingo|fin de semana|entrada|salida|del\s+\d{1,2}|hasta|al\s+\d{1,2}|fecha)\b/.test(
-          normalizedAllUserTextForFilters
-        );
-      const hasPeopleInfoInHistory =
-        /\bpara\s+\d+\b|\b\d+\s*personas?\b|\bsomos\s+\d+\b/.test(
-          normalizedAllUserTextForFilters
-        );
       // Si ya estamos recolectando datos para contrato/reserva, NO reabrir catálogo.
       const contractPromptInHistory = recentForCatalogIntent.some((m: any) => {
         if (m.sender !== "assistant") return false;
@@ -948,32 +995,8 @@ Fincas disponibles: ${fincaNames}`,
           !shouldBlockCatalogFincaConfirmed &&
           !skipSingleFincaCardResend
         ) {
-          const hasLocationReadyForCatalog =
-            catalogIntent.intent === "search_catalog" &&
-            String(catalogIntent.location ?? "").trim().length >= 3;
-          const mustAskPetsBeforeCatalog =
-            hasLocationReadyForCatalog &&
-            hasDateInfoInHistory &&
-            hasPeopleInfoInHistory &&
-            !hasPetsInfoInHistory;
-          if (mustAskPetsBeforeCatalog) {
-            const askPetsText =
-              "Perfecto ✅ Antes de mostrarte opciones, necesito confirmar si llevarán mascotas 🐾 (sí o no). Así evitamos ofrecerte fincas que no apliquen para tu plan.";
-            await ctx.runAction(internal.ycloud.sendWhatsAppMessage, {
-              to: args.phone,
-              text: askPetsText,
-              wamid: args.wamid,
-            });
-            await ctx.runMutation(internal.messages.insertAssistantMessage, {
-              conversationId,
-              content: askPetsText,
-              createdAt: Date.now(),
-            });
-            await ctx.runMutation(internal.conversations.updateLastMessageAt, {
-              conversationId,
-            });
-            return;
-          }
+          // Nuevo criterio comercial: mascotas es un dato importante, pero no debe
+          // bloquear el avance del catálogo si ya tenemos personas + fechas.
           console.log("[catalog-intent]", JSON.stringify(catalogIntent));
           const invalidSearchLocations = /\b(dias?|personas?|fincas?|reservar?|noches?|una|los|las|el|la)\b/i;
           const catalogIntentArg =
@@ -1069,6 +1092,53 @@ Fincas disponibles: ${fincaNames}`,
             console.error("YCloud catalog fallback error:", e);
           }
         }
+      }
+
+      const petCountMentions = (() => {
+        const text = normalizedAllUserTextForFilters;
+        const numericMatch =
+          text.match(/(\d+)\s*(?:mascotas?|perros?)/i) ||
+          text.match(/(?:mascotas?|perros?)\s*[:\-]?\s*(\d+)/i);
+        if (numericMatch?.[1]) return Number(numericMatch[1]);
+        if (/\b(tres)\s+(?:mascotas?|perros?)\b/i.test(text)) return 3;
+        if (/\b(cuatro)\s+(?:mascotas?|perros?)\b/i.test(text)) return 4;
+        if (/\b(cinco)\s+(?:mascotas?|perros?)\b/i.test(text)) return 5;
+        return 0;
+      })();
+      const hasSelectedSpecificFinca =
+        !!(
+          fincaTitle ||
+          confirmedFincaTitle ||
+          confirmedFincaInHistoryTitle ||
+          selectedCatalogPropertyTitle ||
+          catalogIntent.intent === "single_finca"
+        );
+      const shouldEscalateByPetPolicy =
+        petCountMentions > 2 &&
+        hasSelectedSpecificFinca &&
+        !userExplicitlyWantsOtherOptions;
+      if (shouldEscalateByPetPolicy) {
+        const petPolicyText =
+          "Perfecto ✨ Ya con la finca de tu interés identificada, este caso por política de mascotas debe validarlo un asesor porque viajarían con más de 2 perros 🐾. Te comunico con nuestro equipo para confirmarte esta opción.";
+        await ctx.runMutation(internal.messages.insertAssistantMessage, {
+          conversationId,
+          content: petPolicyText,
+          createdAt: Date.now(),
+        });
+        await ctx.runAction(internal.ycloud.sendWhatsAppMessage, {
+          to: args.phone,
+          text: petPolicyText,
+          wamid: args.wamid,
+        });
+        await ctx.runMutation(internal.conversations.escalate, {
+          conversationId,
+          operationalState: "requires_advisor",
+          assignedUserId: botEscalateAssignedUserId(),
+        });
+        await ctx.runMutation(internal.conversations.updateLastMessageAt, {
+          conversationId,
+        });
+        return;
       }
 
       // Plantillas: no pisar el flujo cuando ya mandamos catálogo interactivo, el cliente pide finca específica, o envía datos.
@@ -1321,6 +1391,12 @@ Fincas disponibles: ${fincaNames}`,
 
 En FincasYa.com tu alquiler siempre es seguro, respaldado y con total tranquilidad. ®`;
         }
+
+        await ctx.runMutation(internal.conversations.escalate, {
+          conversationId,
+          operationalState: "requires_advisor",
+          assignedUserId: botEscalateAssignedUserId(),
+        });
       }
 
       // Guardrail de cierre: no anunciar contrato si el usuario no esta en flujo real de reserva.
@@ -1703,6 +1779,21 @@ export const generateReplyWithRagAndFincas = internalAction({
     isReactivated: v.optional(v.boolean()),
   },
   handler: async (ctx, args): Promise<string> => {
+    const promptOverride = await ctx.runQuery(api.internalPages.getById, {
+      pageId: PROMPT_INTERNAL_PAGE_ID,
+    });
+    const promptOverrideText =
+      promptOverride &&
+      typeof promptOverride === "object" &&
+      "prompt" in promptOverride &&
+      typeof (promptOverride as { prompt?: unknown }).prompt === "string"
+        ? (promptOverride as { prompt: string }).prompt.trim()
+        : "";
+    const effectiveBasePrompt =
+      promptOverrideText.length > 0
+        ? promptOverrideText
+        : DEFAULT_CONSULTANT_SYSTEM_PROMPT;
+
     const ragResult = await rag.search(ctx, {
       namespace: "fincas",
       query: args.searchQueryOverride ?? args.userMessage,
@@ -1925,17 +2016,22 @@ ${breakdown}
       console.error("[prompt-templates] error cargando plantillas:", e);
     }
 
-    const systemPrompt = buildSystemPrompt(ragResult.text, fincasContext, {
-      singleFincaCatalogSent: args.singleFincaCatalogSent ?? false,
-      fincaTitle: args.fincaTitle ?? "",
-      whatsappCatalogSentForSearch: catalogAlreadyShown,
-      catalogFoundFincasButFailed: catalogFailed,
-      currentDate,
-      dynamicLocations: args.dynamicLocations,
-      hasImage: !!args.imageUrl,
-      templatesSection,
-      isReactivated: args.isReactivated ?? false,
-    });
+    const systemPrompt = buildSystemPrompt(
+      ragResult.text,
+      fincasContext,
+      effectiveBasePrompt,
+      {
+        singleFincaCatalogSent: args.singleFincaCatalogSent ?? false,
+        fincaTitle: args.fincaTitle ?? "",
+        whatsappCatalogSentForSearch: catalogAlreadyShown,
+        catalogFoundFincasButFailed: catalogFailed,
+        currentDate,
+        dynamicLocations: args.dynamicLocations,
+        hasImage: !!args.imageUrl,
+        templatesSection,
+        isReactivated: args.isReactivated ?? false,
+      }
+    );
     // ── TTL de historial: solo incluir mensajes de las últimas 12 horas ──
     // Si han pasado más de 12h desde el último mensaje, el agente arranca
     // sin contexto previo (como una conversación nueva).
@@ -2045,6 +2141,7 @@ function formatFincasForPrompt(
 function buildSystemPrompt(
   ragContext: string,
   fincasContext: string,
+  basePromptInput?: string,
   opts?: {
     singleFincaCatalogSent?: boolean;
     fincaTitle?: string;
@@ -2057,7 +2154,7 @@ function buildSystemPrompt(
     isReactivated?: boolean;
   }
 ): string {
-  let basePrompt = CONSULTANT_SYSTEM_PROMPT;
+  let basePrompt = basePromptInput || CONSULTANT_SYSTEM_PROMPT;
   
   // Reemplazo dinámico o limpieza del listado de ciudades
   if (opts?.dynamicLocations) {
@@ -3083,7 +3180,7 @@ export const maybeSendWhatsappTemplateReply = internalAction({
     }
 
     const valid = routable.some(
-      (t) => t.name === picked!.name && t.language === picked!.language
+      (t) => t.name === picked.name && t.language === picked.language
     );
     if (!valid) {
       console.warn(
@@ -3107,7 +3204,7 @@ export const maybeSendWhatsappTemplateReply = internalAction({
     }
 
     const pickedTemplate = routable.find(
-      (t) => t.name === picked!.name && t.language === picked!.language
+      (t) => t.name === picked.name && t.language === picked.language
     );
 
     await ctx.runMutation(internal.messages.insertAssistantMessage, {
@@ -4063,7 +4160,7 @@ export const extractContractData = action({
       let resolvedPropertyId = String(parsed.propertyId || "");
       if (!resolvedPropertyId || !resolvedPropertyId.includes(":")) {
         const fincaName = String(parsed.finca || parsed.fincaName || parsed.nombreFinca || "");
-        let searchTerms = [resolvedPropertyId, fincaName].filter(
+        const searchTerms = [resolvedPropertyId, fincaName].filter(
           (t) => t && t.length > 2,
         );
 
@@ -4366,7 +4463,7 @@ function formatTimeTo24h(timeStr: string): string {
     if (/^\d{2}:\d{2}$/.test(t)) return t;
     return timeStr;
   }
-  let [_, hours, minutes, ampm] = match;
+  const [_, hours, minutes, ampm] = match;
   let h = parseInt(hours, 10);
   if (ampm === "PM" && h < 12) h += 12;
   if (ampm === AmPM.AM && h === 12) h = 0;

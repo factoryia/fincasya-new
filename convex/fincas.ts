@@ -690,7 +690,7 @@ export const calculateStayPrice = query({
     
     // 1. Identificar la regla dominante para toda la estancia
     let dominantRule = null;
-    let tempCurrent = new Date(start);
+    const tempCurrent = new Date(start);
     
     while (tempCurrent < end) {
       const dateStr = tempCurrent.toISOString().split('T')[0];
