@@ -13,6 +13,7 @@ import { ContactsModule } from './contacts/contacts.module';
 import { BookingsModule } from './bookings/bookings.module';
 import { PaymentsModule } from './payments/payments.module';
 import { InternalPagesModule } from './internal-pages/internal-pages.module';
+import { AccountingManagersModule } from './accounting-managers/accounting-managers.module';
 import { ScheduleModule } from '@nestjs/schedule';
 
 @Module({
@@ -32,6 +33,7 @@ import { ScheduleModule } from '@nestjs/schedule';
     BookingsModule,
     PaymentsModule,
     InternalPagesModule,
+    AccountingManagersModule,
   ],
 
   controllers: [],

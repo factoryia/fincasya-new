@@ -1,5 +1,6 @@
 import { BadGatewayException, Injectable, UnauthorizedException } from '@nestjs/common';
 import { ConvexHttpClient } from 'convex/browser';
+import { anyApi } from 'convex/server';
 import { api } from '../../../convex-api-stub';
 
 @Injectable()
@@ -13,9 +14,9 @@ export class ConvexService {
 
   async query(path: string, args: Record<string, unknown> = {}, token?: string): Promise<any> {
     const [module, functionName] = path.split(':');
-    const fullPath = (api)[module]?.[functionName];
+    let fullPath = (api as any)[module]?.[functionName];
     if (!fullPath) {
-      throw new Error(`Query not found: ${path}`);
+      fullPath = (anyApi as any)[module][functionName];
     }
     if (token) {
       const convexUrl = process.env.CONVEX_URL || 'https://adventurous-octopus-651.convex.cloud';
@@ -42,9 +43,9 @@ export class ConvexService {
 
   async mutation(path: string, args: any) {
     const [module, functionName] = path.split(':');
-    const fullPath = (api)[module]?.[functionName];
+    let fullPath = (api as any)[module]?.[functionName];
     if (!fullPath) {
-      throw new Error(`Mutation not found: ${path}`);
+      fullPath = (anyApi as any)[module][functionName];
     }
     // Ensure args is a plain object to avoid Convex validation errors with class instances
     // We use JSON.parse(JSON.stringify) to handle recursive plain object conversion

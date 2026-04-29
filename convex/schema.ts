@@ -629,4 +629,17 @@ export default defineSchema({
     createdAt: v.number(),
     updatedAt: v.number(),
   }),
+
+  /** Gestión de encargados contables */
+  accountingManagers: defineTable({
+    name: v.string(),
+    idNumber: v.string(),
+    idIssuancePlace: v.optional(v.string()),
+    accountNumber: v.optional(v.string()),
+    bankName: v.optional(v.string()),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index('by_name', ['name'])
+    .index('by_idNumber', ['idNumber']),
 });

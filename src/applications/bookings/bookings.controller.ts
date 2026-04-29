@@ -35,6 +35,12 @@ export class BookingsController {
     return this.remindersService.triggerRemindersManually();
   }
 
+  @Get('count')
+  @UseGuards(ConvexAuthGuard, AdminGuard)
+  async count() {
+    return this.bookingsSyncService.countBookings();
+  }
+
   @Get('my-bookings')
   @UseGuards(ConvexAuthGuard)
   async getMyBookings(@Req() req: Request) {

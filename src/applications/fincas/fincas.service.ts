@@ -135,10 +135,11 @@ import ILovePDFFile from '@ilovepdf/ilovepdf-nodejs/ILovePDFFile';
 import axios from 'axios';
 import { ConvexService } from '../shared/services/convex.service';
 import { S3Service } from '../shared/services/s3.service';
-import type { InboxService } from '../inbox/inbox.service';
+import { InboxService } from '../inbox/inbox.service';
 import { CreateFincaDto } from './dto/create-finca.dto';
 import { UpdateFincaDto } from './dto/update-finca.dto';
 import { ListFincasDto } from './dto/list-fincas.dto';
+import { PdfService, ReservationConfirmationData } from '../shared/services/pdf.service';
 import { parseExcelToFincas } from './excel-parser';
 import {
   GlobalPricingRuleDto,
@@ -152,7 +153,8 @@ export class FincasService {
   constructor(
     private readonly convexService: ConvexService,
     private readonly s3Service: S3Service,
-    @Inject(forwardRef(() => require('../inbox/inbox.service').InboxService))
+    private readonly pdfService: PdfService,
+    @Inject(forwardRef(() => InboxService))
     private readonly inboxService: InboxService,
   ) {}
 
@@ -593,20 +595,25 @@ export class FincasService {
         updateData.contractTemplateUrl = contractTemplateUrl;
       }
 
-      const result = await this.convexService.mutation('fincas:update', {
+      const mutationPayload: any = {
         id,
         ...updateData,
-        features:
-          features?.map((f: any) => ({
-            name: f.name,
-            ...(f.iconId ? { iconId: f.iconId } : {}),
-            ...(f.zone ? { zone: f.zone } : {}),
-          })) || [],
-        ...(featuredIcons && { featuredIcons }),
-        ...(zoneOrder && { zoneOrder }),
-        ...(active !== undefined && { active }),
-        catalogIds,
-      });
+      };
+
+      if (features !== undefined && Array.isArray(features)) {
+        mutationPayload.features = features.map((f: any) => ({
+          name: f.name,
+          ...(f.iconId ? { iconId: f.iconId } : {}),
+          ...(f.zone ? { zone: f.zone } : {}),
+        }));
+      }
+
+      if (featuredIcons !== undefined) mutationPayload.featuredIcons = featuredIcons;
+      if (zoneOrder !== undefined) mutationPayload.zoneOrder = zoneOrder;
+      if (active !== undefined) mutationPayload.active = active;
+      if (catalogIds !== undefined) mutationPayload.catalogIds = catalogIds;
+
+      const result = await this.convexService.mutation('fincas:update', mutationPayload);
 
 
       // Agregar nuevas imÃ¡genes a travÃ©s de la mutaciÃ³n dedicada de Convex.
@@ -1187,11 +1194,11 @@ export class FincasService {
         [mappingKeys.priceText]: totalPriceText,
         [mappingKeys.priceNumeric]: totalPriceFormatted,
         [mappingKeys.priceNumericAlt]: totalPriceFormatted,
-        [mappingKeys.accountHolder]: dto.accountHolder,
-        [mappingKeys.idNumber]: dto.idNumber,
-        [mappingKeys.accountNumber]: dto.accountNumber,
-        [mappingKeys.bankName]: dto.bankName,
-        [mappingKeys.contractNumber]: dto.contractNumber,
+        [mappingKeys.accountHolder]: dto.accountHolder ?? '',
+        [mappingKeys.idNumber]: dto.idNumber ?? '',
+        [mappingKeys.accountNumber]: dto.accountNumber ?? '',
+        [mappingKeys.bankName]: dto.bankName ?? '',
+        [mappingKeys.contractNumber]: dto.contractNumber ?? '',
         [mappingKeys.clientName]: dto.clientName || contact?.name || '',
         [mappingKeys.clientId]: dto.clientId || '',
         [mappingKeys.clientEmail]: dto.clientEmail || '',
@@ -1204,11 +1211,11 @@ export class FincasService {
         'HORA ENTRADA': dto.checkInTime || '',
         'HORA SALIDA': dto.checkOutTime || '',
         // Fallbacks genÃ©ricos
-        Text6: dto.contractNumber,
-        Text9: totalPriceText,
-        Text10: totalPriceFormatted,
-        Text11: dto.accountNumber,
-        Text13: dto.bankName,
+        Text6: dto.contractNumber ?? '',
+        Text9: totalPriceText ?? '',
+        Text10: totalPriceFormatted ?? '',
+        Text11: dto.accountNumber ?? '',
+        Text13: dto.bankName ?? '',
         // Campos de mascotas
         'NUMERO_MASCOTAS': String(petCount),
         'DEP_MASCOTAS': String(dto.petDeposit ?? petSurchargeRefundable),
@@ -1216,63 +1223,118 @@ export class FincasService {
         'CARGO_SERVICIO': String(serviceStaffFee),
       };
 
-      // --- DETECCIÃ“N DE FORMATO Y PROCESAMIENTO ---
+      // --- PREPARACIÓN DE VALORES PARA WORD/HTML ---
+      const wordValues: Record<string, string> = {
+        fechaGeneracion: valuesMapping[mappingKeys.date] ?? '',
+        precioLetras: valuesMapping[mappingKeys.priceText] ?? '',
+        precioNumerico: valuesMapping[mappingKeys.priceNumeric] ?? '',
+        bancoNombre: valuesMapping[mappingKeys.bankName] ?? '',
+        cuentaNumero: valuesMapping[mappingKeys.accountNumber] ?? '',
+        titularNombre: valuesMapping[mappingKeys.accountHolder] ?? '',
+        titularCedula: valuesMapping[mappingKeys.idNumber] ?? '',
+        contratoNumero: valuesMapping[mappingKeys.contractNumber] ?? '',
+        fechaEntrada: valuesMapping[mappingKeys.checkInDate] ?? '',
+        fechaLlegada: valuesMapping[mappingKeys.checkInDate] ?? '',
+        fecha_entrada: valuesMapping[mappingKeys.checkInDate] ?? '',
+        fecha_llegada: valuesMapping[mappingKeys.checkInDate] ?? '',
+        fechaSalida: valuesMapping[mappingKeys.checkOutDate] ?? '',
+        fecha_salida: valuesMapping[mappingKeys.checkOutDate] ?? '',
+        ciudad: valuesMapping[mappingKeys.city] ?? '',
+        nochesTexto: this.numberToSpanishText(totalNights, false),
+        nochesNumero: String(totalNights),
+        diasTexto: this.numberToSpanishText(totalDays, false),
+        diasNumero: String(totalDays),
+        fechaEntradaMini: checkInMini,
+        fechaLlegadaMini: checkInMini,
+        fechaSalidaMini: checkOutMini,
+        horaLlegada: dto.checkInTime || '03:00 PM',
+        horaSalida: dto.checkOutTime || '01:00 PM',
+        ciudadCliente: valuesMapping[mappingKeys.clientCity] || dto.clientCity || '',
+        direccionCliente: valuesMapping[mappingKeys.clientAddress] || dto.clientAddress || '',
+        clienteNombre: valuesMapping[mappingKeys.clientName] ?? '',
+        clienteCedula: valuesMapping[mappingKeys.clientId] ?? '',
+        clienteId: valuesMapping[mappingKeys.clientId] ?? '',
+        clienteIdentificacion: valuesMapping[mappingKeys.clientId] ?? '',
+        clientCorreo: valuesMapping[mappingKeys.clientEmail] ?? '',
+        clienteCelular: valuesMapping[mappingKeys.clientPhone] ?? '',
+        firmaCliente: dto.signature ?? '',
+        numeroMascotas: String(petCount),
+        depositoMascotas: String(petSurchargeRefundable),
+        cargoMascotas: String(petSurchargeNonRefundable),
+        totalMascotas: String(petSurchargeRefundable + petSurchargeNonRefundable),
+        nombreFinca: finca.title || '',
+        municipioFinca: finca.location || '',
+        capacidadDePersonas: String(finca.capacity || 0),
+        característicasDeFinca: this.formatFincaFeatures(finca.features || []),
+        caracteristicasDeFinca: this.formatFincaFeatures(finca.features || []),
+        nombrePropietario: '', 
+      };
+
+      // Agregar también los mapeos del PDF (con y sin corchetes) por si acaso
+      for (const [k, v] of Object.entries(valuesMapping)) {
+        if (v === undefined || v === null) continue;
+        const t = String(v);
+        const clean = k.replace(/^\[|\]$/g, '').trim() || k;
+        wordValues[clean] = t;
+        if (k !== clean) {
+          wordValues[k] = t;
+        }
+      }
+
+      // --- DETECCIÓN DE FORMATO Y PROCESAMIENTO ---
       const isDocx = templateBytes.slice(0, 2).toString() === 'PK';
+      const isHtml = templateBytes.slice(0, 500).toString().toLowerCase().includes('<html');
+      
       let finalBuffer: Buffer;
       let finalFilename: string;
       let finalMimeType: string;
 
-      if (isDocx) {
-        console.log('[api] Detectado formato Word (.docx)');
-
-        const wordValues: Record<string, string> = {
-          fechaGeneracion: valuesMapping[mappingKeys.date] ?? '',
-          precioLetras: valuesMapping[mappingKeys.priceText] ?? '',
-          precioNumerico: valuesMapping[mappingKeys.priceNumeric] ?? '',
-          bancoNombre: valuesMapping[mappingKeys.bankName] ?? '',
-          cuentaNumero: valuesMapping[mappingKeys.accountNumber] ?? '',
-          titularNombre: valuesMapping[mappingKeys.accountHolder] ?? '',
-          titularCedula: valuesMapping[mappingKeys.idNumber] ?? '',
-          contratoNumero: valuesMapping[mappingKeys.contractNumber] ?? '',
-          fechaEntrada: valuesMapping[mappingKeys.checkInDate] ?? '',
-          fechaLlegada: valuesMapping[mappingKeys.checkInDate] ?? '',
-          fecha_entrada: valuesMapping[mappingKeys.checkInDate] ?? '',
-          fecha_llegada: valuesMapping[mappingKeys.checkInDate] ?? '',
-          fechaSalida: valuesMapping[mappingKeys.checkOutDate] ?? '',
-          fecha_salida: valuesMapping[mappingKeys.checkOutDate] ?? '',
-          ciudad: valuesMapping[mappingKeys.city] ?? '',
-          nochesTexto: this.numberToSpanishText(totalNights, false),
-          nochesNumero: String(totalNights),
-          diasTexto: this.numberToSpanishText(totalDays, false),
-          diasNumero: String(totalDays),
-          fechaEntradaMini: checkInMini,
-          fechaLlegadaMini: checkInMini,
-          fechaSalidaMini: checkOutMini,
-          horaLlegada: dto.checkInTime || '03:00 PM',
-          horaSalida: dto.checkOutTime || '01:00 PM',
-          ciudadCliente: valuesMapping[mappingKeys.clientCity] || dto.clientCity || '',
-          direccionCliente: valuesMapping[mappingKeys.clientAddress] || dto.clientAddress || '',
-          clienteNombre: valuesMapping[mappingKeys.clientName] ?? '',
-          clienteCedula: valuesMapping[mappingKeys.clientId] ?? '',
-          clienteId: valuesMapping[mappingKeys.clientId] ?? '',
-          clienteIdentificacion: valuesMapping[mappingKeys.clientId] ?? '',
-          clientCorreo: valuesMapping[mappingKeys.clientEmail] ?? '',
-          clienteCelular: valuesMapping[mappingKeys.clientPhone] ?? '',
-          firmaCliente: dto.signature ?? '',
-          numeroMascotas: String(petCount),
-          depositoMascotas: String(petSurchargeRefundable),
-          cargoMascotas: String(petSurchargeNonRefundable),
-          totalMascotas: String(petSurchargeRefundable + petSurchargeNonRefundable),
-        };
-        for (const [k, v] of Object.entries(valuesMapping)) {
-          if (v === undefined || v === null) continue;
-          const t = String(v);
-          const clean = k.replace(/^\[|\]$/g, '').trim() || k;
-          wordValues[clean] = t;
-          if (k !== clean) {
-            wordValues[k] = t;
+      if (isHtml) {
+        console.log('[api] Detectado formato HTML (Word antiguo)');
+        let htmlString = templateBytes.toString();
+        
+        // Realizar reemplazos robustos en el HTML usando Regex
+        console.log('[api] WordValues keys:', Object.keys(wordValues));
+        for (const [key, val] of Object.entries(wordValues)) {
+          // Regex que permite espacios y etiquetas HTML opcionales dentro de las llaves
+          const regex = new RegExp(`\\{\\{[\\s]*(?:<[^>]*>)*[\\s]*${key}[\\s]*(?:<[^>]*>)*[\\s]*\\}\\}`, 'g');
+          if (regex.test(htmlString)) {
+            console.log(`[api] Reemplazando llave: {{${key}}} -> ${val}`);
+            htmlString = htmlString.replace(regex, String(val ?? ''));
+          } else {
+            // Loguear solo si es una llave común que debería estar
+            if (['clienteNombre', 'clienteCedula', 'contratoNumero'].includes(key)) {
+              console.warn(`[api] Llave NO encontrada en el HTML: {{${key}}}`);
+            }
           }
         }
+        
+        finalBuffer = Buffer.from(htmlString);
+        const sanitizedTitle = this.sanitizeFilename(finca.title || 'Finca');
+        const contractNumber = dto.contractNumber ? `_${dto.contractNumber}` : '';
+        finalFilename = `Contrato_${sanitizedTitle}${contractNumber}.doc`;
+        finalMimeType = 'application/msword';
+        
+        console.log('[api] Contrato HTML procesado correctamente.');
+
+        // Intentar convertir HTML a PDF (iLovePDF suele aceptar .doc con HTML interno)
+        if (finalBuffer) {
+          try {
+            console.log(`[api] Convirtiendo contrato HTML a PDF...`);
+            const pdfBuffer = await this.convertDocxToPdf(
+              finalBuffer,
+              finalFilename,
+            );
+            finalBuffer = pdfBuffer;
+            finalFilename = finalFilename.replace('.doc', '.pdf');
+            finalMimeType = 'application/pdf';
+            console.log('[api] Conversión de HTML a PDF completada.');
+          } catch (e: any) {
+            console.warn('[api] No se pudo convertir HTML a PDF, se usará .doc');
+          }
+        }
+      } else if (isDocx) {
+        console.log('[api] Detectado formato Word (.docx)');
 
         const processXml = (xml: string) =>
           applyWordTemplateReplacements(xml, wordValues);
@@ -1557,6 +1619,93 @@ export class FincasService {
     }
   }
 
+  /**
+   * Genera el PDF de confirmación de reserva para una reserva existente,
+   * lo sube a S3 y lo enlaza a la reserva en Convex.
+   */
+  async generateBookingConfirmation(bookingId: string) {
+    const booking = await this.convexService.query('bookings:getById', {
+      id: bookingId,
+    });
+    if (!booking) {
+      throw new NotFoundException('Reserva no encontrada');
+    }
+
+    const finca = await this.convexService.query('fincas:getById', {
+      id: booking.propertyId,
+    });
+
+    const checkInDate = this.pdfService.toIsoDate(booking.fechaEntrada);
+    const checkOutDate = this.pdfService.toIsoDate(booking.fechaSalida);
+    const totalAmount = this.pdfService.toNumber(booking.precioTotal);
+
+    // Mapear datos al formato de PDF
+    const pdfData: ReservationConfirmationData = {
+      propertyId: booking.propertyId,
+      contractNumber: booking.contractNumber || String(Date.now()).slice(-6),
+      clientName: booking.nombreCompleto || 'Cliente',
+      clientId: booking.cedula || '',
+      clientEmail: booking.correo || '',
+      issueDate: this.pdfService.toIsoDate(new Date()),
+      clientPhone: booking.celular || '',
+      clientAddress: '', // No siempre disponible en booking
+      propertyName: finca?.title || booking.fincaName || 'Propiedad',
+      propertyLocation: finca?.location || '',
+      checkInDate,
+      checkOutDate,
+      checkInTime: '10:00', // Default
+      checkOutTime: '15:00', // Default
+      guests: this.pdfService.toNumber(booking.numeroPersonas) || 1,
+      nights: this.pdfService.calculateNights(checkInDate, checkOutDate),
+      depositAmount: Math.round(totalAmount * 0.5), // Default behavior
+      depositDate: this.pdfService.toIsoDate(new Date()),
+      balanceAmount: Math.round(totalAmount * 0.5),
+      balanceDate: checkInDate,
+      rentAmount: totalAmount,
+      cleaningFee: 0,
+      refundableDeposit: 0,
+      totalAmount,
+      paymentMethod: 'bancolombia', // Default
+      paymentStatus: booking.status === 'PAID' ? 'paid' : 'pending',
+    };
+
+    const pdfBuffer =
+      await this.pdfService.generateReservationConfirmationPdfBuffer(pdfData);
+    const filename = `Confirmacion_Reserva_${pdfData.contractNumber}.pdf`;
+
+    const file: Express.Multer.File = {
+      fieldname: 'file',
+      originalname: filename,
+      encoding: '7bit',
+      mimetype: 'application/pdf',
+      buffer: Buffer.from(pdfBuffer),
+      size: pdfBuffer.byteLength,
+      stream: null as any,
+      destination: '',
+      filename: '',
+      path: '',
+    };
+
+    const s3Url = await this.s3Service.uploadFile(file, 'confirmations', filename);
+
+    // Enlazar a la reserva
+    await this.convexService.mutation('bookings:appendMultimedia', {
+      bookingId,
+      file: {
+        url: s3Url,
+        name: filename,
+        type: 'application/pdf',
+        size: pdfBuffer.byteLength,
+        uploadedAt: Date.now(),
+      },
+    });
+
+    return {
+      url: s3Url,
+      filename,
+    };
+  }
+
   private numberToSpanishText(n: number, addCurrency = true): string {
     if (n === 0) return 'CERO';
 
@@ -1661,6 +1810,20 @@ export class FincasService {
 
     const text = processNum(n).toUpperCase();
     return addCurrency ? `${text} PESOS M/CTE` : text;
+  }
+
+  /**
+   * Formatea las características de la finca en una lista HTML para el contrato.
+   */
+  private formatFincaFeatures(features: any[]): string {
+    if (!features || features.length === 0) return '';
+
+    const list = features.map((f) => {
+      const name = typeof f === 'string' ? f : f.name || '';
+      return `<li>${name.toUpperCase()}</li>`;
+    });
+
+    return `<ul style="margin-top: 10px; margin-bottom: 10px; font-size: 11pt; color: #333;">${list.join('')}</ul>`;
   }
 
   /**

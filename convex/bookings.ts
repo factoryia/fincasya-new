@@ -184,6 +184,17 @@ export const list = query({
 });
 
 /**
+ * Contar todas las reservas existentes para generación de IDs secuenciales
+ */
+export const countAll = query({
+  args: {},
+  handler: async (ctx) => {
+    const all = await ctx.db.query('bookings').collect();
+    return all.length;
+  },
+});
+
+/**
  * Obtener reserva por ID
  */
 export const getById = query({

@@ -187,8 +187,6 @@ export class FincasController {
       contractTemplate?: Express.Multer.File[];
     },
   ) {
-    console.log('[DEBUG] Raw body features:', req.body.features);
-    console.log('[DEBUG] UpdateFincaDto features:', updateDto.features);
     return this.fincasService.update(
       id,
       updateDto,

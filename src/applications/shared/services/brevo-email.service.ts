@@ -28,6 +28,7 @@ export class BrevoEmailService {
     propertyTitle: string;
     reference: string;
     contractUrl: string;
+    confirmationUrl?: string;
   }) {
     const htmlContent = getClientConfirmationTemplate({
       logoUrl: this.logoUrl,
@@ -38,8 +39,25 @@ export class BrevoEmailService {
     });
 
     try {
-      const extension =
-        data.contractUrl.split('.').pop()?.split('?')[0] || 'pdf';
+      const attachments = [];
+
+      // Attach contract
+      if (data.contractUrl) {
+        const extension =
+          data.contractUrl.split('.').pop()?.split('?')[0] || 'pdf';
+        attachments.push({
+          url: data.contractUrl,
+          name: `Contrato_${data.reference}.${extension}`,
+        });
+      }
+
+      // Attach confirmation PDF if provided
+      if (data.confirmationUrl) {
+        attachments.push({
+          url: data.confirmationUrl,
+          name: `Confirmacion_Reserva_${data.reference}.pdf`,
+        });
+      }
 
       const response = await fetch('https://api.brevo.com/v3/smtp/email', {
         method: 'POST',
@@ -52,12 +70,7 @@ export class BrevoEmailService {
           to: [{ email: data.clientEmail, name: data.clientName }],
           subject: `📦 Acción Requerida: Instrucciones para tu reserva en ${data.propertyTitle}`,
           htmlContent: htmlContent,
-          attachment: [
-            {
-              url: data.contractUrl,
-              name: `Contrato_${data.reference}.${extension}`,
-            },
-          ],
+          attachment: attachments,
         }),
       });
 
@@ -86,6 +99,8 @@ export class BrevoEmailService {
     checkOutDate: string;
     totalAmount: number;
     reference: string;
+    contractUrl?: string;
+    confirmationUrl?: string;
   }) {
     const adminEmail = this.adminEmail;
 
@@ -102,6 +117,20 @@ export class BrevoEmailService {
     });
 
     try {
+      const attachments = [];
+      if (data.contractUrl) {
+        attachments.push({
+          url: data.contractUrl,
+          name: `Contrato_${data.reference}.pdf`,
+        });
+      }
+      if (data.confirmationUrl) {
+        attachments.push({
+          url: data.confirmationUrl,
+          name: `Confirmacion_Reserva_${data.reference}.pdf`,
+        });
+      }
+
       const response = await fetch('https://api.brevo.com/v3/smtp/email', {
         method: 'POST',
         headers: {
@@ -113,6 +142,7 @@ export class BrevoEmailService {
           to: [{ email: adminEmail }],
           subject: `🚨 NUEVA RESERVA: ${data.propertyTitle} - ${data.clientName}`,
           htmlContent: htmlContent,
+          attachment: attachments.length > 0 ? attachments : undefined,
         }),
       });
 

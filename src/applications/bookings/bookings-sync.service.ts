@@ -1,7 +1,7 @@
 import { Injectable, forwardRef, Inject } from '@nestjs/common';
 import { ConvexService } from '../shared/services/convex.service';
 import { S3Service } from '../shared/services/s3.service';
-import type { FincasService } from '../fincas/fincas.service';
+import { FincasService } from '../fincas/fincas.service';
 import { BrevoEmailService } from '../shared/services/brevo-email.service';
 import * as crypto from 'crypto';
 
@@ -10,10 +10,14 @@ export class BookingsSyncService {
   constructor(
     private readonly convexService: ConvexService,
     private readonly s3Service: S3Service,
-    @Inject(forwardRef(() => require('../fincas/fincas.service').FincasService))
+    @Inject(forwardRef(() => FincasService))
     private readonly fincasService: FincasService,
     private readonly brevoEmailService: BrevoEmailService,
   ) {}
+
+  async countBookings() {
+    return this.convexService.query('bookings:countAll', {});
+  }
 
   async checkAvailability(
     propertyId: string,
@@ -317,10 +321,29 @@ export class BookingsSyncService {
           });
           console.log(`Reserva ${booking._id} marcada como PAGADA.`);
 
+          // Generar PDF de confirmación de reserva automáticamente
+          let confirmationUrl = '';
+          try {
+            const confirmationResult = await this.fincasService.generateBookingConfirmation(booking._id);
+            confirmationUrl = confirmationResult.url;
+            console.log(`Confirmación de reserva generada: ${confirmationUrl}`);
+          } catch (confErr) {
+            console.error(`[api] Error generando confirmación de reserva para ${booking._id}:`, confErr.message);
+          }
+
           // 6. Enviar notificaciones por correo (Brevo)
           try {
-            const contractFile = (booking.multimedia || []).find((m: any) => m.type === 'application/pdf');
+            // Refrescar booking para tener el multimedia actualizado (con la confirmación recién añadida)
+            const updatedBooking = await this.convexService.query('bookings:getById', { id: booking._id });
+            const contractFile = (updatedBooking?.multimedia || []).find((m: any) => 
+              m.type === 'application/pdf' && (m.name.toLowerCase().includes('contrato') || m.name.toLowerCase().includes('contract'))
+            );
+            const confirmationFile = (updatedBooking?.multimedia || []).find((m: any) => 
+              m.type === 'application/pdf' && (m.name.toLowerCase().includes('confirmacion') || m.name.toLowerCase().includes('confirmation'))
+            );
+
             const contractUrl = contractFile?.url || '';
+            const finalConfirmationUrl = confirmationUrl || confirmationFile?.url || '';
 
             // Notificación al Cliente
             await this.brevoEmailService.sendBookingConfirmationToClient({
@@ -329,6 +352,7 @@ export class BookingsSyncService {
               propertyTitle: (booking as any).propertyTitle || 'tu propiedad',
               reference: reference,
               contractUrl: contractUrl,
+              confirmationUrl: finalConfirmationUrl,
             });
 
             // Notificación al Administrador
@@ -341,6 +365,8 @@ export class BookingsSyncService {
               checkOutDate: new Date(booking.fechaSalida).toLocaleDateString('es-CO'),
               totalAmount: booking.precioTotal,
               reference: reference,
+              contractUrl: contractUrl,
+              confirmationUrl: finalConfirmationUrl,
             });
           } catch (emailErr) {
             console.error(`[api] Error enviando notificaciones para reserva ${booking._id}:`, emailErr.message);
