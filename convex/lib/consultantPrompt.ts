@@ -514,6 +514,28 @@ Una vez el cliente haya proporcionado todos sus datos personales:
 
 🚨 **NO ANTICIPAR EL PASO 5:** Está terminantemente prohibido incluir el tag [CONTRACT_PDF:{...}] antes de que el cliente envíe el soporte de pago. Si el cliente pregunta por condiciones, mascotas u otras dudas mientras aún no ha pagado, responde la pregunta y recuérdale amablemente que una vez comparta el soporte del pago se genera el contrato.
 
+### MENSAJE AUTOMÁTICO DESPUÉS DE ENVIAR EL CONTRATO (evento backend)
+Cuando el asesor humano genere y envíe manualmente el documento del contrato:
+
+1. El sistema debe registrar esa acción en la base de datos.
+2. La conversación debe volver a modo bot y quedar en seguimiento de pago.
+3. Después de esa actualización, el backend debe enviar EXACTAMENTE este mensaje:
+
+✨ **Tu reserva, con respaldo y total confianza**
+
+Queremos que vivas una experiencia segura desde el primer momento. Por eso, antes de cualquier pago, recibirás tu **contrato de arrendamiento** y toda nuestra documentación legal para que valides quiénes somos y tengas plena tranquilidad 🔐
+
+💳 **Opciones de pago flexibles**
+Elige el medio que prefieras: Davivienda, BBVA, Bancolombia, Nequi, PSE, tarjeta de crédito o Llaves.
+
+💰 **¿Cómo aseguras tu finca?**
+Con un **anticipo del 50%** reservas tu fecha. El valor restante lo pagas directamente al momento de recibir la finca, una vez confirmes que todo está en perfecto estado 👌
+
+📍 **Después de tu reserva**
+Al confirmar tu pago, recibirás el **soporte oficial** junto con todos los detalles y la ubicación exacta de la propiedad.
+
+🤝 En FincasYa.com no solo reservas una finca, aseguras una experiencia confiable, clara y respaldada en cada paso.
+
 ### PASO 5: GENERACIÓN DEL CONTRATO TRAS SOPORTE DE PAGO (CRÍTICO — ACCIÓN INMEDIATA)
 ⚠️ **REGLA DE ORO**: Una vez que el cliente envíe la captura o soporte del pago (foto, screenshot o confirmación de transferencia), debes hacer TODO esto en UN SOLO MENSAJE, sin esperas, sin decir "un momento", sin decir "voy a proceder":
 
@@ -1097,3 +1119,53 @@ Responde siempre de forma natural, cálida y profesional.`;
 export const PROMPT_INTERNAL_PAGE_ID = "consultant-system-prompt";
 export const DEFAULT_CONSULTANT_SYSTEM_PROMPT = buildFullSystemPrompt();
 export const CONSULTANT_SYSTEM_PROMPT = DEFAULT_CONSULTANT_SYSTEM_PROMPT;
+
+const OFFICIAL_WELCOME_MARKER =
+  "### MENSAJE DE BIENVENIDA OFICIAL (solo cuando el cliente envía únicamente un saludo simple)";
+const OFFICIAL_WELCOME_INTRO =
+  'Si el cliente envía solamente "hola", "buenas", "buen día", "hello", "hey" o un saludo equivalente SIN más contexto, envía EXACTAMENTE este mensaje:';
+const CONTRACT_SENT_MARKER =
+  "### MENSAJE AUTOMÁTICO DESPUÉS DE ENVIAR EL CONTRATO (evento backend)";
+const CONTRACT_SENT_INTRO =
+  "3. Después de esa actualización, el backend debe enviar EXACTAMENTE este mensaje:";
+
+function extractExactMessageBlock(
+  promptText: string,
+  marker: string,
+  intro: string,
+): string | null {
+  const start = promptText.indexOf(marker);
+  if (start < 0) return null;
+
+  const afterMarker = promptText.slice(start + marker.length);
+  const introIndex = afterMarker.indexOf(intro);
+  if (introIndex < 0) return null;
+
+  const afterIntro = afterMarker
+    .slice(introIndex + intro.length)
+    .replace(/^\s+/, "");
+  const nextSectionIndex = afterIntro.indexOf("\n### ");
+  const messageBlock =
+    nextSectionIndex >= 0 ? afterIntro.slice(0, nextSectionIndex) : afterIntro;
+  const clean = messageBlock.trim();
+
+  return clean.length > 0 ? clean : null;
+}
+
+export function extractOfficialWelcomeMessage(promptText: string): string | null {
+  return extractExactMessageBlock(
+    promptText,
+    OFFICIAL_WELCOME_MARKER,
+    OFFICIAL_WELCOME_INTRO,
+  );
+}
+
+export function extractContractSentAutomaticMessage(
+  promptText: string,
+): string | null {
+  return extractExactMessageBlock(
+    promptText,
+    CONTRACT_SENT_MARKER,
+    CONTRACT_SENT_INTRO,
+  );
+}

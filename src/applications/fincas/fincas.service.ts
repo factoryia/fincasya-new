@@ -146,6 +146,11 @@ import {
 } from './dto/global-pricing.dto';
 import { UpdateOwnerInfoDto } from './dto/owner-info.dto';
 import { GenerateContractDto } from './dto/generate-contract.dto';
+import {
+  DEFAULT_CONSULTANT_SYSTEM_PROMPT,
+  PROMPT_INTERNAL_PAGE_ID,
+  extractContractSentAutomaticMessage,
+} from '../../../convex/lib/consultantPrompt';
 
 @Injectable()
 export class FincasService {
@@ -155,6 +160,96 @@ export class FincasService {
     @Inject(forwardRef(() => require('../inbox/inbox.service').InboxService))
     private readonly inboxService: InboxService,
   ) {}
+
+  private cleanOptionalText(value: unknown): string | undefined {
+    if (typeof value !== 'string') return undefined;
+    const clean = value.trim();
+    return clean.length > 0 ? clean : undefined;
+  }
+
+  private async getEffectiveConsultantPrompt(): Promise<string> {
+    try {
+      const data = (await this.convexService.query('internalPages:getById', {
+        pageId: PROMPT_INTERNAL_PAGE_ID,
+      })) as { prompt?: unknown } | null;
+      const customPrompt =
+        data && typeof data.prompt === 'string' ? data.prompt.trim() : '';
+      return customPrompt.length > 0
+        ? customPrompt
+        : DEFAULT_CONSULTANT_SYSTEM_PROMPT;
+    } catch {
+      return DEFAULT_CONSULTANT_SYSTEM_PROMPT;
+    }
+  }
+
+  private async getContractSentAutomaticMessage(): Promise<string> {
+    const effectivePrompt = await this.getEffectiveConsultantPrompt();
+    return (
+      extractContractSentAutomaticMessage(effectivePrompt) ||
+      extractContractSentAutomaticMessage(DEFAULT_CONSULTANT_SYSTEM_PROMPT) ||
+      `✨ **Tu reserva, con respaldo y total confianza**
+
+Queremos que vivas una experiencia segura desde el primer momento. Por eso, antes de cualquier pago, recibirás tu **contrato de arrendamiento** y toda nuestra documentación legal para que valides quiénes somos y tengas plena tranquilidad 🔐
+
+💳 **Opciones de pago flexibles**
+Elige el medio que prefieras: Davivienda, BBVA, Bancolombia, Nequi, PSE, tarjeta de crédito o Llaves.
+
+💰 **¿Cómo aseguras tu finca?**
+Con un **anticipo del 50%** reservas tu fecha. El valor restante lo pagas directamente al momento de recibir la finca, una vez confirmes que todo está en perfecto estado 👌
+
+📍 **Después de tu reserva**
+Al confirmar tu pago, recibirás el **soporte oficial** junto con todos los detalles y la ubicación exacta de la propiedad.
+
+🤝 En FincasYa.com no solo reservas una finca, aseguras una experiencia confiable, clara y respaldada en cada paso.`
+    );
+  }
+
+  private async finalizeHumanContractFlow(
+    conversationId: string,
+    dto: GenerateContractDto,
+  ) {
+    try {
+      await this.inboxService.updateContactForConversation(conversationId, {
+        name: this.cleanOptionalText(dto.clientName),
+        cedula: this.cleanOptionalText(dto.clientId),
+        email: this.cleanOptionalText(dto.clientEmail),
+        city: this.cleanOptionalText(dto.clientCity),
+      });
+    } catch (error: unknown) {
+      console.warn(
+        `[api] No se pudo sincronizar la ficha del contacto para ${conversationId}:`,
+        error instanceof Error ? error.message : error,
+      );
+    }
+
+    try {
+      await this.convexService.mutation('conversations:setToAiPublic', {
+        conversationId,
+      });
+      await this.convexService.mutation('conversations:setOperationalState', {
+        conversationId,
+        operationalState: 'pending_payment',
+      });
+    } catch (error: unknown) {
+      console.warn(
+        `[api] No se pudo actualizar el estado conversacional tras enviar contrato en ${conversationId}:`,
+        error instanceof Error ? error.message : error,
+      );
+    }
+
+    try {
+      const followUpMessage = await this.getContractSentAutomaticMessage();
+      await this.inboxService.sendMessage(conversationId, {
+        type: 'text',
+        text: followUpMessage,
+      });
+    } catch (error: unknown) {
+      console.error(
+        `[api] No se pudo enviar el mensaje automático posterior al contrato en ${conversationId}:`,
+        error instanceof Error ? error.message : error,
+      );
+    }
+  }
 
   async list(listDto: ListFincasDto) {
     try {
@@ -1441,6 +1536,9 @@ export class FincasService {
         try {
       const contractMetadata = {
         kind: 'generated_contract',
+        contractGenerated: true,
+        contractSent: true,
+        conversationState: 'contract_sent',
         contractData: {
           propertyId: dto.propertyId,
           propertyTitle: finca.title || '',
@@ -1482,6 +1580,8 @@ export class FincasService {
             metadata: contractMetadata,
             file: generatedFile,
           });
+
+          await this.finalizeHumanContractFlow(dto.conversationId, dto);
         } catch (msgErr) {
           console.error(
             `[api] No se pudo enviar mensaje al inbox ${dto.conversationId}:`,
@@ -1719,4 +1819,3 @@ export class FincasService {
     }
   }
 }
-
