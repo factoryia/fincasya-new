@@ -34,3 +34,19 @@ export const upsert = mutation({
     return args.content;
   },
 });
+
+export const removeById = mutation({
+  args: { pageId: v.string() },
+  handler: async (ctx, args) => {
+    const existing = await ctx.db
+      .query('internalPages')
+      .withIndex('by_pageId', (q) => q.eq('pageId', args.pageId))
+      .first();
+
+    if (existing) {
+      await ctx.db.delete(existing._id);
+    }
+
+    return { success: true };
+  },
+});

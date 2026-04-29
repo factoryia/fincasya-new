@@ -324,7 +324,7 @@ http.route({
       );
     }
 
-    const name = (file as File).name?.toLowerCase() ?? '';
+    const name = (file).name?.toLowerCase() ?? '';
     if (!name.endsWith('.xlsx') && !name.endsWith('.xls')) {
       return jsonResponse(
         { error: 'Solo se admiten archivos .xlsx o .xls' },

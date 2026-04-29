@@ -150,7 +150,7 @@ export const debugUsers = query({
       data.users_plural_count = usersPlural.length;
       data.users_plural_sample = usersPlural
         .slice(0, 3)
-        .map((u) => ({ _id: u._id, name: u.name, userId: (u as any).userId }));
+        .map((u) => ({ _id: u._id, name: u.name, userId: (u).userId }));
       console.log(`Users (plural) count: ${usersPlural.length}`);
     } catch (e: any) {
       data.users_plural_error = e.message;

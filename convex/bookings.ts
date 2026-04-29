@@ -99,7 +99,7 @@ export const list = query({
             ? await ctx.db
                 .query('bookings')
                 .withIndex('by_is_direct', (q) =>
-                  q.eq('isDirect', args.isDirect!),
+                  q.eq('isDirect', args.isDirect),
                 )
                 .collect()
             : await ctx.db.query('bookings').collect();
@@ -461,7 +461,7 @@ export const create = mutation({
 
     const bookingId = await ctx.db.insert('bookings', {
       propertyId: args.propertyId,
-      userId: resolvedUserId as any,
+      userId: resolvedUserId,
       nombreCompleto: args.nombreCompleto,
       cedula: args.cedula,
       celular: args.celular,

@@ -55,7 +55,7 @@ export const list = query({
   },
   handler: async (ctx, args) => {
     const limit = args.limit ?? 50;
-    let contactsQuery = ctx.db.query("contacts");
+    const contactsQuery = ctx.db.query("contacts");
 
     const allContacts = await contactsQuery.order("desc").collect();
 

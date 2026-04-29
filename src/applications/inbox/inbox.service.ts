@@ -166,7 +166,7 @@ export class InboxService {
   }
 
   async createQuickReplyTemplate(body: QuickReplyTemplatePayload, file?: Express.Multer.File) {
-    const mediaType = (body.mediaType || (file ? 'audio' : 'text')) as 'text' | 'audio';
+    const mediaType = (body.mediaType || (file ? 'audio' : 'text'));
     let mediaUrl = body.mediaUrl?.trim();
     if (mediaType === 'audio' && file) {
       mediaUrl = await this.s3Service.uploadFile(file, 'inbox-templates', file.originalname);
@@ -445,7 +445,7 @@ export class InboxService {
     const suggested: any =
       suggestedRaw &&
       typeof suggestedRaw === 'object' &&
-      !(suggestedRaw as any).error
+      !(suggestedRaw).error
         ? suggestedRaw
         : {};
 

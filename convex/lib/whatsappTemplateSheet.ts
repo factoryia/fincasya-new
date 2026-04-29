@@ -130,7 +130,7 @@ export function parseWorkbookSheetsToPayloads(
       header: 1,
       defval: "",
       raw: false,
-    }) as unknown[][];
+    });
     const kv = rowsToKeyValue(rows);
     const fallback = sanitizeTemplateName(sheetName);
     try {

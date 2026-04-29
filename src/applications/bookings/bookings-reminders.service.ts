@@ -43,7 +43,7 @@ export class BookingsRemindersService {
           await this.brevoEmailService.sendReservationReminder({
             clientEmail: booking.correo,
             clientName: booking.nombreCompleto,
-            propertyTitle: (booking as any).propertyTitle,
+            propertyTitle: (booking).propertyTitle,
             checkInDate: new Date(booking.fechaEntrada).toLocaleDateString('es-CO'),
             checkInTime: booking.horaEntrada || '03:00 PM',
             reference: booking.reference || booking._id.slice(-6),

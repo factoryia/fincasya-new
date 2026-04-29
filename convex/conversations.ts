@@ -125,7 +125,7 @@ export const setOperationalStateInternal = internalMutation({
   handler: async (ctx, args) => {
     const prev = await ctx.db.get(args.conversationId);
     const fromState = prev
-      ? (effectiveState(prev.operationalState as OperationalState | undefined) as OperationalState)
+      ? (effectiveState(prev.operationalState as OperationalState | undefined))
       : undefined;
     await ctx.db.patch(args.conversationId, {
       operationalState: args.operationalState,
@@ -305,7 +305,7 @@ export const setOperationalState = mutation({
   handler: async (ctx, args) => {
     const prev = await ctx.db.get(args.conversationId);
     const fromState = prev
-      ? (effectiveState(prev.operationalState as OperationalState | undefined) as OperationalState)
+      ? (effectiveState(prev.operationalState as OperationalState | undefined))
       : undefined;
     await ctx.db.patch(args.conversationId, {
       operationalState: args.operationalState,

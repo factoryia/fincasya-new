@@ -77,7 +77,7 @@ export class AdminController {
       return res.redirect(`${appUrl}/admin/reservations?success=true`);
     } catch (err) {
       console.error('[calendar-callback] Error intercambiando código:', err);
-      const msg = (err as any).message || 'exchange_failed';
+      const msg = (err).message || 'exchange_failed';
       return res.redirect(
         `${appUrl}/admin/reservations?error=${encodeURIComponent(msg)}`,
       );

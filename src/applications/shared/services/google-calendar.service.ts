@@ -24,7 +24,7 @@ export class GoogleCalendarService {
       throw new Error('Google Calendar no está conectado');
     }
 
-    let accessToken = gc.accessToken;
+    const accessToken = gc.accessToken;
 
     // Si el token expiró, lo refrescamos vía Convex (o lo intentamos aquí si no queremos delegar todo)
     // Para simplificar, configuramos el refresh token y dejamos que la librería lo maneje o usamos el de Convex
