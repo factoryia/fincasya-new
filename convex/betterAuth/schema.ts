@@ -20,13 +20,15 @@ export const tables = {
     createdAt: v.number(),
     updatedAt: v.number(),
     userId: v.optional(v.union(v.null(), v.string())),
-    /** Rol del usuario: "user" (por defecto) o "admin". Usuarios sin rol se tratan como "user". */
+    /** Rol del usuario interno. Default: "client" para nuevos registros. */
     role: v.optional(
       v.union(
         v.literal('admin'),
-        v.literal('assistant'),
         v.literal('vendedor'),
+        v.literal('asesor_limitado'),
+        v.literal('contabilidad'),
         v.literal('propietario'),
+        v.literal('client'),
         v.literal('user'),
         v.null(),
       ),

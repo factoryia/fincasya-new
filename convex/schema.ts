@@ -642,4 +642,15 @@ export default defineSchema({
   })
     .index('by_name', ['name'])
     .index('by_idNumber', ['idNumber']),
+
+  // Permisos por rol
+  rolePermissions: defineTable({
+    role: v.string(),
+    module: v.string(),
+    permissions: v.array(v.string()),
+    isCustom: v.optional(v.boolean()),
+    updatedAt: v.number(),
+  })
+    .index('by_role', ['role'])
+    .index('by_role_module', ['role', 'module']),
 });
