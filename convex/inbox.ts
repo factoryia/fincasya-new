@@ -25,6 +25,8 @@ export const sendMessage = action({
     mediaUrlForStorage: v.optional(v.string()),
     filename: v.optional(v.string()),
     metadata: v.optional(v.any()),
+    /** Convex user._id del asesor que envía el mensaje (trazabilidad). */
+    sentByUserId: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
     const apiKey = process.env.YCLOUD_API_KEY;
@@ -49,10 +51,18 @@ export const sendMessage = action({
         conversationId: args.conversationId,
         content: args.text,
         createdAt: now,
+        sentByUserId: args.sentByUserId,
       });
       await ctx.runMutation(internal.conversations.updateLastMessageAt, {
         conversationId: args.conversationId,
       });
+      if (args.sentByUserId) {
+        await ctx.runMutation(internal.conversationAudit.recordEvent, {
+          conversationId: args.conversationId,
+          eventType: "message_sent",
+          userId: args.sentByUserId,
+        });
+      }
       return { ok: true };
     }
 
@@ -115,10 +125,18 @@ export const sendMessage = action({
         type: "product",
         metadata: args.metadata,
         createdAt: now,
+        sentByUserId: args.sentByUserId,
       });
       await ctx.runMutation(internal.conversations.updateLastMessageAt, {
         conversationId: args.conversationId,
       });
+      if (args.sentByUserId) {
+        await ctx.runMutation(internal.conversationAudit.recordEvent, {
+          conversationId: args.conversationId,
+          eventType: "message_sent",
+          userId: args.sentByUserId,
+        });
+      }
       return { ok: true };
     }
 
@@ -180,10 +198,18 @@ export const sendMessage = action({
       mediaUrl: args.mediaUrlForStorage ?? args.mediaUrl,
       metadata: args.metadata,
       createdAt: now,
+      sentByUserId: args.sentByUserId,
     });
     await ctx.runMutation(internal.conversations.updateLastMessageAt, {
       conversationId: args.conversationId,
     });
+    if (args.sentByUserId) {
+      await ctx.runMutation(internal.conversationAudit.recordEvent, {
+        conversationId: args.conversationId,
+        eventType: "message_sent",
+        userId: args.sentByUserId,
+      });
+    }
 
     return { ok: true };
   },
