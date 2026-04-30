@@ -81,6 +81,162 @@ export function isNegativeOnly(userMessage: string): boolean {
   return /^(no(\s+.*)?|nada|ningun[oa]|tampoco|ni\s+idea|para\s+nada)$/i.test(t);
 }
 
+type KnownReservationData = {
+  hasDates: boolean;
+  dateLabel?: string;
+  hasCapacity: boolean;
+  capacity?: number;
+  hasGroup: boolean;
+  groupLabel?: string;
+  hasPetsAnswer: boolean;
+  petsLabel?: string;
+};
+
+function wordNumberToNumber(value: string | undefined): number | undefined {
+  if (!value) return undefined;
+  const normalized = normalizeAsciiText(value);
+  if (/^\d+$/.test(normalized)) return Number(normalized);
+  const words: Record<string, number> = {
+    un: 1,
+    una: 1,
+    uno: 1,
+    dos: 2,
+    tres: 3,
+    cuatro: 4,
+    cinco: 5,
+    seis: 6,
+  };
+  return words[normalized];
+}
+
+function extractKnownReservationData(
+  text: string,
+  opts?: { assistantAskedPets?: boolean; currentMessage?: string }
+): KnownReservationData {
+  const normalized = normalizeAsciiText(text);
+  const currentNormalized = normalizeAsciiText(opts?.currentMessage ?? "");
+  const dateRange = extractDateRangeFromText(text);
+  const hasWeekend =
+    /\b(fin\s+de\s+semana|este\s+fin|proximo\s+fin|el\s+fin\s+de\s+semana|sabado\s+y\s+domingo|sabado|domingo)\b/i.test(
+      normalized
+    );
+  const capacity = extractCapacityFromText(text);
+  const groupMatch = normalized.match(
+    /\b(?:grupo\s+)?(familiar|familia|amigos|amigas|empresarial|empresa|corporativo|pareja)\b/i
+  );
+  const groupRaw = groupMatch?.[1];
+  const groupLabel = groupRaw
+    ? groupRaw === "familia"
+      ? "familiar"
+      : groupRaw === "empresa" || groupRaw === "corporativo"
+        ? "empresarial"
+        : groupRaw
+    : undefined;
+
+  const negativePets =
+    /\b(sin\s+mascotas?|0\s+(?:mascotas?|perros?|gatos?)|no\s+(?:llevamos|llevo|viajan|van|tenemos|hay)\s+(?:mascotas?|perros?|gatos?)|ningun[ao]s?\s+(?:mascotas?|perros?|gatos?))\b/i.test(
+      normalized
+    ) ||
+    (opts?.assistantAskedPets === true &&
+      !!currentNormalized &&
+      isNegativeOnly(opts.currentMessage ?? ""));
+  const petCountMatch =
+    normalized.match(/(\d+)\s*(?:mascotas?|perros?|gatos?)\b/i) ||
+    normalized.match(/(?:mascotas?|perros?|gatos?)\s*[:\-]?\s*(\d+)/i) ||
+    normalized.match(/\b(un|una|uno|dos|tres|cuatro|cinco|seis)\s+(?:mascotas?|perros?|gatos?)\b/i);
+  const petCount = wordNumberToNumber(petCountMatch?.[1]);
+  const positivePets =
+    !negativePets &&
+    (petCount != null ||
+      /\b(mascotas?|perros?|gatos?|animal(?:es)?|llev[oa]\s+(?:mi\s+)?(?:perro|gato|mascota))\b/i.test(
+        normalized
+      ) ||
+      (opts?.assistantAskedPets === true &&
+        !!opts.currentMessage &&
+        messageLooksLikePetAnswer(opts.currentMessage) &&
+        !isNegativeOnly(opts.currentMessage)));
+
+  return {
+    hasDates: !!dateRange || hasWeekend,
+    dateLabel: dateRange?.label ?? (hasWeekend ? "fin de semana" : undefined),
+    hasCapacity: capacity != null,
+    capacity,
+    hasGroup: !!groupLabel,
+    groupLabel,
+    hasPetsAnswer: negativePets || positivePets,
+    petsLabel: negativePets ? "no" : positivePets ? (petCount ? `sí, ${petCount}` : "sí") : undefined,
+  };
+}
+
+function formatKnownReservationDataSummary(known: KnownReservationData): string {
+  return [
+    known.hasDates && known.dateLabel ? `fechas: ${known.dateLabel}` : null,
+    known.hasCapacity && known.capacity ? `personas: ${known.capacity}` : null,
+    known.hasGroup && known.groupLabel ? `grupo: ${known.groupLabel}` : null,
+    known.hasPetsAnswer && known.petsLabel ? `mascotas: ${known.petsLabel}` : null,
+  ]
+    .filter(Boolean)
+    .join(", ");
+}
+
+function joinSpanishList(items: string[]): string {
+  if (items.length <= 1) return items[0] ?? "";
+  if (items.length === 2) return `${items[0]} y ${items[1]}`;
+  return `${items.slice(0, -1).join(", ")} y ${items[items.length - 1]}`;
+}
+
+function buildPostCatalogFollowUp(
+  excludePropertyIds: unknown[] | undefined,
+  known: KnownReservationData
+): string {
+  if (excludePropertyIds?.length) {
+    return "¿Te gustó alguna de estas opciones? 🏡 Si quieres, te comparto más alternativas con los mismos filtros.";
+  }
+
+  const pending: string[] = ["cuál finca te gustó"];
+  if (!known.hasDates) pending.push("fechas de entrada y salida");
+  if (!known.hasCapacity) pending.push("número de personas");
+  if (!known.hasGroup) pending.push("tipo de grupo");
+  if (!known.hasPetsAnswer) pending.push("si viajan con mascotas");
+
+  if (pending.length === 1) {
+    return "Ya te compartí algunas opciones ✅ ¿Cuál finca te gustó? 🏡 Si quieres, también puedo mostrarte más alternativas.";
+  }
+
+  return `Ya te compartí algunas opciones ✅ Para continuar, dime ${joinSpanishList(pending)}.`;
+}
+
+function buildMissingReservationDetailsPrompt(
+  known: KnownReservationData,
+  fincaTitle?: string
+): string {
+  const missing: string[] = [];
+  if (!known.hasDates) missing.push("fechas de entrada y salida");
+  if (!known.hasCapacity) missing.push("número de personas");
+  if (!known.hasGroup) missing.push("tipo de grupo");
+  if (!known.hasPetsAnswer) missing.push("si viajan con mascotas");
+
+  if (missing.length === 0) {
+    if (fincaTitle) {
+      return `¡Listo! Ya tengo fechas, personas, grupo y mascotas para ${fincaTitle}. ¿Avanzamos con la cotización? 🏡`;
+    }
+    return "Ya tengo fechas, personas, grupo y mascotas ✅ Solo dime cuál finca te gustó para validar disponibilidad y valor final. 🏡";
+  }
+
+  if (fincaTitle) {
+    return `Perfecto. Para avanzar con ${fincaTitle}, dime ${joinSpanishList(missing)}.`;
+  }
+  return `Para continuar, dime ${joinSpanishList(missing)}.`;
+}
+
+function messageLooksLikeNoLocationPreference(userMessage: string): boolean {
+  const normalized = normalizeAsciiText(userMessage);
+  if (!normalized || normalized.length > 80) return false;
+  return /^(no\s+se|no\s+tengo\s+preferencia|cualquiera|cualquier(?:a)?\s+esta\s+bien|sin\s+preferencia|me\s+da\s+igual|donde\s+haya|varios?|varias?)$/i.test(
+    normalized
+  );
+}
+
 function parseCatalogSelectionPayload(userMessage: string): {
   productRetailerId?: string;
   catalogId?: string;
@@ -446,7 +602,9 @@ export const processInboundMessage = internalAction({
     const shouldAbortIfAssistantAlreadyReplied = async (stage: string) => {
       const recentMsgs = (await ctx.runQuery(api.messages.listRecent, {
         conversationId,
-        limit: 8,
+        // Un catálogo puede insertar hasta 8 fichas + un follow-up; el límite
+        // debe alcanzar a ver el último mensaje del cliente para deduplicar bien.
+        limit: 40,
       })) as any[];
       const latestUserIdx = [...recentMsgs]
         .map((m, i) => ({ m, i }))
@@ -1042,6 +1200,13 @@ Fincas disponibles: ${fincaNames}`,
         console.error("YCloud catalog send error:", e);
       }
 
+      if (whatsappCatalogSentForSearch) {
+        await ctx.runMutation(internal.conversations.updateLastMessageAt, {
+          conversationId,
+        });
+        return;
+      }
+
       // FALLBACK: si el catálogo NO se envió pero el usuario menciona una ciudad conocida,
       // forzar el envío del catálogo con esa ciudad usando fechas del próximo fin de semana.
       // IMPORTANTE: no aplicar este fallback cuando el usuario pidió una finca específica,
@@ -1091,6 +1256,13 @@ Fincas disponibles: ${fincaNames}`,
             console.error("YCloud catalog fallback error:", e);
           }
         }
+      }
+
+      if (whatsappCatalogSentForSearch) {
+        await ctx.runMutation(internal.conversations.updateLastMessageAt, {
+          conversationId,
+        });
+        return;
       }
 
       const petCountMentions = (() => {
@@ -1266,43 +1438,22 @@ Fincas disponibles: ${fincaNames}`,
       // Reutilizar dynamicLocationsList ya declarado arriba (template-guard)
       const dynamicLocations = dynamicLocationsList.join(", ");
 
-      // Calcular si el usuario ya proporcionó info de fechas (fin de semana) para NO volver a pedirla
-      const _weekendRegexEarly = /\b(sabado|sábado|domingo|fin\s+de\s+semana|este\s+fin|proximo\s+fin|pr[oó]ximo\s+fin)\b/i;
-      const hasKnownWeekend =
-        _weekendRegexEarly.test(currentMessageText) ||
-        (catalogIntent.intent === "search_catalog" && (catalogIntent as any).hasWeekend === true) ||
-        recentForCatalogIntent.some((m: any) =>
-          m.sender === "user" && _weekendRegexEarly.test(String(m.content ?? ""))
-        );
       // Extraer datos ya conocidos para que el prompt no los vuelva a pedir
       const _allUserTextsEarly = [
         currentMessageText,
         ...recentForCatalogIntent.filter((m: any) => m.sender === "user").map((m: any) => String(m.content ?? "")),
       ].join("\n");
-      const _knownDateRange = extractDateRangeFromText(_allUserTextsEarly);
-      const _knownCapacityMatch = _allUserTextsEarly.match(/(?:m[aá]ximo\s+)?(\d+)\s*(?:o\s+m[aá]s\s+)?personas/i) || _allUserTextsEarly.match(/para\s+(\d+)\b/i);
-      const _knownPetsMatch = _allUserTextsEarly.match(/(\d+)\s*(?:mascotas?|perros?|gatos?)/i) || _allUserTextsEarly.match(/(un[oa]?|dos|tres|cuatro|cinco|seis)\s+(?:mascotas?|perros?|gatos?)/i);
       const _assistantAskedPetsEarly = recentForCatalogIntent.some(
         (m: any) =>
           m.sender === "assistant" &&
           /\bmascotas?|perros?|gatos?\b/i.test(String(m.content ?? ""))
       );
-      const _knownHasPets =
-        _knownPetsMatch != null ||
-        /\b(mascotas?|perros?|gatos?)\b/i.test(_allUserTextsEarly) ||
-        (_assistantAskedPetsEarly &&
-          messageLooksLikePetAnswer(currentMessageText) &&
-          !isNegativeOnly(currentMessageText));
-      const knownDataSummary = [
-        _knownDateRange
-          ? `fechas: ${_knownDateRange.label}`
-          : hasKnownWeekend
-            ? "fechas: este fin de semana (sábado y domingo)"
-            : null,
-        _knownCapacityMatch ? `personas: ${_knownCapacityMatch[1]}` : null,
-        _knownHasPets ? `mascotas: sí` : null,
-      ].filter(Boolean).join(", ");
-      const hasKnownDates = hasKnownWeekend || !!_knownDateRange;
+      const knownReservationData = extractKnownReservationData(_allUserTextsEarly, {
+        assistantAskedPets: _assistantAskedPetsEarly,
+        currentMessage: currentMessageText,
+      });
+      const knownDataSummary = formatKnownReservationDataSummary(knownReservationData);
+      const hasKnownDates = knownReservationData.hasDates;
 
       // Si saltamos el reenvío de ficha, resolver el nombre oficial en BD para la IA y el contexto.
       if (skipSingleFincaCardResend) {
@@ -1337,6 +1488,31 @@ Fincas disponibles: ${fincaNames}`,
         console.log("[single-finca-guard] ficha bloqueada, nombre para IA:", fincaTitle);
       }
 
+      const previousCatalogPropertyIds = Array.isArray((conv as any).lastSentCatalogPropertyIds)
+        ? ((conv as any).lastSentCatalogPropertyIds as unknown[])
+        : [];
+      const previousCatalogShown =
+        previousCatalogPropertyIds.length > 0 &&
+        recentForCatalogIntent.some((m: any) => {
+          if (m.sender !== "assistant") return false;
+          const t = String(m.content ?? "").toLowerCase();
+          return (
+            m.type === "product" ||
+            m.type === "catalog" ||
+            /cat[aá]logo\s+enviado|ya\s+te\s+compart[ií]|te\s+compart[ií]\s+(?:el\s+)?cat[aá]logo/.test(t)
+          );
+        });
+      const effectiveWhatsappCatalogShown =
+        whatsappCatalogSentForSearch ||
+        (previousCatalogShown && catalogIntent.intent !== "search_catalog");
+      const effectiveCatalogLocation =
+        catalogLocation ||
+        (typeof (conv as any).lastCatalogSearch?.location === "string"
+          ? (conv as any).lastCatalogSearch.location
+          : "");
+      const effectiveCatalogFincasCount =
+        catalogFincasCount || previousCatalogPropertyIds.length || undefined;
+
       // La IA siempre genera la respuesta; lo que cambia es el contexto que recibe.
       let replyText = await ctx.runAction(
         internal.ycloud.generateReplyWithRagAndFincas,
@@ -1346,12 +1522,15 @@ Fincas disponibles: ${fincaNames}`,
           singleFincaCatalogSent: singleFincaSent,
           fincaTitle: fincaTitle || confirmedFincaInHistoryTitle,
           searchQueryOverride: searchOverride,
-          whatsappCatalogSentForSearch,
+          whatsappCatalogSentForSearch: effectiveWhatsappCatalogShown,
           dynamicLocations,
-          catalogLocation,
-          catalogFincasCount,
+          catalogLocation: effectiveCatalogLocation,
+          catalogFincasCount: effectiveCatalogFincasCount,
           catalogFoundFincasButFailed,
           hasKnownWeekend: hasKnownDates,
+          hasKnownCapacity: knownReservationData.hasCapacity,
+          hasKnownGroup: knownReservationData.hasGroup,
+          hasKnownPetsAnswer: knownReservationData.hasPetsAnswer,
           knownDataSummary: knownDataSummary || undefined,
           fincaAlreadyConfirmed:
             shouldBlockCatalogFincaConfirmed ||
@@ -1530,15 +1709,17 @@ En FincasYa.com tu alquiler siempre es seguro, respaldado y con total tranquilid
           if (cleaned.length >= 20) {
             replyText = cleaned;
           } else if (hasKnownSelectedFinca) {
-            replyText =
-              "Perfecto. Ya tengo la finca seleccionada. Para continuar con el filtro, indícame por favor fecha de ingreso, fecha de salida, si llevarán mascotas, zona de preferencia, presupuesto aproximado y qué te gustaría que tenga la finca (piscina, jacuzzi, kiosko u otra característica). 📅🐾💰";
+            replyText = buildMissingReservationDetailsPrompt(
+              knownReservationData,
+              fincaTitle || confirmedFincaInHistoryTitle || selectedCatalogPropertyTitle
+            );
           } else if (singleFincaSent && fincaTitle) {
-            replyText = `Te envié la ficha de ${fincaTitle}. Cuéntame fechas y número de personas para validar disponibilidad y valor final. 📅👥`;
+            replyText = buildMissingReservationDetailsPrompt(knownReservationData, fincaTitle);
           } else if (fincaTitle) {
             // Catálogo múltiple ya mostrado antes; finca elegida por nombre: primero cotizar.
-            replyText = `¡Excelente elección, ${fincaTitle}! 🏡 Para avanzar, compárteme fechas y número de personas, y te confirmo disponibilidad con el valor exacto. 📅👥`;
+            replyText = buildMissingReservationDetailsPrompt(knownReservationData, fincaTitle);
           } else {
-            replyText = "Cuéntame fechas y número de personas para continuar. 📅👥";
+            replyText = buildMissingReservationDetailsPrompt(knownReservationData);
           }
         }
       }
@@ -1778,7 +1959,13 @@ export const generateReplyWithRagAndFincas = internalAction({
     catalogFoundFincasButFailed: v.optional(v.boolean()),
     /** True si el usuario ya mencionó "sábado y domingo" / "fin de semana" en la conversación — no volver a pedir fechas. */
     hasKnownWeekend: v.optional(v.boolean()),
-    /** Resumen de datos ya conocidos del cliente (fechas, personas, mascotas) para omitirlos en el prompt. */
+    /** True si el usuario ya dio número de personas. */
+    hasKnownCapacity: v.optional(v.boolean()),
+    /** True si el usuario ya dijo tipo de grupo/plan. */
+    hasKnownGroup: v.optional(v.boolean()),
+    /** True si el usuario ya respondió si viaja con mascotas o no. */
+    hasKnownPetsAnswer: v.optional(v.boolean()),
+    /** Resumen de datos ya conocidos del cliente (fechas, personas, grupo, mascotas) para omitirlos en el prompt. */
     knownDataSummary: v.optional(v.string()),
     /** True si el cliente ya eligió y confirmó una finca específica → la IA debe avanzar al flujo de reserva, no al catálogo. */
     fincaAlreadyConfirmed: v.optional(v.boolean()),
@@ -1864,7 +2051,9 @@ Si falta algún dato puntual (p.ej. correo o ciudad de residencia), PIDE SOLO es
       // Construir lista de datos pendientes excluyendo los que el cliente YA dio
       const pendingBullets: string[] = ["● 🏡 ¿Cuál de estas fincas te llamó la atención?"];
       if (!args.hasKnownWeekend) pendingBullets.push("● 📅 Fechas exactas de tu estadía (día de entrada y salida)");
-      pendingBullets.push("● 🐾 ¿Llevarán mascotas?");
+      if (!args.hasKnownCapacity) pendingBullets.push("● 👥 Número total de personas");
+      if (!args.hasKnownGroup) pendingBullets.push("● 🏡 Tipo de grupo: familiar, amigos o empresarial");
+      if (!args.hasKnownPetsAnswer) pendingBullets.push("● 🐾 ¿Llevarán mascotas?");
       const knownNote = args.knownDataSummary
         ? ` El cliente ya proporcionó: ${args.knownDataSummary}. NO vuelvas a pedir estos datos.`
         : "";
@@ -1873,7 +2062,12 @@ Si falta algún dato puntual (p.ej. correo o ciudad de residencia), PIDE SOLO es
       const knownNote2 = args.knownDataSummary
         ? ` El cliente ya proporcionó: ${args.knownDataSummary}. NO vuelvas a pedir estos datos.`
         : "";
-      fincasContext = `(Ya se envió el catálogo de WhatsApp con las fincas; el cliente ve nombres, fotos y precios ahí.${knownNote2} Sigue el PASO 2: pregunta cuál finca le llamó la atención${args.hasKnownWeekend ? "" : " y las fechas"}. NO repitas lista de fincas en texto.)`;
+      const pendingBullets: string[] = ["● 🏡 ¿Cuál finca le llamó la atención?"];
+      if (!args.hasKnownWeekend) pendingBullets.push("● 📅 Fechas exactas de estadía");
+      if (!args.hasKnownCapacity) pendingBullets.push("● 👥 Número total de personas");
+      if (!args.hasKnownGroup) pendingBullets.push("● 🏡 Tipo de grupo");
+      if (!args.hasKnownPetsAnswer) pendingBullets.push("● 🐾 Mascotas");
+      fincasContext = `(Ya se envió el catálogo de WhatsApp con las fincas; el cliente ve nombres, fotos y precios ahí.${knownNote2} Sigue el PASO 2: pide SOLO los datos faltantes: ${pendingBullets.join(" ")}. NO repitas lista de fincas en texto.)`;
     } else if (catalogFailed && fincasList.length > 0) {
       // El catálogo interactivo de WhatsApp NO pudo enviarse (las fincas no están registradas en el catálogo de Meta).
       // En este caso excepcional, la IA DEBE describir las fincas disponibles en texto.
@@ -2217,7 +2411,7 @@ function buildSystemPrompt(
   const priorityInstructions = `
 ---
 ## ⚠️ INSTRUCCIONES DE PRIORIDAD MÁXIMA (OVERRIDE)
-1. **PASO 1 (Ubicación Faltante):** Si el usuario te da fechas/personas pero NO ubicación, DEBES preguntar únicamente "¿En qué ciudad o municipio te gustaría reservar? 🏡". PROHIBIDO listar ciudades disponibles.
+1. **PASO 1 (Ubicación Faltante):** Si el usuario te da fechas/personas pero NO ubicación y todavía NO se ha enviado catálogo, DEBES preguntar únicamente "¿En qué ciudad o municipio te gustaría reservar? 🏡". Si el CONTEXTO DE FINCAS indica que ya se envió un catálogo (incluido "varios destinos"), NO vuelvas a pedir ciudad, fechas ni personas: pregunta cuál finca le gustó. PROHIBIDO listar ciudades disponibles.
 2. **CATÁLOGO ENVIADO = NO LISTAR EN TEXTO:** Si el CONTEXTO DE FINCAS dice que "YA ENVIÓ EXITOSAMENTE el catálogo", tu mensaje debe ser SOLO 1-2 líneas confirmando el envío. NUNCA listes fincas en texto.
 3. **DESTINOS CERCANOS:** Si el cliente pide una ciudad sin fincas, sugiere destinos cercanos usando la lista UBICACIONES DISPONIBLES (mencionando solo 3-5 opciones relevantes geográficamente).
 4. **PRECIOS DE TEMPORADA:** Si en el CONTEXTO DE FINCAS aparecen REGLAS DE TEMPORADA para una finca, DEBES usar el valorUnico de la temporada que aplique a las fechas del cliente. Si no aplica ninguna temporada, usa el precio Base.
@@ -4017,14 +4211,20 @@ export const maybeSendCatalogForUserMessage = internalAction({
           conversationId: args.conversationId,
           limit: 5,
         });
-        const lastAssistant = recentMsgs.find((m: any) => m.sender === "assistant");
+        const lastAssistant = [...recentMsgs].reverse().find((m: any) => m.sender === "assistant");
         const assistantAskedPets = !!lastAssistant && /\bmascotas?|perros?|gatos?\b/i.test(
           String(lastAssistant.content ?? "")
         );
+        const assistantAskedLocation = !!lastAssistant && /\b(ciudad|municipio|destino|ubicaci[oó]n|d[oó]nde)\b/i.test(
+          String(lastAssistant.content ?? "")
+        );
+        const userHasNoLocationPreference =
+          assistantAskedLocation && messageLooksLikeNoLocationPreference(args.userMessage);
         const allowMergedUserHistory =
           asksFincasOrCatalogInMessage(args.userMessage) ||
           messageLooksLikeDateCapacityFollowup(args.userMessage) ||
-          (assistantAskedPets && messageLooksLikePetAnswer(args.userMessage));
+          (assistantAskedPets && messageLooksLikePetAnswer(args.userMessage)) ||
+          userHasNoLocationPreference;
         if (allowMergedUserHistory) {
           // Verificar que NO estamos en flujo de cierre (cotización/contrato)
           const isInClosingFlow = lastAssistant && (
@@ -4042,7 +4242,9 @@ export const maybeSendCatalogForUserMessage = internalAction({
             parsed =
               parseLocationAndDates(merged) ??
               parseSearchFilters(merged) ??
-              parseSearchFiltersWithoutLocation(merged);
+              (userHasNoLocationPreference || asksFincasOrCatalogInMessage(args.userMessage)
+                ? parseSearchFiltersWithoutLocation(merged)
+                : null);
           }
         }
       }
@@ -4201,9 +4403,22 @@ export const maybeSendCatalogForUserMessage = internalAction({
       });
     }
 
-    const postCatalogFollowUp = excludePropertyIds?.length
-      ? "¿Te gustó alguna de estas opciones? 🏡 Si quieres, te comparto más alternativas con los mismos filtros."
-      : "Ya te compartí algunos catálogo ✅ ¿Te gustó alguna finca? 🏡 Si quieres, también puedo mostrarte más opciones.";
+    const recentForFollowUp = await ctx.runQuery(api.messages.listRecent, {
+      conversationId: args.conversationId,
+      limit: 30,
+    });
+    const knownForFollowUp = extractKnownReservationData(
+      [
+        ...recentForFollowUp
+          .filter((m: any) => m.sender === "user")
+          .map((m: any) => String(m.content ?? "")),
+        args.userMessage,
+      ].join("\n")
+    );
+    const postCatalogFollowUp = buildPostCatalogFollowUp(
+      excludePropertyIds,
+      knownForFollowUp
+    );
     await ctx.runAction(internal.ycloud.sendWhatsAppMessage, {
       to: args.phone,
       text: postCatalogFollowUp,
