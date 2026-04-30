@@ -3898,7 +3898,7 @@ export const maybeSendSingleFincaCatalogForUserMessage = internalAction({
 
 const CATALOG_LIMIT = 30;
 /** Cuántas fichas de catálogo enviar por separado (mensajes interactive type product, no product_list). */
-const CATALOG_SEND_BATCH = 3;
+const CATALOG_SEND_BATCH = 8;
 
 /**
  * Si el mensaje incluye ubicación + fechas (o "fin de semana") o pide "otras opciones",
