@@ -998,14 +998,13 @@ Fincas disponibles: ${fincaNames}`,
           // Nuevo criterio comercial: mascotas es un dato importante, pero no debe
           // bloquear el avance del catálogo si ya tenemos personas + fechas.
           console.log("[catalog-intent]", JSON.stringify(catalogIntent));
-          const invalidSearchLocations = /\b(dias?|personas?|fincas?|reservar?|noches?|una|los|las|el|la)\b/i;
           const catalogIntentArg =
             catalogIntent.intent === "more_options"
               ? catalogIntent
               : catalogIntent.intent === "search_catalog" && 
                 catalogIntent.location &&
                 catalogIntent.location.length >= 3 &&
-                !invalidSearchLocations.test(catalogIntent.location)
+                !isInvalidCatalogLocation(catalogIntent.location)
                 ? catalogIntent
                 : undefined;
           if (!catalogIntentArg && catalogIntent.intent === "search_catalog") {
@@ -1280,14 +1279,30 @@ Fincas disponibles: ${fincaNames}`,
         currentMessageText,
         ...recentForCatalogIntent.filter((m: any) => m.sender === "user").map((m: any) => String(m.content ?? "")),
       ].join("\n");
+      const _knownDateRange = extractDateRangeFromText(_allUserTextsEarly);
       const _knownCapacityMatch = _allUserTextsEarly.match(/(?:m[aá]ximo\s+)?(\d+)\s*(?:o\s+m[aá]s\s+)?personas/i) || _allUserTextsEarly.match(/para\s+(\d+)\b/i);
       const _knownPetsMatch = _allUserTextsEarly.match(/(\d+)\s*(?:mascotas?|perros?|gatos?)/i) || _allUserTextsEarly.match(/(un[oa]?|dos|tres|cuatro|cinco|seis)\s+(?:mascotas?|perros?|gatos?)/i);
-      const _knownHasPets = _knownPetsMatch != null || /\b(mascotas?|perros?|gatos?)\b/i.test(_allUserTextsEarly);
+      const _assistantAskedPetsEarly = recentForCatalogIntent.some(
+        (m: any) =>
+          m.sender === "assistant" &&
+          /\bmascotas?|perros?|gatos?\b/i.test(String(m.content ?? ""))
+      );
+      const _knownHasPets =
+        _knownPetsMatch != null ||
+        /\b(mascotas?|perros?|gatos?)\b/i.test(_allUserTextsEarly) ||
+        (_assistantAskedPetsEarly &&
+          messageLooksLikePetAnswer(currentMessageText) &&
+          !isNegativeOnly(currentMessageText));
       const knownDataSummary = [
-        hasKnownWeekend ? "fechas: este fin de semana (sábado y domingo)" : null,
+        _knownDateRange
+          ? `fechas: ${_knownDateRange.label}`
+          : hasKnownWeekend
+            ? "fechas: este fin de semana (sábado y domingo)"
+            : null,
         _knownCapacityMatch ? `personas: ${_knownCapacityMatch[1]}` : null,
         _knownHasPets ? `mascotas: sí` : null,
       ].filter(Boolean).join(", ");
+      const hasKnownDates = hasKnownWeekend || !!_knownDateRange;
 
       // Si saltamos el reenvío de ficha, resolver el nombre oficial en BD para la IA y el contexto.
       if (skipSingleFincaCardResend) {
@@ -1336,7 +1351,7 @@ Fincas disponibles: ${fincaNames}`,
           catalogLocation,
           catalogFincasCount,
           catalogFoundFincasButFailed,
-          hasKnownWeekend,
+          hasKnownWeekend: hasKnownDates,
           knownDataSummary: knownDataSummary || undefined,
           fincaAlreadyConfirmed:
             shouldBlockCatalogFincaConfirmed ||
@@ -3230,10 +3245,151 @@ export type CatalogIntent =
       hasWeekend?: boolean;
       dateD1?: number;
       dateD2?: number;
+      dateMonth?: number;
       minCapacity?: number;
       sortByPrice?: boolean;
       hasPets?: boolean;
     };
+
+const ALL_LOCATIONS_CATALOG_LABEL = "varios destinos";
+const MONTH_NAMES: Record<string, number> = {
+  enero: 0,
+  febrero: 1,
+  marzo: 2,
+  abril: 3,
+  mayo: 4,
+  junio: 5,
+  julio: 6,
+  agosto: 7,
+  septiembre: 8,
+  setiembre: 8,
+  octubre: 9,
+  noviembre: 10,
+  diciembre: 11,
+};
+const MONTH_NAME_PATTERN =
+  "\\b(enero|febrero|marzo|abril|mayo|junio|julio|agosto|septiembre|setiembre|octubre|noviembre|diciembre)\\b";
+
+function normalizeAsciiText(value: string): string {
+  return value
+    .trim()
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/\p{M}/gu, "")
+    .replace(/[^\w\s]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function isInvalidCatalogLocation(location: string): boolean {
+  const normalized = normalizeAsciiText(location);
+  if (!normalized) return true;
+  if (Object.prototype.hasOwnProperty.call(MONTH_NAMES, normalized)) return true;
+  if (
+    /^(dias?|personas?|fincas?|reservar?|reserva|noches?|una?|unos?|unas?|los|las|el|la|mascotas?|perros?|gatos?|familiar|familia|amigos|empresarial|empresa|mismo|misma)$/.test(
+      normalized
+    )
+  ) {
+    return true;
+  }
+  if (/^(no\s+se|no\s+sé|cualquiera|cualquier|varios?|varias?|sin\s+preferencia)$/.test(normalized)) {
+    return true;
+  }
+  return false;
+}
+
+function isAllLocationsCatalogLocation(location: string): boolean {
+  return normalizeAsciiText(location) === normalizeAsciiText(ALL_LOCATIONS_CATALOG_LABEL);
+}
+
+function chooseCatalogYearAndMonth(day: number, explicitMonth?: number): {
+  year: number;
+  month: number;
+} {
+  const now = new Date();
+  let year = now.getFullYear();
+  let month = explicitMonth ?? now.getMonth();
+  const today = new Date(now);
+  today.setHours(0, 0, 0, 0);
+  let candidate = new Date(year, month, day);
+  candidate.setHours(0, 0, 0, 0);
+
+  if (candidate.getTime() < today.getTime()) {
+    if (explicitMonth != null) {
+      year += 1;
+    } else {
+      month += 1;
+      if (month > 11) {
+        month = 0;
+        year += 1;
+      }
+    }
+  }
+
+  return { year, month };
+}
+
+function buildCatalogDateRangeFromDays(
+  d1: number,
+  d2: number,
+  explicitMonth?: number
+): { fechaEntrada: number; fechaSalida: number } | null {
+  if (d1 < 1 || d1 > 31 || d2 < 1 || d2 > 31) return null;
+  const { year, month } = chooseCatalogYearAndMonth(d1, explicitMonth);
+  const salidaMonth = d2 < d1 ? month + 1 : month;
+  return {
+    fechaEntrada: new Date(year, month, d1).getTime(),
+    fechaSalida: new Date(year, salidaMonth, d2 + 1).getTime(),
+  };
+}
+
+function extractDateRangeFromText(userMessage: string): {
+  fechaEntrada: number;
+  fechaSalida: number;
+  label: string;
+} | null {
+  const msg = userMessage.trim().toLowerCase();
+  const dateMatch = msg.match(
+    new RegExp(
+      `(?:del\\s+)?(\\d{1,2})\\s*(?:al|hasta\\s+el|hasta|a)\\s*(\\d{1,2})(?:\\s+(?:de\\s+)?${MONTH_NAME_PATTERN})?`,
+      "i"
+    )
+  );
+  if (!dateMatch) return null;
+
+  const d1 = parseInt(dateMatch[1], 10);
+  const d2 = parseInt(dateMatch[2], 10);
+  const explicitMonthName = dateMatch[3]?.toLowerCase();
+  const explicitMonth =
+    explicitMonthName != null ? MONTH_NAMES[explicitMonthName] : undefined;
+  const range = buildCatalogDateRangeFromDays(d1, d2, explicitMonth);
+  if (!range) return null;
+  return {
+    ...range,
+    label: explicitMonthName
+      ? `${d1} al ${d2} de ${explicitMonthName}`
+      : `${d1} al ${d2}`,
+  };
+}
+
+function extractCapacityFromText(userMessage: string): number | undefined {
+  const match =
+    userMessage.match(/(\d+)\s*(?:o\s+mas?\s+)?personas/i) ||
+    userMessage.match(/para\s+(\d+)\b/i);
+  return match ? parseInt(match[1], 10) : undefined;
+}
+
+function detectPetsFromText(userMessage: string): boolean | undefined {
+  const lower = userMessage.toLowerCase().normalize("NFD").replace(/\p{M}/gu, "");
+  if (/\b(sin\s+mascotas?|no\s+(llevamos|llevo|viajan|van)\s+mascotas?)\b/i.test(lower)) {
+    return undefined;
+  }
+  return /\b(mascota|mascotas|perro|perros|gato|gatos|animal|llev[oa]\s+(mi\s+)?(perro|gato|mascota)|si\s+una|sí\s+una)\b/i.test(
+    lower
+  )
+    ? true
+    : undefined;
+}
 
 /**
  * La IA detecta la intención del usuario: ver una finca, buscar opciones (ubicación + fechas), o pedir más opciones.
@@ -3263,8 +3419,11 @@ Reglas:
 - Si pregunta por métodos de pago, datos bancarios, Nequi, PSE, transferencia, firma de contrato o PDF del contrato, devuelve SIEMPRE intent "none" (no catálogo).
 - intent: "none" si no aplica ninguna de las anteriores.
 - hasWeekend: true si menciona "fin de semana", "sábado y domingo", "sábado", "domingo" sin fechas específicas.
+- dateD1/dateD2 si menciona un rango de días específico (ej. "5 al 7 de mayo" → dateD1:5, dateD2:7).
+- dateMonth: número de mes 1-12 SOLO si el usuario menciona el mes explícitamente (ej. mayo → 5). No lo inventes si no aparece.
 - hasPets: true si menciona mascotas, perros, gatos, animales o cualquier animal de compañía.
 - minCapacity: número de personas si lo menciona (ej. "10 personas", "máximo 10", "para 8").
+- Nunca uses nombres de meses (enero, febrero, marzo, abril, mayo, etc.) como location. Si el usuario solo da fechas/personas y no municipio, devuelve "none".
 
 Contexto reciente (líneas Cliente/Asistente). Si está vacío, ignóralo:
 ${snippet || "(vacío)"}
@@ -3274,7 +3433,7 @@ Ejemplos de salida:
 {"intent":"more_options"}
 {"intent":"search_catalog","location":"melgar","hasWeekend":true,"minCapacity":5,"sortByPrice":true,"hasPets":false}
 {"intent":"search_catalog","location":"villavicencio","hasWeekend":true,"minCapacity":10,"hasPets":true}
-{"intent":"search_catalog","location":"restrepo","dateD1":20,"dateD2":21,"minCapacity":10}
+{"intent":"search_catalog","location":"restrepo","dateD1":20,"dateD2":21,"dateMonth":5,"minCapacity":10}
 {"intent":"none"}
 
 Ejemplos con confirmación:
@@ -3305,6 +3464,7 @@ Mes actual: ${month + 1}, año: ${year}.`,
             hasWeekend: parsed.hasWeekend === true,
             dateD1: typeof parsed.dateD1 === "number" ? parsed.dateD1 : undefined,
             dateD2: typeof parsed.dateD2 === "number" ? parsed.dateD2 : undefined,
+            dateMonth: typeof parsed.dateMonth === "number" ? parsed.dateMonth : undefined,
             minCapacity: typeof parsed.minCapacity === "number" ? parsed.minCapacity : undefined,
             sortByPrice: parsed.sortByPrice === true,
             hasPets: parsed.hasPets === true,
@@ -3365,6 +3525,7 @@ function parseLocationAndDates(userMessage: string): {
 } | null {
   const msg = userMessage.trim().toLowerCase();
   const STOP_WORDS_LD = /^(una?|unas?|unos?|la|el|las|los|esa?|ese|eso|esta?|esto|mi|tu|su|que|como|donde|aqui|alli|alla|dos|tres|mas|maximo|minimo|amigos|familia|reunion|evento)$/i;
+  const dateRange = extractDateRangeFromText(msg);
   // Intentar múltiples patrones de ubicación, priorizando más específicos
   const locCandidatesLD = [
     msg.match(/para\s+([a-záéíóúñ]{4,})(?:\s+del\s|\s+para\s|\s+\d|,|$)/i),
@@ -3378,26 +3539,23 @@ function parseLocationAndDates(userMessage: string): {
     const candidate = m[1].trim().replace(/\s+/g, " ");
     if (candidate.length < 3) continue;
     if (STOP_WORDS_LD.test(candidate)) continue;
+    if (isInvalidCatalogLocation(candidate)) continue;
     if (/\b(dias?|personas?|fincas?|reservar?|noches?)\b/i.test(candidate)) continue;
     location = candidate;
     break;
   }
-  // Fechas: "del 20 al 21" o "20 al 21"
-  const dateMatch = msg.match(/(?:del\s+)?(\d{1,2})\s*(?:al|hasta el|hasta)\s*(\d{1,2})/i);
-  if (!location || !dateMatch) return null;
-  const d1 = parseInt(dateMatch[1], 10);
-  const d2 = parseInt(dateMatch[2], 10);
-  if (d1 < 1 || d1 > 31 || d2 < 1 || d2 > 31) return null;
-  const now = new Date();
-  const year = now.getFullYear();
-  const month = now.getMonth();
-  const fechaEntrada = new Date(year, month, d1).getTime();
-  const fechaSalida = new Date(year, month, d2 + 1).getTime(); // salida = día siguiente 00:00
-  const personasMatch = msg.match(/(\d+)\s*(?:o\s+mas?\s+)?personas/i);
-  const minCapacity = personasMatch ? parseInt(personasMatch[1], 10) : undefined;
+  if (!location || !dateRange) return null;
+  const minCapacity = extractCapacityFromText(msg);
   const sortByPrice = /\b(buen\s+precio|económico|económicas|barato|barata)\b/i.test(msg);
-  const hasPets = /\b(mascota|mascotas|perro|perros|gato|gatos|animal|llev[oa]\s+(mi\s+)?(perro|gato|mascota))\b/i.test(msg);
-  return { location, fechaEntrada, fechaSalida, minCapacity, sortByPrice, hasPets };
+  const hasPets = detectPetsFromText(msg);
+  return {
+    location,
+    fechaEntrada: dateRange.fechaEntrada,
+    fechaSalida: dateRange.fechaSalida,
+    minCapacity,
+    sortByPrice,
+    hasPets,
+  };
 }
 
 /** Próximo fin de semana: sábado 00:00 a lunes 00:00 (2 noches). */
@@ -3447,19 +3605,64 @@ function parseSearchFilters(userMessage: string): {
     const candidate = m[1].replace(/[^\w\u00e1\u00e9\u00ed\u00f3\u00fa\u00f1\s]/gi, "").trim().replace(/\s+/g, " ");
     if (candidate.length < 3) continue;
     if (STOP_WORDS.test(candidate)) continue;
+    if (isInvalidCatalogLocation(candidate)) continue;
     if (/\b(dias?|personas?|fincas?|reservar?|noches?|sabado|domingo|fin)\b/i.test(candidate)) continue;
     location = candidate;
     break;
   }
   if (!location) return null;
-  const personasMatch = lower.match(/(\d+)\s*(?:o\s+mas?\s+)?personas/i);
-  const minCapacity = personasMatch ? parseInt(personasMatch[1], 10) : undefined;
+  const minCapacity = extractCapacityFromText(lower);
   const sortByPrice = /\b(buen\s+precio|economico|economicas|barato|barata)\b/i.test(lower);
-  const hasPets = /\b(mascota|mascotas|perro|perros|gato|gatos|animal|llev[oa]\s+(mi\s+)?(perro|gato|mascota))\b/i.test(lower);
+  const hasPets = detectPetsFromText(lower);
   return {
     location,
     fechaEntrada: weekend.fechaEntrada,
     fechaSalida: weekend.fechaSalida,
+    minCapacity,
+    sortByPrice,
+    hasPets,
+  };
+}
+
+/**
+ * Cuando el cliente no sabe el destino, permite usar fechas + cupo para buscar
+ * disponibilidad en varios municipios en vez de inventar una ubicación.
+ */
+function parseSearchFiltersWithoutLocation(userMessage: string): {
+  location: string;
+  fechaEntrada: number;
+  fechaSalida: number;
+  minCapacity?: number;
+  sortByPrice?: boolean;
+  hasPets?: boolean;
+} | null {
+  const lower = userMessage.trim().toLowerCase().normalize("NFD").replace(/\p{M}/gu, "");
+  const dateRange = extractDateRangeFromText(userMessage);
+  const hasWeekendRef = /\b(fin\s+de\s+semana|este\s+fin|proximo\s+fin|el\s+fin\s+de\s+semana|sabado\s+y\s+domingo|sabado|domingo)\b/i.test(
+    lower
+  );
+  const minCapacity = extractCapacityFromText(lower);
+  if (!minCapacity) return null;
+
+  let fechaEntrada: number;
+  let fechaSalida: number;
+  if (dateRange) {
+    fechaEntrada = dateRange.fechaEntrada;
+    fechaSalida = dateRange.fechaSalida;
+  } else if (hasWeekendRef) {
+    const weekend = getNextWeekendDates();
+    fechaEntrada = weekend.fechaEntrada;
+    fechaSalida = weekend.fechaSalida;
+  } else {
+    return null;
+  }
+
+  const sortByPrice = /\b(buen\s+precio|economico|economicas|barato|barata)\b/i.test(lower);
+  const hasPets = detectPetsFromText(userMessage);
+  return {
+    location: ALL_LOCATIONS_CATALOG_LABEL,
+    fechaEntrada,
+    fechaSalida,
     minCapacity,
     sortByPrice,
     hasPets,
@@ -3501,6 +3704,15 @@ function messageLooksLikeDateCapacityFollowup(userMessage: string): boolean {
   );
   const hasPersonas = /\b\d+\s*(?:o\s+mas?\s+)?personas\b/i.test(lower);
   return hasWeekend && hasPersonas;
+}
+
+function messageLooksLikePetAnswer(userMessage: string): boolean {
+  const lower = normalizeAsciiText(userMessage);
+  if (!lower || lower.length > 80) return false;
+  return (
+    /\b(mascotas?|perros?|gatos?)\b/i.test(lower) ||
+    /^(si|sí|sii|claro|correcto|una|uno|un|1|dos|2|tres|3|no|sin\s+mascotas?)\b/i.test(lower)
+  );
 }
 
 /**
@@ -3573,8 +3785,9 @@ export const maybeSendSingleFincaCatalogForUserMessage = internalAction({
     extractedFincaName: v.optional(v.string()),
   },
   handler: async (ctx, args): Promise<{ sent: boolean; fincaTitle?: string }> => {
+    const potentialPetFilterAnswer = messageLooksLikePetAnswer(args.userMessage);
     if (
-      shouldBlockCatalogMultiFincaSearch(args.userMessage) ||
+      (shouldBlockCatalogMultiFincaSearch(args.userMessage) && !potentialPetFilterAnswer) ||
       looksLikeContractDataSubmission(args.userMessage)
     ) {
       return { sent: false };
@@ -3707,6 +3920,7 @@ export const maybeSendCatalogForUserMessage = internalAction({
           hasWeekend: v.optional(v.boolean()),
           dateD1: v.optional(v.number()),
           dateD2: v.optional(v.number()),
+          dateMonth: v.optional(v.number()),
           minCapacity: v.optional(v.number()),
           sortByPrice: v.optional(v.boolean()),
           hasPets: v.optional(v.boolean()),
@@ -3721,8 +3935,9 @@ export const maybeSendCatalogForUserMessage = internalAction({
     });
     if (!conv) return { sent: false };
 
+    const potentialPetFilterAnswer = messageLooksLikePetAnswer(args.userMessage);
     if (
-      shouldBlockCatalogMultiFincaSearch(args.userMessage) ||
+      (shouldBlockCatalogMultiFincaSearch(args.userMessage) && !potentialPetFilterAnswer) ||
       looksLikeContractDataSubmission(args.userMessage)
     ) {
       return { sent: false };
@@ -3736,6 +3951,7 @@ export const maybeSendCatalogForUserMessage = internalAction({
     let hasPets: boolean | undefined;
     let excludePropertyIds: Id<"properties">[] | undefined;
     let usedInferredDates = false;
+    let searchAllLocations = false;
 
     const intent = args.catalogIntent;
     if (intent?.intent === "more_options" && conv.lastCatalogSearch) {
@@ -3746,19 +3962,32 @@ export const maybeSendCatalogForUserMessage = internalAction({
       minCapacity = last.minCapacity;
       sortByPrice = last.sortByPrice;
       excludePropertyIds = conv.lastSentCatalogPropertyIds ?? [];
+      searchAllLocations = isAllLocationsCatalogLocation(last.location);
       // Conservar preferencia de mascotas del último catálogo si aplica
       hasPets = (last as any).hasPets === true ? true : undefined;
     } else if (intent?.intent === "search_catalog" && intent.location) {
+      if (isInvalidCatalogLocation(intent.location)) {
+        console.warn("[catalog-guard] intent search_catalog descartado — ubicación inválida:", intent.location);
+        return { sent: false };
+      }
       const weekend = getNextWeekendDates();
       if (intent.hasWeekend) {
         fechaEntrada = weekend.fechaEntrada;
         fechaSalida = weekend.fechaSalida;
       } else if (intent.dateD1 != null && intent.dateD2 != null) {
-        const now = new Date();
-        const y = now.getFullYear();
-        const m = now.getMonth();
-        fechaEntrada = new Date(y, m, intent.dateD1).getTime();
-        fechaSalida = new Date(y, m, intent.dateD2 + 1).getTime();
+        const exactRangeFromText = extractDateRangeFromText(args.userMessage);
+        const range =
+          exactRangeFromText ??
+          buildCatalogDateRangeFromDays(
+            intent.dateD1,
+            intent.dateD2,
+            intent.dateMonth != null && intent.dateMonth >= 1 && intent.dateMonth <= 12
+              ? intent.dateMonth - 1
+              : undefined
+          );
+        if (!range) return { sent: false };
+        fechaEntrada = range.fechaEntrada;
+        fechaSalida = range.fechaSalida;
       } else {
         fechaEntrada = weekend.fechaEntrada;
         fechaSalida = weekend.fechaSalida;
@@ -3776,6 +4005,7 @@ export const maybeSendCatalogForUserMessage = internalAction({
       minCapacity = last.minCapacity;
       sortByPrice = last.sortByPrice;
       excludePropertyIds = conv.lastSentCatalogPropertyIds ?? [];
+      searchAllLocations = isAllLocationsCatalogLocation(last.location);
       hasPets = (last as any).hasPets === true ? true : undefined;
     } else {
       let parsed =
@@ -3783,16 +4013,20 @@ export const maybeSendCatalogForUserMessage = internalAction({
         parseSearchFilters(args.userMessage);
       if (!parsed) {
         // NUNCA re-disparar catálogo con "sí" / confirmación. Solo con preguntas explícitas.
+        const recentMsgs = await ctx.runQuery(api.messages.listRecent, {
+          conversationId: args.conversationId,
+          limit: 5,
+        });
+        const lastAssistant = recentMsgs.find((m: any) => m.sender === "assistant");
+        const assistantAskedPets = !!lastAssistant && /\bmascotas?|perros?|gatos?\b/i.test(
+          String(lastAssistant.content ?? "")
+        );
         const allowMergedUserHistory =
           asksFincasOrCatalogInMessage(args.userMessage) ||
-          messageLooksLikeDateCapacityFollowup(args.userMessage);
+          messageLooksLikeDateCapacityFollowup(args.userMessage) ||
+          (assistantAskedPets && messageLooksLikePetAnswer(args.userMessage));
         if (allowMergedUserHistory) {
           // Verificar que NO estamos en flujo de cierre (cotización/contrato)
-          const recentMsgs = await ctx.runQuery(api.messages.listRecent, {
-            conversationId: args.conversationId,
-            limit: 5,
-          });
-          const lastAssistant = recentMsgs.find((m: any) => m.sender === "assistant");
           const isInClosingFlow = lastAssistant && (
             /avancemos con la reserva|elaborar tu contrato|datos de la persona/i.test(lastAssistant.content)
           );
@@ -3806,12 +4040,15 @@ export const maybeSendCatalogForUserMessage = internalAction({
               .map((m: any) => m.content)
               .join("\n");
             parsed =
-              parseLocationAndDates(merged) ?? parseSearchFilters(merged);
+              parseLocationAndDates(merged) ??
+              parseSearchFilters(merged) ??
+              parseSearchFiltersWithoutLocation(merged);
           }
         }
       }
       if (!parsed) return { sent: false };
       location = parsed.location;
+      searchAllLocations = isAllLocationsCatalogLocation(location);
       fechaEntrada = parsed.fechaEntrada;
       fechaSalida = parsed.fechaSalida;
       minCapacity = parsed.minCapacity;
@@ -3821,16 +4058,26 @@ export const maybeSendCatalogForUserMessage = internalAction({
 
     location = normalizeCatalogLocation(location);
 
-    const fincas = await ctx.runQuery(api.fincas.searchAvailableByLocationAndDates, {
-      location,
-      fechaEntrada,
-      fechaSalida,
-      limit: CATALOG_LIMIT,
-      minCapacity,
-      excludePropertyIds,
-      sortByPrice,
-      allowsPets: hasPets,
-    });
+    const fincas = searchAllLocations
+      ? await ctx.runQuery(api.fincas.searchAvailableByDates, {
+          fechaEntrada,
+          fechaSalida,
+          limit: CATALOG_LIMIT,
+          minCapacity,
+          excludePropertyIds,
+          sortByPrice,
+          allowsPets: hasPets,
+        })
+      : await ctx.runQuery(api.fincas.searchAvailableByLocationAndDates, {
+          location,
+          fechaEntrada,
+          fechaSalida,
+          limit: CATALOG_LIMIT,
+          minCapacity,
+          excludePropertyIds,
+          sortByPrice,
+          allowsPets: hasPets,
+        });
     console.log("[catalog-search] location:", location, "fincas encontradas (antes de catálogo):", fincas.length);
 
     if (fincas.length === 0) {

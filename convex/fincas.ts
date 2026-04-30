@@ -1096,7 +1096,7 @@ export const searchAvailableByLocationAndDates = query({
       byLocation = byLocation.filter((p) => p.allowsPets === true);
     }
 
-    const available = [];
+    const available: typeof byLocation = [];
     for (const property of byLocation) {
       const overlapping = await ctx.db
         .query('propertyAvailability')
@@ -1120,6 +1120,102 @@ export const searchAvailableByLocationAndDates = query({
     }
 
     const filteredAvailable = available.slice(0, limit);
+
+    const withDetails = await Promise.all(
+      filteredAvailable.map(async (property) => {
+        const image = await ctx.db
+          .query('propertyImages')
+          .withIndex('by_property', (q: any) =>
+            q.eq('propertyId', property._id),
+          )
+          .first();
+        return {
+          ...property,
+          image: image?.url,
+        };
+      }),
+    );
+
+    return withDetails;
+  },
+});
+
+/**
+ * Fincas disponibles por rango de fechas sin filtrar por ubicación.
+ * Se usa cuando el cliente no tiene municipio de preferencia y quiere comparar destinos.
+ */
+export const searchAvailableByDates = query({
+  args: {
+    fechaEntrada: v.number(),
+    fechaSalida: v.number(),
+    limit: v.optional(v.number()),
+    minCapacity: v.optional(v.number()),
+    excludePropertyIds: v.optional(v.array(v.id('properties'))),
+    sortByPrice: v.optional(v.boolean()),
+    allowsPets: v.optional(v.boolean()),
+  },
+  handler: async (ctx, args) => {
+    const limit = args.limit ?? 30;
+    const excludeSet = new Set(args.excludePropertyIds ?? []);
+    const all = await ctx.db.query('properties').collect();
+    let candidates = all.filter(
+      (p) =>
+        p.active !== false &&
+        p.visible !== false &&
+        !excludeSet.has(p._id),
+    );
+
+    if (args.minCapacity != null) {
+      candidates = candidates.filter((p) => p.capacity >= args.minCapacity!);
+    }
+
+    if (args.allowsPets === true) {
+      candidates = candidates.filter((p) => p.allowsPets === true);
+    }
+
+    const available: typeof candidates = [];
+    for (const property of candidates) {
+      const overlapping = await ctx.db
+        .query('propertyAvailability')
+        .withIndex('by_property', (q) => q.eq('propertyId', property._id))
+        .filter((q) =>
+          q.and(
+            q.lt(q.field('fechaEntrada'), args.fechaSalida),
+            q.gt(q.field('fechaSalida'), args.fechaEntrada),
+          ),
+        )
+        .first();
+
+      if (!overlapping) {
+        available.push(property);
+      }
+      if (available.length >= limit * 3) break;
+    }
+
+    let orderedAvailable = available;
+    if (args.sortByPrice) {
+      orderedAvailable = [...available].sort((a, b) => a.priceBase - b.priceBase);
+    } else {
+      const byLocation = new Map<string, typeof available>();
+      for (const property of available) {
+        const key = property.location.trim().toLowerCase();
+        const bucket = byLocation.get(key) ?? [];
+        bucket.push(property);
+        byLocation.set(key, bucket);
+      }
+      const diversified: typeof available = [];
+      while (diversified.length < limit && byLocation.size > 0) {
+        for (const [key, bucket] of [...byLocation.entries()]) {
+          const next = bucket.shift();
+          if (next) diversified.push(next);
+          if (bucket.length === 0) byLocation.delete(key);
+          if (diversified.length >= limit) break;
+        }
+      }
+      orderedAvailable = diversified;
+    }
+
+    const filteredAvailable = orderedAvailable.slice(0, limit);
 
     const withDetails = await Promise.all(
       filteredAvailable.map(async (property) => {
