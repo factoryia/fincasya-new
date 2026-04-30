@@ -4203,7 +4203,7 @@ export const maybeSendCatalogForUserMessage = internalAction({
 
     const postCatalogFollowUp = excludePropertyIds?.length
       ? "¿Te gustó alguna de estas opciones? 🏡 Si quieres, te comparto más alternativas con los mismos filtros."
-      : "Ya te compartí el catálogo ✅ ¿Te gustó alguna finca? 🏡 Si quieres, también puedo mostrarte más opciones.";
+      : "Ya te compartí algunos catálogo ✅ ¿Te gustó alguna finca? 🏡 Si quieres, también puedo mostrarte más opciones.";
     await ctx.runAction(internal.ycloud.sendWhatsAppMessage, {
       to: args.phone,
       text: postCatalogFollowUp,
