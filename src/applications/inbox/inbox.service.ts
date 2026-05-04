@@ -98,11 +98,16 @@ export class InboxService {
       }));
   }
 
-  async setAssignedUser(conversationId: string, assignedUserId: string | null) {
+  async setAssignedUser(conversationId: string, assignedUserId: string | null, actorUserId?: string) {
     return this.convexService.mutation('conversations:setAssignedUser', {
       conversationId,
       assignedUserId,
+      actorUserId: actorUserId ?? undefined,
     });
+  }
+
+  async getAuditHistory(conversationId: string) {
+    return this.convexService.query('conversationAudit:listByConversation', { conversationId });
   }
 
   async setOperationalState(
@@ -227,7 +232,7 @@ export class InboxService {
     });
   }
 
-  async setStatus(conversationId: string, status: 'ai' | 'human' | 'resolved') {
+  async setStatus(conversationId: string, status: 'ai' | 'human' | 'resolved', actorUserId?: string) {
     if (status === 'ai') {
       return this.convexService.mutation('conversations:setToAiPublic', {
         conversationId,
@@ -241,6 +246,7 @@ export class InboxService {
     if (status === 'resolved') {
       return this.convexService.mutation('conversations:resolveConversation', {
         conversationId,
+        actorUserId: actorUserId ?? undefined,
       });
     }
     throw new BadRequestException('status debe ser ai, human o resolved');
@@ -265,9 +271,10 @@ export class InboxService {
       filename?: string;
       metadata?: any;
       file?: Express.Multer.File;
+      sentByUserId?: string;
     },
   ) {
-    const { type, text, mediaUrl, metadata, file, filename: requestedFilename } =
+    const { type, text, mediaUrl, metadata, file, filename: requestedFilename, sentByUserId } =
       params;
     if (type === 'text' && !text?.trim()) {
       throw new BadRequestException(
@@ -320,6 +327,7 @@ export class InboxService {
       mediaUrl: finalMediaUrl,
       mediaUrlForStorage,
       filename,
+      sentByUserId: sentByUserId || undefined,
     });
     return result ?? { ok: true };
   }

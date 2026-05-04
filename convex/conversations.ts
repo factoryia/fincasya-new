@@ -1,6 +1,7 @@
 import { v } from "convex/values";
 import type { Id } from "./_generated/dataModel";
 import { internalMutation, mutation, query } from "./_generated/server";
+import { internal } from "./_generated/api";
 import {
   DEFAULT_OPERATIONAL_STATE,
   operationalStateValidator,
@@ -254,9 +255,19 @@ export const setToAiPublic = mutation({
 
 /** Marcar conversación como resuelta. */
 export const resolveConversation = mutation({
-  args: { conversationId: v.id("conversations") },
+  args: {
+    conversationId: v.id("conversations"),
+    actorUserId: v.optional(v.string()),
+  },
   handler: async (ctx, args) => {
     await ctx.db.patch(args.conversationId, { status: "resolved" });
+    if (args.actorUserId) {
+      await ctx.runMutation(internal.conversationAudit.recordEvent, {
+        conversationId: args.conversationId,
+        eventType: "resolved",
+        userId: args.actorUserId,
+      });
+    }
   },
 });
 
@@ -282,17 +293,47 @@ export const setPriority = mutation({
  */
 /**
  * Asignar o quitar asesor (documento `user` en Convex). `null` en API Nest → limpiar.
+ * `actorUserId` es opcional: quién hace la acción (para auditoría).
  */
 export const setAssignedUser = mutation({
   args: {
     conversationId: v.id("conversations"),
     assignedUserId: v.union(v.string(), v.null()),
+    actorUserId: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
+    const prev = await ctx.db.get(args.conversationId);
     await ctx.db.patch(args.conversationId, {
       assignedUserId:
         args.assignedUserId === null ? undefined : args.assignedUserId,
     });
+
+    if (args.assignedUserId === null) {
+      // Unassigned
+      await ctx.runMutation(internal.conversationAudit.recordEvent, {
+        conversationId: args.conversationId,
+        eventType: "unassigned",
+        userId: args.actorUserId ?? "system",
+      });
+    } else {
+      const prevAssigned = prev?.assignedUserId;
+      if (prevAssigned && prevAssigned !== args.assignedUserId) {
+        // Transferred from one advisor to another
+        await ctx.runMutation(internal.conversationAudit.recordEvent, {
+          conversationId: args.conversationId,
+          eventType: "transferred",
+          userId: args.assignedUserId,
+          previousUserId: prevAssigned,
+        });
+      } else {
+        // New assignment
+        await ctx.runMutation(internal.conversationAudit.recordEvent, {
+          conversationId: args.conversationId,
+          eventType: "assigned",
+          userId: args.assignedUserId,
+        });
+      }
+    }
   },
 });
 

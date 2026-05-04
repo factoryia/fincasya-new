@@ -14,6 +14,7 @@ import { BookingsModule } from './bookings/bookings.module';
 import { PaymentsModule } from './payments/payments.module';
 import { InternalPagesModule } from './internal-pages/internal-pages.module';
 import { AccountingManagersModule } from './accounting-managers/accounting-managers.module';
+import { RolesModule } from './roles/roles.module';
 import { ScheduleModule } from '@nestjs/schedule';
 
 @Module({
@@ -34,6 +35,7 @@ import { ScheduleModule } from '@nestjs/schedule';
     PaymentsModule,
     InternalPagesModule,
     AccountingManagersModule,
+    RolesModule,
   ],
 
   controllers: [],

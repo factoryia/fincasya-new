@@ -41,6 +41,7 @@ export const insertAssistantMessage = internalMutation({
     conversationId: v.id("conversations"),
     content: v.string(),
     createdAt: v.number(),
+    sentByUserId: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
     await ctx.db.insert("messages", {
@@ -48,6 +49,7 @@ export const insertAssistantMessage = internalMutation({
       sender: "assistant",
       content: args.content,
       createdAt: args.createdAt,
+      sentByUserId: args.sentByUserId,
     });
   },
 });
@@ -70,6 +72,7 @@ export const insertAssistantMessageWithMedia = internalMutation({
     mediaUrl: v.optional(v.string()),
     metadata: v.optional(v.any()),
     createdAt: v.number(),
+    sentByUserId: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
     await ctx.db.insert("messages", {
@@ -80,6 +83,7 @@ export const insertAssistantMessageWithMedia = internalMutation({
       mediaUrl: args.mediaUrl,
       metadata: args.metadata,
       createdAt: args.createdAt,
+      sentByUserId: args.sentByUserId,
     });
   },
 });

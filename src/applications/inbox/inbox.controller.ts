@@ -197,17 +197,17 @@ export class InboxController {
   /**
    * Escalar: cambiar entre IA, humano o resuelto
    * PATCH /api/inbox/:conversationId/status
-   * Body: { "status": "human" } | "ai" | "resolved"
+   * Body: { "status": "human", "userId": "<convex_user_id>" }
    */
   @Patch(':conversationId/status')
   async setStatus(
     @Param('conversationId') conversationId: string,
-    @Body() body: { status: 'ai' | 'human' | 'resolved' },
+    @Body() body: { status: 'ai' | 'human' | 'resolved'; userId?: string },
   ) {
     if (!body?.status || !['ai', 'human', 'resolved'].includes(body.status)) {
       throw new BadRequestException('status debe ser ai, human o resolved');
     }
-    return this.inboxService.setStatus(conversationId, body.status);
+    return this.inboxService.setStatus(conversationId, body.status, body.userId);
   }
 
   /**
@@ -258,12 +258,12 @@ export class InboxController {
   /**
    * Asignar o quitar asesor (Convex user _id).
    * PATCH /api/inbox/:conversationId/assigned-user
-   * Body: { "assignedUserId": "<id>" | null }
+   * Body: { "assignedUserId": "<id>" | null, "actorUserId": "<convex_user_id>" }
    */
   @Patch(':conversationId/assigned-user')
   async setAssignedUser(
     @Param('conversationId') conversationId: string,
-    @Body() body: { assignedUserId: string | null },
+    @Body() body: { assignedUserId: string | null; actorUserId?: string },
   ) {
     if (!body || !('assignedUserId' in body)) {
       throw new BadRequestException('Body debe incluir assignedUserId (string o null)');
@@ -271,7 +271,16 @@ export class InboxController {
     if (body.assignedUserId !== null && typeof body.assignedUserId !== 'string') {
       throw new BadRequestException('assignedUserId debe ser string o null');
     }
-    return this.inboxService.setAssignedUser(conversationId, body.assignedUserId);
+    return this.inboxService.setAssignedUser(conversationId, body.assignedUserId, body.actorUserId);
+  }
+
+  /**
+   * Historial de auditoría de atención de una conversación
+   * GET /api/inbox/:conversationId/audit-history
+   */
+  @Get(':conversationId/audit-history')
+  async getAuditHistory(@Param('conversationId') conversationId: string) {
+    return this.inboxService.getAuditHistory(conversationId);
   }
 
   /**
@@ -294,6 +303,7 @@ export class InboxController {
     @Body('mediaUrl') mediaUrl?: string,
     @Body('filename') filename?: string,
     @Body('metadata') metadata?: any,
+    @Body('sentByUserId') sentByUserId?: string,
     @UploadedFile() file?: Express.Multer.File,
   ) {
     const msgType = (type || (file ? this.inferTypeFromFile(file) : 'text'));
@@ -314,6 +324,7 @@ export class InboxController {
       filename: filename?.trim() || undefined,
       metadata: parsedMetadata,
       file,
+      sentByUserId: sentByUserId?.trim() || undefined,
     });
   }
  

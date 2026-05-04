@@ -70,9 +70,11 @@ export const update = mutation({
     role: v.optional(
       v.union(
         v.literal('admin'),
-        v.literal('assistant'),
         v.literal('vendedor'),
+        v.literal('asesor_limitado'),
+        v.literal('contabilidad'),
         v.literal('propietario'),
+        v.literal('client'),
         v.literal('user'),
         v.null(),
       ),
@@ -109,9 +111,11 @@ export const updateByEmail = mutation({
     role: v.optional(
       v.union(
         v.literal('admin'),
-        v.literal('assistant'),
         v.literal('vendedor'),
+        v.literal('asesor_limitado'),
+        v.literal('contabilidad'),
         v.literal('propietario'),
+        v.literal('client'),
         v.literal('user'),
       ),
     ),

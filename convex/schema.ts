@@ -482,6 +482,8 @@ export default defineSchema({
     /** Metadatos del mensaje (ej: para catálogos, datos de finca) */
     metadata: v.optional(v.any()),
     createdAt: v.number(),
+    /** Convex user._id del asesor que envió el mensaje manualmente (trazabilidad). */
+    sentByUserId: v.optional(v.string()),
   }).index('by_conversation', ['conversationId', 'createdAt']),
 
   /** Plantillas rápidas configurables por intención para respuestas del inbox/IA. */
@@ -506,6 +508,23 @@ export default defineSchema({
     .index('by_intent', ['intentKey'])
     .index('by_slash', ['slashCommand'])
     .index('by_active', ['active']),
+
+  /** Trazabilidad de quién atiende cada conversación (asignaciones, transferencias, mensajes, cierres). */
+  conversationAuditEvents: defineTable({
+    conversationId: v.id('conversations'),
+    eventType: v.union(
+      v.literal('assigned'),
+      v.literal('unassigned'),
+      v.literal('transferred'),
+      v.literal('resolved'),
+      v.literal('message_sent'),
+    ),
+    userId: v.string(),
+    previousUserId: v.optional(v.string()),
+    createdAt: v.number(),
+  })
+    .index('by_conversation', ['conversationId', 'createdAt'])
+    .index('by_user', ['userId', 'createdAt']),
 
   ycloudProcessedEvents: defineTable({
     eventId: v.string(),
@@ -642,4 +661,15 @@ export default defineSchema({
   })
     .index('by_name', ['name'])
     .index('by_idNumber', ['idNumber']),
+
+  // Permisos por rol
+  rolePermissions: defineTable({
+    role: v.string(),
+    module: v.string(),
+    permissions: v.array(v.string()),
+    isCustom: v.optional(v.boolean()),
+    updatedAt: v.number(),
+  })
+    .index('by_role', ['role'])
+    .index('by_role_module', ['role', 'module']),
 });

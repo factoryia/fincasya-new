@@ -44,9 +44,11 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
                   position?: null | string;
                   role?:
                     | "admin"
-                    | "assistant"
                     | "vendedor"
+                    | "asesor_limitado"
+                    | "contabilidad"
                     | "propietario"
+                    | "client"
                     | "user"
                     | null;
                   updatedAt: number;
@@ -589,9 +591,11 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
                   position?: null | string;
                   role?:
                     | "admin"
-                    | "assistant"
                     | "vendedor"
+                    | "asesor_limitado"
+                    | "contabilidad"
                     | "propietario"
+                    | "client"
                     | "user"
                     | null;
                   updatedAt?: number;
@@ -842,9 +846,11 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
                   position?: null | string;
                   role?:
                     | "admin"
-                    | "assistant"
                     | "vendedor"
+                    | "asesor_limitado"
+                    | "contabilidad"
                     | "propietario"
+                    | "client"
                     | "user"
                     | null;
                   updatedAt?: number;
