@@ -1055,6 +1055,32 @@ export const search = query({
 });
 
 /**
+ * Tope de cupo "cómodo" para el catálogo: el cliente dijo N personas y queremos
+ * priorizar fincas cercanas a N antes que propiedades muy grandes (p. ej. 30+ para un grupo de 10).
+ */
+function catalogComfortCapacityMax(minPeople: number): number {
+  return Math.max(minPeople + 4, Math.ceil(minPeople * 2));
+}
+
+function comparePropertiesForCatalogCapacity(
+  a: { capacity: number; priceBase: number },
+  b: { capacity: number; priceBase: number },
+  minPeople: number,
+  sortByPrice: boolean,
+): number {
+  const capMax = catalogComfortCapacityMax(minPeople);
+  const tierOf = (c: number) => (c <= capMax ? 0 : 1);
+  const ta = tierOf(a.capacity);
+  const tb = tierOf(b.capacity);
+  if (ta !== tb) return ta - tb;
+  const excessA = a.capacity - minPeople;
+  const excessB = b.capacity - minPeople;
+  if (excessA !== excessB) return excessA - excessB;
+  if (sortByPrice) return a.priceBase - b.priceBase;
+  return 0;
+}
+
+/**
  * Fincas disponibles por ubicación y rango de fechas (para enviar catálogo WhatsApp).
  * Solo incluye fincas que están en al menos un catálogo (propertyWhatsAppCatalog) y sin reservas que solapen.
  * Opcional: filtrar por capacidad mínima, excluir IDs ya enviados, ordenar por precio.
@@ -1096,6 +1122,17 @@ export const searchAvailableByLocationAndDates = query({
       byLocation = byLocation.filter((p) => p.allowsPets === true);
     }
 
+    if (args.minCapacity != null) {
+      byLocation.sort((a, b) =>
+        comparePropertiesForCatalogCapacity(
+          a,
+          b,
+          args.minCapacity!,
+          args.sortByPrice === true,
+        ),
+      );
+    }
+
     const available: typeof byLocation = [];
     for (const property of byLocation) {
       const overlapping = await ctx.db
@@ -1115,7 +1152,16 @@ export const searchAvailableByLocationAndDates = query({
       if (available.length >= limit * 2) break; // Fetch a bit more for sorting
     }
 
-    if (args.sortByPrice) {
+    if (args.minCapacity != null) {
+      available.sort((a, b) =>
+        comparePropertiesForCatalogCapacity(
+          a,
+          b,
+          args.minCapacity!,
+          args.sortByPrice === true,
+        ),
+      );
+    } else if (args.sortByPrice) {
       available.sort((a, b) => a.priceBase - b.priceBase);
     }
 
@@ -1173,6 +1219,17 @@ export const searchAvailableByDates = query({
       candidates = candidates.filter((p) => p.allowsPets === true);
     }
 
+    if (args.minCapacity != null) {
+      candidates.sort((a, b) =>
+        comparePropertiesForCatalogCapacity(
+          a,
+          b,
+          args.minCapacity!,
+          args.sortByPrice === true,
+        ),
+      );
+    }
+
     const available: typeof candidates = [];
     for (const property of candidates) {
       const overlapping = await ctx.db
@@ -1192,9 +1249,23 @@ export const searchAvailableByDates = query({
       if (available.length >= limit * 3) break;
     }
 
+    if (args.minCapacity != null) {
+      available.sort((a, b) =>
+        comparePropertiesForCatalogCapacity(
+          a,
+          b,
+          args.minCapacity!,
+          args.sortByPrice === true,
+        ),
+      );
+    }
+
     let orderedAvailable = available;
     if (args.sortByPrice) {
-      orderedAvailable = [...available].sort((a, b) => a.priceBase - b.priceBase);
+      orderedAvailable =
+        args.minCapacity != null
+          ? available
+          : [...available].sort((a, b) => a.priceBase - b.priceBase);
     } else {
       const byLocation = new Map<string, typeof available>();
       for (const property of available) {
@@ -1202,6 +1273,18 @@ export const searchAvailableByDates = query({
         const bucket = byLocation.get(key) ?? [];
         bucket.push(property);
         byLocation.set(key, bucket);
+      }
+      if (args.minCapacity != null) {
+        for (const bucket of byLocation.values()) {
+          bucket.sort((a, b) =>
+            comparePropertiesForCatalogCapacity(
+              a,
+              b,
+              args.minCapacity!,
+              false,
+            ),
+          );
+        }
       }
       const diversified: typeof available = [];
       while (diversified.length < limit && byLocation.size > 0) {
