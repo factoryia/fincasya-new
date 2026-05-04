@@ -421,6 +421,7 @@ export const create = mutation({
           email: args.correo || contactByPhone.email,
           cedula: args.cedula || contactByPhone.cedula,
           city: args.city || contactByPhone.city,
+          crmType: 'client',
           lastReservationAt: now,
           updatedAt: now,
         });
@@ -438,6 +439,7 @@ export const create = mutation({
             phone: args.celular || contactByEmail.phone,
             cedula: args.cedula || contactByEmail.cedula,
             city: args.city || contactByEmail.city,
+            crmType: 'client',
             lastReservationAt: now,
             updatedAt: now,
           });
@@ -452,6 +454,7 @@ export const create = mutation({
           email: args.correo,
           cedula: args.cedula,
           city: args.city,
+          crmType: 'client',
           createdAt: now,
           lastReservationAt: now,
           updatedAt: now,

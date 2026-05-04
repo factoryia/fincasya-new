@@ -436,8 +436,56 @@ export const getOrCreateContact = internalMutation({
     return await ctx.db.insert("contacts", {
       phone: args.phone,
       name: args.name || args.phone,
+      crmType: "lead",
       createdAt: now,
       updatedAt: now,
+    });
+  },
+});
+
+/**
+ * Cuando el bot ya identifica finca + cupo, enriquecer el nombre en CRM como lead
+ * (ej. "Santiago Quinta Tramonti 10p Melgar") sin tratarlo como cliente con reserva.
+ * No pisa contactos ya marcados como client o con reserva confirmada en BD.
+ */
+export const syncLeadDisplayFromBotContext = internalMutation({
+  args: {
+    contactId: v.id("contacts"),
+    whatsappDisplayName: v.string(),
+    fincaTitle: v.string(),
+    capacity: v.number(),
+    locationHint: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    const c = await ctx.db.get(args.contactId);
+    if (!c) return;
+    if (c.crmType === "client" || c.lastReservationAt) return;
+
+    const raw = String(args.whatsappDisplayName ?? "").trim();
+    const phoneLike = /^[\d\s\-+()]{10,}$/.test(raw.replace(/\s/g, ""));
+    const customerLabel =
+      raw.length > 0 && !phoneLike ? raw.slice(0, 48) : "Cliente";
+
+    const finca = String(args.fincaTitle ?? "").trim();
+    const cap = Math.floor(Number(args.capacity));
+    if (!finca || cap < 1 || cap > 999) return;
+
+    const locRaw = String(args.locationHint ?? "").trim();
+    const locShort =
+      locRaw.length > 0
+        ? locRaw.split(/[\s,]+/).filter(Boolean).slice(0, 2).join(" ")
+        : "";
+
+    const parts = [customerLabel, finca, `${cap}p`, locShort].filter(Boolean);
+    const leadName = parts.join(" ").replace(/\s+/g, " ").trim().slice(0, 200);
+    if (leadName.length < 3) return;
+
+    if (c.name === leadName && c.crmType === "lead") return;
+
+    await ctx.db.patch(args.contactId, {
+      name: leadName,
+      crmType: "lead",
+      updatedAt: Date.now(),
     });
   },
 });
@@ -1522,6 +1570,40 @@ Fincas disponibles: ${fincaNames}`,
           }
         }
         console.log("[single-finca-guard] ficha bloqueada, nombre para IA:", fincaTitle);
+      }
+
+      // CRM: nombre descriptivo tipo lead cuando ya hay finca + número de personas (no durante PASO 4+ ni si ya es cliente).
+      if (
+        knownReservationData.hasCapacity &&
+        knownReservationData.capacity != null &&
+        !clientDeliveredPersonalData &&
+        !contractPromptInHistory
+      ) {
+        const resolvedFincaForLead = [
+          fincaTitle,
+          confirmedFincaTitle,
+          confirmedFincaInHistoryTitle,
+          selectedCatalogPropertyTitle,
+        ].find(
+          (t) =>
+            t &&
+            String(t).trim().length > 0 &&
+            String(t).trim() !== "finca seleccionada"
+        );
+        if (resolvedFincaForLead) {
+          const catalogLocHint =
+            catalogLocation ||
+            (catalogIntent.intent === "search_catalog"
+              ? catalogIntent.location
+              : undefined);
+          await ctx.runMutation(internal.ycloud.syncLeadDisplayFromBotContext, {
+            contactId,
+            whatsappDisplayName: args.name,
+            fincaTitle: String(resolvedFincaForLead).trim(),
+            capacity: knownReservationData.capacity!,
+            locationHint: catalogLocHint,
+          });
+        }
       }
 
       const previousCatalogPropertyIds = Array.isArray((conv as any).lastSentCatalogPropertyIds)
@@ -3677,8 +3759,8 @@ export const detectCatalogIntentWithAI = internalAction({
 Reglas:
 - intent: "single_finca" si pide VER o RESERVAR una finca específica por nombre (ej. "quiero ver villa green", "me gustaría reservar la finca X", "quinto la finca X", "esta es la finca que elegí"). **CRÍTICO:** Aunque el mensaje incluya fechas, personas u otros datos de reserva, si menciona un nombre de finca específico, DEBES marcarlo como "single_finca". También si es una confirmación para una finca mencionada justo antes. En fincaName pon solo el nombre de la finca en minúsculas.
 - intent: "more_options" si pide otras opciones, más opciones, no le gustan, envía más, otras fincas, dame otras, "enviame las fincas", "muéstrame las fincas", "cuáles fincas".
-- intent: "search_catalog" SOLO SI MENCIONA EXPLÍCITAMENTE UN MUNICIPIO O CIUDAD (ej. Villeta, Melgar, etc.) Y NO MENCIONA UNA FINCA CONCRETA. Si menciona una finca, prioriza "single_finca". También aplica cuando el mensaje es un pedido inicial con ciudad, fechas y personas (ej. "quiero reservar en villavicencio para 10 personas el sábado").
-- Si el mensaje ACTUAL es solo confirmación (sí, si, ok, dale, por favor, procede, claro, listo): Analiza el CONTEXTO para determinar qué confirma el usuario. CASOS: (1) Si el Asistente preguntó "¿Te gustaría ver/mostrar las fincas en [Ciudad]?" o "¿Te gustaría que te muestre opciones en [Ciudad]?" → devuelve search_catalog con esa ciudad inferida del contexto. (2) Si el Asistente preguntó "¿Te gustaría avanzar con la reserva?" o "¿Deseas continuar?" → devuelve "none". (3) Si el Asistente solicitó datos del contrato → devuelve "none". (4) Si hay ubicación en el contexto y el asistente estaba enviando/mostrando catálogo de fincas → devuelve search_catalog con esa ubicación. Si no se puede inferir la ciudad, devuelve "none".
+- intent: "search_catalog" SOLO SI en el mensaje ACTUAL o en mensajes recientes del **Cliente** en el contexto aparecen **fechas explícitas de estadía** (día de entrada y día de salida, ej. "del 21 al 23 de mayo", "5 al 7 de abril", "20 al 22") **Y** menciona un municipio/ciudad (Melgar, Villeta, etc.) **Y** NO menciona una finca concreta por nombre. Si menciona una finca específica, prioriza "single_finca". Si solo da ciudad + personas + grupo/mascotas/"fin de semana" **sin** números de día de entrada y salida, devuelve "none" (el catálogo no se envía hasta tener esas fechas).
+- Si el mensaje ACTUAL es solo confirmación (sí, si, ok, dale, por favor, procede, claro, listo): CASOS: (1) Si el Asistente preguntó por ver fincas en una ciudad pero el cliente **aún no ha escrito** fechas con día y día en sus mensajes → "none". (2) Si el Asistente preguntó "¿Te gustaría avanzar con la reserva?" o "¿Deseas continuar?" → "none". (3) Si el Asistente solicitó datos del contrato → "none". (4) Si el cliente ya escribió fechas explícitas en el contexto y confirma ver opciones en esa ciudad → "search_catalog" con location inferida **solo si** esas fechas aparecen en el contexto del Cliente.
 - Si pregunta por métodos de pago, datos bancarios, Nequi, PSE, transferencia, firma de contrato o PDF del contrato, devuelve SIEMPRE intent "none" (no catálogo).
 - intent: "none" si no aplica ninguna de las anteriores.
 - hasWeekend: true si menciona "fin de semana", "sábado y domingo", "sábado", "domingo" sin fechas específicas.
@@ -3694,13 +3776,13 @@ ${snippet || "(vacío)"}
 Ejemplos de salida:
 {"intent":"single_finca","fincaName":"villa green"}
 {"intent":"more_options"}
-{"intent":"search_catalog","location":"melgar","hasWeekend":true,"minCapacity":5,"sortByPrice":true,"hasPets":false}
-{"intent":"search_catalog","location":"villavicencio","hasWeekend":true,"minCapacity":10,"hasPets":true}
-{"intent":"search_catalog","location":"restrepo","dateD1":20,"dateD2":21,"dateMonth":5,"minCapacity":10}
 {"intent":"none"}
+{"intent":"search_catalog","location":"melgar","dateD1":21,"dateD2":23,"dateMonth":5,"minCapacity":10,"hasPets":true}
+{"intent":"search_catalog","location":"restrepo","dateD1":20,"dateD2":21,"dateMonth":5,"minCapacity":10}
 
 Ejemplos con confirmación:
-Contexto: "Asistente: Perfecto, ¿te gustaría que te muestre las fincas en Villeta? | Cliente: Si por favor" → {"intent":"search_catalog","location":"villeta"}
+Contexto: "Cliente: melgar del 10 al 12 de junio 8 personas | Asistente: ¿Te muestro opciones? | Cliente: Si por favor" → {"intent":"search_catalog","location":"melgar","dateD1":10,"dateD2":12,"dateMonth":6,"minCapacity":8}
+Contexto: "Asistente: Perfecto, ¿te gustaría que te muestre las fincas en Villeta? | Cliente: Si por favor" → {"intent":"none"}
 Contexto: "Asistente: ¿Te gustaría avanzar con la reserva? | Cliente: Si" → {"intent":"none"}
 Contexto: "Asistente: Para elaborar el contrato necesito tus datos... | Cliente: Sí claro" → {"intent":"none"}
 
@@ -4164,8 +4246,9 @@ const CATALOG_LIMIT = 30;
 const CATALOG_SEND_BATCH = 8;
 
 /**
- * Si el mensaje incluye ubicación + fechas (o "fin de semana") o pide "otras opciones",
- * busca fincas disponibles y envía hasta CATALOG_SEND_BATCH fichas, una por mensaje. Guarda en la conversación para "otras opciones".
+ * Si el mensaje incluye ubicación + fechas concretas (día al día, con o sin mes) o pide "otras opciones"
+ * reutilizando un catálogo ya enviado con fechas válidas, busca fincas y envía hasta CATALOG_SEND_BATCH fichas.
+ * No infiere "próximo fin de semana" para armar el catálogo: sin fechas explícitas del usuario no se envía.
  */
 export const maybeSendCatalogForUserMessage = internalAction({
   args: {
@@ -4325,6 +4408,30 @@ export const maybeSendCatalogForUserMessage = internalAction({
       minCapacity = parsed.minCapacity;
       sortByPrice = parsed.sortByPrice;
       hasPets = (parsed as any).hasPets === true ? true : undefined;
+    }
+
+    // No catálogo multi-finca sin rango explícito en mensajes del usuario (evita cupos "próximo fin de semana"
+    // cuando aún no hay check-in/check-out reales — riesgo de mostrar fincas no disponibles para su estadía).
+    const catalogRepeatOrMoreOptions =
+      intent?.intent === "more_options" ||
+      (detectOtrasOpciones(args.userMessage) && conv.lastCatalogSearch);
+    if (!catalogRepeatOrMoreOptions) {
+      const recentUsersForCatalog = await ctx.runQuery(api.messages.listRecent, {
+        conversationId: args.conversationId,
+        limit: 40,
+      });
+      const mergedUserTextForCatalogGuard = [
+        args.userMessage,
+        ...recentUsersForCatalog
+          .filter((m: any) => m.sender === "user")
+          .map((m: any) => String(m.content ?? "")),
+      ].join("\n");
+      if (!extractDateRangeFromText(mergedUserTextForCatalogGuard)) {
+        console.log(
+          "[catalog-guard] Sin fechas explícitas de estadía (ej. del 21 al 23 de mayo) — no se envía catálogo.",
+        );
+        return { sent: false, location };
+      }
     }
 
     location = normalizeCatalogLocation(location);
