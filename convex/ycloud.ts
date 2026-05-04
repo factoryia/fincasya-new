@@ -82,8 +82,11 @@ export function isNegativeOnly(userMessage: string): boolean {
 }
 
 type KnownReservationData = {
+  /** true solo si el usuario dio rango calendario (ej. del 5 al 8 de julio), no basta con "fin de semana". */
   hasDates: boolean;
   dateLabel?: string;
+  /** Mencionó fin de semana / sábado pero sin fechas concretas — hace falta día y mes para cotizar temporada. */
+  mentionsWeekendOnly?: boolean;
   hasCapacity: boolean;
   capacity?: number;
   hasGroup: boolean;
@@ -157,8 +160,9 @@ function extractKnownReservationData(
         !isNegativeOnly(opts.currentMessage)));
 
   return {
-    hasDates: !!dateRange || hasWeekend,
-    dateLabel: dateRange?.label ?? (hasWeekend ? "fin de semana" : undefined),
+    hasDates: !!dateRange,
+    dateLabel: dateRange?.label,
+    mentionsWeekendOnly: hasWeekend && !dateRange,
     hasCapacity: capacity != null,
     capacity,
     hasGroup: !!groupLabel,
@@ -171,6 +175,9 @@ function extractKnownReservationData(
 function formatKnownReservationDataSummary(known: KnownReservationData): string {
   return [
     known.hasDates && known.dateLabel ? `fechas: ${known.dateLabel}` : null,
+    !known.hasDates && known.mentionsWeekendOnly
+      ? "preferencia: fin de semana (sin fechas calendario aún — pedir día/mes entrada y salida)"
+      : null,
     known.hasCapacity && known.capacity ? `personas: ${known.capacity}` : null,
     known.hasGroup && known.groupLabel ? `grupo: ${known.groupLabel}` : null,
     known.hasPetsAnswer && known.petsLabel ? `mascotas: ${known.petsLabel}` : null,
@@ -194,7 +201,7 @@ function buildPostCatalogFollowUp(
   }
 
   const pending: string[] = ["cuál finca te gustó"];
-  if (!known.hasDates) pending.push("fechas de entrada y salida");
+  if (!known.hasDates) pending.push("fechas exactas de entrada y salida (día y mes)");
   if (!known.hasCapacity) pending.push("número de personas");
   if (!known.hasGroup) pending.push("tipo de grupo");
   if (!known.hasPetsAnswer) pending.push("si viajan con mascotas");
@@ -211,7 +218,7 @@ function buildMissingReservationDetailsPrompt(
   fincaTitle?: string
 ): string {
   const missing: string[] = [];
-  if (!known.hasDates) missing.push("fechas de entrada y salida");
+  if (!known.hasDates) missing.push("fechas exactas de entrada y salida (día y mes)");
   if (!known.hasCapacity) missing.push("número de personas");
   if (!known.hasGroup) missing.push("tipo de grupo");
   if (!known.hasPetsAnswer) missing.push("si viajan con mascotas");
@@ -340,12 +347,41 @@ export function userRequestedHumanAdvisor(text: string): boolean {
 }
 
 /**
+ * Etiquetas internas `[STATUS:...]` en la respuesta del modelo: quitar del texto al cliente
+ * y disparar escalación cuando aplique.
+ */
+export function stripAssistantStatusTags(text: string): {
+  clean: string;
+  requiresAdvisor: boolean;
+} {
+  let requiresAdvisor = false;
+  const clean = text
+    .replace(/\s*\[\s*STATUS\s*:\s*([^\]]+?)\s*\]/gi, (_full, rawCode: string) => {
+      const code = String(rawCode)
+        .trim()
+        .toLowerCase()
+        .replace(/-/g, "_")
+        .replace(/\s+/g, "_");
+      if (code === "requiere_asesor") requiresAdvisor = true;
+      return "";
+    })
+    .replace(/[ \t]+\n/g, "\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .replace(/[ \t]{2,}/g, " ")
+    .trim();
+  return { clean, requiresAdvisor };
+}
+
+/**
  * La respuesta visible del asistente promete derivación a humano → debe ejecutarse escalate.
  */
 export function assistantPromisesHumanHandoff(text: string): boolean {
   const t = text.toLowerCase();
   return (
     /\b(te\s+paso\s+con\s+(un\s+)?(asesor|humano|agente)|paso\s+con\s+un\s+asesor|pasarte\s+con\s+un\s+asesor|comunico\s+con\s+un\s+asesor)\b/i.test(
+      t
+    ) ||
+    /\b(te\s+conectamos\s+con\s+(un\s+)?asesor|conectamos\s+con\s+un\s+asesor|te\s+conecto\s+con\s+un\s+asesor)\b/i.test(
       t
     ) ||
     /\b(un\s+asesor\s+humano|asesor\s+humano\s+de\s+inmediato|con\s+un\s+asesor\s+humano)\b/i.test(
@@ -1548,6 +1584,8 @@ Fincas disponibles: ${fincaNames}`,
         }
       );
 
+      let escalateFromAssistantStatusTag = false;
+
       // Guard anti-loop: si el cliente ya entregó datos y la IA intenta reenviar la plantilla del PASO 4,
       // forzamos el mensaje de cierre del PASO 5. Evita loops "Para elaborar tu contrato..." repetidos.
       if (replyText && clientDeliveredPersonalData) {
@@ -1721,6 +1759,16 @@ En FincasYa.com tu alquiler siempre es seguro, respaldado y con total tranquilid
           } else {
             replyText = buildMissingReservationDetailsPrompt(knownReservationData);
           }
+        }
+      }
+
+      if (replyText) {
+        const st = stripAssistantStatusTags(replyText);
+        replyText = st.clean;
+        escalateFromAssistantStatusTag = st.requiresAdvisor;
+        if (!replyText.trim() && escalateFromAssistantStatusTag) {
+          replyText =
+            "En un momento un asesor humano continúa contigo por este chat para ayudarte. 🤝";
         }
       }
 
@@ -1907,17 +1955,23 @@ En FincasYa.com tu alquiler siempre es seguro, respaldado y con total tranquilid
             content: sentAssistantText,
             createdAt: Date.now(),
           });
-          // Si el modelo prometió pasar a un humano pero no hubo escalate antes, forzar modo humano.
-          if (assistantPromisesHumanHandoff(sentAssistantText)) {
+          // Si el modelo incluyó [STATUS:requiere_asesor] o prometió handoff a humano → modo humano.
+          if (
+            escalateFromAssistantStatusTag ||
+            assistantPromisesHumanHandoff(sentAssistantText)
+          ) {
             const convAfterSend = await ctx.runQuery(api.conversations.getById, {
               conversationId,
             });
             if (convAfterSend?.status === "ai") {
               console.log(
-                "[escalate] Respuesta del asistente promete handoff a humano → escalando",
+                escalateFromAssistantStatusTag
+                  ? "[escalate] Tag [STATUS:requiere_asesor] en respuesta → escalando"
+                  : "[escalate] Respuesta del asistente promete handoff a humano → escalando",
               );
               await ctx.runMutation(internal.conversations.escalate, {
                 conversationId,
+                operationalState: "requires_advisor",
                 assignedUserId: botEscalateAssignedUserId(),
               });
             }
@@ -3523,6 +3577,11 @@ function chooseCatalogYearAndMonth(day: number, explicitMonth?: number): {
   return { year, month };
 }
 
+/**
+ * Rango para búsqueda de catálogo / disponibilidad.
+ * El usuario dice "del D1 al D2": D1 = primer día de estadía, D2 = **día de check-out** (se va ese día en la mañana).
+ * Ej. 21 al 23 mayo → 2 noches (21–22), no 3.
+ */
 function buildCatalogDateRangeFromDays(
   d1: number,
   d2: number,
@@ -3533,8 +3592,18 @@ function buildCatalogDateRangeFromDays(
   const salidaMonth = d2 < d1 ? month + 1 : month;
   return {
     fechaEntrada: new Date(year, month, d1).getTime(),
-    fechaSalida: new Date(year, salidaMonth, d2 + 1).getTime(),
+    fechaSalida: new Date(year, salidaMonth, d2).getTime(),
   };
+}
+
+/** YYYY-MM-DD en calendario local (mismo criterio que `new Date(y,m,d)` del catálogo). */
+function formatLocalYMD(ms: number): string {
+  const d = new Date(ms);
+  if (Number.isNaN(d.getTime())) return "";
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
 }
 
 function extractDateRangeFromText(userMessage: string): {
@@ -4328,18 +4397,106 @@ export const maybeSendCatalogForUserMessage = internalAction({
       console.log("[catalog-search] fallback parcial: ", catalogEntryMap.size, "con entrada,", fincasToSend.length - catalogEntryMap.size, "con ID Convex");
     }
 
+    const recentForCatalogContext = await ctx.runQuery(api.messages.listRecent, {
+      conversationId: args.conversationId,
+      limit: 30,
+    });
+    const mergedUserDateText = [
+      args.userMessage,
+      ...recentForCatalogContext
+        .filter((m: any) => m.sender === "user")
+        .map((m: any) => String(m.content ?? "")),
+    ].join("\n");
+    const explicitDateRangeInChat = !!extractDateRangeFromText(mergedUserDateText);
+
+    let catalogShowSeasonalPrices = false;
+    if (!usedInferredDates) {
+      const catIntent = args.catalogIntent;
+      if (catIntent?.intent === "more_options") {
+        catalogShowSeasonalPrices = true;
+      } else if (catIntent?.intent === "search_catalog") {
+        catalogShowSeasonalPrices =
+          catIntent.hasWeekend === true ||
+          (catIntent.dateD1 != null && catIntent.dateD2 != null);
+      } else {
+        catalogShowSeasonalPrices = explicitDateRangeInChat;
+      }
+    }
+
     const bodyText = excludePropertyIds?.length
       ? "Aquí tienes más opciones con los mismos filtros:"
       : usedInferredDates
-        ? `Te comparto algunas fincas disponibles en ${location}:`
+        ? `Te comparto fincas en ${location}. Referencia de disponibilidad: próximo fin de semana. Con tus fechas exactas te cotizo la temporada que te aplica.`
         : "Estas son las fincas disponibles para tus fechas:";
     const followUpProductBody = excludePropertyIds?.length
       ? "Otra opción disponible:"
       : "Aquí tienes otra opción para tus fechas:";
 
+    const checkInStr = formatLocalYMD(fechaEntrada);
+    const checkOutStr = formatLocalYMD(fechaSalida);
+    type CatalogStayPrice = {
+      nightly: number;
+      staySubtotal: number;
+      nights: number;
+      rule: string;
+    };
+    const catalogPriceByPropertyId = new Map<string, CatalogStayPrice>();
+    if (
+      catalogShowSeasonalPrices &&
+      checkInStr &&
+      checkOutStr &&
+      checkInStr < checkOutStr
+    ) {
+      for (const f of fincasToSend) {
+        try {
+          const pr = await ctx.runQuery(api.fincas.calculateStayPrice, {
+            propertyId: f._id,
+            fechaEntrada: checkInStr,
+            fechaSalida: checkOutStr,
+          });
+          const nightsCount = pr?.nightsCount ?? 0;
+          const subtotal = pr?.subtotal ?? 0;
+          if (pr && nightsCount > 0 && subtotal > 0) {
+            const nightly = Math.round(subtotal / nightsCount);
+            const rule = String(pr.appliedRule || "Estándar").slice(0, 120);
+            catalogPriceByPropertyId.set(f._id as string, {
+              nightly,
+              staySubtotal: subtotal,
+              nights: nightsCount,
+              rule,
+            });
+          }
+        } catch (e) {
+          console.warn("[catalog-price] omitiendo finca", f._id, e);
+        }
+      }
+    }
+
+    const catalogPriceSuffix = (propertyId: string, priceBase: number): string => {
+      const info = catalogPriceByPropertyId.get(propertyId);
+      if (info) {
+        return `\n\n💰 Para tus fechas (${info.nights} noches): $${info.nightly.toLocaleString("es-CO")}/noche (${info.rule}). Total alojamiento: $${info.staySubtotal.toLocaleString("es-CO")}.`;
+      }
+      const pb = Number(priceBase ?? 0);
+      if (!catalogShowSeasonalPrices) {
+        const basePart =
+          pb > 0
+            ? ` Precio base referencial: $${pb.toLocaleString("es-CO")}/noche.`
+            : "";
+        return `\n\n📅 Para cotizar con la temporada correcta (reglas globales / Puentes / Semana Santa, etc.) envíame fecha de entrada y salida con día y mes.${basePart}`;
+      }
+      if (pb > 0) {
+        return `\n\n💰 Tarifa base referencial: $${pb.toLocaleString("es-CO")}/noche. Cotización final según temporada al confirmar fechas.`;
+      }
+      return "";
+    };
+
     try {
       for (let i = 0; i < fincasToSend.length; i++) {
-        const perBody = i === 0 ? bodyText : followUpProductBody;
+        const f = fincasToSend[i];
+        const perBody =
+          (i === 0 ? bodyText : followUpProductBody) +
+          catalogPriceSuffix(f._id as string, f.priceBase);
         await ctx.runAction(internal.ycloud.sendWhatsAppCatalogList, {
           to: args.phone,
           productRetailerIds: [productRetailerIds[i]],
@@ -4352,6 +4509,10 @@ export const maybeSendCatalogForUserMessage = internalAction({
       console.error("[catalog-search] Error enviando catálogo interactivo, fallback a texto:", err);
       const top = fincas.slice(0, CATALOG_SEND_BATCH);
       const lines = top.map((f: any, idx: number) => {
+        const info = catalogPriceByPropertyId.get(f._id as string);
+        if (info) {
+          return `${idx + 1}. ${f.title} — $${info.nightly.toLocaleString("es-CO")}/noche (${info.rule}), ${info.nights} noches ≈ $${info.staySubtotal.toLocaleString("es-CO")} alojamiento`;
+        }
         const price = Number(f.priceBase ?? 0);
         const priceLabel =
           price > 0 ? `$${price.toLocaleString("es-CO")} / noche` : "Precio a confirmar";
@@ -4387,6 +4548,7 @@ export const maybeSendCatalogForUserMessage = internalAction({
     });
 
     for (const f of fincasToSend) {
+      const stayPrice = catalogPriceByPropertyId.get(f._id as string);
       await ctx.runMutation(internal.messages.insertAssistantMessageWithMedia, {
         conversationId: args.conversationId,
         content: `Catálogo enviado: ${f.title}`,
@@ -4395,26 +4557,23 @@ export const maybeSendCatalogForUserMessage = internalAction({
           product: {
             title: f.title,
             image: f.image || "",
-            price: f.priceBase,
+            price: stayPrice?.nightly ?? f.priceBase,
+            priceBase: f.priceBase,
             slug: f.slug || f.code || f._id,
+            ...(stayPrice
+              ? {
+                  appliedRule: stayPrice.rule,
+                  staySubtotal: stayPrice.staySubtotal,
+                  nights: stayPrice.nights,
+                }
+              : {}),
           },
         },
         createdAt: Date.now(),
       });
     }
 
-    const recentForFollowUp = await ctx.runQuery(api.messages.listRecent, {
-      conversationId: args.conversationId,
-      limit: 30,
-    });
-    const knownForFollowUp = extractKnownReservationData(
-      [
-        ...recentForFollowUp
-          .filter((m: any) => m.sender === "user")
-          .map((m: any) => String(m.content ?? "")),
-        args.userMessage,
-      ].join("\n")
-    );
+    const knownForFollowUp = extractKnownReservationData(mergedUserDateText);
     const postCatalogFollowUp = buildPostCatalogFollowUp(
       excludePropertyIds,
       knownForFollowUp
