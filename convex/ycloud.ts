@@ -12,6 +12,11 @@ import {
 } from "./lib/consultantPrompt";
 import { CONVEX_OPENAI_CHAT_MODEL } from "./lib/openaiModel";
 import { transcribeAudio } from "./lib/transcription";
+import {
+  bogotaCalendarDateNoonMs,
+  PUENTE_ONE_NIGHT_CATALOG_NOTICE_ES,
+  shouldBlockCatalogForPuenteOneNightSatSun,
+} from "./lib/colombiaPublicHolidays";
 
 /**
  * Convex env: `_id` del usuario asesor. Si está definido, al escalar a humano el bot asigna la conversación.
@@ -1262,6 +1267,12 @@ Fincas disponibles: ${fincaNames}`,
               catalogIntent: catalogIntentArg,
             }
           );
+          if (catalogRes?.puenteMinNightsNoticeSent || catalogRes?.petsQuestionSent) {
+            await ctx.runMutation(internal.conversations.updateLastMessageAt, {
+              conversationId,
+            });
+            return;
+          }
           whatsappCatalogSentForSearch = catalogRes?.sent ?? false;
           catalogLocation = catalogRes?.location ?? "";
           catalogFincasCount = catalogRes?.fincasCount ?? 0;
@@ -1311,7 +1322,23 @@ Fincas disponibles: ${fincaNames}`,
           console.log("[catalog-fallback] Ciudad detectada sin catálogo, forzando envío:", matchedCity);
           const _fbMsgLower = currentMessageText.toLowerCase().normalize("NFD").replace(/\p{M}/gu, "");
           const _fbPersonasMatch = _fbMsgLower.match(/(\d+)\s*(?:o\s+mas?\s+)?personas/i);
-          const _fbHasPets = /\b(mascota|mascotas|perro|perros|gato|gatos)\b/i.test(_fbMsgLower);
+          // Buscar mascotas en todo el historial del usuario, no solo el mensaje actual
+          const _fbAllUserText = [
+            currentMessageText,
+            ...recentForCatalogIntent
+              .filter((m: any) => m.sender === "user")
+              .map((m: any) => String(m.content ?? "")),
+          ].join("\n");
+          const _fbKnownPets = extractKnownReservationData(_fbAllUserText, {
+            assistantAskedPets: recentForCatalogIntent.some(
+              (m: any) =>
+                m.sender === "assistant" &&
+                /\bmascotas?|perros?|gatos?\b/i.test(String(m.content ?? "")),
+            ),
+          });
+          const _fbHasPets = _fbKnownPets.hasPetsAnswer
+            ? (_fbKnownPets.petsLabel !== "no" ? true : false)
+            : undefined;
           const _fbCapacity = _fbPersonasMatch ? parseInt(_fbPersonasMatch[1], 10) : undefined;
           try {
             const catalogRes = await ctx.runAction(
@@ -1330,6 +1357,12 @@ Fincas disponibles: ${fincaNames}`,
                 },
               }
             );
+            if (catalogRes?.puenteMinNightsNoticeSent || catalogRes?.petsQuestionSent) {
+              await ctx.runMutation(internal.conversations.updateLastMessageAt, {
+                conversationId,
+              });
+              return;
+            }
             whatsappCatalogSentForSearch = catalogRes?.sent ?? false;
             catalogLocation = catalogRes?.location ?? matchedCity;
             catalogFincasCount = catalogRes?.fincasCount ?? 0;
@@ -3673,8 +3706,8 @@ function buildCatalogDateRangeFromDays(
   const { year, month } = chooseCatalogYearAndMonth(d1, explicitMonth);
   const salidaMonth = d2 < d1 ? month + 1 : month;
   return {
-    fechaEntrada: new Date(year, month, d1).getTime(),
-    fechaSalida: new Date(year, salidaMonth, d2).getTime(),
+    fechaEntrada: bogotaCalendarDateNoonMs(year, month, d1),
+    fechaSalida: bogotaCalendarDateNoonMs(year, salidaMonth, d2),
   };
 }
 
@@ -4274,8 +4307,22 @@ export const maybeSendCatalogForUserMessage = internalAction({
       )
     ),
   },
-  returns: v.object({ sent: v.boolean(), location: v.optional(v.string()), fincasCount: v.optional(v.number()), fincasFoundButNoCatalog: v.optional(v.boolean()) }),
-  handler: async (ctx, args): Promise<{ sent: boolean; location?: string; fincasCount?: number; fincasFoundButNoCatalog?: boolean }> => {
+  returns: v.object({
+    sent: v.boolean(),
+    location: v.optional(v.string()),
+    fincasCount: v.optional(v.number()),
+    fincasFoundButNoCatalog: v.optional(v.boolean()),
+    puenteMinNightsNoticeSent: v.optional(v.boolean()),
+    petsQuestionSent: v.optional(v.boolean()),
+  }),
+  handler: async (ctx, args): Promise<{
+    sent: boolean;
+    location?: string;
+    fincasCount?: number;
+    fincasFoundButNoCatalog?: boolean;
+    puenteMinNightsNoticeSent?: boolean;
+    petsQuestionSent?: boolean;
+  }> => {
     const conv = await ctx.runQuery(api.conversations.getById, {
       conversationId: args.conversationId,
     });
@@ -4317,10 +4364,9 @@ export const maybeSendCatalogForUserMessage = internalAction({
         return { sent: false };
       }
       const weekend = getNextWeekendDates();
-      if (intent.hasWeekend) {
-        fechaEntrada = weekend.fechaEntrada;
-        fechaSalida = weekend.fechaSalida;
-      } else if (intent.dateD1 != null && intent.dateD2 != null) {
+      // Si la IA manda día/mes explícitos, SIEMPRE prevalecen sobre hasWeekend (evita pisar "16 al 17 mayo"
+      // con "próximo fin de semana" y romper puente / conteo de noches).
+      if (intent.dateD1 != null && intent.dateD2 != null) {
         const exactRangeFromText = extractDateRangeFromText(args.userMessage);
         const range =
           exactRangeFromText ??
@@ -4334,6 +4380,9 @@ export const maybeSendCatalogForUserMessage = internalAction({
         if (!range) return { sent: false };
         fechaEntrada = range.fechaEntrada;
         fechaSalida = range.fechaSalida;
+      } else if (intent.hasWeekend) {
+        fechaEntrada = weekend.fechaEntrada;
+        fechaSalida = weekend.fechaSalida;
       } else {
         fechaEntrada = weekend.fechaEntrada;
         fechaSalida = weekend.fechaSalida;
@@ -4410,28 +4459,126 @@ export const maybeSendCatalogForUserMessage = internalAction({
       hasPets = (parsed as any).hasPets === true ? true : undefined;
     }
 
+    const recentUsersForCatalog = await ctx.runQuery(api.messages.listRecent, {
+      conversationId: args.conversationId,
+      limit: 40,
+    });
+    const mergedUserTextForCatalogGuard = [
+      args.userMessage,
+      ...recentUsersForCatalog
+        .filter((m: any) => m.sender === "user")
+        .map((m: any) => String(m.content ?? "")),
+    ].join("\n");
+
     // No catálogo multi-finca sin rango explícito en mensajes del usuario (evita cupos "próximo fin de semana"
     // cuando aún no hay check-in/check-out reales — riesgo de mostrar fincas no disponibles para su estadía).
     const catalogRepeatOrMoreOptions =
       intent?.intent === "more_options" ||
       (detectOtrasOpciones(args.userMessage) && conv.lastCatalogSearch);
     if (!catalogRepeatOrMoreOptions) {
-      const recentUsersForCatalog = await ctx.runQuery(api.messages.listRecent, {
-        conversationId: args.conversationId,
-        limit: 40,
-      });
-      const mergedUserTextForCatalogGuard = [
-        args.userMessage,
-        ...recentUsersForCatalog
-          .filter((m: any) => m.sender === "user")
-          .map((m: any) => String(m.content ?? "")),
-      ].join("\n");
       if (!extractDateRangeFromText(mergedUserTextForCatalogGuard)) {
         console.log(
           "[catalog-guard] Sin fechas explícitas de estadía (ej. del 21 al 23 de mayo) — no se envía catálogo.",
         );
         return { sent: false, location };
       }
+    }
+
+    // Mascotas: si el usuario no ha respondido si lleva o no mascotas, preguntar ANTES de enviar el catálogo.
+    // Así filtramos solo fincas que las aceptan y no mostramos propiedades que luego quedan descartadas.
+    // Excepción: "otras opciones" reutiliza el catálogo previo (ya tenía la info de mascotas guardada).
+    const isRepeatOrMoreOptions =
+      intent?.intent === "more_options" ||
+      (detectOtrasOpciones(args.userMessage) && conv.lastCatalogSearch);
+    if (!isRepeatOrMoreOptions && hasPets === undefined) {
+      // Revisar historial completo de usuario para ver si ya respondió mascotas
+      const allUserTextForPets = mergedUserTextForCatalogGuard;
+      const petKnown = extractKnownReservationData(allUserTextForPets, {
+        assistantAskedPets: recentUsersForCatalog.some(
+          (m: any) =>
+            m.sender === "assistant" &&
+            /\bmascotas?|perros?|gatos?\b/i.test(String(m.content ?? "")),
+        ),
+      }).hasPetsAnswer;
+
+      if (!petKnown) {
+        const petsQuestion =
+          `🐾 Antes de enviarte las opciones: ¿viajan con mascotas?\n\nAlgunas fincas no las admiten, y prefiero mostrarte solo las que aplican para tu grupo. ✅`;
+        console.log("[catalog-guard] Mascotas desconocidas — pausando catálogo hasta recibir respuesta.");
+        await ctx.runMutation(internal.messages.insertAssistantMessage, {
+          conversationId: args.conversationId,
+          content: petsQuestion,
+          createdAt: Date.now(),
+        });
+        await ctx.runAction(internal.ycloud.sendWhatsAppMessage, {
+          to: args.phone,
+          text: petsQuestion,
+          wamid: args.wamid,
+        });
+        return { sent: false, location, petsQuestionSent: true };
+      }
+    }
+
+    // Si el último mensaje del asistente ya fue la notificación de puente y el usuario confirma
+    // con "sí / dale / por favor / ok", interpretamos que acepta extender la estadía +1 noche
+    // (ej. 16–17 → 16–18 en mayo 2026) y movemos el check-out un día adelante para que la guarda
+    // de puente no vuelva a dispararse y podamos enviar el catálogo con 2 noches.
+    const lastAssistantMsg = [...recentUsersForCatalog]
+      .reverse()
+      .find((m: any) => m.sender === "assistant");
+    const lastWasPuenteNotice =
+      !!lastAssistantMsg &&
+      /puente\s+o\s+d[ií]a\s+festivo/i.test(String(lastAssistantMsg.content ?? "")) &&
+      /estad[ií]a\s+m[ií]nima\s+es\s+de\s+\*?2\s+noches/i.test(
+        String(lastAssistantMsg.content ?? ""),
+      );
+    const normalizedUserConfirm = String(args.userMessage)
+      .trim()
+      .toLowerCase()
+      .normalize("NFD")
+      .replace(/\p{M}/gu, "");
+    const userConfirmsSimple =
+      /^(si|ok|dale|listo|claro|vale|perfecto|confirmo|por\s*favor|si\s*por\s*favor|ok\s*por\s*favor|dale\s*por\s*favor|de\s*una|si\s*claro|si\s*dale)[\s!.¡?]*$/i.test(
+        normalizedUserConfirm,
+      );
+    if (
+      lastWasPuenteNotice &&
+      userConfirmsSimple &&
+      shouldBlockCatalogForPuenteOneNightSatSun(
+        fechaEntrada,
+        fechaSalida,
+        mergedUserTextForCatalogGuard,
+      )
+    ) {
+      console.log(
+        "[catalog] Cliente confirmó extensión a puente — moviendo check-out +1 día para enviar catálogo de 2 noches.",
+      );
+      fechaSalida = fechaSalida + 86_400_000;
+    }
+
+    // Puente / festivo: 1 noche solo sábado→domingo no cumple mínimo 2 noches — avisar antes del catálogo.
+    if (
+      shouldBlockCatalogForPuenteOneNightSatSun(
+        fechaEntrada,
+        fechaSalida,
+        mergedUserTextForCatalogGuard,
+      )
+    ) {
+      console.log(
+        "[catalog-guard] Puente o festivo: estadía de 1 noche sábado–domingo — no se envía catálogo hasta mín. 2 noches.",
+      );
+      const notice = PUENTE_ONE_NIGHT_CATALOG_NOTICE_ES;
+      await ctx.runMutation(internal.messages.insertAssistantMessage, {
+        conversationId: args.conversationId,
+        content: notice,
+        createdAt: Date.now(),
+      });
+      await ctx.runAction(internal.ycloud.sendWhatsAppMessage, {
+        to: args.phone,
+        text: notice,
+        wamid: args.wamid,
+      });
+      return { sent: false, location, puenteMinNightsNoticeSent: true };
     }
 
     location = normalizeCatalogLocation(location);
@@ -4597,6 +4744,56 @@ export const maybeSendCatalogForUserMessage = internalAction({
       }
       return "";
     };
+
+    // Aviso de regla de mascotas (3ra en adelante) — se envía una sola vez antes del catálogo.
+    // Por política: 1ra/2da $100.000 reembolsable; 3ra+ $30.000 NO reembolsable + aseo $70.000.
+    const petCountFromHistory = (() => {
+      const lower = mergedUserTextForCatalogGuard
+        .toLowerCase()
+        .normalize("NFD")
+        .replace(/\p{M}/gu, "");
+      const numeric =
+        lower.match(/(\d+)\s*(?:mascotas?|perros?|gatos?)/i) ||
+        lower.match(/(?:mascotas?|perros?|gatos?)\s*[:\-]?\s*(\d+)/i);
+      if (numeric?.[1]) {
+        const n = parseInt(numeric[1], 10);
+        if (Number.isFinite(n)) return n;
+      }
+      const wordMap: Record<string, number> = {
+        un: 1, una: 1, uno: 1, dos: 2, tres: 3, cuatro: 4, cinco: 5, seis: 6,
+      };
+      const wordMatch = lower.match(
+        /\b(un|una|uno|dos|tres|cuatro|cinco|seis)\s+(?:mascotas?|perros?|gatos?)\b/i,
+      );
+      if (wordMatch?.[1]) return wordMap[wordMatch[1].toLowerCase()] ?? 0;
+      return 0;
+    })();
+    const petRuleAlreadySentInHistory = recentUsersForCatalog.some((m: any) => {
+      if (m.sender !== "assistant") return false;
+      const t = String(m.content ?? "");
+      return (
+        /3ra\s+en\s+adelante/i.test(t) ||
+        /\$\s*30[.,]?000.*no\s+reembolsable/i.test(t) ||
+        /cargo\s+(?:[^\n]{0,30})?aseo/i.test(t)
+      );
+    });
+    if (hasPets === true && petCountFromHistory >= 3 && !petRuleAlreadySentInHistory) {
+      const petRuleNotice =
+        `🐾 Por política de FincasYa, al viajar con ${petCountFromHistory} mascotas aplica:\n\n` +
+        `• 1ra y 2da mascota: $100.000 c/u (depósito *reembolsable*) ✅\n` +
+        `• Desde la 3ra en adelante: $30.000 c/u (*no reembolsable*) + cargo único de aseo $70.000 🧹\n\n` +
+        `⚠️ Las mascotas no pueden estar en piscina ni sobre los muebles.\n\n` +
+        `Ahora te comparto las fincas en ${location} que admiten mascotas para tus fechas. 🏡`;
+      await ctx.runMutation(internal.messages.insertAssistantMessage, {
+        conversationId: args.conversationId,
+        content: petRuleNotice,
+        createdAt: Date.now(),
+      });
+      await ctx.runAction(internal.ycloud.sendWhatsAppMessage, {
+        to: args.phone,
+        text: petRuleNotice,
+      });
+    }
 
     try {
       for (let i = 0; i < fincasToSend.length; i++) {
