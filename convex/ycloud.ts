@@ -49,6 +49,20 @@ function extractOfficialWelcomeMessage(promptText: string): string | null {
   return clean.length > 0 ? clean : null;
 }
 
+function extractQuickReplyBlock(promptText: string, intentKey: string): string | null {
+  const escapedKey = intentKey.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const markerRegex = new RegExp(`###\\s*\\[\\/\\s*${escapedKey}\\b[^\\n]*`);
+  const markerMatch = promptText.match(markerRegex);
+  if (!markerMatch || markerMatch.index === undefined) return null;
+
+  const afterMarker = promptText.slice(markerMatch.index + markerMatch[0].length);
+  const nextSectionIndex = afterMarker.indexOf("\n### ");
+  const messageBlock =
+    nextSectionIndex >= 0 ? afterMarker.slice(0, nextSectionIndex) : afterMarker;
+  const clean = messageBlock.trim();
+  return clean.length > 0 ? clean : null;
+}
+
 /**
  * Solo afirmación corta (confirmación), sin datos nuevos de búsqueda.
  * Evita enrutar plantillas genéricas de catálogo cuando el usuario confirma "sí" a mostrar opciones.
@@ -209,7 +223,6 @@ function buildPostCatalogFollowUp(
   if (!known.hasDates) pending.push("fechas exactas de entrada y salida (día y mes)");
   if (!known.hasCapacity) pending.push("número de personas");
   if (!known.hasGroup) pending.push("tipo de grupo");
-  if (!known.hasPetsAnswer) pending.push("si viajan con mascotas");
 
   if (pending.length === 1) {
     return "Ya te compartí algunas opciones ✅ ¿Cuál finca te gustó? 🏡 Si quieres, también puedo mostrarte más alternativas.";
@@ -226,13 +239,13 @@ function buildMissingReservationDetailsPrompt(
   if (!known.hasDates) missing.push("fechas exactas de entrada y salida (día y mes)");
   if (!known.hasCapacity) missing.push("número de personas");
   if (!known.hasGroup) missing.push("tipo de grupo");
-  if (!known.hasPetsAnswer) missing.push("si viajan con mascotas");
+  if (fincaTitle && !known.hasPetsAnswer) missing.push("si viajan con mascotas");
 
   if (missing.length === 0) {
     if (fincaTitle) {
       return `¡Listo! Ya tengo fechas, personas, grupo y mascotas para ${fincaTitle}. ¿Avanzamos con la cotización? 🏡`;
     }
-    return "Ya tengo fechas, personas, grupo y mascotas ✅ Solo dime cuál finca te gustó para validar disponibilidad y valor final. 🏡";
+    return "Ya tengo fechas, personas y tipo de grupo ✅ Solo dime cuál finca te gustó para validar disponibilidad y valor final. 🏡";
   }
 
   if (fincaTitle) {
@@ -2222,7 +2235,6 @@ Si falta algún dato puntual (p.ej. correo o ciudad de residencia), PIDE SOLO es
       if (!args.hasKnownWeekend) pendingBullets.push("● 📅 Fechas exactas de tu estadía (día de entrada y salida)");
       if (!args.hasKnownCapacity) pendingBullets.push("● 👥 Número total de personas");
       if (!args.hasKnownGroup) pendingBullets.push("● 🏡 Tipo de grupo: familiar, amigos o empresarial");
-      if (!args.hasKnownPetsAnswer) pendingBullets.push("● 🐾 ¿Llevarán mascotas?");
       const knownNote = args.knownDataSummary
         ? ` El cliente ya proporcionó: ${args.knownDataSummary}. NO vuelvas a pedir estos datos.`
         : "";
@@ -2235,7 +2247,6 @@ Si falta algún dato puntual (p.ej. correo o ciudad de residencia), PIDE SOLO es
       if (!args.hasKnownWeekend) pendingBullets.push("● 📅 Fechas exactas de estadía");
       if (!args.hasKnownCapacity) pendingBullets.push("● 👥 Número total de personas");
       if (!args.hasKnownGroup) pendingBullets.push("● 🏡 Tipo de grupo");
-      if (!args.hasKnownPetsAnswer) pendingBullets.push("● 🐾 Mascotas");
       fincasContext = `(Ya se envió el catálogo de WhatsApp con las fincas; el cliente ve nombres, fotos y precios ahí.${knownNote2} Sigue el PASO 2: pide SOLO los datos faltantes: ${pendingBullets.join(" ")}. NO repitas lista de fincas en texto.)`;
     } else if (catalogFailed && fincasList.length > 0) {
       // El catálogo interactivo de WhatsApp NO pudo enviarse (las fincas no están registradas en el catálogo de Meta).
@@ -4484,40 +4495,10 @@ export const maybeSendCatalogForUserMessage = internalAction({
       }
     }
 
-    // Mascotas: si el usuario no ha respondido si lleva o no mascotas, preguntar ANTES de enviar el catálogo.
-    // Así filtramos solo fincas que las aceptan y no mostramos propiedades que luego quedan descartadas.
-    // Excepción: "otras opciones" reutiliza el catálogo previo (ya tenía la info de mascotas guardada).
-    const isRepeatOrMoreOptions =
-      intent?.intent === "more_options" ||
-      (detectOtrasOpciones(args.userMessage) && conv.lastCatalogSearch);
-    if (!isRepeatOrMoreOptions && hasPets === undefined) {
-      // Revisar historial completo de usuario para ver si ya respondió mascotas
-      const allUserTextForPets = mergedUserTextForCatalogGuard;
-      const petKnown = extractKnownReservationData(allUserTextForPets, {
-        assistantAskedPets: recentUsersForCatalog.some(
-          (m: any) =>
-            m.sender === "assistant" &&
-            /\bmascotas?|perros?|gatos?\b/i.test(String(m.content ?? "")),
-        ),
-      }).hasPetsAnswer;
-
-      if (!petKnown) {
-        const petsQuestion =
-          `🐾 Antes de enviarte las opciones: ¿viajan con mascotas?\n\nAlgunas fincas no las admiten, y prefiero mostrarte solo las que aplican para tu grupo. ✅`;
-        console.log("[catalog-guard] Mascotas desconocidas — pausando catálogo hasta recibir respuesta.");
-        await ctx.runMutation(internal.messages.insertAssistantMessage, {
-          conversationId: args.conversationId,
-          content: petsQuestion,
-          createdAt: Date.now(),
-        });
-        await ctx.runAction(internal.ycloud.sendWhatsAppMessage, {
-          to: args.phone,
-          text: petsQuestion,
-          wamid: args.wamid,
-        });
-        return { sent: false, location, petsQuestionSent: true };
-      }
-    }
+    // Política de negocio actual:
+    // - No bloquear catálogo por mascotas en etapa de descubrimiento.
+    // - Priorizar validación de fechas/festivos y envío de catálogo.
+    // - Preguntar mascotas al avanzar con una finca concreta.
 
     // Si el último mensaje del asistente ya fue la notificación de puente y el usuario confirma
     // con "sí / dale / por favor / ok", interpretamos que acepta extender la estadía +1 noche
@@ -4567,7 +4548,24 @@ export const maybeSendCatalogForUserMessage = internalAction({
       console.log(
         "[catalog-guard] Puente o festivo: estadía de 1 noche sábado–domingo — no se envía catálogo hasta mín. 2 noches.",
       );
-      const notice = PUENTE_ONE_NIGHT_CATALOG_NOTICE_ES;
+      const promptOverrideForPuenteNotice = await ctx.runQuery(api.internalPages.getById, {
+        pageId: PROMPT_INTERNAL_PAGE_ID,
+      });
+      const promptOverridePuenteText =
+        promptOverrideForPuenteNotice &&
+        typeof promptOverrideForPuenteNotice === "object" &&
+        "prompt" in promptOverrideForPuenteNotice &&
+        typeof (promptOverrideForPuenteNotice as { prompt?: unknown }).prompt === "string"
+          ? (promptOverrideForPuenteNotice as { prompt: string }).prompt.trim()
+          : "";
+      const effectivePromptForPuenteNotice =
+        promptOverridePuenteText.length > 0
+          ? promptOverridePuenteText
+          : DEFAULT_CONSULTANT_SYSTEM_PROMPT;
+      const notice =
+        extractQuickReplyBlock(effectivePromptForPuenteNotice, "puente catalogo guard") ||
+        extractQuickReplyBlock(effectivePromptForPuenteNotice, "puente") ||
+        PUENTE_ONE_NIGHT_CATALOG_NOTICE_ES;
       await ctx.runMutation(internal.messages.insertAssistantMessage, {
         conversationId: args.conversationId,
         content: notice,
