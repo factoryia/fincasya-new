@@ -383,17 +383,132 @@ Al confirmar tu pago, recibirás el **soporte oficial** junto con todos los deta
         limit: 1000,
       }));
       const properties = data?.properties || [];
-      return properties.map((p: any) => ({
+      const rows = properties.map((p: any) => {
+        const department = this.getDepartmentFromLocation(p.location);
+        return {
         _id: p._id,
         title: p.title,
         code: p.code,
         image: p.images?.[0] || p.image || null,
         location: p.location,
+        department,
         allowsPets: p.allowsPets,
         serviceStaffAvailable: p.serviceStaffAvailable,
         serviceStaffPrice: p.serviceStaffPrice,
         serviceStaffMandatory: p.serviceStaffMandatory,
-      }));
+        };
+      });
+
+      return rows.sort((a: any, b: any) => {
+        const d = String(a.department || '').localeCompare(
+          String(b.department || ''),
+          'es',
+          { sensitivity: 'base' },
+        );
+        if (d !== 0) return d;
+        const l = String(a.location || '').localeCompare(String(b.location || ''), 'es', {
+          sensitivity: 'base',
+        });
+        if (l !== 0) return l;
+        return String(a.title || '').localeCompare(String(b.title || ''), 'es', {
+          sensitivity: 'base',
+        });
+      });
+    } catch (error) {
+      throw new BadRequestException(error.message);
+    }
+  }
+
+  async listSimpleGroupedByDepartment() {
+    const rows = await this.listSimple();
+    const grouped = new Map<string, any[]>();
+    for (const row of rows) {
+      const key = String(row.department || 'Sin departamento').trim();
+      const bucket = grouped.get(key) || [];
+      bucket.push(row);
+      grouped.set(key, bucket);
+    }
+    return Array.from(grouped.entries())
+      .sort((a, b) => a[0].localeCompare(b[0], 'es', { sensitivity: 'base' }))
+      .map(([department, properties]) => ({ department, properties }));
+  }
+
+  async listSimpleGroupedByDepartmentPlainText(): Promise<string> {
+    const groups = await this.listSimpleGroupedByDepartment();
+    if (!groups.length) return 'No hay fincas registradas.';
+
+    const lines: string[] = [];
+    for (const group of groups) {
+      lines.push(`=== ${group.department} ===`);
+      for (const p of group.properties) {
+        const title = String(p.title ?? '').trim();
+        const location = String(p.location ?? '').trim();
+        lines.push(location ? `- ${title} (${location})` : `- ${title}`);
+      }
+      lines.push('');
+    }
+    return lines.join('\n').trim();
+  }
+
+  private getDepartmentFromLocation(location: unknown): string {
+    const raw = String(location ?? '')
+      .toLowerCase()
+      .normalize('NFD')
+      .replace(/\p{M}/gu, '')
+      .trim();
+    if (!raw) return 'Sin departamento';
+
+    const isAny = (words: string[]) => words.some((w) => raw.includes(w));
+
+    if (
+      isAny(['melgar', 'carmen de apicala', 'flandes', 'ibague', 'espinal', 'tolima'])
+    ) {
+      return 'Tolima';
+    }
+    if (
+      isAny([
+        'anapoima',
+        'girardot',
+        'ricaurte',
+        'tocaima',
+        'villeta',
+        'la mesa',
+        'nilo',
+        'viota',
+        'cundinamarca',
+      ])
+    ) {
+      return 'Cundinamarca';
+    }
+    if (isAny(['villavicencio', 'restrepo', 'acacias', 'meta'])) {
+      return 'Meta';
+    }
+    if (isAny(['cartagena', 'bolivar'])) {
+      return 'Bolivar';
+    }
+    if (isAny(['santa marta', 'magdalena'])) {
+      return 'Magdalena';
+    }
+    return 'Otros';
+  }
+
+  async listPropertyNamesWithConfiguredSeasons(): Promise<string[]> {
+    try {
+      const data = await this.convexService.query('fincas:list', {
+        limit: 3000,
+      });
+      const properties = data?.properties || [];
+
+      const names = properties
+        .filter((p: any) => Array.isArray(p.pricing) && p.pricing.length > 0)
+        .map((p: any) => String(p.title ?? '').trim())
+        .filter((name: string) => name.length > 0)
+        .sort((a: string, b: string) =>
+          a.localeCompare(b, 'es', { sensitivity: 'base' }),
+        );
+
+      // Evitar duplicados por seguridad (mismo nombre en varias entradas).
+      return Array.from(new Set(names));
     } catch (error) {
       throw new BadRequestException(error.message);
     }

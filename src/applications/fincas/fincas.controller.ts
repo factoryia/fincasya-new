@@ -71,6 +71,17 @@ export class FincasController {
     return this.fincasService.getCatalogFeedCsv();
   }
 
+  @Get('temporadas-configuradas')
+  @Header('Content-Type', 'text/plain; charset=utf-8')
+  async getTemporadasConfiguradasListado(): Promise<string> {
+    const names =
+      await this.fincasService.listPropertyNamesWithConfiguredSeasons();
+    if (names.length === 0) {
+      return 'No hay fincas con temporadas configuradas.';
+    }
+    return names.join('\n');
+  }
+
   @Post()
   @UseGuards(ConvexAuthGuard, AdminGuard)
   @UseInterceptors(
