@@ -304,6 +304,18 @@ function stripDateQuestions(text: string): string {
     .trim();
 }
 
+function stripGroupQuestions(text: string): string {
+  return text
+    .replace(/[^.!?\n]*tipo\s+de\s+grupo[^.!?\n]*/gi, "")
+    .replace(/[^.!?\n]*(plan\s+es\s+m[aá]s\s+familiar|familiar,\s+amigos,\s+empresarial|pareja\s+u\s+otro)[^.!?\n]*/gi, "")
+    .replace(/[^.!?\n]*familiar,\s*amigos,\s*empresarial[^.!?\n]*/gi, "")
+    .replace(/([.!?])\s*[?]/g, "$1")
+    .replace(/([?!])\s*\./g, "$1")
+    .replace(/\.{2,}/g, ".")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
 /**
  * Detecta mensajes fuera del alcance del bot (ej. operaciones matemáticas o trivia).
  * Busca ahorrar tokens evitando llamadas al LLM cuando no hay intención de reserva.
@@ -318,8 +330,13 @@ export function isOutOfDomainMessage(userMessage: string): boolean {
 
   // Si menciona contexto de negocio, no bloquear.
   const domainSignals =
-    /\b(finca|fincas|reserva|reservar|alquiler|hospedaje|estad[ií]a|check[-\s]?in|check[-\s]?out|fecha|personas|huesped|hu[eé]sped|mascota|contrato|cotiza|cotizacion|precio|disponibilidad|noche|noches|catalogo|cat[aá]logo|ubicaci[oó]n|ciudad)\b/i;
+    /\b(finca|fincas|reserva|reservar|alquiler|hospedaje|estad[ií]a|check[-\s]?in|check[-\s]?out|fecha|personas|huesped|hu[eé]sped|mascota|contrato|cotiza|cotizacion|precio|disponibilidad|noche|noches|catalogo|cat[aá]logo|ubicaci[oó]n|ciudad|municipio|melgar|girardot|anapoima|tocaima|ricaurte|amigos?|familiar|familia|empresarial|empresa|pareja)\b/i;
   if (domainSignals.test(normalized)) return false;
+
+  // Fechas comunes sin la palabra "fecha": "10-12 mayo", "del 10 al 12", etc.
+  const dateLikeSignals =
+    /\b(\d{1,2}\s*[-/]\s*\d{1,2}\s*(de\s+)?(ene|enero|feb|febrero|mar|marzo|abr|abril|may|mayo|jun|junio|jul|julio|ago|agosto|sep|sept|septiembre|oct|octubre|nov|noviembre|dic|diciembre)|del?\s+\d{1,2}\s+al\s+\d{1,2}\s*(de\s+)?(ene|enero|feb|febrero|mar|marzo|abr|abril|may|mayo|jun|junio|jul|julio|ago|agosto|sep|sept|septiembre|oct|octubre|nov|noviembre|dic|diciembre))\b/i;
+  if (dateLikeSignals.test(normalized)) return false;
 
   // Operaciones aritméticas típicas: "4x4", "2+2", "10/5", etc.
   const mathExpression =
@@ -1052,7 +1069,28 @@ export const processInboundMessage = internalAction({
       }
 
       // Guardrail: evitar gastar tokens en consultas fuera del propósito del bot.
-      if (args.type === "text" && isOutOfDomainMessage(currentMessageText)) {
+      const mergedUserTextForOODGuard = [
+        currentMessageText,
+        ...recentForCatalogIntent
+          .filter((m: any) => m.sender === "user")
+          .map((m: any) => String(m.content ?? "")),
+      ].join("\n");
+      const knownForOODGuard = extractKnownReservationData(mergedUserTextForOODGuard, {
+        assistantAskedPets: recentForCatalogIntent.some(
+          (m: any) => m.sender === "assistant" && /\bmascotas?|perros?|gatos?\b/i.test(String(m.content ?? "")),
+        ),
+        currentMessage: currentMessageText,
+      });
+      const hasReservationSignalForOODGuard =
+        knownForOODGuard.hasDates ||
+        knownForOODGuard.hasCapacity ||
+        knownForOODGuard.hasGroup ||
+        knownForOODGuard.hasPetsAnswer;
+      if (
+        args.type === "text" &&
+        isOutOfDomainMessage(currentMessageText) &&
+        !hasReservationSignalForOODGuard
+      ) {
         const outOfDomainReply =
           "Estoy para ayudarte con reservas de fincas (disponibilidad, precios y contrato). 🏡 Compárteme por favor ciudad, fechas y número de personas para asistirte de inmediato.";
         await ctx.runMutation(internal.messages.insertAssistantMessage, {
@@ -1677,6 +1715,49 @@ Fincas disponibles: ${fincaNames}`,
       const effectiveCatalogFincasCount =
         catalogFincasCount || previousCatalogPropertyIds.length || undefined;
 
+      // Guard crítico: si el cliente ya eligió una finca concreta y aún no confirma mascotas,
+      // NO cotizar todavía. Primero preguntar mascotas para validar si la finca aplica.
+      const hasConcreteFincaSelection = !!(
+        shouldBlockCatalogFincaConfirmed ||
+        selectedCatalogPropertyTitle ||
+        skipSingleFincaCardResend ||
+        fincaTitle
+      );
+      if (hasConcreteFincaSelection && !knownReservationData.hasPetsAnswer) {
+        const promptOverrideForPetsOnSelection = await ctx.runQuery(api.internalPages.getById, {
+          pageId: PROMPT_INTERNAL_PAGE_ID,
+        });
+        const promptOverridePetsOnSelectionText =
+          promptOverrideForPetsOnSelection &&
+          typeof promptOverrideForPetsOnSelection === "object" &&
+          "prompt" in promptOverrideForPetsOnSelection &&
+          typeof (promptOverrideForPetsOnSelection as { prompt?: unknown }).prompt === "string"
+            ? (promptOverrideForPetsOnSelection as { prompt: string }).prompt.trim()
+            : "";
+        const effectivePromptForPetsOnSelection =
+          promptOverridePetsOnSelectionText.length > 0
+            ? promptOverridePetsOnSelectionText
+            : DEFAULT_CONSULTANT_SYSTEM_PROMPT;
+        const petsBeforeQuoteMsg =
+          extractQuickReplyBlock(effectivePromptForPetsOnSelection, "mascotas finca seleccionada") ||
+          "Perfecto 👌 Antes de confirmar la cotización, ¿van a llevar mascotas? 🐾\n\n" +
+            "Si la respuesta es sí, dime cuántas para validar que esta finca aplique y calcular los cargos correspondientes.";
+        await ctx.runMutation(internal.messages.insertAssistantMessage, {
+          conversationId,
+          content: petsBeforeQuoteMsg,
+          createdAt: Date.now(),
+        });
+        await ctx.runAction(internal.ycloud.sendWhatsAppMessage, {
+          to: args.phone,
+          text: petsBeforeQuoteMsg,
+          wamid: args.wamid,
+        });
+        await ctx.runMutation(internal.conversations.updateLastMessageAt, {
+          conversationId,
+        });
+        return;
+      }
+
       // La IA siempre genera la respuesta; lo que cambia es el contexto que recibe.
       let replyText = await ctx.runAction(
         internal.ycloud.generateReplyWithRagAndFincas,
@@ -1834,6 +1915,16 @@ En FincasYa.com tu alquiler siempre es seguro, respaldado y con total tranquilid
           );
         if (asksExactDateAgain && hasWeekendInHistory) {
           replyText = stripDateQuestions(replyText);
+        }
+        const asksGroupAgain =
+          /\b(tipo\s+de\s+grupo|plan\s+es\s+m[aá]s\s+familiar|familiar,\s*amigos,\s*empresarial|pareja\s+u\s+otro)\b/i.test(
+            replyText
+          );
+        if (asksGroupAgain && knownReservationData.hasGroup) {
+          const cleanedGroup = stripGroupQuestions(replyText);
+          if (cleanedGroup.length >= 20) {
+            replyText = cleanedGroup;
+          }
         }
 
         // Evita repetir "¿Cuál finca te llamó la atención?" si el asistente
