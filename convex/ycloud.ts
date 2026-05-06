@@ -4769,7 +4769,7 @@ function extractDateRangeFromText(userMessage: string): {
   const matches = Array.from(
     msg.matchAll(
       new RegExp(
-        `(?:del\\s+)?(\\d{1,2})\\s*(?:al|hasta\\s+el|hasta|a)\\s*(\\d{1,2})(?:\\s+(?:de\\s+)?${MONTH_NAME_PATTERN})?`,
+        `(?:(?:del|el)\\s+)?(\\d{1,2})\\s*(?:al|hasta\\s+el|hasta|a|y|e)\\s*(\\d{1,2})(?:\\s+(?:de\\s+)?${MONTH_NAME_PATTERN})?`,
         "gi"
       )
     )
@@ -5167,7 +5167,7 @@ function normalizeCatalogLocation(location: string): string {
 function asksFincasOrCatalogInMessage(userMessage: string): boolean {
   const lower = userMessage.trim().toLowerCase().normalize("NFD").replace(/\p{M}/gu, "");
   if (
-    /\b(qu[eé]\s+fincas|qu[eé]\s+opciones|fincas\s+tienes|tienen\s+fincas|hay\s+fincas|ver\s+(las\s+)?opciones|m[aá]s\s+opciones|el\s+cat[aá]logo|un\s+cat[aá]logo|mostrar(me)?\s+(las\s+)?opciones|envi[aá](me)?\s+(las\s+)?fincas|fincas\s+disponibles|mu[eé]stra(me)?\s+(las\s+)?fincas|ver\s+(las\s+)?fincas|quiero\s+ver\s+(las\s+)?opciones|todas\s+las\s+(opciones|fincas)\s+disponibles)\b/i.test(
+    /\b(qu[eé]\s+fincas|qu[eé]\s+opciones|fincas\s+tienes|tienen\s+fincas|hay\s+fincas|ver\s+(las\s+)?opciones|m[aá]s\s+opciones|el\s+cat[aá]l[ao]go|un\s+cat[aá]l[ao]go|mostrar(me)?\s+(las\s+)?opciones|envi[aá](me)?\s+(las\s+)?fincas|fincas\s+disponibles|mu[eé]stra(me)?\s+(las\s+)?fincas|ver\s+(las\s+)?fincas|quiero\s+ver\s+(las\s+)?opciones|todas\s+las\s+(opciones|fincas)\s+disponibles)\b/i.test(
       lower
     )
   ) {
@@ -5179,7 +5179,7 @@ function asksFincasOrCatalogInMessage(userMessage: string): boolean {
   }
   if (
     /\b(dime|indicame|cu[eé]ntame|mu[eé]strame|puedes\s+(decir|dar)|quiero\s+saber)\b/i.test(lower) &&
-    /\b(fincas?|precios?|opciones?|cat[aá]logo|disponib)\b/i.test(lower)
+    /\b(fincas?|precios?|opciones?|cat[aá]l[ao]go|disponib)\b/i.test(lower)
   ) {
     return true;
   }
@@ -5189,7 +5189,7 @@ function asksFincasOrCatalogInMessage(userMessage: string): boolean {
   if (/\b(fincas?|opciones?)\b/i.test(lower) && /\b(disponib|precios?)\b/i.test(lower)) {
     return true;
   }
-  if (/^cat[aá]logo\s*[!?.¡¿]*$/i.test(lower.trim())) return true;
+  if (/^cat[aá]l[ao]go\s*[!?.¡¿]*$/i.test(lower.trim())) return true;
   return false;
 }
 
@@ -5892,8 +5892,11 @@ export const maybeSendCatalogForUserMessage = internalAction({
       });
       const eventVsDescansoOk = threadHasEventVsDescansoClarification(mergedUserTextForCatalogGuard);
       const userDemandsCatalogNow = asksFincasOrCatalogInMessage(mergedUserTextForCatalogGuard);
+      const userHasNoLocationPreferenceNow = messageLooksLikeNoLocationPreference(args.userMessage);
+      const allowCatalogWithoutFullFunnel =
+        userDemandsCatalogNow || (userHasNoLocationPreferenceNow && funnelKnown.hasCapacity);
       if (
-        !userDemandsCatalogNow &&
+        !allowCatalogWithoutFullFunnel &&
         (!funnelKnown.hasCapacity || !funnelKnown.hasGroup || !eventVsDescansoOk)
       ) {
         console.log(
