@@ -66,9 +66,36 @@ function sanitizeOfficialWelcomeFromPrompt(welcome: string): string {
   }
   if (!skippedMascotas) return welcome;
   const joined = out.join("\n").replace(/\n{3,}/g, "\n\n").trim();
-  const note =
-    "\n\n(Las mascotas las confirmamos cuando elijas una finca del catálogo, para aplicar bien depósitos y reglas de esa propiedad. 🐾)";
-  return joined + note;
+  if (/\bLas mascotas las confirmamos cuando elijas\b/i.test(joined)) return joined;
+  return joined;
+}
+
+/** Misma bienvenida que el prompt oficial; fallback si no se puede extraer del system prompt. */
+const OFFICIAL_OPENING_WELCOME_FALLBACK =
+  "¡Hola! Es un gusto saludarte. Te escribe Hernán de FincasYa.com 🏡✨\n\n" +
+  "Tenemos opciones espectaculares de fincas listas para ti 🤩 y quiero ayudarte a encontrar la ideal según tu plan.\n\n" +
+  "Compárteme por favor:\n\n" +
+  "📅 Fechas: entrada y salida\n\n" +
+  "👨‍👩‍👧‍👦 Cupo: número de personas (desde los 2 años)\n\n" +
+  "🏡 Tipo de grupo: familiar, amigos o empresarial\n\n" +
+  "📍 Ubicación: municipio o zona de preferencia (si ya tienes una en mente)\n\n" +
+  "Con esto te envío opciones disponibles, fotos, precios y promociones ajustadas a lo que buscas 🔥\n\n" +
+  "Estoy atento para ayudarte a reservar tu finca perfecta ✨";
+
+
+async function resolveOfficialOpeningWelcomeText(ctx: { runQuery: any }): Promise<string> {
+  const promptOverride = await ctx.runQuery(api.internalPages.getById, {
+    pageId: PROMPT_INTERNAL_PAGE_ID,
+  });
+  const overrideText =
+    promptOverride &&
+      typeof promptOverride === "object" &&
+      "prompt" in promptOverride &&
+      typeof (promptOverride as { prompt?: unknown }).prompt === "string"
+      ? (promptOverride as { prompt: string }).prompt.trim()
+      : "";
+  const effectivePrompt = overrideText.length > 0 ? overrideText : DEFAULT_CONSULTANT_SYSTEM_PROMPT;
+  return extractOfficialWelcomeMessage(effectivePrompt) ?? OFFICIAL_OPENING_WELCOME_FALLBACK;
 }
 
 function extractQuickReplyBlock(promptText: string, intentKey: string): string | null {
@@ -209,6 +236,8 @@ function tryParseCatalogIntentJson(rawInput: string): Record<string, unknown> | 
   };
   let candidate = stripped;
   const attempts: string[] = [candidate];
+  // Secuencias \\u truncadas o inválidas (el modelo a veces rompe el JSON).
+  candidate = candidate.replace(/\\u[0-9a-fA-F]{0,3}(?![0-9a-fA-F])/gi, "");
   candidate = candidate.replace(/\\u(?![0-9a-fA-F]{4})/g, "\\\\u");
   attempts.push(candidate);
   attempts.push(candidate.replace(/\\(?!["\\/bfnrtu])/g, "\\\\"));
@@ -226,6 +255,167 @@ function tryParseCatalogIntentJson(rawInput: string): Record<string, unknown> | 
     if (ok) return ok;
   }
   return null;
+}
+
+/**
+ * Asistente inició recolección de datos para contrato (PASO 4 del manual o variantes).
+ * Debe alinearse con `contractPromptInHistory` para que el blob post-plantilla incluya al cliente.
+ */
+const ASSISTANT_CONTRACT_DATA_COLLECTION_RE =
+  /elaborar\s+tu\s+contrato|datos\s+de\s+la\s+persona|contrato\s+de\s+arrendamiento|persona\s+responsable/i;
+
+/** Orientación DJ/decoración: antes del primer catálogo si hay fiesta/evento, o segunda burbuja tras datos personales (PASO 4). */
+const EVENT_DETAIL_AFTER_CONTRACT_DATA_MESSAGE =
+  "Con el fin de orientarte mejor y ofrecerte la opción más adecuada, cuéntanos si tu celebración será familiar y tranquila o de amigos, si contemplas ingresar sonido, DJ, decoración, grupo musical o iluminación adicional.";
+
+const PRE_CATALOG_EVENT_ORIENTATION_PREFIX = "👋 Hola, buen día. Gusto saludarte. Claro que sí.\n\n";
+
+function hasEventIntentInReservationThread(fullThread: string): boolean {
+  const n = normalizeAsciiText(fullThread);
+  if (
+    /\b(solo\s+descans|sin\s+evento|no\s+es\s+un\s+evento|no\s+hay\s+evento|solamente\s+descans|para\s+solo\s+descans|para\s+descans|solo\s+para\s+compartir)\w*\b/i.test(
+      n,
+    )
+  ) {
+    return false;
+  }
+  return /\b(evento|fiesta|celebraci|cumplea|boda|quince|matrimonio|aniversario|after\b|graduaci|reuni[oó]n\s+empresarial)\w*\b/i.test(
+    n,
+  );
+}
+
+/**
+ * El cliente ya pasó por el embudo largo de evento (tipo, invitados extra, decoración, sonido, presupuesto).
+ * En ese caso NO reenviar el bloque "orientarte mejor… DJ/decoración" ni el saludo de pre-catálogo.
+ */
+function threadAlreadyDetailedEventFunnelForPreCatalogOrientation(fullThread: string): boolean {
+  const n = normalizeAsciiText(fullThread);
+  let signals = 0;
+  if (
+    /\b(cumplea[nñ]os|cumple\b|boda|quince|matrimonio|fiesta\s+privada|evento\s+empresarial|despedida)\b/i.test(
+      n,
+    )
+  ) {
+    signals++;
+  }
+  if (/\bno\s+nada\b/i.test(n) || /\bsin\s+decor/i.test(n)) signals++;
+  if (/\b(parlante|parlantes|sonido\s+peque|\bdj\b|montaje\s+musical|iluminaci\w*)\b/i.test(n)) signals++;
+  if (/\b\d[\d.,]*\s*(mill[oó]n|millones)\b/i.test(n)) signals++;
+  if (
+    /\b(solo\s+las\s+personas|solamente\s+(?:asist|las\s+personas)|no\s+llev\w+\s+personas\s+adicion)\b/i.test(
+      n,
+    )
+  ) {
+    signals++;
+  }
+  return signals >= 2;
+}
+
+/**
+ * Antes del primer catálogo multi-finca: el hilo debe aclarar si el plan incluye evento/fiesta o solo descanso.
+ * (Alineado con el saludo: fechas, cupo, tipo de grupo y convivencia/evento.)
+ */
+function threadHasEventVsDescansoClarification(fullThread: string): boolean {
+  const n = normalizeAsciiText(fullThread);
+  if (
+    /\b(solo\s+descans|sin\s+evento|no\s+es\s+un\s+evento|no\s+hay\s+evento|solamente\s+descans|para\s+solo\s+descans|para\s+descans|solo\s+para\s+compartir|solo\s+compartir|no\s+evento|pur[ao]\s+descans)\w*\b/i.test(
+      n,
+    )
+  ) {
+    return true;
+  }
+  return hasEventIntentInReservationThread(fullThread);
+}
+
+/** El modelo a veces duplica la orientación de evento; el backend la envía antes del primer catálogo (fiesta) y/o tras datos (PASO 4). */
+function stripEventCelebrationOrientationFromModelReply(text: string): string {
+  if (!text) return text;
+  const re = /\n*\s*Con el fin de orientarte mejor y ofrecerte[\s\S]*$/i;
+  const trimmed = text.replace(re, "").trim();
+  return trimmed.length >= 8 ? trimmed : text;
+}
+
+/**
+ * "sin 3 mascotas" → "sí, 3 mascotas" si el último mensaje del asistente fue la pregunta de mascotas.
+ * Usa `recentMessages` con ventana amplia (el límite corto del hilo de catálogo deja fuera la pregunta 🐾).
+ */
+function fixSinNumeralPetsTypo(
+  msg: string,
+  recentMessages: readonly { sender: string; content?: unknown }[],
+): string {
+  const lastAsst = [...recentMessages].reverse().find((m) => m.sender === "assistant");
+  if (!lastAsst) return msg;
+  const ac = String(lastAsst.content ?? "");
+  if (!/\b(van a llevar|llevar mascotas|cu[aá]ntas|mascotas|perros|gatos)\b/i.test(ac)) {
+    return msg;
+  }
+  if (/\bno\s+(?:llevamos|llev|van)\s+(?:mascotas?|perros?|gatos?)\b/i.test(msg)) return msg;
+  const before = msg;
+  const next = msg.replace(
+    /(^|[\n.!?]\s*)sin(\s+\d{1,2}\s+(?:mascotas?|perros?|gatos?))\b/gi,
+    (_m, pre: string, mid: string) => `${pre}sí,${mid}`,
+  );
+  if (next !== before) {
+    console.warn("[pet-reply] Corregido typo «sin N…»→«sí, N…» frente a pregunta de mascotas (ventana amplia).");
+  }
+  return next;
+}
+
+function extractPetCountFromUserMessage(text: string): number {
+  const lower = normalizeAsciiText(text);
+  const numeric =
+    lower.match(/(\d+)\s*(?:mascotas?|perros?|gatos?)\b/i) ||
+    lower.match(/(?:mascotas?|perros?|gatos?)\s*[:\-]?\s*(\d+)/i);
+  if (numeric?.[1]) {
+    const n = parseInt(numeric[1], 10);
+    if (Number.isFinite(n) && n > 0) return n;
+  }
+  const wordMap: Record<string, number> = {
+    un: 1,
+    una: 1,
+    uno: 1,
+    dos: 2,
+    tres: 3,
+    cuatro: 4,
+    cinco: 5,
+    seis: 6,
+  };
+  const wordMatch = lower.match(
+    /\b(un|una|uno|dos|tres|cuatro|cinco|seis)\s+(?:mascotas?|perros?|gatos?)\b/i,
+  );
+  if (wordMatch?.[1]) return wordMap[wordMatch[1].toLowerCase()] ?? 0;
+  return 0;
+}
+
+/**
+ * Sustituye alucinaciones del modelo que piden asesor por "validar" N mascotas cuando ya hay finca
+ * y aplican las reglas globales de FincasYa (depósitos), sin tope especial en ficha.
+ */
+function repairAssistantPetAdvisorHallucination(
+  reply: string,
+  opts: { fincaChosen: boolean; petCount: number },
+): string {
+  if (!reply || !opts.fincaChosen || opts.petCount < 2) return reply;
+  if (
+    /\bno\s+(?:admite|permite|acepta)\s+mascotas?\b/i.test(reply) ||
+    /\bmascotas?\b[^.]{0,80}\bno\s+(?:admite|permite|acepta)\b/i.test(reply)
+  ) {
+    return reply;
+  }
+  const mentionsAdvisorPet =
+    /(asesor|equipo\s+humano).{0,160}(mascot|perros?|gatos?|autoriz)|(mascot|perros?|gatos?).{0,160}(asesor|valida(?:r|rlo|rla|ci[oó]n)|autoriz)/i.test(
+      reply,
+    );
+  if (!mentionsAdvisorPet) return reply;
+  const n = opts.petCount;
+  return (
+    `Gracias por confirmarlo 🐾 Con *${n} mascotas* aplican las reglas globales de FincasYa para depósitos y cargos; si la ficha de la finca dice que admite mascotas, no hace falta “validación especial” solo por la cantidad.\n\n` +
+    `🐾 Por política de FincasYa, al viajar con ${n} mascotas aplica:\n\n` +
+    `• 1ra y 2da mascota: $100.000 c/u (depósito reembolsable) ✅\n` +
+    `• Desde la 3ra en adelante: $30.000 c/u (no reembolsable) + cargo único de aseo $70.000 🧹\n\n` +
+    `⚠️ Las mascotas no pueden estar en piscina ni sobre los muebles.\n\n` +
+    `Si te parece bien, sigo con la *cotización* (PASO 3) usando el precio de la finca y estos montos. 💰`
+  );
 }
 
 function wordNumberToNumber(value: string | undefined): number | undefined {
@@ -264,15 +454,20 @@ function extractKnownReservationData(
     );
   const capacity = extractCapacityFromText(text);
   let groupMatch = normalized.match(
-    /\b(?:grupo\s+)?(familiar|familia|amigos|amigas|empresarial|empresa|corporativo|pareja)\b/i
+    /\b(?:grupo\s+)?(familiar|familia|amigos?|amigas?|empresarial|empresa|corporativo|pareja)\b/i
   );
   if (!groupMatch) {
-    groupMatch = normalized.match(/\bplan\s+de\s+(familiar|familia|amigos|amigas|empresarial|pareja)\b/i);
+    groupMatch = normalized.match(
+      /\bplan\s+de\s+(familiar|familia|amigos?|amigas?|empresarial|pareja)\b/i
+    );
   }
   if (!groupMatch) {
     groupMatch = normalized.match(
-      /\b(?:ya\s+te\s+)?d[ií]je[^.!?\n]{0,160}\b(familiar|familia|amigos|amigas|empresarial|empresa|pareja)\b/i
+      /\b(?:ya\s+te\s+)?d[ií]je[^.!?\n]{0,160}\b(familiar|familia|amigos?|amigas?|empresarial|empresa|pareja)\b/i
     );
+  }
+  if (!groupMatch && /\bpara\s+(?:unos?\s+)?(amigos?|amigas?)\b/i.test(normalized)) {
+    groupMatch = normalized.match(/\bpara\s+(?:unos?\s+)?(amigos?|amigas?)\b/i);
   }
   const groupRaw = groupMatch?.[1];
   const groupLabel = groupRaw
@@ -280,7 +475,9 @@ function extractKnownReservationData(
       ? "familiar"
       : groupRaw === "empresa" || groupRaw === "corporativo"
         ? "empresarial"
-        : groupRaw
+        : /^amig/i.test(groupRaw)
+          ? "amigos"
+          : groupRaw
     : undefined;
 
   const negativePets =
@@ -438,6 +635,23 @@ function stripPreCatalogFunnelBoilerplate(text: string): string {
     .replace(/\bVamos\s+a\s+mostrarte\s+las\s+opciones[^.!?]*[.!?]\s*/gi, "")
     .replace(/Te\s+hacemos\s+esta\s+pregunta\s+porque[\s\S]*?(?:\.|!|\?)(?:\s*\n)?/gi, "")
     .replace(/\bPerfecto\.?\s+Entonces\s+buscaremos[\s\S]*?(?:\.|!|\?)\s*/gi, "")
+    .replace(/\n{3,}/g, "\n\n")
+    .replace(/\s{2,}/g, " ")
+    .trim();
+}
+
+/**
+ * El cliente ya respondió descanso vs evento en el hilo: si el modelo vuelve a soltar
+ * "¿Tienes contemplada la finca para algún tipo de evento o solamente para descansar y compartir?",
+ * lo quitamos y dejamos avanzar el siguiente paso.
+ */
+function stripEventDescansoQuestionWhenKnown(text: string): string {
+  if (!text) return text;
+  const re =
+    /¿\s*Tienes\s+contemplad[ao]\s+la\s+finca\s+para\s+alg[uú]n\s+tipo\s+de\s+evento\s+o\s+solamente\s+para\s+descansar\s+y\s+compartir[^\n?]*\?[^\n]*/gi;
+  if (!re.test(text)) return text;
+  return text
+    .replace(re, "")
     .replace(/\n{3,}/g, "\n\n")
     .replace(/\s{2,}/g, " ")
     .trim();
@@ -626,6 +840,34 @@ function stripDateQuestions(text: string): string {
     .replace(/\s*📅\s*$/g, "")
     // Limpiar líneas vacías múltiples
     .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
+/**
+ * Tras mascotas/cierre, la IA a veces pide de nuevo cupo y fechas aunque ya están en el hilo
+ * (p. ej. ventana corta de mensajes). Quitar esa fricción si ya parseamos fechas + personas.
+ */
+function stripRedundantPersonasFechasAskWhenKnown(
+  text: string,
+  known: KnownReservationData,
+): string {
+  if (!text || !known.hasDates || !known.hasCapacity) return text;
+  if (
+    !/\b(solo\s+)?me\s+falta\s+confirmar|\bcu[aá]ntas\s+personas\s+se\s+van\s+a\s+hospedar|\bfechas\s+exactas\s+de\s+entrada\b/i.test(
+      text,
+    )
+  ) {
+    return text;
+  }
+  return text
+    .replace(
+      /\b(?:solo\s+)?me\s+falta\s+confirmar\s+cu[aá]ntas\s+personas\s+se\s+van\s+a\s+hospedar\s+y\s+las\s+fechas\s+exactas\s+de\s+entrada\s+y\s+salida[^.!?\n]*[.]?\s*/gi,
+      "",
+    )
+    .replace(/[^.!?\n]*\bcu[aá]ntas\s+personas\s+se\s+van\s+a\s+hospedar[^.!?\n]*[.]?\s*/gi, "")
+    .replace(/[^.!?\n]*\bfechas\s+exactas\s+de\s+entrada\s+y\s+salida[^.!?\n]*[.]?\s*/gi, "")
+    .replace(/\n{3,}/g, "\n\n")
+    .replace(/\s{2,}/g, " ")
     .trim();
 }
 
@@ -970,9 +1212,9 @@ export const processInboundMessage = internalAction({
         // Obtener nombres de fincas para el prompt de Whisper
         const allFincas = await ctx.runQuery(api.fincas.search, { query: " ", limit: 1000 });
         const fincaNames = allFincas.map(p => p.title).join(", ");
-        
+
         const contextualPrompt = `FincasYa, reservación de fincas, hospedaje, fin de semana. Fincas: ${fincaNames}. Palabras clave: mascotas, adultos, niños, personas, depósito, reserva, entrada, salida, disponibilidad.`;
-        
+
         const transcription = await transcribeAudio(args.mediaUrl, contextualPrompt);
         console.log("[transcription] Resultado:", transcription);
         finalContent = `[Voz] ${transcription}`;
@@ -1114,17 +1356,17 @@ export const processInboundMessage = internalAction({
 
     if (shouldReply) {
       // Contexto para la IA
-      let currentMessageText = (args.type === "audio" && finalContent.startsWith("[Voz]")) 
-        ? finalContent 
+      let currentMessageText = (args.type === "audio" && finalContent.startsWith("[Voz]"))
+        ? finalContent
         : (args.text || "");
       const promptOverrideForGreeting = await ctx.runQuery(api.internalPages.getById, {
         pageId: PROMPT_INTERNAL_PAGE_ID,
       });
       const promptOverrideGreetingText =
         promptOverrideForGreeting &&
-        typeof promptOverrideForGreeting === "object" &&
-        "prompt" in promptOverrideForGreeting &&
-        typeof (promptOverrideForGreeting as { prompt?: unknown }).prompt === "string"
+          typeof promptOverrideForGreeting === "object" &&
+          "prompt" in promptOverrideForGreeting &&
+          typeof (promptOverrideForGreeting as { prompt?: unknown }).prompt === "string"
           ? (promptOverrideForGreeting as { prompt: string }).prompt.trim()
           : "";
       const effectivePromptForGreeting =
@@ -1137,17 +1379,7 @@ export const processInboundMessage = internalAction({
         .replace(/\p{M}/gu, "")
         .trim();
       const OPENING_QUALIFICATION_TEXT =
-        extractOfficialWelcomeMessage(effectivePromptForGreeting) ||
-        "¡Hola! Es un gusto saludarte. Te escribe Hernán de FincasYa.com 🏡✨\n\n" +
-          "Tenemos opciones espectaculares de fincas listas para ti 🤩 y quiero ayudarte a encontrar la ideal según tu plan.\n\n" +
-          "Compárteme por favor:\n\n" +
-          "📅 Fechas: entrada y salida\n\n" +
-          "👨‍👩‍👧‍👦 Cupo: número de personas (desde los 2 años)\n\n" +
-          "🏡 Tipo de grupo: familiar, amigos o empresarial\n\n" +
-          "📍 Ubicación: municipio o zona (si ya tienes una en mente)\n\n" +
-          "Con esto te envío opciones disponibles, fotos, precios y promociones ajustadas a lo que buscas 🔥\n\n" +
-          "Las mascotas las confirmamos cuando elijas una finca, para cotizar bien depósitos y reglas de esa propiedad. 🐾\n\n" +
-          "Estoy atento para ayudarte a reservar tu finca perfecta ✨";
+        extractOfficialWelcomeMessage(effectivePromptForGreeting) ?? OFFICIAL_OPENING_WELCOME_FALLBACK;
       const userRequestedFlowRestart =
         /^(clear|limpiar|reiniciar|reinicia|reset|start over|empezar de nuevo|iniciar de nuevo)$/i.test(
           normalizedIncomingText
@@ -1218,7 +1450,7 @@ export const processInboundMessage = internalAction({
         if (m.sender !== "assistant") return false;
         const t = String(m.content ?? "").toLowerCase();
         return (
-          /elaborar\s+tu\s+contrato|datos\s+de\s+la\s+persona|documento\s+de\s+identidad|lugar\s+de\s+expedici[oó]n|correo\s+electr[oó]nico|direcci[oó]n|hora\s+aproximada\s+de\s+ingreso|formalizar\s+la\s+reserva/.test(
+          /elaborar\s+tu\s+contrato|datos\s+de\s+la\s+persona|documento\s+de\s+identidad|lugar\s+de\s+expedici[oó]n|correo\s+electr[oó]nico|direcci[oó]n|hora\s+aproximada\s+de\s+ingreso|formalizar\s+la\s+reserva|contrato\s+de\s+arrendamiento|persona\s+responsable/.test(
             t
           )
         );
@@ -1245,7 +1477,7 @@ export const processInboundMessage = internalAction({
           const m: any = recentForCatalogIntent[i];
           if (m.sender === "assistant") {
             const t = String(m.content ?? "").toLowerCase();
-            if (/elaborar\s+tu\s+contrato|datos\s+de\s+la\s+persona/.test(t)) {
+            if (ASSISTANT_CONTRACT_DATA_COLLECTION_RE.test(t)) {
               foundAssistantPrompt = true;
               break;
             }
@@ -1257,7 +1489,7 @@ export const processInboundMessage = internalAction({
           if (!seenPrompt) {
             if (
               m.sender === "assistant" &&
-              /elaborar\s+tu\s+contrato|datos\s+de\s+la\s+persona/i.test(String(m.content ?? ""))
+              ASSISTANT_CONTRACT_DATA_COLLECTION_RE.test(String(m.content ?? ""))
             ) {
               seenPrompt = true;
             }
@@ -1290,6 +1522,27 @@ export const processInboundMessage = internalAction({
       if (clientDeliveredPersonalData) {
         console.log("[contract-stage] cliente entregó sus datos →", clientDataFlags);
       }
+      const contractBlobBeforeCurrentMessage = userTextsAfterContractPrompt.slice(0, -1).join("\n");
+      const clientDataFlagsBeforeCurrent = {
+        hasFullName: /\b[A-ZÁÉÍÓÚÑa-záéíóúñ]{3,}\s+[A-ZÁÉÍÓÚÑa-záéíóúñ]{3,}(?:\s+[A-ZÁÉÍÓÚÑa-záéíóúñ]{3,})*/.test(
+          contractBlobBeforeCurrentMessage
+        ),
+        hasIdNumber: /\b\d{7,12}\b/.test(contractBlobBeforeCurrentMessage),
+        hasPhone: /\b3\d{9}\b/.test(contractBlobBeforeCurrentMessage),
+        hasEmail: /@\w+\.\w+/.test(contractBlobBeforeCurrentMessage),
+        hasAddress: /(calle|carrera|cra\.?|cl\.?|avenida|av\.?|mz|manzana|barrio)\s*[\w\d]/i.test(
+          contractBlobBeforeCurrentMessage
+        ),
+      };
+      const providedDataCountBeforeCurrent =
+        Number(clientDataFlagsBeforeCurrent.hasFullName) +
+        Number(clientDataFlagsBeforeCurrent.hasIdNumber) +
+        Number(clientDataFlagsBeforeCurrent.hasPhone) +
+        Number(clientDataFlagsBeforeCurrent.hasEmail || clientDataFlagsBeforeCurrent.hasAddress);
+      const clientJustCompletedPersonalDataThisTurn =
+        clientDeliveredPersonalData &&
+        contractPromptInHistory &&
+        providedDataCountBeforeCurrent < 3;
 
       // Detectar si el asistente ya confirmó una finca específica en mensajes recientes
       // (evitar re-enviar catálogo en mensajes de seguimiento: "si", "dale", "quiero reservar", etc.)
@@ -1340,6 +1593,15 @@ export const processInboundMessage = internalAction({
           currentMessageText = burst.join("\n");
           console.log("[burst-merge] mensajes de cliente fusionados:", burst.length);
         }
+      }
+
+      // Typo "sin 3 mascotas" → "sí, 3 mascotas": la ventana de 14 msgs suele dejar fuera la pregunta 🐾 del asistente.
+      const recentForPetTypoContext = await ctx.runQuery(api.messages.listRecent, {
+        conversationId,
+        limit: 60,
+      });
+      if (args.type === "text") {
+        currentMessageText = fixSinNumeralPetsTypo(currentMessageText, recentForPetTypoContext);
       }
 
       // Tras fusionar ráfagas: el pedido de humano puede estar solo en un segmento anterior.
@@ -1514,6 +1776,38 @@ Fincas disponibles: ${fincaNames}`,
         console.error("YCloud detectCatalogIntentWithAI error:", e);
       }
 
+      // Si la IA falló o devolvió "none", intentar reconstruir `search_catalog` desde ciudad + fechas en el hilo.
+      const blockCatalogForPetOnlyAfterFincaChoice =
+        shouldBlockBroadCatalogForPetFollowUpAfterFincaChoice(
+          currentMessageText,
+          recentForCatalogIntent,
+        );
+      if (
+        !imageIdentifiedFincaName &&
+        !selectedCatalogPropertyTitle &&
+        catalogIntent.intent === "none" &&
+        !blockCatalogForPetOnlyAfterFincaChoice
+      ) {
+        const mergedForCatalogInfer = [
+          currentMessageText,
+          ...recentForCatalogIntent
+            .filter((m: any) => m.sender === "user")
+            .map((m: any) => String(m.content ?? "")),
+        ].join("\n");
+        const inferredCatalog = inferSearchCatalogIntentFromUserThread(
+          mergedForCatalogInfer,
+          dynamicLocationsList,
+        );
+        if (inferredCatalog) {
+          console.log("[catalog-intent] inferido desde hilo:", JSON.stringify(inferredCatalog));
+          catalogIntent = inferredCatalog;
+        }
+      } else if (blockCatalogForPetOnlyAfterFincaChoice && catalogIntent.intent === "none") {
+        console.log(
+          "[catalog-guard] Sin inferencia search_catalog — respuesta de mascotas tras elección de finca concreta.",
+        );
+      }
+
       // Si la visión ya identificó la finca, forzar el intent
       if (imageIdentifiedFincaName) {
         catalogIntent = { intent: "single_finca", fincaName: imageIdentifiedFincaName };
@@ -1551,7 +1845,7 @@ Fincas disponibles: ${fincaNames}`,
 
       // Enviar ficha de una finca (IA o regex como respaldo).
       // PERO NO re-enviar si el usuario está dando datos de seguimiento (fechas, personas) SIN mencionar finca
-      const followUpData = isProvidingFollowUpData(currentMessageText) 
+      const followUpData = isProvidingFollowUpData(currentMessageText)
         && catalogIntent.intent !== "single_finca";
 
       // Si ya se envió un catálogo múltiple antes (lastSentCatalogPropertyIds >= 1) y el usuario
@@ -1638,7 +1932,7 @@ Fincas disponibles: ${fincaNames}`,
           const catalogIntentArg =
             catalogIntent.intent === "more_options"
               ? catalogIntent
-              : catalogIntent.intent === "search_catalog" && 
+              : catalogIntent.intent === "search_catalog" &&
                 catalogIntent.location &&
                 catalogIntent.location.length >= 3 &&
                 !isInvalidCatalogLocation(catalogIntent.location)
@@ -1701,15 +1995,28 @@ Fincas disponibles: ${fincaNames}`,
         !singleFincaSent &&
         catalogIntent.intent !== "single_finca" &&
         !shouldBlockCatalogByContractFlow &&
-        !shouldBlockCatalogFincaConfirmed
+        !shouldBlockCatalogFincaConfirmed &&
+        !shouldBlockBroadCatalogForPetFollowUpAfterFincaChoice(
+          currentMessageText,
+          recentForCatalogIntent,
+        )
       ) {
-        const msgLower_pre = currentMessageText.toLowerCase().normalize("NFD").replace(/\p{M}/gu, "");
+        const mergedForCityFallback = [
+          currentMessageText,
+          ...recentForCatalogIntent
+            .filter((m: any) => m.sender === "user")
+            .map((m: any) => String(m.content ?? "")),
+        ].join("\n");
+        const msgLower_pre = mergedForCityFallback
+          .toLowerCase()
+          .normalize("NFD")
+          .replace(/\p{M}/gu, "");
         const matchedCity = dynamicLocationsList.find(
           (loc: string) => msgLower_pre.includes(loc.toLowerCase().normalize("NFD").replace(/\p{M}/gu, ""))
         );
         if (matchedCity) {
           console.log("[catalog-fallback] Ciudad detectada sin catálogo, forzando envío:", matchedCity);
-          const _fbMsgLower = currentMessageText.toLowerCase().normalize("NFD").replace(/\p{M}/gu, "");
+          const _fbMsgLower = msgLower_pre;
           const _fbPersonasMatch = _fbMsgLower.match(/(\d+)\s*(?:o\s+mas?\s+)?personas/i);
           // Buscar mascotas en todo el historial del usuario, no solo el mensaje actual
           const _fbAllUserText = [
@@ -1772,59 +2079,12 @@ Fincas disponibles: ${fincaNames}`,
         return;
       }
 
-      const petCountMentions = (() => {
-        const text = normalizedAllUserTextForFilters;
-        const numericMatch =
-          text.match(/(\d+)\s*(?:mascotas?|perros?)/i) ||
-          text.match(/(?:mascotas?|perros?)\s*[:\-]?\s*(\d+)/i);
-        if (numericMatch?.[1]) return Number(numericMatch[1]);
-        if (/\b(tres)\s+(?:mascotas?|perros?)\b/i.test(text)) return 3;
-        if (/\b(cuatro)\s+(?:mascotas?|perros?)\b/i.test(text)) return 4;
-        if (/\b(cinco)\s+(?:mascotas?|perros?)\b/i.test(text)) return 5;
-        return 0;
-      })();
-      const hasSelectedSpecificFinca =
-        !!(
-          fincaTitle ||
-          confirmedFincaTitle ||
-          confirmedFincaInHistoryTitle ||
-          selectedCatalogPropertyTitle ||
-          catalogIntent.intent === "single_finca"
-        );
-      const shouldEscalateByPetPolicy =
-        petCountMentions > 2 &&
-        hasSelectedSpecificFinca &&
-        !userExplicitlyWantsOtherOptions;
-      if (shouldEscalateByPetPolicy) {
-        const petPolicyText =
-          "Perfecto ✨ Ya con la finca de tu interés identificada, este caso por política de mascotas debe validarlo un asesor porque viajarían con más de 2 perros 🐾. Te comunico con nuestro equipo para confirmarte esta opción.";
-        await ctx.runMutation(internal.messages.insertAssistantMessage, {
-          conversationId,
-          content: petPolicyText,
-          createdAt: Date.now(),
-        });
-        await ctx.runAction(internal.ycloud.sendWhatsAppMessage, {
-          to: args.phone,
-          text: petPolicyText,
-          wamid: args.wamid,
-        });
-        await ctx.runMutation(internal.conversations.escalate, {
-          conversationId,
-          operationalState: "requires_advisor",
-          assignedUserId: botEscalateAssignedUserId(),
-        });
-        await ctx.runMutation(internal.conversations.updateLastMessageAt, {
-          conversationId,
-        });
-        return;
-      }
-
       // Plantillas: no pisar el flujo cuando ya mandamos catálogo interactivo, el cliente pide finca específica, o envía datos.
       let quickReplySent = false;
       let templateSent = false;
       const isProvidingData = /\d{7,}/.test(currentMessageText) || /@\w+\.\w+/.test(currentMessageText);
       const isSpecificFinca = singleFincaSent || catalogIntent.intent === "single_finca";
-      
+
       // Detectar si el usuario menciona una ubicación o datos de reserva (no enviar template genérica)
       const msgLower = currentMessageText.toLowerCase().normalize("NFD").replace(/\p{M}/gu, "");
       const mentionsCityOrFinca = dynamicLocationsList.some((loc: string) =>
@@ -1851,7 +2111,7 @@ Fincas disponibles: ${fincaNames}`,
       const shouldBlockGenericTemplates =
         (hasActiveReservationContext && isShortBookingFollowUp) ||
         !!selectedCatalogPropertyTitle;
-      
+
       console.log("[template-guard]", {
         mentionsCityOrFinca,
         mentionsDatesOrPersonas,
@@ -1870,7 +2130,7 @@ Fincas disponibles: ${fincaNames}`,
           hasBookingContext ||
           shouldBlockGenericTemplates,
       });
-      
+
       if (
         isQuickReplyDbRoutingEnabled() &&
         !whatsappCatalogSentForSearch &&
@@ -1946,12 +2206,20 @@ Fincas disponibles: ${fincaNames}`,
       // Reutilizar dynamicLocationsList ya declarado arriba (template-guard)
       const dynamicLocations = dynamicLocationsList.join(", ");
 
-      // Extraer datos ya conocidos para que el prompt no los vuelva a pedir
+      // Extraer datos ya conocidos para que el prompt no los vuelva a pedir.
+      // NO usar solo `recentForCatalogIntent` (limit 14): tras muchas fichas de catálogo del asistente,
+      // los mensajes del usuario con fechas/cupo quedan fuera de la ventana y la IA cree que faltan datos.
+      const recentUserMessagesForReservation = await ctx.runQuery(api.messages.listRecent, {
+        conversationId,
+        limit: 100,
+      });
       const _allUserTextsEarly = [
         currentMessageText,
-        ...recentForCatalogIntent.filter((m: any) => m.sender === "user").map((m: any) => String(m.content ?? "")),
+        ...recentUserMessagesForReservation
+          .filter((m: any) => m.sender === "user")
+          .map((m: any) => String(m.content ?? "")),
       ].join("\n");
-      const _assistantAskedPetsEarly = recentForCatalogIntent.some(
+      const _assistantAskedPetsEarly = recentForPetTypoContext.some(
         (m: any) =>
           m.sender === "assistant" &&
           /\bmascotas?|perros?|gatos?\b/i.test(String(m.content ?? ""))
@@ -1963,6 +2231,69 @@ Fincas disponibles: ${fincaNames}`,
       });
       const knownDataSummary = formatKnownReservationDataSummary(knownReservationData);
       const hasKnownDates = knownReservationData.hasDates;
+
+      // Aviso temprano de puente/festivo: si el cliente ya pasó fechas de 1 noche sáb→dom y cae
+      // en puente, NO seguir pidiendo cupo/grupo/evento — primero pedir extender al lunes (mín 2 noches).
+      // Sólo enviar una vez (chequeo en historial reciente) y sólo si el cliente no acaba de confirmar
+      // explícitamente la extensión ("sí / dale / por favor / ok").
+      try {
+        const earlyPuenteRange = extractDateRangeFromText(_allUserTextsEarly);
+        if (earlyPuenteRange) {
+          const puenteApplies = shouldBlockCatalogForPuenteOneNightSatSun(
+            earlyPuenteRange.fechaEntrada,
+            earlyPuenteRange.fechaSalida,
+            _allUserTextsEarly,
+          );
+          const puenteNoticeAlreadySent = recentUserMessagesForReservation.some(
+            (m: any) =>
+              m.sender === "assistant" &&
+              /puente\s+o\s+d[ií]a\s+festivo/i.test(String(m.content ?? "")) &&
+              /estad[ií]a\s+m[ií]nima\s+es\s+de\s+\*?2\s+noches/i.test(String(m.content ?? "")),
+          );
+          const normalizedCurrentForExtension = currentMessageText
+            .trim()
+            .toLowerCase()
+            .normalize("NFD")
+            .replace(/\p{M}/gu, "");
+          const userConfirmsExtensionShortcut =
+            /^(si|ok|dale|listo|claro|vale|perfecto|confirmo|por\s*favor|si\s*por\s*favor|ok\s*por\s*favor|dale\s*por\s*favor|de\s*una|si\s*claro|si\s*dale|extend(er|emos|amos)|extiendo|alarg(ar|amos|o)|al\s*lunes)[\s!.¡?]*$/i.test(
+              normalizedCurrentForExtension,
+            );
+          const userProvidedNewLongerRange =
+            puenteNoticeAlreadySent &&
+            !!extractDateRangeFromText(currentMessageText) &&
+            !shouldBlockCatalogForPuenteOneNightSatSun(
+              extractDateRangeFromText(currentMessageText)!.fechaEntrada,
+              extractDateRangeFromText(currentMessageText)!.fechaSalida,
+              currentMessageText,
+            );
+          const skipPuenteEarlyNotice =
+            puenteNoticeAlreadySent ||
+            userConfirmsExtensionShortcut ||
+            userProvidedNewLongerRange;
+          if (puenteApplies && !skipPuenteEarlyNotice) {
+            console.log(
+              "[puente-guard] 1 noche sáb–dom en puente/festivo detectado en hilo — aviso temprano antes del embudo.",
+            );
+            await ctx.runMutation(internal.messages.insertAssistantMessage, {
+              conversationId,
+              content: PUENTE_ONE_NIGHT_CATALOG_NOTICE_ES,
+              createdAt: Date.now(),
+            });
+            await ctx.runAction(internal.ycloud.sendWhatsAppMessage, {
+              to: args.phone,
+              text: PUENTE_ONE_NIGHT_CATALOG_NOTICE_ES,
+              wamid: args.wamid,
+            });
+            await ctx.runMutation(internal.conversations.updateLastMessageAt, {
+              conversationId,
+            });
+            return;
+          }
+        }
+      } catch (puenteEarlyErr) {
+        console.warn("[puente-guard] error en aviso temprano:", puenteEarlyErr);
+      }
 
       // Si saltamos el reenvío de ficha, resolver el nombre oficial en BD para la IA y el contexto.
       if (skipSingleFincaCardResend) {
@@ -2070,9 +2401,9 @@ Fincas disponibles: ${fincaNames}`,
         });
         const promptOverridePetsOnSelectionText =
           promptOverrideForPetsOnSelection &&
-          typeof promptOverrideForPetsOnSelection === "object" &&
-          "prompt" in promptOverrideForPetsOnSelection &&
-          typeof (promptOverrideForPetsOnSelection as { prompt?: unknown }).prompt === "string"
+            typeof promptOverrideForPetsOnSelection === "object" &&
+            "prompt" in promptOverrideForPetsOnSelection &&
+            typeof (promptOverrideForPetsOnSelection as { prompt?: unknown }).prompt === "string"
             ? (promptOverrideForPetsOnSelection as { prompt: string }).prompt.trim()
             : "";
         const effectivePromptForPetsOnSelection =
@@ -2082,7 +2413,7 @@ Fincas disponibles: ${fincaNames}`,
         const petsBeforeQuoteMsg =
           extractQuickReplyBlock(effectivePromptForPetsOnSelection, "mascotas finca seleccionada") ||
           "Perfecto 👌 Antes de confirmar la cotización, ¿van a llevar mascotas? 🐾\n\n" +
-            "Si la respuesta es sí, dime cuántas para validar que esta finca aplique y calcular los cargos correspondientes.";
+          "Si la respuesta es sí, dime cuántas para validar que esta finca aplique y calcular los cargos correspondientes.";
         await ctx.runMutation(internal.messages.insertAssistantMessage, {
           conversationId,
           content: petsBeforeQuoteMsg,
@@ -2332,12 +2663,38 @@ En FincasYa.com tu alquiler siempre es seguro, respaldado y con total tranquilid
           replyText,
           knownReservationData,
           fincaTitle ||
-            confirmedFincaTitle ||
-            confirmedFincaInHistoryTitle ||
-            selectedCatalogPropertyTitle,
+          confirmedFincaTitle ||
+          confirmedFincaInHistoryTitle ||
+          selectedCatalogPropertyTitle,
         );
         if (replyText !== beforeQuoteRepair) {
           console.warn("[prompt-strip] Cotización: sustituido encabezado con placeholders por datos del hilo.");
+        }
+
+        const beforeEventOrientStrip = replyText;
+        replyText = stripEventCelebrationOrientationFromModelReply(replyText);
+        if (replyText !== beforeEventOrientStrip) {
+          console.warn(
+            "[prompt-strip] Retirado párrafo «Con el fin de orientarte mejor…» del modelo (segunda burbuja solo desde backend tras datos).",
+          );
+        }
+
+        const petCountThisTurn = extractPetCountFromUserMessage(currentMessageText);
+        const fincaChosenForPetPolicyGuard = !!(
+          fincaTitle ||
+          confirmedFincaTitle ||
+          confirmedFincaInHistoryTitle ||
+          selectedCatalogPropertyTitle
+        );
+        const beforePetAdvisorRepair = replyText;
+        replyText = repairAssistantPetAdvisorHallucination(replyText, {
+          fincaChosen: fincaChosenForPetPolicyGuard,
+          petCount: petCountThisTurn,
+        });
+        if (replyText !== beforePetAdvisorRepair) {
+          console.warn(
+            "[pet-policy-guard] Sustituida respuesta que pedía asesor/validación por política estándar de mascotas.",
+          );
         }
 
         // Si el cliente ya dio datos clave (fechas/personas/grupo/mascota) y la IA pregunta
@@ -2391,6 +2748,43 @@ En FincasYa.com tu alquiler siempre es seguro, respaldado y con total tranquilid
             // El strip deja solo "Gracias. ?" — mejor avanzar al siguiente paso del embudo.
             replyText = buildEventVsDescansoFunnelPrompt(knownReservationData);
           }
+        }
+
+        // Si el cliente ya dijo en el hilo si era evento/fiesta o solo descansar, no volver a preguntarlo.
+        const eventOrDescansoAlreadyKnown =
+          threadHasEventVsDescansoClarification(_allUserTextsEarly);
+        if (
+          eventOrDescansoAlreadyKnown &&
+          /¿\s*Tienes\s+contemplad[ao]\s+la\s+finca\s+para\s+alg[uú]n\s+tipo\s+de\s+evento/i.test(
+            replyText,
+          )
+        ) {
+          const beforeEventStrip = replyText;
+          const cleanedEvent = stripEventDescansoQuestionWhenKnown(replyText);
+          if (cleanedEvent.length >= 20) {
+            replyText = cleanedEvent;
+            console.warn(
+              "[prompt-strip] Pregunta evento/descanso eliminada — el cliente ya la respondió en el hilo.",
+            );
+          } else if (hasConcreteFincaSelection) {
+            // Ya hay finca elegida + evento conocido: mejor preguntar mascotas (paso pre-cotización).
+            replyText =
+              "Perfecto 👌 Antes de confirmar la cotización, ¿van a llevar mascotas? 🐾\n\n" +
+              "Si la respuesta es sí, dime cuántas para validar que esta finca aplique y calcular los cargos correspondientes.";
+          } else {
+            replyText = buildMissingReservationDetailsPrompt(knownReservationData);
+          }
+          if (replyText !== beforeEventStrip) {
+            // noop — log ya emitido arriba.
+          }
+        }
+
+        const beforeRedundantPersonasFechas = replyText;
+        replyText = stripRedundantPersonasFechasAskWhenKnown(replyText, knownReservationData);
+        if (replyText !== beforeRedundantPersonasFechas) {
+          console.warn(
+            "[prompt-strip] Eliminado pedido redundante de personas/fechas — ya constan en el hilo parseado.",
+          );
         }
 
         // Evita repetir "¿Cuál finca te llamó la atención?" si el asistente
@@ -2507,7 +2901,7 @@ En FincasYa.com tu alquiler siempre es seguro, respaldado y con total tranquilid
               const direccion = String(parsed.direccion ?? "");
               const entradaHora = String(parsed.entradaHora ?? "");
               const salidaHora = String(parsed.salidaHora ?? "");
-              
+
               const cleanReplyText = replyText.split(tag)[0].trim();
 
               const PAYMENT_PROCESS_TEXT = `👨‍💻 Proceso de reserva:
@@ -2526,8 +2920,8 @@ En FincasYa.com tu alquiler siempre es seguro, respaldado y con total tranquilid
 
               const textToSend = cleanReplyText
                 ? (alreadyHasPaymentInfo
-                    ? cleanReplyText
-                    : `${cleanReplyText}\n\n${PAYMENT_PROCESS_TEXT}`)
+                  ? cleanReplyText
+                  : `${cleanReplyText}\n\n${PAYMENT_PROCESS_TEXT}`)
                 : `¡Listo! He recibido todos tus datos para la reserva. ✨\n\n${PAYMENT_PROCESS_TEXT}`;
 
               // Enviar el mensaje visible del asistente (sin el bloque técnico)
@@ -2661,6 +3055,41 @@ En FincasYa.com tu alquiler siempre es seguro, respaldado y con total tranquilid
               });
             }
           }
+
+          const alreadySentEventCelebrationFollowUp = recentForCatalogIntent.some(
+            (m: any) =>
+              m.sender === "assistant" &&
+              /\borientarte mejor y ofrecerte\b/i.test(String(m.content ?? "")),
+          );
+          const shouldSendEventCelebrationFollowUp =
+            clientJustCompletedPersonalDataThisTurn &&
+            hasEventIntentInReservationThread(_allUserTextsEarly) &&
+            !replyText.includes("[CONTRACT_PDF:") &&
+            !/\borientarte mejor y ofrecerte\b/i.test(sentAssistantText) &&
+            !alreadySentEventCelebrationFollowUp;
+          if (shouldSendEventCelebrationFollowUp) {
+            await new Promise((resolve) => setTimeout(resolve, 550));
+            if (
+              !(await shouldAbortIfNotLatestUser("before_event_celebration_followup")) &&
+              !(await shouldAbortIfAssistantAlreadyReplied("before_event_celebration_followup"))
+            ) {
+              try {
+                await ctx.runAction(internal.ycloud.sendWhatsAppMessage, {
+                  to: args.phone,
+                  text: EVENT_DETAIL_AFTER_CONTRACT_DATA_MESSAGE,
+                  wamid: args.wamid,
+                });
+                await ctx.runMutation(internal.messages.insertAssistantMessage, {
+                  conversationId,
+                  content: EVENT_DETAIL_AFTER_CONTRACT_DATA_MESSAGE,
+                  createdAt: Date.now(),
+                });
+                console.log("[event-followup] Orientación celebración enviada tras datos completos.");
+              } catch (e) {
+                console.error("[event-followup] Error enviando segunda burbuja:", e);
+              }
+            }
+          }
         }
       }
     }
@@ -2727,9 +3156,9 @@ export const generateReplyWithRagAndFincas = internalAction({
     });
     const promptOverrideText =
       promptOverride &&
-      typeof promptOverride === "object" &&
-      "prompt" in promptOverride &&
-      typeof (promptOverride as { prompt?: unknown }).prompt === "string"
+        typeof promptOverride === "object" &&
+        "prompt" in promptOverride &&
+        typeof (promptOverride as { prompt?: unknown }).prompt === "string"
         ? (promptOverride as { prompt: string }).prompt.trim()
         : "";
     const effectiveBasePrompt =
@@ -2814,11 +3243,10 @@ Si falta algún dato puntual (p.ej. correo o ciudad de residencia), PIDE SOLO es
     } else {
       const threadKnown =
         args.knownDataSummary && args.knownDataSummary.trim().length > 0
-          ? `**Resumen de lo que el cliente ya dijo:** ${args.knownDataSummary}\n${
-              args.hasKnownLocation === true
-                ? "**NO** vuelvas a preguntar en qué ciudad o municipio — el destino ya consta arriba o en el historial. **PROHIBIDO** el bloque «Te puedo mostrar opciones en: Anapoima, Girardot…» ni «¿En dónde te gustaría empezar?»: el cliente ya eligió zona. Sigue con el siguiente dato del embudo (tipo de plan si faltara, o una sola línea evento vs descanso, o deja el catálogo).\n\n"
-                : ""
-            }`
+          ? `**Resumen de lo que el cliente ya dijo:** ${args.knownDataSummary}\n${args.hasKnownLocation === true
+            ? "**NO** vuelvas a preguntar en qué ciudad o municipio — el destino ya consta arriba o en el historial. **PROHIBIDO** el bloque «Te puedo mostrar opciones en: Anapoima, Girardot…» ni «¿En dónde te gustaría empezar?»: el cliente ya eligió zona. Sigue con el siguiente dato del embudo (tipo de plan si faltara, o una sola línea evento vs descanso, o deja el catálogo).\n\n"
+            : ""
+          }`
           : args.hasKnownLocation === true
             ? "**El cliente ya indicó un municipio/destino en el hilo.** NO preguntes de nuevo por ciudad ni listes zonas. **PROHIBIDO** «Te puedo mostrar opciones en…» / «¿En dónde te gustaría empezar?».\n\n"
             : "";
@@ -2833,11 +3261,11 @@ Si falta algún dato puntual (p.ej. correo o ciudad de residencia), PIDE SOLO es
         args.userMessage,
       ].join(" ");
 
-      const monthNames: Record<string, number> = { enero:0,febrero:1,marzo:2,abril:3,mayo:4,junio:5,julio:6,agosto:7,septiembre:8,octubre:9,noviembre:10,diciembre:11 };
+      const monthNames: Record<string, number> = { enero: 0, febrero: 1, marzo: 2, abril: 3, mayo: 4, junio: 5, julio: 6, agosto: 7, septiembre: 8, octubre: 9, noviembre: 10, diciembre: 11 };
       // Regex más robusta para fechas: "20 al 25 de abril", "del 20 al 25", "20 hasta el 25 de mayo"
       const dateRangeMatch = fullConversationText.match(/(?:del\s+|desde el\s+|desde\s+)?(\d{1,2})\s*(?:al|hasta el|hasta|a)\s*(\d{1,2})/i);
       const monthMatch = fullConversationText.match(/\b(enero|febrero|marzo|abril|mayo|junio|julio|agosto|septiembre|octubre|noviembre|diciembre)\b/i);
-      
+
       let parsedDates: { start: string, end: string } | null = null;
       if (dateRangeMatch) {
         const d1 = parseInt(dateRangeMatch[1], 10);
@@ -2845,9 +3273,9 @@ Si falta algún dato puntual (p.ej. correo o ciudad de residencia), PIDE SOLO es
         const now = new Date();
         const monthIndex = monthMatch ? monthNames[monthMatch[1].toLowerCase()] ?? now.getMonth() : now.getMonth();
         const year = now.getFullYear();
-        
+
         const monthNum = String(monthIndex + 1).padStart(2, '0');
-        
+
         // Formato YYYY-MM-DD manual para evitar desfases de zona horaria
         parsedDates = {
           start: `${year}-${monthNum}-${String(d1).padStart(2, '0')}`,
@@ -2869,7 +3297,7 @@ Si falta algún dato puntual (p.ej. correo o ciudad de residencia), PIDE SOLO es
             });
 
             if (pricingRes && pricingRes.total > 0) {
-              const breakdown = pricingRes.nights.map((n: any) => 
+              const breakdown = pricingRes.nights.map((n: any) =>
                 `    - ${n.date} (${n.ruleName}): $${n.price.toLocaleString("es-CO")}`
               ).join("\n");
 
@@ -3065,8 +3493,8 @@ function formatFincasForPrompt(
         p.isDirect === true || p.isDirectBooking === true
           ? "🟢 Finca Propia (disponibilidad directa)"
           : p.isDirect === false
-          ? "🔵 Finca de Propietario (disponibilidad a confirmar con propietario)"
-          : "";
+            ? "🔵 Finca de Propietario (disponibilidad a confirmar con propietario)"
+            : "";
       const typeLine = propertyType ? ` | Tipo: ${propertyType}` : "";
       const base = `- ${p.title} (ID: ${p._id}): ${p.description ?? ""} | Ubicación: ${p.location ?? "N/A"} | Capacidad: ${p.capacity ?? "N/A"} personas | Precio base/noche: ${money(p.priceBase)}${typeLine}`;
       const seasons: string[] = [];
@@ -3116,7 +3544,7 @@ function buildSystemPrompt(
   }
 ): string {
   let basePrompt = basePromptInput || CONSULTANT_SYSTEM_PROMPT;
-  
+
   // Reemplazo dinámico o limpieza del listado de ciudades
   if (opts?.dynamicLocations) {
     basePrompt = basePrompt.replace(/{DYNAMIC_LOCATIONS_LIST}/g, opts.dynamicLocations);
@@ -3168,7 +3596,7 @@ En este turno el sistema **puede aún no haber enviado** el catálogo de WhatsAp
     ? "**MODO FALLBACK ACTIVO:** El catálogo interactivo de WhatsApp NO está disponible para esta ciudad (fincas no registradas en Meta). EXCEPCIÓN: DEBES listar en texto las fincas disponibles con nombre, capacidad y precio base. Usa viñetas simples. Después pregunta cuál le interesa."
     : "**REGLA ABSOLUTA: NUNCA listes nombres de fincas en texto, con o sin catálogo enviado. El catálogo interactivo de WhatsApp muestra todas las propiedades con fotos, precios y detalles. Si no fue enviado aún, el sistema lo enviará por separado. Tu respuesta de texto debe ser SOLO confirmación breve + pregunta concreta.**";
 
-  const dynamicLocationsText = opts?.dynamicLocations 
+  const dynamicLocationsText = opts?.dynamicLocations
     ? `\n**UBICACIONES DISPONIBLES EN TIEMPO REAL:** ${opts.dynamicLocations}`
     : "";
 
@@ -3947,10 +4375,16 @@ export const maybeSendQuickReplyTemplateByIntent = internalAction({
         .replace(/\s+/g, " ")
         .trim();
 
-    const OPENING_QUALIFICATION_TEXT =
-      "Hola, gracias por comunicarte con FincasYa.com 🏡, con gusto te ayudamos a encontrar la finca ideal para tu estadía. ✨\n\n" +
-      "Para poder recomendarte la mejor opción, te haremos unas preguntas rápidas. Esto nos ayuda porque algunas fincas tienen restricciones sobre cantidad de personas, tipo de evento, sonido, decoración o ingreso de invitados adicionales. ✅\n\n" +
-      "¿Para cuántas personas necesitas la finca? 👥";
+    const normalizedUserForOpening = normalizeText(args.userMessage || "");
+    const isOpeningGreetingForWelcome =
+      /^(hola|hol|holaa|holi|holis|hols|hi|hello|hey|buenos|buenas|buen dia|buen día|que tal|qué tal|saludos|informacion|información|info|me ayudas)\b/i.test(
+        normalizedUserForOpening,
+      ) && normalizedUserForOpening.length <= 90;
+    const hasAssistantHistoryForWelcome = recent.some((m: any) => m.sender === "assistant");
+    const openingWelcomeResolved =
+      isOpeningGreetingForWelcome && !hasAssistantHistoryForWelcome && !args.isReactivated
+        ? await resolveOfficialOpeningWelcomeText(ctx)
+        : null;
 
     const isTemplateWelcomeLike = (template: any) => {
       const meta = normalizeText(
@@ -4030,24 +4464,17 @@ export const maybeSendQuickReplyTemplateByIntent = internalAction({
     };
 
     if (!selectedIntent) {
-      const normalizedUser = normalizeText(args.userMessage || "");
-      const isOpeningGreeting =
-        /^(hola|hol|holaa|holi|holis|hols|hi|hello|hey|buenos|buenas|buen dia|buen día|que tal|qué tal|saludos|informacion|información|info|me ayudas)\b/i.test(
-          normalizedUser
-        ) && normalizedUser.length <= 90;
-      const hasAssistantHistory = recent.some((m: any) => m.sender === "assistant");
-
       // isReactivated=true: el cliente ya habló antes → NO enviar bienvenida desde cero aunque no haya historial visible.
-      if (isOpeningGreeting && !hasAssistantHistory && !args.isReactivated) {
-        console.log("[quick-template] apertura detectada, enviando onboarding comercial");
+      if (openingWelcomeResolved) {
+        console.log("[quick-template] apertura detectada, enviando bienvenida oficial (Hernán / checklist)");
         await ctx.runAction(internal.ycloud.sendWhatsAppMessage, {
           to: args.phone,
-          text: OPENING_QUALIFICATION_TEXT,
+          text: openingWelcomeResolved,
           wamid: args.wamid,
         });
         await ctx.runMutation(internal.messages.insertAssistantMessage, {
           conversationId: args.conversationId,
-          content: OPENING_QUALIFICATION_TEXT,
+          content: openingWelcomeResolved,
           createdAt: Date.now(),
         });
         return { sent: true };
@@ -4057,25 +4484,17 @@ export const maybeSendQuickReplyTemplateByIntent = internalAction({
     const selectedTemplate = templates.find((t: any) => t.intentKey === selectedIntent);
     if (!selectedTemplate) return { sent: false };
 
-    // Para saludo inicial, siempre usar el texto fijo de apertura.
-    // Esto evita variaciones por plantillas DB y garantiza un único saludo oficial.
-    const normalizedUser = normalizeText(args.userMessage || "");
-    const isOpeningGreeting =
-      /^(hola|hol|holaa|holi|holis|hols|hi|hello|hey|buenos|buenas|buen dia|buen día|que tal|qué tal|saludos|informacion|información|info|me ayudas)\b/i.test(
-        normalizedUser
-      ) && normalizedUser.length <= 90;
-    const hasAssistantHistory = recent.some((m: any) => m.sender === "assistant");
-    // isReactivated=true: evitar bienvenida completa cuando cliente ya habló antes.
-    if (isOpeningGreeting && !hasAssistantHistory && !args.isReactivated) {
-      console.log("[quick-template] saludo inicial detectado, enviando saludo fijo oficial");
+    // Para saludo inicial, siempre usar el mismo texto que el prompt oficial (no plantillas DB genéricas).
+    if (openingWelcomeResolved) {
+      console.log("[quick-template] saludo inicial detectado, enviando bienvenida oficial");
       await ctx.runAction(internal.ycloud.sendWhatsAppMessage, {
         to: args.phone,
-        text: OPENING_QUALIFICATION_TEXT,
+        text: openingWelcomeResolved,
         wamid: args.wamid,
       });
       await ctx.runMutation(internal.messages.insertAssistantMessage, {
         conversationId: args.conversationId,
-        content: OPENING_QUALIFICATION_TEXT,
+        content: openingWelcomeResolved,
         createdAt: Date.now(),
       });
       return { sent: true };
@@ -4206,16 +4625,16 @@ export type CatalogIntent =
   | { intent: "single_finca"; fincaName: string }
   | { intent: "more_options" }
   | {
-      intent: "search_catalog";
-      location: string;
-      hasWeekend?: boolean;
-      dateD1?: number;
-      dateD2?: number;
-      dateMonth?: number;
-      minCapacity?: number;
-      sortByPrice?: boolean;
-      hasPets?: boolean;
-    };
+    intent: "search_catalog";
+    location: string;
+    hasWeekend?: boolean;
+    dateD1?: number;
+    dateD2?: number;
+    dateMonth?: number;
+    minCapacity?: number;
+    sortByPrice?: boolean;
+    hasPets?: boolean;
+  };
 
 const ALL_LOCATIONS_CATALOG_LABEL = "varios destinos";
 const MONTH_NAMES: Record<string, number> = {
@@ -4423,9 +4842,9 @@ export const detectCatalogIntentWithAI = internalAction({
     let text: string;
     try {
       const out = await generateText({
-      model: openai.chat(CONVEX_OPENAI_CHAT_MODEL),
-      temperature: 1,
-      system: `Eres un clasificador. Del mensaje del usuario extrae la intención y datos. Responde SOLO con un JSON válido, sin markdown, sin explicación.
+        model: openai.chat(CONVEX_OPENAI_CHAT_MODEL),
+        temperature: 1,
+        system: `Eres un clasificador. Del mensaje del usuario extrae la intención y datos. Responde SOLO con un JSON válido, sin markdown, sin explicación.
 
 Reglas:
 - intent: "single_finca" si pide VER o RESERVAR una finca específica por nombre (ej. "quiero ver villa green", "me gustaría reservar la finca X", "quinto la finca X", "esta es la finca que elegí"). **CRÍTICO:** Aunque el mensaje incluya fechas, personas u otros datos de reserva, si menciona un nombre de finca específico, DEBES marcarlo como "single_finca". También si es una confirmación para una finca mencionada justo antes. En fincaName pon solo el nombre de la finca en minúsculas.
@@ -4458,8 +4877,8 @@ Contexto: "Asistente: ¿Te gustaría avanzar con la reserva? | Cliente: Si" → 
 Contexto: "Asistente: Para elaborar el contrato necesito tus datos... | Cliente: Sí claro" → {"intent":"none"}
 
 Mes actual: ${month + 1}, año: ${year}.`,
-      prompt: args.userMessage,
-    });
+        prompt: args.userMessage,
+      });
       text = out.text;
     } catch (e) {
       console.error("detectCatalogIntentWithAI: fallo del modelo o respuesta inválida:", e);
@@ -4501,6 +4920,33 @@ Mes actual: ${month + 1}, año: ${year}.`,
 });
 
 /**
+ * Si el clasificador IA falla o devuelve "none", reconstruir `search_catalog` desde
+ * ciudad del portafolio + rango de fechas explícito en mensajes del cliente.
+ */
+function inferSearchCatalogIntentFromUserThread(
+  mergedUserText: string,
+  locationKeywords: readonly string[],
+): CatalogIntent | null {
+  const merged = mergedUserText.trim();
+  if (!merged) return null;
+  if (parseSingleFincaRequest(merged)) return null;
+  if (!extractDateRangeFromText(merged)) return null;
+  const locHit = extractCatalogLocationMention(normalizeAsciiText(merged), locationKeywords);
+  if (!locHit.label) return null;
+  const resolvedKeyword = locationKeywords.find(
+    (k) => normalizeAsciiText(String(k)) === locHit.label,
+  );
+  const normalizedLoc = normalizeCatalogLocation(String(resolvedKeyword ?? locHit.label));
+  if (normalizedLoc.length < 2 || isInvalidCatalogLocation(normalizedLoc)) return null;
+  return {
+    intent: "search_catalog",
+    location: normalizedLoc,
+    hasPets: detectPetsFromText(merged),
+    minCapacity: extractCapacityFromText(merged),
+  };
+}
+
+/**
  * Parsea si el usuario pide ver una finca concreta por nombre (ej. "quiero ver la finca de villa green").
  * Devuelve el término de búsqueda o null.
  */
@@ -4517,7 +4963,17 @@ function parseSingleFincaRequest(userMessage: string): string | null {
   ) {
     return null;
   }
+  const laDeWithPropertyName = msg.match(
+    /\bla\s+de\b[\s\S]{0,220}?\b(villa|casa|quinta|finca|chalet|hacienda)\s+([a-záéíóúñ0-9#\-]{2,})\b/i,
+  );
+  if (laDeWithPropertyName) {
+    const term =
+      `${laDeWithPropertyName[1]} ${laDeWithPropertyName[2]}`.trim();
+    if (term.length >= 4) return term;
+  }
   const patterns = [
+    // "quiero reserva(s) la de villa rosa" (evita "quiero reservar en melgar" → nombre de finca).
+    /quiero\s+(?:reservar|reservas?)\s+(?:la\s+de\s+|el\s+de\s+)([a-záéíóúñ0-9\s#]+)/i,
     /(?:quiero\s+)?(?:ver|mostrar)\s+(?:la\s+)?(?:finca\s+)?(?:de\s+)?([a-záéíóúñ0-9\s#]+)/i,
     /(?:la\s+)?finca\s+(?:de\s+)?([a-záéíóúñ0-9\s#]+)/i,
   ];
@@ -4768,6 +5224,185 @@ function messageLooksLikePetAnswer(userMessage: string): boolean {
   );
 }
 
+function getLastAssistantMessageContentFromRecent(
+  recentAscending: readonly { sender: string; content?: unknown }[],
+): string {
+  for (let i = recentAscending.length - 1; i >= 0; i--) {
+    if (recentAscending[i].sender === "assistant") {
+      return String(recentAscending[i].content ?? "");
+    }
+  }
+  return "";
+}
+
+/** El asistente preguntó por mascotas para seguir con la cotización (no un cierre genérico de catálogo). */
+function assistantMessageWasPetConfirmationQuestion(assistantContent: string): boolean {
+  const t = String(assistantContent ?? "").toLowerCase();
+  if (!/\b(mascotas?|perros?|gatos?)\b/.test(t)) return false;
+  if (
+    /\b(van\s+a\s+llevar|llevan|llevar[aá]n?|traer[aá]n?|tienes?\s+contemplad[ao])\b/i.test(t) &&
+    /\b(mascotas?|perros?|gatos?)\b/.test(t)
+  ) {
+    return true;
+  }
+  if (/\b(cu[aá]ntas|cuantas)\b/i.test(t) && /\b(mascotas?|perros?|gatos?)\b/.test(t)) return true;
+  if (/\b(antes\s+de\s+confirmar|c[oó]tizaci[oó]n).{0,160}\b(mascotas?|perros?|gatos?)\b/i.test(t)) {
+    return true;
+  }
+  return false;
+}
+
+/** Recap de política de mascotas o invitación a catálogo por mascotas (tras elegir finca). */
+function assistantMessageWasPetPolicyRecapOrCatalogInvite(assistantContent: string): boolean {
+  const t = String(assistantContent ?? "").toLowerCase();
+  if (!/\b(mascotas?|perros?|gatos?)\b/.test(t)) return false;
+  return (
+    /\bpor\s+pol[ií]tica\s+de\s+fincasya\b/i.test(t) ||
+    /\b1ra\s+y\s+2da\s+mascota\b/i.test(t) ||
+    /\bahora\s+te\s+comparto\s+las\s+fincas\b/i.test(t)
+  );
+}
+
+/**
+ * Mensaje del asistente que indica que estamos en la fase post-elección de finca:
+ * pregunta de evento, mascotas, cotización, o solicitud de datos personales/contrato.
+ */
+function assistantMessageInPostFincaBookingContext(assistantContent: string): boolean {
+  const t = String(assistantContent ?? "").toLowerCase();
+  if (assistantMessageWasPetConfirmationQuestion(t)) return true;
+  if (assistantMessageWasPetPolicyRecapOrCatalogInvite(t)) return true;
+  if (
+    /\b(evento|fiesta|celebraci|tipo\s+de\s+evento)\b/i.test(t) &&
+    /\b(contemplad[ao]|tienes?\s+contemplad[ao]|descansar\s+y\s+compartir|solamente\s+para\s+descansar)\b/i.test(
+      t,
+    )
+  ) {
+    return true;
+  }
+  if (/\b(antes\s+de\s+confirmar\s+la\s+cotizaci[oó]n|cotizaci[oó]n\s+formal)\b/i.test(t)) return true;
+  if (
+    /\b(datos\s+(de\s+la\s+persona|del\s+responsable|para\s+el\s+contrato)|elaborar\s+tu\s+contrato|persona\s+responsable|contrato\s+de\s+arrendamiento|c[eé]dula|n[uú]mero\s+de\s+documento|foto\s+de\s+(la\s+)?c[eé]dula)\b/i.test(
+      t,
+    )
+  ) {
+    return true;
+  }
+  return false;
+}
+
+function recentAssistantInPostFincaBookingContext(
+  recentAscending: readonly { sender: string; content?: unknown }[],
+): boolean {
+  let assistantCount = 0;
+  for (let i = recentAscending.length - 1; i >= 0; i--) {
+    if (recentAscending[i].sender !== "assistant") continue;
+    const t = String(recentAscending[i].content ?? "");
+    if (assistantMessageInPostFincaBookingContext(t)) return true;
+    assistantCount++;
+    if (assistantCount >= 8) break;
+  }
+  return false;
+}
+
+/** Alguno de los últimos mensajes del asistente encaja en confirmación o política de mascotas. */
+function recentAssistantInPetBookingContext(
+  recentAscending: readonly { sender: string; content?: unknown }[],
+): boolean {
+  let assistantCount = 0;
+  for (let i = recentAscending.length - 1; i >= 0; i--) {
+    if (recentAscending[i].sender !== "assistant") continue;
+    const t = String(recentAscending[i].content ?? "");
+    if (
+      assistantMessageWasPetConfirmationQuestion(t) ||
+      assistantMessageWasPetPolicyRecapOrCatalogInvite(t)
+    ) {
+      return true;
+    }
+    assistantCount++;
+    if (assistantCount >= 8) break;
+  }
+  return false;
+}
+
+/** El hilo del usuario ya indica reserva / elección de una propiedad concreta (no solo ciudad + fechas). */
+function userThreadSignalsConcretePropertyChoice(mergedUserText: string): boolean {
+  const t = mergedUserText.trim();
+  if (!t) return false;
+  if (parseSingleFincaRequest(t)) return true;
+  const norm = t.toLowerCase().normalize("NFD").replace(/\p{M}/gu, "");
+  if (/\bquiero\s+(?:reservar|reservas?)\b/.test(norm)) {
+    if (/\b(esa|este|esta|esa\s+de|este\s+de|esta\s+de|la\s+de|el\s+de)\b/.test(norm)) return true;
+    if (/\b(quinta|villa|casa\s+[a-záéíóúñ#]|finca\s+[a-záéíóúñ#]|chalet|hacienda)\b/.test(norm)) {
+      return true;
+    }
+  }
+  if (
+    /\b(eleg[ií]|elijo|me\s+quedo\s+con|reservo)\b/.test(norm) &&
+    /\b(quinta|villa|casa|finca)\b/.test(norm)
+  ) {
+    return true;
+  }
+  // "la de melgar. villa hermosa" / "la de mergar, quinta X" — elige nombre sin "quiero reservar".
+  if (
+    /\bla\s+de\b/i.test(norm) &&
+    /\b(quinta|villa|casa|finca|chalet|hacienda)\s+[a-záéíóúñ0-9#\-]{2,}/i.test(norm)
+  ) {
+    return true;
+  }
+  return false;
+}
+
+/**
+ * Evita reabrir catálogo múltiple cuando el cliente ya eligió finca y solo responde cuántas mascotas.
+ */
+function shouldBlockBroadCatalogForPetFollowUpAfterFincaChoice(
+  currentUserMessage: string,
+  recentAscending: readonly { sender: string; content?: unknown }[],
+): boolean {
+  if (!messageLooksLikePetAnswer(currentUserMessage)) return false;
+  if (
+    /\b(otras\s+opciones?|otra\s+finca|m[aá]s\s+fincas|ver\s+m[aá]s|cambiar\s+de\s+finca)\b/i.test(
+      currentUserMessage.toLowerCase().normalize("NFD").replace(/\p{M}/gu, ""),
+    )
+  ) {
+    return false;
+  }
+  if (!recentAssistantInPetBookingContext(recentAscending)) return false;
+  const mergedUser = [
+    currentUserMessage,
+    ...recentAscending.filter((m) => m.sender === "user").map((m) => String(m.content ?? "")),
+  ].join("\n");
+  return userThreadSignalsConcretePropertyChoice(mergedUser);
+}
+
+/**
+ * Bloqueo amplio: si el cliente ya eligió finca concreta y la conversación reciente está en
+ * fase de cotización (mascotas, evento, datos), NO reabrir catálogo multi a menos que pida explícitamente
+ * "otras opciones" / "más fincas" / "cambiar de finca".
+ */
+function shouldBlockBroadCatalogAfterFincaChosen(
+  currentUserMessage: string,
+  recentAscending: readonly { sender: string; content?: unknown }[],
+): boolean {
+  const lowerCurrent = (currentUserMessage ?? "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/\p{M}/gu, "");
+  if (
+    /\b(otras\s+opciones?|otra\s+finca|m[aá]s\s+fincas|ver\s+m[aá]s|cambiar\s+de\s+finca|otra\s+opci[oó]n)\b/i.test(
+      lowerCurrent,
+    )
+  ) {
+    return false;
+  }
+  const mergedUser = [
+    currentUserMessage,
+    ...recentAscending.filter((m) => m.sender === "user").map((m) => String(m.content ?? "")),
+  ].join("\n");
+  if (!userThreadSignalsConcretePropertyChoice(mergedUser)) return false;
+  return recentAssistantInPostFincaBookingContext(recentAscending);
+}
+
 /**
  * No reenviar catálogo de varias fincas: pago, bancos, contrato, etc.
  * Evita que un merge del historial reactive Melgar+finde cuando el usuario ya va por cierre.
@@ -4927,8 +5562,8 @@ export const maybeSendSingleFincaCatalogForUserMessage = internalAction({
     });
 
     // Obtener la primera imagen para los metadatos
-    const firstImage = await ctx.runQuery(api.fincas.getPropertyImage, { 
-      propertyId: fincaToSend._id 
+    const firstImage = await ctx.runQuery(api.fincas.getPropertyImage, {
+      propertyId: fincaToSend._id
     });
 
     await ctx.runMutation(internal.messages.insertAssistantMessageWithMedia, {
@@ -5022,6 +5657,17 @@ export const maybeSendCatalogForUserMessage = internalAction({
         .map((m: any) => String(m.content ?? "")),
     ].join("\n");
 
+    // No cortar aquí si el turno es respuesta sobre mascotas: abajo se envía la política 3+ (sin catálogo).
+    if (
+      shouldBlockBroadCatalogAfterFincaChosen(args.userMessage, recentUsersForCatalog) &&
+      !messageLooksLikePetAnswer(args.userMessage)
+    ) {
+      console.log(
+        "[catalog-guard] Sin catálogo multi — finca concreta ya elegida y flujo en cotización; no reabrir lista.",
+      );
+      return { sent: false };
+    }
+
     const catalogLocationKeywords = await ctx.runQuery(api.fincas.getAllUniqueLocations, {});
 
     let location: string;
@@ -5038,10 +5684,10 @@ export const maybeSendCatalogForUserMessage = internalAction({
     const resolvedIntentLocation =
       intent?.intent === "search_catalog" && intent.location
         ? resolveCatalogLocationForSearch(
-            intent.location,
-            mergedUserTextForCatalogGuard,
-            catalogLocationKeywords,
-          )
+          intent.location,
+          mergedUserTextForCatalogGuard,
+          catalogLocationKeywords,
+        )
         : "";
     const searchCatalogIntentUsable =
       intent?.intent === "search_catalog" &&
@@ -5240,6 +5886,26 @@ export const maybeSendCatalogForUserMessage = internalAction({
         );
         return { sent: false, location };
       }
+      // Primer catálogo: no adelantar tarjetas si falta embudo (cupo, tipo de grupo, evento vs descanso).
+      const funnelKnown = extractKnownReservationData(mergedUserTextForCatalogGuard, {
+        catalogLocationKeywords: catalogLocationKeywords,
+      });
+      const eventVsDescansoOk = threadHasEventVsDescansoClarification(mergedUserTextForCatalogGuard);
+      const userDemandsCatalogNow = asksFincasOrCatalogInMessage(mergedUserTextForCatalogGuard);
+      if (
+        !userDemandsCatalogNow &&
+        (!funnelKnown.hasCapacity || !funnelKnown.hasGroup || !eventVsDescansoOk)
+      ) {
+        console.log(
+          "[catalog-guard] Embudo incompleto — no se envía catálogo hasta cupo, tipo de grupo y evento vs descanso.",
+          {
+            hasCapacity: funnelKnown.hasCapacity,
+            hasGroup: funnelKnown.hasGroup,
+            eventVsDescansoOk,
+          },
+        );
+        return { sent: false, location };
+      }
     }
 
     // Política de negocio actual:
@@ -5284,7 +5950,9 @@ export const maybeSendCatalogForUserMessage = internalAction({
       fechaSalida = fechaSalida + 86_400_000;
     }
 
-    // Puente / festivo: 1 noche solo sábado→domingo no cumple mínimo 2 noches — avisar antes del catálogo.
+    // Puente / festivo: 1 noche solo sábado→domingo — en lugar de bloquear el catálogo, extendemos
+    // checkout +1 día (2 noches) y lo dejamos claro en el texto del listado.
+    let puenteCatalogAutoExtended = false;
     if (
       shouldBlockCatalogForPuenteOneNightSatSun(
         fechaEntrada,
@@ -5293,66 +5961,99 @@ export const maybeSendCatalogForUserMessage = internalAction({
       )
     ) {
       console.log(
-        "[catalog-guard] Puente o festivo: estadía de 1 noche sábado–domingo — no se envía catálogo hasta mín. 2 noches.",
+        "[catalog-guard] Puente/festivo + 1 noche sáb–dom: extendiendo salida +1 día para enviar catálogo (mín. 2 noches).",
       );
-      const promptOverrideForPuenteNotice = await ctx.runQuery(api.internalPages.getById, {
-        pageId: PROMPT_INTERNAL_PAGE_ID,
-      });
-      const promptOverridePuenteText =
-        promptOverrideForPuenteNotice &&
-        typeof promptOverrideForPuenteNotice === "object" &&
-        "prompt" in promptOverrideForPuenteNotice &&
-        typeof (promptOverrideForPuenteNotice as { prompt?: unknown }).prompt === "string"
-          ? (promptOverrideForPuenteNotice as { prompt: string }).prompt.trim()
-          : "";
-      const effectivePromptForPuenteNotice =
-        promptOverridePuenteText.length > 0
-          ? promptOverridePuenteText
-          : DEFAULT_CONSULTANT_SYSTEM_PROMPT;
-      const notice =
-        extractQuickReplyBlock(effectivePromptForPuenteNotice, "puente catalogo guard") ||
-        extractQuickReplyBlock(effectivePromptForPuenteNotice, "puente") ||
-        PUENTE_ONE_NIGHT_CATALOG_NOTICE_ES;
-      await ctx.runMutation(internal.messages.insertAssistantMessage, {
-        conversationId: args.conversationId,
-        content: notice,
-        createdAt: Date.now(),
-      });
-      await ctx.runAction(internal.ycloud.sendWhatsAppMessage, {
-        to: args.phone,
-        text: notice,
-        wamid: args.wamid,
-      });
-      return { sent: false, location, puenteMinNightsNoticeSent: true };
+      fechaSalida = fechaSalida + 86_400_000;
+      puenteCatalogAutoExtended = true;
     }
 
     location = normalizeCatalogLocation(location);
 
-    const fincas = searchAllLocations
+    let fincas = searchAllLocations
       ? await ctx.runQuery(api.fincas.searchAvailableByDates, {
-          fechaEntrada,
-          fechaSalida,
-          limit: CATALOG_LIMIT,
-          minCapacity,
-          excludePropertyIds,
-          sortByPrice,
-          allowsPets: hasPets,
-        })
+        fechaEntrada,
+        fechaSalida,
+        limit: CATALOG_LIMIT,
+        minCapacity,
+        excludePropertyIds,
+        sortByPrice,
+        allowsPets: hasPets,
+      })
       : await ctx.runQuery(api.fincas.searchAvailableByLocationAndDates, {
-          location,
-          fechaEntrada,
-          fechaSalida,
-          limit: CATALOG_LIMIT,
-          minCapacity,
-          excludePropertyIds,
-          sortByPrice,
-          allowsPets: hasPets,
-        });
+        location,
+        fechaEntrada,
+        fechaSalida,
+        limit: CATALOG_LIMIT,
+        minCapacity,
+        excludePropertyIds,
+        sortByPrice,
+        allowsPets: hasPets,
+      });
+    const funnelKnownForCatalog = extractKnownReservationData(mergedUserTextForCatalogGuard, {
+      catalogLocationKeywords,
+    });
+    const groupLabelNorm = normalizeAsciiText(funnelKnownForCatalog.groupLabel ?? "");
+    const groupIsFriends = /\bamig/.test(groupLabelNorm);
+    const hasEventIntentForCatalog = hasEventIntentInReservationThread(mergedUserTextForCatalogGuard);
+    if (groupIsFriends || hasEventIntentForCatalog) {
+      const beforeCompatibilityFilter = fincas.length;
+      fincas = fincas.filter((f: any) => {
+        if (groupIsFriends && f.familyOnly === true) return false;
+        if (hasEventIntentForCatalog && f.allowsEventsContent === false) return false;
+        return true;
+      });
+      if (fincas.length !== beforeCompatibilityFilter) {
+        console.log(
+          "[catalog-filter] excluidas fincas incompatibles con grupo/evento:",
+          beforeCompatibilityFilter - fincas.length,
+          "de",
+          beforeCompatibilityFilter,
+          {
+            group: funnelKnownForCatalog.groupLabel,
+            hasEventIntentForCatalog,
+          },
+        );
+      }
+    }
     console.log("[catalog-search] location:", location, "fincas encontradas (antes de catálogo):", fincas.length);
 
     if (fincas.length === 0) {
       console.log("[catalog-search] 0 fincas para", location, "fechas:", new Date(fechaEntrada).toISOString(), "-", new Date(fechaSalida).toISOString());
       return { sent: false, location };
+    }
+
+    const alreadySentPreCatalogEventOrientation = recentUsersForCatalog.some(
+      (m: any) =>
+        m.sender === "assistant" &&
+        /\borientarte mejor y ofrecerte\b/i.test(String(m.content ?? "")),
+    );
+    const eventOrientationRedundantWithThread =
+      threadAlreadyDetailedEventFunnelForPreCatalogOrientation(mergedUserTextForCatalogGuard);
+    const isFirstCatalogMulti =
+      !catalogRepeatOrMoreOptions && !(excludePropertyIds && excludePropertyIds.length > 0);
+    const shouldSendPreCatalogEventOrientation =
+      isFirstCatalogMulti &&
+      hasEventIntentInReservationThread(mergedUserTextForCatalogGuard) &&
+      !alreadySentPreCatalogEventOrientation &&
+      !eventOrientationRedundantWithThread;
+    if (shouldSendPreCatalogEventOrientation) {
+      const preCatalogEventMsg =
+        PRE_CATALOG_EVENT_ORIENTATION_PREFIX + EVENT_DETAIL_AFTER_CONTRACT_DATA_MESSAGE;
+      try {
+        await ctx.runMutation(internal.messages.insertAssistantMessage, {
+          conversationId: args.conversationId,
+          content: preCatalogEventMsg,
+          createdAt: Date.now(),
+        });
+        await ctx.runAction(internal.ycloud.sendWhatsAppMessage, {
+          to: args.phone,
+          text: preCatalogEventMsg,
+          wamid: args.wamid,
+        });
+        console.log("[event-followup] Orientación celebración/DJ enviada antes del primer catálogo.");
+      } catch (e) {
+        console.error("[event-followup] Error enviando orientación pre-catálogo:", e);
+      }
     }
 
     const fincasToSend = fincas.slice(0, CATALOG_SEND_BATCH);
@@ -5422,11 +6123,16 @@ export const maybeSendCatalogForUserMessage = internalAction({
       }
     }
 
-    const bodyText = excludePropertyIds?.length
+    let bodyText = excludePropertyIds?.length
       ? "Aquí tienes más opciones con los mismos filtros:"
       : usedInferredDates
         ? `Te comparto fincas en ${location}. Referencia de disponibilidad: próximo fin de semana. Con tus fechas exactas te cotizo la temporada que te aplica.`
         : "Estas son las fincas disponibles para tus fechas:";
+    if (puenteCatalogAutoExtended) {
+      bodyText =
+        `📌 Ese fin cae en puente/festivo: la estadía mínima es *2 noches*. Ajusté la búsqueda al checkout siguiente para mostrarte opciones válidas.\n\n` +
+        bodyText;
+    }
     const followUpProductBody = excludePropertyIds?.length
       ? "Otra opción disponible:"
       : "Aquí tienes otra opción para tus fechas:";
@@ -5522,13 +6228,21 @@ export const maybeSendCatalogForUserMessage = internalAction({
         /cargo\s+(?:[^\n]{0,30})?aseo/i.test(t)
       );
     });
+    const blockBroadCatalogAfterPetFollowUp =
+      shouldBlockBroadCatalogForPetFollowUpAfterFincaChoice(
+        args.userMessage,
+        recentUsersForCatalog,
+      ) ||
+      shouldBlockBroadCatalogAfterFincaChosen(args.userMessage, recentUsersForCatalog);
     if (hasPets === true && petCountFromHistory >= 3 && !petRuleAlreadySentInHistory) {
-      const petRuleNotice =
+      const petPolicyBody =
         `🐾 Por política de FincasYa, al viajar con ${petCountFromHistory} mascotas aplica:\n\n` +
         `• 1ra y 2da mascota: $100.000 c/u (depósito *reembolsable*) ✅\n` +
         `• Desde la 3ra en adelante: $30.000 c/u (*no reembolsable*) + cargo único de aseo $70.000 🧹\n\n` +
-        `⚠️ Las mascotas no pueden estar en piscina ni sobre los muebles.\n\n` +
-        `Ahora te comparto las fincas en ${location} que admiten mascotas para tus fechas. 🏡`;
+        `⚠️ Las mascotas no pueden estar en piscina ni sobre los muebles.`;
+      const catalogTeaser =
+        `\n\nAhora te comparto las fincas en ${location} que admiten mascotas para tus fechas. 🏡`;
+      const petRuleNotice = petPolicyBody + (blockBroadCatalogAfterPetFollowUp ? "" : catalogTeaser);
       await ctx.runMutation(internal.messages.insertAssistantMessage, {
         conversationId: args.conversationId,
         content: petRuleNotice,
@@ -5538,6 +6252,19 @@ export const maybeSendCatalogForUserMessage = internalAction({
         to: args.phone,
         text: petRuleNotice,
       });
+      if (blockBroadCatalogAfterPetFollowUp) {
+        console.log(
+          "[catalog-guard] Política 3+ mascotas enviada sin reabrir catálogo — finca ya elegida; sigue cotización / datos.",
+        );
+        return { sent: false, location, fincasCount: fincas.length };
+      }
+    }
+
+    if (blockBroadCatalogAfterPetFollowUp) {
+      console.log(
+        "[catalog-guard] Sin catálogo multi — respuesta de mascotas con finca ya elegida; sigue cotización / datos.",
+      );
+      return { sent: false, location, fincasCount: fincas.length };
     }
 
     try {
@@ -5611,10 +6338,10 @@ export const maybeSendCatalogForUserMessage = internalAction({
             slug: f.slug || f.code || f._id,
             ...(stayPrice
               ? {
-                  appliedRule: stayPrice.rule,
-                  staySubtotal: stayPrice.staySubtotal,
-                  nights: stayPrice.nights,
-                }
+                appliedRule: stayPrice.rule,
+                staySubtotal: stayPrice.staySubtotal,
+                nights: stayPrice.nights,
+              }
               : {}),
           },
         },
@@ -5674,39 +6401,39 @@ export const sendWhatsAppCatalogList = internalAction({
       const body: Record<string, unknown> =
         args.productRetailerIds.length === 1
           ? {
-              from: wabaNumber,
-              to: args.to,
-              type: "interactive",
-              interactive: {
-                type: "product",
-                body: { text: bodyText },
-                footer: { text: "FincasYa" },
-                action: {
-                  catalog_id: catalogIdToUse,
-                  product_retailer_id: args.productRetailerIds[0],
-                },
+            from: wabaNumber,
+            to: args.to,
+            type: "interactive",
+            interactive: {
+              type: "product",
+              body: { text: bodyText },
+              footer: { text: "FincasYa" },
+              action: {
+                catalog_id: catalogIdToUse,
+                product_retailer_id: args.productRetailerIds[0],
               },
-            }
+            },
+          }
           : {
-              from: wabaNumber,
-              to: args.to,
-              type: "interactive",
-              interactive: {
-                type: "product_list",
-                header: { type: "text", text: "Fincas" },
-                body: { text: bodyText },
-                footer: { text: "FincasYa" },
-                action: {
-                  catalog_id: catalogIdToUse,
-                  sections: [
-                    {
-                      title: "Fincas disponibles",
-                      product_items: args.productRetailerIds.map((id) => ({ product_retailer_id: id })),
-                    },
-                  ],
-                },
+            from: wabaNumber,
+            to: args.to,
+            type: "interactive",
+            interactive: {
+              type: "product_list",
+              header: { type: "text", text: "Fincas" },
+              body: { text: bodyText },
+              footer: { text: "FincasYa" },
+              action: {
+                catalog_id: catalogIdToUse,
+                sections: [
+                  {
+                    title: "Fincas disponibles",
+                    product_items: args.productRetailerIds.map((id) => ({ product_retailer_id: id })),
+                  },
+                ],
               },
-            };
+            },
+          };
       if (args.wamid) body.context = { message_id: args.wamid };
       return body;
     };
@@ -5754,7 +6481,7 @@ export const sendWhatsAppCatalogList = internalAction({
  * Prioriza bloques [CONTRACT_PDF:...] existentes o usa la IA para inferir.
  */
 export const extractContractData = action({
-  args: { 
+  args: {
     conversationId: v.id("conversations"),
     forceFresh: v.optional(v.boolean()),
   },
@@ -5864,8 +6591,8 @@ export const extractContractData = action({
       });
       const contact: any = conv
         ? await ctx.runQuery(api.contacts.getById, {
-            contactId: conv.contactId,
-          })
+          contactId: conv.contactId,
+        })
         : null;
 
       // Intentar extraer numeroPersonas de la historia si falta en el JSON
@@ -5875,8 +6602,8 @@ export const extractContractData = action({
         for (const msg of [...historyMessages].reverse()) {
           const text = msg.content.toLowerCase();
           // Regex para: "Huéspedes: 10", "10 personas", "pax: 8", "para 5 personas"
-          const match = text.match(/(?:huéspedes|personas|pax|cupo)(?:\s*[:\-]\s*|\s+)(\d{1,2})/i) 
-                     || text.match(/(\d{1,2})\s+(?:personas|adultos|huéspedes)/i);
+          const match = text.match(/(?:huéspedes|personas|pax|cupo)(?:\s*[:\-]\s*|\s+)(\d{1,2})/i)
+            || text.match(/(\d{1,2})\s+(?:personas|adultos|huéspedes)/i);
           if (match) {
             numeroPersonas = parseInt(match[1], 10);
             break;
@@ -5891,8 +6618,8 @@ export const extractContractData = action({
           const text = msg.content.toLowerCase();
           // Regex para: "Mascotas: 2", "llevo 2 perros", "un gato", "sin mascotas"
           const match = text.match(/(?:mascotas|perros|gatos|animales)(?:\s*[:\-]\s*|\s+)(\d{1,2})/i)
-                     || text.match(/(\d{1,2})\s+(?:mascotas|perros|gatos|animales)/i)
-                     || (/\b(un|una)\s+(mascota|perro|gato|animal)\b/i.test(text) ? [null, "1"] : null);
+            || text.match(/(\d{1,2})\s+(?:mascotas|perros|gatos|animales)/i)
+            || (/\b(un|una)\s+(mascota|perro|gato|animal)\b/i.test(text) ? [null, "1"] : null);
           if (match) {
             petCount = parseInt(match[1], 10);
             break;
@@ -5934,7 +6661,7 @@ export const extractContractData = action({
             fechaSalida: String(parsed.checkOutDate),
             numeroMascotas: petCount,
           });
-          
+
           if (pricingRes && pricingRes.subtotal !== undefined && pricingRes.nightsCount !== undefined && pricingRes.subtotal > 0) {
             databasePrice = Math.round(pricingRes.subtotal / pricingRes.nightsCount);
             databaseStayPrice = pricingRes.subtotal;
@@ -5979,18 +6706,18 @@ export const extractContractData = action({
 
           const rawNightly = Number(parsed.nightlyPrice || 0);
           const total = Number(parsed.totalPrice || parsed.precioTotal || 0);
-          
+
           // REPARACIÓN AGRESIVA: Si no hay precio de DB pero tenemos noches
           if (calculatedNoches > 0) {
             let effectiveStayPrice = stayPrice;
-            
+
             // Si el stayPrice es sospechoso (0 o igual al total teniendo mascotas), recalculamos
             if (effectiveStayPrice === 0 || (effectiveStayPrice === total && petCount > 0)) {
               const pets = Number(petCount || 0);
               let petSurcharge = 0;
               if (pets > 0 && pets <= 2) petSurcharge = pets * 100000;
               else if (pets >= 3) petSurcharge = pets * 30000;
-              
+
               const derivedStayPrice = total - petSurcharge;
               if (derivedStayPrice > 0) {
                 effectiveStayPrice = derivedStayPrice;
@@ -6007,7 +6734,7 @@ export const extractContractData = action({
           }
           return String(parsed.nightlyPrice || "");
         })(),
-        totalPrice: databaseStayPrice !== null 
+        totalPrice: databaseStayPrice !== null
           ? String(databaseStayPrice + (Number(parsed.totalPrice || 0) - (stayPrice || databaseStayPrice))) // Intentar mantener extras si existen
           : String(parsed.totalPrice || parsed.precioTotal || ""),
         stayPrice: databaseStayPrice || (calculatedNoches > 0 && Number(parsed.totalPrice || 0) > 0 ? Number(parsed.totalPrice || 0) : stayPrice) || undefined,
@@ -6023,41 +6750,41 @@ export const extractContractData = action({
     // 1. Intentar encontrar un bloque [CONTRACT_PDF:...] ya generado (SOLUCIÓN RÁPIDA)
     if (!forceFresh) {
       for (const msg of [...messages].reverse()) {
-      if (
-        msg.sender === "assistant" &&
-        msg.content.includes("[CONTRACT_PDF:")
-      ) {
-        const tag = "[CONTRACT_PDF:";
-        const idx = msg.content.indexOf(tag);
-        const jsonStart = msg.content.indexOf("{", idx);
-        let jsonEnd = -1;
-        if (jsonStart >= 0) {
-          let depth = 0;
-          for (let i = jsonStart; i < msg.content.length; i++) {
-            if (msg.content[i] === "{") depth++;
-            else if (msg.content[i] === "}") {
-              depth--;
-              if (depth === 0) {
-                jsonEnd = i + 1;
-                break;
+        if (
+          msg.sender === "assistant" &&
+          msg.content.includes("[CONTRACT_PDF:")
+        ) {
+          const tag = "[CONTRACT_PDF:";
+          const idx = msg.content.indexOf(tag);
+          const jsonStart = msg.content.indexOf("{", idx);
+          let jsonEnd = -1;
+          if (jsonStart >= 0) {
+            let depth = 0;
+            for (let i = jsonStart; i < msg.content.length; i++) {
+              if (msg.content[i] === "{") depth++;
+              else if (msg.content[i] === "}") {
+                depth--;
+                if (depth === 0) {
+                  jsonEnd = i + 1;
+                  break;
+                }
               }
             }
           }
-        }
-        if (jsonEnd > 0) {
-          try {
-            const parsed = JSON.parse(msg.content.slice(jsonStart, jsonEnd));
-            const normalized = await normalizeData(parsed, messages);
-            return {
-              ...normalized,
-              source: "finalized_block",
-            };
-          } catch (e) {
-            console.error("Error parsing CONTRACT_PDF block:", e);
+          if (jsonEnd > 0) {
+            try {
+              const parsed = JSON.parse(msg.content.slice(jsonStart, jsonEnd));
+              const normalized = await normalizeData(parsed, messages);
+              return {
+                ...normalized,
+                source: "finalized_block",
+              };
+            } catch (e) {
+              console.error("Error parsing CONTRACT_PDF block:", e);
+            }
           }
         }
       }
-    }
     }
 
 
