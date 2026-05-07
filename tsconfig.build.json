@@ -26,6 +26,6 @@
       "convex-helpers": ["./node_modules/convex-helpers/dist/index.d.ts"]
     }
   },
-  "include": ["src/**/*", "convex/lib/consultantPrompt.ts"],
+  "include": ["src/**/*"],
   "exclude": ["node_modules", "dist", "test", "convex", "**/*spec.ts"]
 }

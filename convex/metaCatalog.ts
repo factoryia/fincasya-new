@@ -344,7 +344,9 @@ export const resyncAllLinkedPropertiesToMeta = action({
   handler: async (ctx) => {
     const links = await ctx.runQuery(api.propertyWhatsAppCatalog.list, {});
     const uniquePropertyIds = Array.from(
-      new Set(links.map((l) => l.propertyId).filter(Boolean)),
+      new Set(
+        links.map((l: { propertyId: Id<"properties"> }) => l.propertyId).filter(Boolean),
+      ),
     ) as Array<Id<'properties'>>;
 
     let scheduled = 0;

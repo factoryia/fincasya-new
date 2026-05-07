@@ -116,6 +116,7 @@ export const sendMessage = action({
           productRetailerIds,
           bodyText,
           catalogId: catalog?.whatsappCatalogId,
+          conversationId: args.conversationId,
         });
       }
 

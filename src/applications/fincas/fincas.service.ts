@@ -151,7 +151,7 @@ import {
   DEFAULT_CONSULTANT_SYSTEM_PROMPT,
   PROMPT_INTERNAL_PAGE_ID,
   extractContractSentAutomaticMessage,
-} from '../../../convex/lib/consultantPrompt';
+} from '../../lib/consultantPrompt';
 
 @Injectable()
 export class FincasService {

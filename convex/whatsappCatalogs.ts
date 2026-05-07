@@ -1,6 +1,160 @@
 import { v } from "convex/values";
-import { query, mutation, internalMutation } from "./_generated/server";
+import {
+  query,
+  mutation,
+  internalMutation,
+  type QueryCtx,
+} from "./_generated/server";
 import type { Id } from "./_generated/dataModel";
+
+/** Reglas de precio activas (misma idea que en `fincas.ts` / `calculateStayPrice`). */
+async function getActivePricingRulesForCatalog(
+  ctx: QueryCtx,
+  propertyId: Id<"properties">,
+) {
+  const pricingRules = await ctx.db
+    .query("propertyPricing")
+    .withIndex("by_property", (q) => q.eq("propertyId", propertyId))
+    .collect();
+
+  const activeRules = [];
+  for (const rule of pricingRules) {
+    let globalData = null;
+    if (rule.globalRuleId) {
+      globalData = await ctx.db.get(rule.globalRuleId);
+    }
+    const isActive = globalData?.activa !== false && (rule.activa ?? true);
+    if (isActive) {
+      activeRules.push({
+        ...rule,
+        fechaDesde: globalData?.fechaDesde || rule.fechaDesde,
+        fechaHasta: globalData?.fechaHasta || rule.fechaHasta,
+        fechas: globalData?.fechas || rule.fechas,
+      });
+    }
+  }
+  return activeRules.sort((a, b) => (a.order ?? 999) - (b.order ?? 999));
+}
+
+function getPriceForDateCatalog(
+  dateStr: string,
+  basePrice: number,
+  activeRules: any[],
+) {
+  const parts = dateStr.split("-");
+  if (parts.length < 3)
+    return { price: basePrice, ruleName: "Estándar", ruleId: null };
+  const mmdd = `${parts[1]}-${parts[2]}`;
+
+  for (const rule of activeRules) {
+    if (rule.fechas?.includes(mmdd)) {
+      return {
+        price: rule.valorUnico ?? basePrice,
+        ruleName: rule.nombre || "Especial",
+        ruleId: rule._id,
+      };
+    }
+    if (rule.fechaDesde && rule.fechaHasta) {
+      if (rule.fechaDesde <= rule.fechaHasta) {
+        if (mmdd >= rule.fechaDesde && mmdd <= rule.fechaHasta) {
+          return {
+            price: rule.valorUnico ?? basePrice,
+            ruleName: rule.nombre || "Especial",
+            ruleId: rule._id,
+          };
+        }
+      } else {
+        if (mmdd >= rule.fechaDesde || mmdd <= rule.fechaHasta) {
+          return {
+            price: rule.valorUnico ?? basePrice,
+            ruleName: rule.nombre || "Especial",
+            ruleId: rule._id,
+          };
+        }
+      }
+    }
+  }
+  return { price: basePrice, ruleName: "Estándar", ruleId: null };
+}
+
+async function lodgingStaySummaryForCatalog(
+  ctx: QueryCtx,
+  propertyId: Id<"properties">,
+  fechaEntrada: string,
+  fechaSalida: string,
+): Promise<{
+  nightsCount: number;
+  nightly: number;
+  subtotal: number;
+  appliedRule: string;
+} | null> {
+  const property = await ctx.db.get(propertyId);
+  if (!property) return null;
+
+  const activeRules = await getActivePricingRulesForCatalog(ctx, propertyId);
+  const start = new Date(fechaEntrada + "T12:00:00");
+  const end = new Date(fechaSalida + "T12:00:00");
+  if (isNaN(start.getTime()) || isNaN(end.getTime()) || start >= end) {
+    return null;
+  }
+
+  let dominantRule: { price: number; ruleName: string } | null = null;
+  const tempCurrent = new Date(start);
+  while (tempCurrent < end) {
+    const dateStr = tempCurrent.toISOString().split("T")[0];
+    const { price, ruleName } = getPriceForDateCatalog(
+      dateStr,
+      property.priceBase,
+      activeRules,
+    );
+    if (ruleName !== "Estándar") {
+      if (!dominantRule) dominantRule = { price, ruleName };
+    }
+    tempCurrent.setDate(tempCurrent.getDate() + 1);
+  }
+
+  const finalNightlyPrice = dominantRule
+    ? dominantRule.price
+    : property.priceBase;
+  const finalRuleName = dominantRule ? dominantRule.ruleName : "Estándar";
+
+  let current = new Date(start);
+  let subtotal = 0;
+  let nightsCount = 0;
+  while (current < end) {
+    subtotal += finalNightlyPrice;
+    nightsCount += 1;
+    current.setDate(current.getDate() + 1);
+  }
+
+  return {
+    nightsCount,
+    nightly: finalNightlyPrice,
+    subtotal,
+    appliedRule: finalRuleName,
+  };
+}
+
+/** Formato tipo WhatsApp: `$ 3.850.000` (punto miles, espacio tras `$`). */
+function formatMoneyCopQuote(n: number): string {
+  const int = Math.round(Number(n));
+  if (!Number.isFinite(int)) return "$ 0";
+  const withDots = Math.abs(int)
+    .toString()
+    .replace(/\B(?=(\d{3})+(?!\d))/g, ".");
+  return int < 0 ? `- $ ${withDots}` : `$ ${withDots}`;
+}
+
+/** Una línea por tarjeta de catálogo (precio según reglas internas; sin nombre de temporada al cliente). */
+function quoteLineForStay(
+  nightsCount: number,
+  nightly: number,
+  subtotal: number,
+  _appliedRule: string,
+): string {
+  const nocheWord = nightsCount === 1 ? "noche" : "noches";
+  return `💰 Para tus fechas (${nightsCount} ${nocheWord}): ${formatMoneyCopQuote(nightly)}/noche. Total alojamiento: ${formatMoneyCopQuote(subtotal)}.`;
+}
 
 /**
  * Catálogos de WhatsApp configurados en la base de datos (sin env vars).
@@ -195,6 +349,293 @@ export const seedCatalogProductos = mutation({
       catalogName: catalog.name,
       propertyId: PROPERTY_ID,
       productRetailerId: PRODUCT_RETAILER_ID,
+    };
+  },
+});
+
+/**
+ * Payload para n8n/YCloud: Meta catalog_id + product_retailer_id por ubicación.
+ * Elige catálogo por locationKeyword (misma lógica que getByLocationKeyword) o el primero por order.
+ */
+function isYmd(s: string) {
+  return /^\d{4}-\d{2}-\d{2}$/.test(String(s || "").trim());
+}
+
+/**
+ * Cotización para el bot (FSM) cuando ya hay finca elegida por `product_retailer_id` y fechas.
+ * Misma lógica de precios que las tarjetas del catálogo (sin nombre de temporada al cliente).
+ */
+export const getBotStayQuoteByRetailerId = query({
+  args: {
+    productRetailerId: v.string(),
+    fechaEntrada: v.string(),
+    fechaSalida: v.string(),
+    cupo: v.optional(v.number()),
+  },
+  handler: async (ctx, args) => {
+    const rid = String(args.productRetailerId ?? "").trim();
+    const feIn = String(args.fechaEntrada ?? "").trim();
+    const feOut = String(args.fechaSalida ?? "").trim();
+    if (!rid || !isYmd(feIn) || !isYmd(feOut)) return null;
+    if (
+      new Date(feIn + "T12:00:00").getTime() >= new Date(feOut + "T12:00:00").getTime()
+    ) {
+      return null;
+    }
+
+    const links = await ctx.db.query("propertyWhatsAppCatalog").collect();
+    const link = links.find((l) => String(l.productRetailerId ?? "").trim() === rid);
+    if (!link) return null;
+    const property = await ctx.db.get(link.propertyId);
+    if (!property) return null;
+
+    const stay = await lodgingStaySummaryForCatalog(ctx, link.propertyId, feIn, feOut);
+    if (!stay || stay.nightsCount <= 0 || stay.nightly <= 0) return null;
+
+    const title = (property.title ?? "").trim() || "Tu finca seleccionada";
+    const quoteLine = quoteLineForStay(
+      stay.nightsCount,
+      stay.nightly,
+      stay.subtotal,
+      stay.appliedRule,
+    );
+    const lines = [`📋 *Resumen de tu estadía*`, `🏡 *${title}*`, quoteLine];
+    if (args.cupo != null && args.cupo > 0) {
+      lines.push(`👥 *${args.cupo} personas*`);
+    }
+    return { text: lines.join("\n") };
+  },
+});
+
+export const getPayloadByLocationForN8n = query({
+  args: {
+    location: v.string(),
+    limit: v.optional(v.number()),
+    /** Check-in / check-out (YYYY-MM-DD). Si ambos válidos, se devuelve `productQuoteLines` alineado con cada producto. */
+    fechaEntrada: v.optional(v.string()),
+    fechaSalida: v.optional(v.string()),
+    /** Capacidad mínima requerida (número de personas). Filtra fincas con capacity >= minCapacity. */
+    minCapacity: v.optional(v.number()),
+    /** Capacidad máxima permitida (número de personas). Filtra fincas con capacity <= maxCapacity. */
+    maxCapacity: v.optional(v.number()),
+    /** true = solo fincas para eventos; false = excluye fincas de eventos (descanso/familiar); undefined = sin filtro. */
+    isEvento: v.optional(v.boolean()),
+  },
+  handler: async (ctx, args) => {
+    const cap = Math.min(Math.max(args.limit ?? 30, 1), 30);
+    const locLower = args.location.trim().toLowerCase();
+    // Sentinel especial: "RECOMENDADAS" → fincas favoritas (isFavorite=true) sin filtro de municipio.
+    const isRecomendadas = locLower === "recomendadas";
+    if (!locLower) {
+      return {
+        catalogId: "",
+        productRetailerIds: [] as string[],
+        productQuoteLines: [] as string[],
+        productTitles: [] as string[],
+        bodyText: "",
+      };
+    }
+
+    const catalogs = await ctx.db.query("whatsappCatalogs").collect();
+    const byKw = isRecomendadas
+      ? null
+      : (catalogs.find(
+          (c) =>
+            c.locationKeyword &&
+            locLower.includes(c.locationKeyword.toLowerCase()),
+        ) ?? null);
+    const byDefault = await ctx.db
+      .query("whatsappCatalogs")
+      .withIndex("by_is_default", (q) => q.eq("isDefault", true))
+      .first();
+    const catalog =
+      byKw ??
+      byDefault ??
+      catalogs.sort((a, b) => (a.order ?? 999) - (b.order ?? 999))[0] ??
+      null;
+
+    if (!catalog) {
+      return {
+        catalogId: "",
+        productRetailerIds: [] as string[],
+        productQuoteLines: [] as string[],
+        productTitles: [] as string[],
+        bodyText: "",
+      };
+    }
+
+    const links = await ctx.db
+      .query("propertyWhatsAppCatalog")
+      .withIndex("by_catalog", (q) => q.eq("catalogId", catalog._id))
+      .collect();
+
+    const feIn = String(args.fechaEntrada ?? "").trim();
+    const feOut = String(args.fechaSalida ?? "").trim();
+    const datesOk =
+      isYmd(feIn) &&
+      isYmd(feOut) &&
+      new Date(feIn + "T12:00:00").getTime() <
+        new Date(feOut + "T12:00:00").getTime();
+
+    const productRetailerIds: string[] = [];
+    const productQuoteLines: string[] = [];
+    const productTitles: string[] = [];
+
+    // Recolección por pasadas con prioridad para tolerar BD escasa de favoritas:
+    //   Pasada 1 (RECOMENDADAS): isFavorite=true + cumple capacidad+evento.
+    //   Pasada 2 (RECOMENDADAS): isFavorite=true + ignora filtro de capacidad (favoritas que no cumplen capacity exacta).
+    //   Pasada 3 (RECOMENDADAS): cualquier finca visible con capacidad+evento OK (sin requerir isFavorite).
+    //   Pasada 4 (fallback duro): cualquier finca visible (sin capacidad ni isFavorite).
+    // Para municipio normal solo aplica un filtro de localización + capacidad+evento; si no quedan, expande a sin-capacidad.
+    type Pass = {
+      label: string;
+      keep: (p: any) => boolean;
+    };
+
+    const matchesLocation = (p: any) =>
+      isRecomendadas ? true : p.location.toLowerCase().includes(locLower);
+    const matchesCapacity = (p: any) => {
+      if (args.minCapacity != null && (p.capacity ?? 0) < args.minCapacity)
+        return false;
+      if (args.maxCapacity != null && (p.capacity ?? 0) > args.maxCapacity)
+        return false;
+      return true;
+    };
+    const matchesEvento = (p: any) => {
+      if (args.isEvento === true) {
+        if (p.familyOnly === true) return false;
+        if (p.allowsEventsContent === false) return false;
+      }
+      return true;
+    };
+
+    const passes: Pass[] = isRecomendadas
+      ? [
+          {
+            label: "fav+cap+ev",
+            keep: (p) =>
+              p.isFavorite === true &&
+              matchesCapacity(p) &&
+              matchesEvento(p),
+          },
+          {
+            label: "fav+ev",
+            keep: (p) => p.isFavorite === true && matchesEvento(p),
+          },
+          {
+            label: "cap+ev",
+            keep: (p) => matchesCapacity(p) && matchesEvento(p),
+          },
+          {
+            label: "any",
+            keep: () => true,
+          },
+        ]
+      : [
+          {
+            label: "loc+cap+ev",
+            keep: (p) =>
+              matchesLocation(p) && matchesCapacity(p) && matchesEvento(p),
+          },
+          {
+            label: "loc+ev",
+            keep: (p) => matchesLocation(p) && matchesEvento(p),
+          },
+          {
+            label: "loc",
+            keep: (p) => matchesLocation(p),
+          },
+        ];
+
+    const seen = new Set<string>();
+    type LinkProp = {
+      link: (typeof links)[number];
+      property: any;
+      retailerId: string;
+    };
+    // Materializa links con propiedad ya cargada (evita re-leer entre pasadas).
+    const candidates: LinkProp[] = [];
+    for (const link of links) {
+      const p = await ctx.db.get(link.propertyId);
+      if (!p || p.active === false || p.visible === false) continue;
+      const id = String(link.productRetailerId || "").trim();
+      if (!id) continue;
+      candidates.push({ link, property: p, retailerId: id });
+    }
+
+    for (const pass of passes) {
+      if (productRetailerIds.length >= cap) break;
+      for (const c of candidates) {
+        if (productRetailerIds.length >= cap) break;
+        if (seen.has(c.retailerId)) continue;
+        if (!pass.keep(c.property)) continue;
+        seen.add(c.retailerId);
+        productRetailerIds.push(c.retailerId);
+        productTitles.push(
+          String(c.property.title ?? c.property.slug ?? c.retailerId).trim() || c.retailerId,
+        );
+        if (datesOk) {
+          const stay = await lodgingStaySummaryForCatalog(
+            ctx,
+            c.link.propertyId,
+            feIn,
+            feOut,
+          );
+          productQuoteLines.push(
+            stay &&
+              stay.nightsCount > 0 &&
+              stay.nightly > 0 &&
+              stay.subtotal > 0
+              ? quoteLineForStay(
+                  stay.nightsCount,
+                  stay.nightly,
+                  stay.subtotal,
+                  stay.appliedRule,
+                )
+              : "",
+          );
+        } else {
+          productQuoteLines.push("");
+        }
+      }
+    }
+
+    const place = args.location.trim();
+    return {
+      catalogId: catalog.whatsappCatalogId,
+      productRetailerIds,
+      productQuoteLines,
+      productTitles,
+      bodyText: productRetailerIds.length
+        ? isRecomendadas
+          ? "Nuestras fincas favoritas 🏡✨"
+          : `Opciones en ${place}`
+        : isRecomendadas
+          ? "No hay fincas favoritas en catálogo por ahora."
+          : `No hay fincas en catálogo para ${place} por ahora.`,
+    };
+  },
+});
+
+/** Dado un product_retailer_id (de una tarjeta de catálogo WhatsApp), devuelve el nombre y ubicación de la propiedad. */
+export const getPropertyByRetailerId = query({
+  args: {
+    productRetailerId: v.string(),
+  },
+  handler: async (ctx, args) => {
+    const rid = args.productRetailerId.trim();
+    if (!rid) return { propertyName: "", location: "", productRetailerId: "" };
+    const links = await ctx.db.query("propertyWhatsAppCatalog").collect();
+    const link = links.find(
+      (l) => String(l.productRetailerId || "").trim() === rid,
+    );
+    if (!link) return { propertyName: "", location: "", productRetailerId: rid };
+    const property = await ctx.db.get(link.propertyId);
+    if (!property) return { propertyName: "", location: "", productRetailerId: rid };
+    return {
+      propertyName: property.title ?? property.title ?? "",
+      location: property.location ?? "",
+      productRetailerId: rid,
     };
   },
 });

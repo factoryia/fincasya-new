@@ -42,6 +42,7 @@ export const insertAssistantMessage = internalMutation({
     content: v.string(),
     createdAt: v.number(),
     sentByUserId: v.optional(v.string()),
+    metadata: v.optional(v.any()),
   },
   handler: async (ctx, args) => {
     await ctx.db.insert("messages", {
@@ -50,6 +51,7 @@ export const insertAssistantMessage = internalMutation({
       content: args.content,
       createdAt: args.createdAt,
       sentByUserId: args.sentByUserId,
+      ...(args.metadata != null ? { metadata: args.metadata } : {}),
     });
   },
 });

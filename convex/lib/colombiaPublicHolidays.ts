@@ -1,7 +1,13 @@
 /**
  * Festivos Colombia (calendario civil) en YYYY-MM-DD, zona America/Bogota.
- * Se usa para no enviar catálogo con solo 1 noche sáb→dom cuando el lunes siguiente es festivo (puente).
- * Actualizar anualmente desde fuente oficial (ej. festivos.com.co).
+ *
+ * Uso: evitar catálogo con **1 sola noche** en fines de semana “tipo puente”:
+ * - Entrada sábado → salida domingo, si el **lunes siguiente** es festivo.
+ * - Entrada domingo → salida lunes, si ese **lunes** es festivo.
+ *
+ * Una noche entre semana o fin de semana **sin** lunes festivo en ese patrón puede seguir el flujo normal.
+ * Calendario cargado: **18 festivos/año** para 2025, 2026 y 2027 (traslados Ley Emiliani).
+ * Revisar al inicio de cada año frente a fuente oficial (Presidencia / MinTrabajo).
  */
 const CO_PUBLIC_HOLIDAYS = new Set<string>([
   // 2025
@@ -124,6 +130,13 @@ function isSaturdayCheckInSundayCheckOutBogota(
   return bogotaWeekdayShort(fechaEntrada) === "Sat" && bogotaWeekdayShort(fechaSalida) === "Sun";
 }
 
+function isSundayCheckInMondayCheckOutBogota(
+  fechaEntrada: number,
+  fechaSalida: number,
+): boolean {
+  return bogotaWeekdayShort(fechaEntrada) === "Sun" && bogotaWeekdayShort(fechaSalida) === "Mon";
+}
+
 function userMentionsFestiveOrBridge(lowerMerged: string): boolean {
   return /\b(festivo|festivos|puente|puentes|feriado|feriados|d[ií]a\s+festivo|puente\s+festivo|festividad)\b/i.test(
     lowerMerged,
@@ -131,8 +144,11 @@ function userMentionsFestiveOrBridge(lowerMerged: string): boolean {
 }
 
 /**
- * 1 noche sábado→domingo con lunes festivo en Colombia, o el usuario indica festivo/puente:
- * no mostrar catálogo hasta alargar estadía (mín. 2 noches en esos fines de semana).
+ * 1 noche en patrón fin-de-semana con puente (Colombia): no enviar catálogo hasta alargar estadía (mín. 2 noches).
+ *
+ * Cubre:
+ * - Sábado → domingo, si el **lunes siguiente** es festivo (o el usuario dice festivo/puente).
+ * - Domingo → lunes, si ese **lunes** es festivo (o el usuario dice festivo/puente).
  */
 export function shouldBlockCatalogForPuenteOneNightSatSun(
   fechaEntrada: number,
@@ -141,17 +157,44 @@ export function shouldBlockCatalogForPuenteOneNightSatSun(
 ): boolean {
   const nights = countCatalogNights(fechaEntrada, fechaSalida);
   if (nights !== 1) return false;
-  if (!isSaturdayCheckInSundayCheckOutBogota(fechaEntrada, fechaSalida)) return false;
 
   const lower = mergedUserText.toLowerCase().normalize("NFD").replace(/\p{M}/gu, "");
-  if (userMentionsFestiveOrBridge(lower)) return true;
 
-  const monYmd = mondayAfterCheckoutSundayYmd(fechaSalida);
-  if (monYmd && isColombiaPublicHolidayYmd(monYmd)) return true;
+  if (isSaturdayCheckInSundayCheckOutBogota(fechaEntrada, fechaSalida)) {
+    if (userMentionsFestiveOrBridge(lower)) return true;
+    const monYmd = mondayAfterCheckoutSundayYmd(fechaSalida);
+    if (monYmd && isColombiaPublicHolidayYmd(monYmd)) return true;
+    return false;
+  }
+
+  if (isSundayCheckInMondayCheckOutBogota(fechaEntrada, fechaSalida)) {
+    if (userMentionsFestiveOrBridge(lower)) return true;
+    const monYmd = toYmdColombia(fechaSalida);
+    if (isColombiaPublicHolidayYmd(monYmd)) return true;
+    return false;
+  }
 
   return false;
 }
 
-export const PUENTE_ONE_NIGHT_CATALOG_NOTICE_ES = `Antes de enviarte el catálogo: ese fin de semana cae en **puente o día festivo** y, por política de FincasYa, en esas fechas la estadía mínima es de **2 noches** (no alcanza solo del sábado al domingo).
+/**
+ * Primer aviso (puente / 1 noche): copy comercial fijo.
+ * `checkIn` / `checkOut` se mantienen en la firma por compatibilidad con llamadas existentes.
+ */
+export function buildPuenteShortNoticeEs(_checkIn: string, _checkOut: string): string {
+  return [
+    "Las fechas que seleccionaste son en puente festivo, para este tipo de fines de semana te brindamos reservar como mínimo 2 noches 🏡",
+    "",
+    "Si deseas reservar una sola noche puede ser fines de semana sin puentes festivos o entre semana 📅",
+  ].join("\n");
+}
 
-Indícame por favor **entrada y salida con al menos 2 noches** (por ejemplo del sábado 16 al lunes 18 de mayo) y te comparto opciones con disponibilidad y precio acordes a tus fechas. ✅`;
+/**
+ * Seguimiento cuando el cliente insiste en 1 noche u otras fechas (mismo tema, otro redactado).
+ */
+export function buildPuenteFollowUpConversationEs(_checkIn: string, _checkOut: string): string {
+  return (
+    "Claro que sí 😊 Si deseas realizar una cotización por el mínimo de una noche, podrías contemplar entre semana o fines de semana; " +
+    "sin puente festivo nos reconfirmas por favor fecha de entrada y salida 📅"
+  );
+}

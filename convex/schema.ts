@@ -530,6 +530,19 @@ export default defineSchema({
     eventId: v.string(),
   }).index('by_event_id', ['eventId']),
 
+  /**
+   * Mensajes de catálogo enviados por el bot (interactive product): wamid → product_retailer_id.
+   * Permite resolver cuando el cliente responde citando una ficha (“Quiero esta”).
+   */
+  ycloudCatalogMessageWamids: defineTable({
+    conversationId: v.id('conversations'),
+    wamid: v.string(),
+    productRetailerId: v.string(),
+    createdAt: v.number(),
+  })
+    .index('by_wamid', ['wamid'])
+    .index('by_conversation', ['conversationId', 'createdAt']),
+
   /** Catálogos de WhatsApp (Meta). Se configuran desde el front; sin env vars. */
   whatsappCatalogs: defineTable({
     name: v.string(),
@@ -661,6 +674,44 @@ export default defineSchema({
   })
     .index('by_name', ['name'])
     .index('by_idNumber', ['idNumber']),
+
+  /**
+   * Sesiones del bot FSM (estado + entidades por conversación).
+   * Cada conversación tiene como máximo una sesión activa.
+   */
+  botSessions: defineTable({
+    conversationId: v.id('conversations'),
+    /** E.164 del cliente (para lookup rápido sin JOIN). */
+    phone: v.string(),
+    /**
+     * Fase actual del FSM:
+     * new → collecting → catalog_sent → pet_check → contract → done (quote_shown legado)
+     */
+    phase: v.string(),
+    entities: v.object({
+      location: v.optional(v.string()),
+      checkIn: v.optional(v.string()),
+      checkOut: v.optional(v.string()),
+      cupo: v.optional(v.number()),
+      isEvento: v.optional(v.boolean()),
+      planType: v.optional(v.string()),
+      selectedPropertyRetailerId: v.optional(v.string()),
+      selectedPropertyName: v.optional(v.string()),
+      catalogUserPickedReply: v.optional(v.boolean()),
+      hasPets: v.optional(v.boolean()),
+      petCount: v.optional(v.number()),
+      contractName: v.optional(v.string()),
+      contractCedula: v.optional(v.string()),
+      contractEmail: v.optional(v.string()),
+      contractPhone: v.optional(v.string()),
+      contractAddress: v.optional(v.string()),
+    }),
+    turnCount: v.number(),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index('by_conversation', ['conversationId'])
+    .index('by_phone', ['phone']),
 
   // Permisos por rol
   rolePermissions: defineTable({

@@ -12,7 +12,9 @@
     "start": "node dist/main.js",
     "importar-fincas": "bun scripts/importar-fincas.js",
     "format": "prettier --write \"src/**/*.ts\" \"convex/**/*.ts\" \"scripts/**/*.ts\"",
-    "lint": "eslint \"{src,convex,scripts}/**/*.ts\" --fix"
+    "lint": "eslint \"{src,convex,scripts}/**/*.ts\" --fix",
+    "n8n:sync-consultant-prompt": "bun run scripts/n8n-workflows/sync-consultant-prompt-to-n8n-file.ts",
+    "n8n:push-workflow": "node scripts/n8n-workflows/push-workflow-via-mcp-http.mjs"
   },
   "dependencies": {
     "@ai-sdk/openai": "1.3.23",

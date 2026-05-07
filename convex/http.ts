@@ -62,6 +62,8 @@ http.route({
         wamid?: string;
         from?: string;
         customerProfile?: { name?: string };
+        /** Mensaje citado (reply): id del mensaje al que responde el cliente (p. ej. ficha de catálogo). */
+        context?: { from?: string; id?: string };
         type?: string;
         text?: { body?: string };
         image?: { link?: string; caption?: string };
@@ -91,6 +93,10 @@ http.route({
       const phone = evt.from ?? '';
       const name = (evt.customerProfile?.name ?? '').trim() || phone;
       const wamid = evt.wamid ?? evt.id;
+      const replyToWamid =
+        typeof evt.context?.id === "string" && evt.context.id.trim().length > 6
+          ? evt.context.id.trim()
+          : undefined;
 
       let content = '';
       let msgType: 'text' | 'image' | 'audio' | 'video' | 'document' = 'text';
@@ -166,6 +172,7 @@ http.route({
             name,
             text: content,
             wamid,
+            replyToWamid,
             type: msgType,
             mediaUrl: mediaUrl || undefined,
           });
