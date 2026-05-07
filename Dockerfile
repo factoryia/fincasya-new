@@ -17,6 +17,8 @@ RUN --mount=type=secret,id=CONVEX_DEPLOY_KEY \
   bunx convex codegen
 
 RUN bun run build
+# Fallar el build si la salida no coincide con el CMD (evita imágenes que reinician en loop).
+RUN test -f dist/main.js || (echo "missing dist/main.js; dist layout:" && ls -laR dist && exit 1)
 
 # Production stage
 FROM oven/bun:1-alpine AS runner
@@ -34,4 +36,5 @@ COPY --from=builder /app/convex/_generated ./convex/_generated
 
 EXPOSE 3001
 
-CMD ["bun", "run", "start"]
+# Ejecutar el bundle explícito (no depender de cómo Bun resuelva `node` en scripts npm).
+CMD ["bun", "dist/main.js"]
