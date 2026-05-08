@@ -1,6 +1,8 @@
 services:
   api:
     image: ghcr.io/factoryia/fincasyaback:latest
+    # No añadir command: aquí salvo que sea imprescindible; la imagen ya usa `bun dist/main.js`.
+    # `node dist/src/main.js` no existe y deja el contenedor en restart loop.
     ports:
       - "3001:3001"
     env_file:
