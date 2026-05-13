@@ -705,6 +705,9 @@ Al confirmar tu pago, recibirás el **soporte oficial** junto con todos los deta
             name: f.name,
             ...(f.iconId ? { iconId: f.iconId } : {}),
             ...(f.zone ? { zone: f.zone } : {}),
+            ...(f.zoneTemplateSourceId
+              ? { zoneTemplateSourceId: f.zoneTemplateSourceId }
+              : {}),
           })) || [],
         ...(featuredIcons && { featuredIcons }),
         ...(zoneOrder && { zoneOrder }),
@@ -815,6 +818,9 @@ Al confirmar tu pago, recibirás el **soporte oficial** junto con todos los deta
           name: f.name,
           ...(f.iconId ? { iconId: f.iconId } : {}),
           ...(f.zone ? { zone: f.zone } : {}),
+          ...(f.zoneTemplateSourceId
+            ? { zoneTemplateSourceId: f.zoneTemplateSourceId }
+            : {}),
         }));
       }
 
@@ -1275,11 +1281,36 @@ Al confirmar tu pago, recibirás el **soporte oficial** junto con todos los deta
         );
       }
 
+      const resolvedContractNumber =
+        (dto.contractNumber && String(dto.contractNumber).trim()) ||
+        `DIR-${this.sanitizeFilename(
+          String(
+            (finca as { code?: string }).code ||
+              (finca as { title?: string }).title ||
+              propertyId,
+          ),
+        ).slice(0, 28)}-${Date.now().toString(36).toUpperCase()}`;
+
       // 2. Descargar la plantilla PDF
-      const response = await axios.get(finca.contractTemplateUrl, {
-        responseType: 'arraybuffer',
-      });
-      const templateBytes = normalizeDownloadedFile(response.data);
+      let templateResponse;
+      try {
+        templateResponse = await axios.get(finca.contractTemplateUrl, {
+          responseType: 'arraybuffer',
+          timeout: 120_000,
+          maxContentLength: 50 * 1024 * 1024,
+        });
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : String(err);
+        throw new BadRequestException(
+          `No se pudo descargar la plantilla del contrato desde la URL configurada en la finca. ${msg}`,
+        );
+      }
+      if (templateResponse.status >= 400) {
+        throw new BadRequestException(
+          `La URL de la plantilla respondió HTTP ${templateResponse.status}. Revisa el archivo en la ficha de la finca.`,
+        );
+      }
+      const templateBytes = normalizeDownloadedFile(templateResponse.data);
 
       // 3. Modificar el PDF con pdf-lib
       // 2. Obtener informaciÃ³n de la conversaciÃ³n y contacto para el cliente
@@ -1408,7 +1439,7 @@ Al confirmar tu pago, recibirás el **soporte oficial** junto con todos los deta
         [mappingKeys.idNumber]: dto.idNumber ?? '',
         [mappingKeys.accountNumber]: dto.accountNumber ?? '',
         [mappingKeys.bankName]: dto.bankName ?? '',
-        [mappingKeys.contractNumber]: dto.contractNumber ?? '',
+        [mappingKeys.contractNumber]: resolvedContractNumber,
         [mappingKeys.clientName]: dto.clientName || contact?.name || '',
         [mappingKeys.clientId]: dto.clientId || '',
         [mappingKeys.clientEmail]: dto.clientEmail || '',
@@ -1421,7 +1452,7 @@ Al confirmar tu pago, recibirás el **soporte oficial** junto con todos los deta
         'HORA ENTRADA': dto.checkInTime || '',
         'HORA SALIDA': dto.checkOutTime || '',
         // Fallbacks genÃ©ricos
-        Text6: dto.contractNumber ?? '',
+        Text6: resolvedContractNumber,
         Text9: totalPriceText ?? '',
         Text10: totalPriceFormatted ?? '',
         Text11: dto.accountNumber ?? '',
@@ -1521,8 +1552,10 @@ Al confirmar tu pago, recibirás el **soporte oficial** junto con todos los deta
         
         finalBuffer = Buffer.from(htmlString);
         const sanitizedTitle = this.sanitizeFilename(finca.title || 'Finca');
-        const contractNumber = dto.contractNumber ? `_${dto.contractNumber}` : '';
-        finalFilename = `Contrato_${sanitizedTitle}${contractNumber}.doc`;
+        const contractNumSuffix = resolvedContractNumber
+          ? `_${resolvedContractNumber}`
+          : '';
+        finalFilename = `Contrato_${sanitizedTitle}${contractNumSuffix}.doc`;
         finalMimeType = 'application/msword';
         
         console.log('[api] Contrato HTML procesado correctamente.');
@@ -1530,17 +1563,15 @@ Al confirmar tu pago, recibirás el **soporte oficial** junto con todos los deta
         // Intentar convertir HTML a PDF (iLovePDF suele aceptar .doc con HTML interno)
         if (finalBuffer) {
           try {
-            console.log(`[api] Convirtiendo contrato HTML a PDF...`);
-            const pdfBuffer = await this.convertDocxToPdf(
-              finalBuffer,
-              finalFilename,
-            );
+            console.log('[api] Convirtiendo contrato HTML a PDF con puppeteer…');
+            const pdfBuffer = await this.pdfService.htmlToPdf(htmlString);
             finalBuffer = pdfBuffer;
             finalFilename = finalFilename.replace('.doc', '.pdf');
             finalMimeType = 'application/pdf';
-            console.log('[api] Conversión de HTML a PDF completada.');
+            console.log('[api] Conversión de HTML a PDF completada con puppeteer.');
           } catch (e: any) {
-            console.warn('[api] No se pudo convertir HTML a PDF, se usará .doc');
+            console.error('[api] Puppeteer no pudo convertir HTML a PDF:', e.message || e);
+            console.warn('[api] Se usará .doc como fallback.');
           }
         }
       } else if (isDocx) {
@@ -1579,8 +1610,10 @@ Al confirmar tu pago, recibirás el **soporte oficial** junto con todos los deta
 
         // Generar nombre de archivo base usando el nombre de la finca
         const sanitizedTitle = this.sanitizeFilename(finca.title || 'Finca');
-        const contractNumber = dto.contractNumber ? `_${dto.contractNumber}` : '';
-        finalFilename = `Contrato_${sanitizedTitle}${contractNumber}.docx`;
+        const contractNumSuffix = resolvedContractNumber
+          ? `_${resolvedContractNumber}`
+          : '';
+        finalFilename = `Contrato_${sanitizedTitle}${contractNumSuffix}.docx`;
         finalMimeType =
           'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
 
@@ -1598,12 +1631,21 @@ Al confirmar tu pago, recibirás el **soporte oficial** junto con todos los deta
             finalBuffer = pdfBuffer;
             finalFilename = finalFilename.replace('.docx', '.pdf');
             finalMimeType = 'application/pdf';
-            console.log('[api] ConversiÃ³n a PDF completada con Ã©xito.');
+            console.log('[api] Conversión a PDF completada con iLovePDF.');
           } catch (e: any) {
-            console.error('[api] Error en conversiÃ³n iLovePDF:', e.message || e);
-            console.warn(
-              '[api] Se entregara el contrato en formato Word porque la conversion a PDF no esta disponible.',
-            );
+            console.error('[api] Error en conversión iLovePDF:', e.message || e);
+            console.log('[api] Intentando fallback puppeteer para PDF…');
+            try {
+              const fallbackHtml = this.buildContractFallbackHtml(wordValues, finca as { title?: string; location?: string });
+              const pdfBuffer = await this.pdfService.htmlToPdf(fallbackHtml);
+              finalBuffer = pdfBuffer;
+              finalFilename = finalFilename.replace('.docx', '.pdf');
+              finalMimeType = 'application/pdf';
+              console.log('[api] Conversión a PDF completada con puppeteer (fallback).');
+            } catch (puppeteerErr: any) {
+              console.error('[api] Puppeteer fallback también falló:', puppeteerErr.message || puppeteerErr);
+              console.warn('[api] Entregando contrato en formato Word.');
+            }
           }
         }
       } else {
@@ -1673,8 +1715,10 @@ Al confirmar tu pago, recibirás el **soporte oficial** junto con todos los deta
         const pdfSavedBytes = await pdfDoc.save();
         finalBuffer = Buffer.from(pdfSavedBytes);
         const sanitizedTitle = this.sanitizeFilename(finca.title || 'Finca');
-        const contractNumber = dto.contractNumber ? `_${dto.contractNumber}` : '';
-        finalFilename = `Contrato_${sanitizedTitle}${contractNumber}.pdf`;
+        const contractNumSuffix = resolvedContractNumber
+          ? `_${resolvedContractNumber}`
+          : '';
+        finalFilename = `Contrato_${sanitizedTitle}${contractNumSuffix}.pdf`;
         finalMimeType = 'application/pdf';
       }
 
@@ -1720,7 +1764,7 @@ Al confirmar tu pago, recibirás el **soporte oficial** junto con todos los deta
           propertyId: dto.propertyId,
           propertyTitle: finca.title || '',
           propertyLocation: finca.location || '',
-          contractNumber: dto.contractNumber || '',
+          contractNumber: resolvedContractNumber,
           generatedFileName: finalFilename,
           bankName: dto.bankName || '',
           accountNumber: dto.accountNumber || '',
@@ -2053,6 +2097,97 @@ Al confirmar tu pago, recibirás el **soporte oficial** junto con todos los deta
       .replace(/[^a-z0-9]/gi, '_') // Reemplazar caracteres no alfanumÃ©ricos por guiÃ³n bajo
       .replace(/_+/g, '_') // Reemplazar guiones bajos mÃºltiples por uno solo
       .replace(/^_|_$/g, ''); // Eliminar guiones bajos al inicio o final
+  }
+
+  /**
+   * Construye un HTML mínimo con los datos del contrato para generar PDF con puppeteer
+   * cuando la conversión del .docx falla.
+   */
+  private buildContractFallbackHtml(
+    v: Record<string, string>,
+    finca: { title?: string; location?: string },
+  ): string {
+    const row = (label: string, value: string) =>
+      value
+        ? `<tr><td style="color:#555;width:40%;padding:4px 8px;">${label}</td><td style="font-weight:600;padding:4px 8px;">${value}</td></tr>`
+        : '';
+    return `<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8"/>
+<style>
+  body{font-family:Arial,sans-serif;font-size:11pt;color:#1a1a1a;margin:0;padding:0;}
+  .wrap{max-width:800px;margin:0 auto;padding:30px 40px;}
+  h1{font-size:14pt;text-align:center;text-transform:uppercase;border-bottom:2px solid #111;padding-bottom:10px;margin-bottom:20px;}
+  h2{font-size:12pt;margin-top:24px;margin-bottom:4px;border-bottom:1px solid #ddd;padding-bottom:4px;}
+  table{width:100%;border-collapse:collapse;margin-bottom:16px;}
+  td{vertical-align:top;}
+  .total{background:#111;color:#fff;text-align:right;padding:10px 14px;font-size:13pt;font-weight:bold;margin-top:20px;}
+  .clause{margin-bottom:10px;font-size:10pt;line-height:1.5;}
+  .footer{margin-top:40px;display:flex;justify-content:space-between;}
+  .sig{text-align:center;width:45%;border-top:1px solid #111;padding-top:6px;font-size:10pt;}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Contrato de Arrendamiento por Días<br/>
+    <span style="font-size:10pt;font-weight:normal;">${finca.title || ''} — ${finca.location || ''}</span>
+  </h1>
+  <p style="text-align:right;font-size:10pt;color:#555;">Fecha: ${v['fechaGeneracion'] || v['FECHA_GENERACIÓN DE CONTRATO (FORMATO DIA(NUMERO) MES(TEXTO) de AÑO(NUMERO))'] || ''}</p>
+
+  <h2>Datos del Contrato</h2>
+  <table>
+    ${row('Contrato N°', v['contratoNumero'] || '')}
+    ${row('Finca', finca.title || '')}
+    ${row('Ubicación', finca.location || '')}
+  </table>
+
+  <h2>Datos del Arrendatario</h2>
+  <table>
+    ${row('Nombre completo', v['clienteNombre'] || '')}
+    ${row('Cédula', v['clienteCedula'] || '')}
+    ${row('Ciudad', v['ciudadCliente'] || '')}
+    ${row('Dirección', v['direccionCliente'] || '')}
+    ${row('Celular', v['clienteCelular'] || '')}
+    ${row('Correo', v['clientCorreo'] || '')}
+  </table>
+
+  <h2>Detalles de la Reserva</h2>
+  <table>
+    ${row('Fecha entrada', v['fechaEntrada'] || '')}
+    ${row('Hora entrada', v['horaLlegada'] || '')}
+    ${row('Fecha salida', v['fechaSalida'] || '')}
+    ${row('Hora salida', v['horaSalida'] || '')}
+    ${row('Número de noches', v['nochesNumero'] || '')}
+  </table>
+
+  <h2>Valor del Contrato</h2>
+  <table>
+    ${row('Valor en letras', v['precioLetras'] || '')}
+    ${row('Valor numérico', v['precioNumerico'] || '')}
+    ${row('Banco', v['bancoNombre'] || '')}
+    ${row('Cuenta', v['cuentaNumero'] || '')}
+    ${row('Titular', v['titularNombre'] || '')}
+    ${row('Cédula titular', v['titularCedula'] || '')}
+  </table>
+
+  <div class="total">Total: ${v['precioNumerico'] || ''}</div>
+
+  <div class="footer">
+    <div class="sig">
+      <p>EL ARRENDADOR</p>
+      <p>${v['titularNombre'] || '_____________________'}</p>
+      <p>C.C. ${v['titularCedula'] || ''}</p>
+    </div>
+    <div class="sig">
+      <p>EL ARRENDATARIO</p>
+      <p>${v['clienteNombre'] || '_____________________'}</p>
+      <p>C.C. ${v['clienteCedula'] || ''}</p>
+    </div>
+  </div>
+</div>
+</body>
+</html>`;
   }
 
   /**

@@ -74,6 +74,15 @@ export const escalate = internalMutation({
     operationalState: v.optional(operationalStateValidator),
     /** Si viene definido, asigna; si `undefined`, limpia asignación. */
     assignedUserId: v.optional(v.string()),
+    /** Marca la conversación como urgente en el inbox (ej. contrato completado por el cliente). */
+    priority: v.optional(
+      v.union(
+        v.literal("urgent"),
+        v.literal("low"),
+        v.literal("medium"),
+        v.literal("resolved"),
+      ),
+    ),
   },
   handler: async (ctx, args) => {
     const op = args.operationalState ?? "requires_advisor";
@@ -82,6 +91,7 @@ export const escalate = internalMutation({
       attended: false,
       operationalState: op,
       assignedUserId: args.assignedUserId,
+      ...(args.priority != null ? { priority: args.priority } : {}),
     });
   },
 });
@@ -168,6 +178,7 @@ export const getById = query({
     const assignedUser = await withAssignedUser(ctx, doc.assignedUserId);
     return {
       ...doc,
+      unreadCount: doc.inboxUnreadCount ?? 0,
       operationalState: effectiveState(doc.operationalState as OperationalState | undefined),
       assignedUser,
     };
@@ -232,6 +243,44 @@ export const markAsAttended = mutation({
   args: { conversationId: v.id("conversations") },
   handler: async (ctx, args) => {
     await ctx.db.patch(args.conversationId, { attended: true });
+  },
+});
+
+/** Marca la conversación como leída en el inbox (reinicia contador de no leídos). */
+export const markInboxRead = mutation({
+  args: { conversationId: v.id("conversations") },
+  handler: async (ctx, args) => {
+    await ctx.db.patch(args.conversationId, { inboxUnreadCount: 0 });
+  },
+});
+
+const MAX_CONVERSATION_TAGS = 25;
+const MAX_TAG_LENGTH = 64;
+
+function normalizeConversationTags(raw: string[]): string[] {
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const t of raw) {
+    const s = t.trim().slice(0, MAX_TAG_LENGTH);
+    if (!s) continue;
+    const key = s.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(s);
+    if (out.length >= MAX_CONVERSATION_TAGS) break;
+  }
+  return out;
+}
+
+/** Etiquetas de negocio (varias por conversación). */
+export const setConversationTags = mutation({
+  args: {
+    conversationId: v.id("conversations"),
+    tags: v.array(v.string()),
+  },
+  handler: async (ctx, args) => {
+    const next = normalizeConversationTags(args.tags);
+    await ctx.db.patch(args.conversationId, { tags: next });
   },
 });
 
@@ -401,6 +450,10 @@ export const list = query({
     assignedUserIds: v.optional(v.array(v.string())),
     /** Solo conversaciones sin asesor asignado. */
     unassignedOnly: v.optional(v.boolean()),
+    /** Solo conversaciones con mensajes del cliente sin leer en el panel. */
+    unreadOnly: v.optional(v.boolean()),
+    /** La conversación debe tener al menos una de estas etiquetas (OR). */
+    tagsAny: v.optional(v.array(v.string())),
     /** Último mensaje (o createdAt si no hay): timestamp >= */
     lastMessageFrom: v.optional(v.number()),
     /** Último mensaje (o createdAt si no hay): timestamp <= */
@@ -442,6 +495,18 @@ export const list = query({
       );
     }
 
+    if (args.unreadOnly) {
+      convs = convs.filter((c) => (c.inboxUnreadCount ?? 0) > 0);
+    }
+
+    if (args.tagsAny && args.tagsAny.length > 0) {
+      const tagSet = new Set(args.tagsAny.map((t) => t.trim()).filter(Boolean));
+      convs = convs.filter((c) => {
+        const tags = c.tags ?? [];
+        return tags.some((t) => tagSet.has(t));
+      });
+    }
+
     const msgTs = (c: (typeof convs)[number]) =>
       c.lastMessageAt ?? c.createdAt ?? c._creationTime;
     if (args.lastMessageFrom !== undefined) {
@@ -458,10 +523,12 @@ export const list = query({
     const slice = convs.slice(0, limit);
     const withContact = await Promise.all(
       slice.map(async (c) => {
+        const { inboxUnreadCount: _u, ...rest } = c;
         const contact = await ctx.db.get(c.contactId);
         const assignedUser = await withAssignedUser(ctx, c.assignedUserId);
         return {
-          ...c,
+          ...rest,
+          unreadCount: _u ?? 0,
           operationalState: effectiveState(
             c.operationalState as OperationalState | undefined
           ),

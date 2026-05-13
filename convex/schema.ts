@@ -20,6 +20,16 @@ export default defineSchema({
     description: v.string(),
     location: v.string(),
     capacity: v.number(),
+    /**
+     * Máximo de personas para evento/celebración (invitados totales), puede ser mayor que `capacity`
+     * (hospedaje). Solo aplica si `allowsEventsContent === true` y el cliente busca con evento.
+     */
+    eventCapacity: v.optional(v.number()),
+    /**
+     * Precio de referencia en COP para evento/celebración hasta `eventCapacity` invitados
+     * (orientador para bot y catálogo; opcional).
+     */
+    eventPackagePrice: v.optional(v.number()),
     rating: v.optional(v.number()),
     reviewsCount: v.optional(v.number()),
     video: v.optional(v.string()),
@@ -127,10 +137,55 @@ export default defineSchema({
     name: v.string(),
     iconId: v.optional(v.id('iconography')),
     featureId: v.optional(v.string()), // Legacy field to allow Convex dev to pass validation
+    /** Cantidad (ej. 2 hamacas, 3 duchas). Por defecto 1 si no se envía. */
+    quantity: v.optional(v.number()),
     zone: v.optional(v.string()),
+    /**
+     * Si proviene de una plantilla de zona por categoría, permite re-aplicar la plantilla
+     * sin borrar características añadidas solo a esta finca (sin este campo).
+     */
+    zoneTemplateSourceId: v.optional(
+      v.id('propertyCategoryZoneTemplates'),
+    ),
   })
     .index('by_property', ['propertyId'])
     .index('by_icon', ['iconId']),
+
+  /**
+   * Zona "tipo" por categoría de propiedad (ECONOMICA, PREMIUM, etc.): plantilla reutilizable.
+   * No sustituye al catálogo global de iconografía; solo agrupa referencias con alias opcional.
+   */
+  propertyCategoryZoneTemplates: defineTable({
+    propertyCategory: v.union(
+      v.literal('ECONOMICA'),
+      v.literal('ESTANDAR'),
+      v.literal('PREMIUM'),
+      v.literal('LUJO'),
+      v.literal('ECOTURISMO'),
+      v.literal('CON_PISCINA'),
+      v.literal('CERCA_BOGOTA'),
+      v.literal('GRUPOS_GRANDES'),
+      v.literal('VIP'),
+    ),
+    name: v.string(),
+    order: v.optional(v.number()),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  }).index('by_category', ['propertyCategory']),
+
+  /** Características de la plantilla de zona: icono del catálogo + nombre mostrado (alias). */
+  propertyCategoryZoneFeatures: defineTable({
+    zoneTemplateId: v.id('propertyCategoryZoneTemplates'),
+    iconographyId: v.id('iconography'),
+    alias: v.optional(v.string()),
+    /** Cantidad por defecto al importar la plantilla a una finca (≥1). */
+    quantity: v.optional(v.number()),
+    order: v.optional(v.number()),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index('by_zone_template', ['zoneTemplateId'])
+    .index('by_iconography', ['iconographyId']),
 
   // Temporadas y precios generales: el admin las crea para reutilizarlas en múltiples fincas
   globalPricing: defineTable({
@@ -269,6 +324,18 @@ export default defineSchema({
     .index('by_is_direct', ['isDirect'])
     .index('by_user', ['userId'])
     .index('by_dates', ['fechaEntrada', 'fechaSalida']),
+
+  /**
+   * Borrador de contrato desde admin: no bloquea calendario ni cuenta como reserva
+   * hasta que en «Confirmar pago» se genera la confirmación y se crea la reserva.
+   */
+  adminContractSnapshots: defineTable({
+    contractNumber: v.string(),
+    propertyId: v.id('properties'),
+    /** Campos compatibles con bookings-sync.createBooking (sin propertyId). */
+    payload: v.any(),
+    createdAt: v.number(),
+  }).index('by_contract_number', ['contractNumber']),
 
   // Tabla de pagos
   payments: defineTable({
@@ -454,6 +521,16 @@ export default defineSchema({
     attended: v.optional(v.boolean()),
     /** Convex `user._id` del asesor asignado (inbox). */
     assignedUserId: v.optional(v.string()),
+    /**
+     * Etiquetas de negocio (inbox): varias por conversación; strings libres
+     * (predefinidas en UI + personalizadas).
+     */
+    tags: v.optional(v.array(v.string())),
+    /**
+     * Mensajes del cliente sin marcar como leídos en el panel (incrementa con
+     * cada mensaje `user`; se pone a 0 al abrir/marcar leído).
+     */
+    inboxUnreadCount: v.optional(v.number()),
   })
     .index('by_contact', ['contactId'])
     .index('by_status', ['status'])
@@ -464,7 +541,12 @@ export default defineSchema({
 
   messages: defineTable({
     conversationId: v.id('conversations'),
-    sender: v.union(v.literal('user'), v.literal('assistant')),
+    /** system = solo inbox (alertas internas); no se envía a WhatsApp. */
+    sender: v.union(
+      v.literal('user'),
+      v.literal('assistant'),
+      v.literal('system'),
+    ),
     content: v.string(),
     /** Tipo de mensaje: texto (default), imagen, audio, video, documento */
     type: v.optional(
@@ -698,8 +780,11 @@ export default defineSchema({
       selectedPropertyRetailerId: v.optional(v.string()),
       selectedPropertyName: v.optional(v.string()),
       catalogUserPickedReply: v.optional(v.boolean()),
+      puenteAcknowledged: v.optional(v.boolean()),
       hasPets: v.optional(v.boolean()),
       petCount: v.optional(v.number()),
+      eventPeopleCount: v.optional(v.number()),
+      eventLogistics: v.optional(v.string()),
       contractName: v.optional(v.string()),
       contractCedula: v.optional(v.string()),
       contractEmail: v.optional(v.string()),
@@ -707,6 +792,10 @@ export default defineSchema({
       contractAddress: v.optional(v.string()),
     }),
     turnCount: v.number(),
+    /** Timestamp en que se entró a la fase actual (para detectar bucles). */
+    phaseEnteredAt: v.optional(v.number()),
+    /** Turnos consecutivos en la misma fase sin avanzar. */
+    samePhaseTurnCount: v.optional(v.number()),
     createdAt: v.number(),
     updatedAt: v.number(),
   })

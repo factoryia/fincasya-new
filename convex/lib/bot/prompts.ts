@@ -6,7 +6,7 @@
  * Nada de esto vive en la BD ni es editable desde el frontend.
  */
 
-import type { BotEntities } from "./types";
+import type { BotEntities, BotPhase } from "./types";
 import { countNights, normalizePlanType } from "./entities";
 
 /**
@@ -24,6 +24,134 @@ export function missingFieldsBundle(e: BotEntities): string | null {
 
   if (missing.length <= 1) return null;
   return `Para mostrarte las mejores opciones me faltan algunos datos 😊\n\n${missing.map((m) => `• ${m}`).join("\n")}`;
+}
+
+/** Lista keys de los campos del catálogo que aún faltan, en orden. */
+function listMissingCatalogFields(e: BotEntities): Array<keyof BotEntities> {
+  const out: Array<keyof BotEntities> = [];
+  if (!e.location) out.push("location");
+  if (!e.checkIn) out.push("checkIn");
+  if (!e.checkOut) out.push("checkOut");
+  if (e.cupo === undefined || e.cupo <= 0) out.push("cupo");
+  if (!normalizePlanType(e.planType)) out.push("planType");
+  if (e.isEvento === undefined) out.push("isEvento");
+  if (e.isEvento === true) {
+    if (e.eventPeopleCount === undefined || e.eventPeopleCount <= 0)
+      out.push("eventPeopleCount");
+    if (!e.eventLogistics) out.push("eventLogistics");
+  }
+  return out;
+}
+
+/**
+ * Cuando faltan EXACTAMENTE 2 campos del catálogo, devuelve UNA pregunta natural
+ * que combina ambas. Más conversacional que el bundle con bullets.
+ * Si no aplica, devuelve null y se usa el bundle con bullets / la pregunta única.
+ *
+ * El caso más típico: faltan los dos últimos (`planType` + `isEvento`).
+ */
+export function combinedQuestionForMissing(e: BotEntities): string | null {
+  const missing = listMissingCatalogFields(e);
+  // Tratar checkIn+checkOut como un solo "campo fechas".
+  const datesMissing = missing.includes("checkIn") || missing.includes("checkOut");
+  const slotKeys = new Set<string>(
+    missing.filter((m) => m !== "checkIn" && m !== "checkOut"),
+  );
+  if (datesMissing) slotKeys.add("dates");
+
+  if (slotKeys.size !== 2) return null;
+
+  const has = (k: string) => slotKeys.has(k);
+
+  // planType + isEvento (los 2 últimos)
+  if (has("planType") && has("isEvento")) {
+    return (
+      `¿Van en plan *familiar*, con *amigos* o *empresarial*? ` +
+      `Y cuéntame: ¿es *solo descanso* o también con *evento/celebración* en la finca? 🏡🎉`
+    );
+  }
+
+  // eventPeopleCount + eventLogistics (cuando el cliente confirma evento por primera vez)
+  if (has("eventPeopleCount") && has("eventLogistics")) {
+    return [
+      "¡Genial, evento confirmado! 🎉 Para enviarte las mejores opciones necesito un par de datos:",
+      "",
+      "👥 *Personas*: ¿cuántas van en total? (Dormir + pasadía)",
+      "",
+      "🎵 *Logística*: ¿llevarás algo de esto?",
+      "  🎧 Sonido profesional / DJ / iluminación",
+      "  🎸 Banda en vivo o grupos musicales (mariachis, etc.)",
+      "  🏡 O solo el sonido básico de la finca",
+      "",
+      "Cuéntame y te comparto las opciones disponibles 🤝",
+    ].join("\n");
+  }
+
+  // cupo + planType
+  if (has("cupo") && has("planType")) {
+    return (
+      `¿Cuántas *personas* van en total? (niños desde 2 años cuentan) ` +
+      `Y cuéntame: ¿van en plan *familiar*, con *amigos* o *empresarial*? 👥🏡`
+    );
+  }
+
+  // cupo + isEvento
+  if (has("cupo") && has("isEvento")) {
+    return (
+      `¿Cuántas *personas* van en total? (niños desde 2 años cuentan) ` +
+      `Y cuéntame: ¿es *solo descanso* o también con *evento/celebración*? 👥🎉`
+    );
+  }
+
+  // location + planType
+  if (has("location") && has("planType")) {
+    return (
+      `¿A qué *municipio o zona* quieren ir? (o te recomiendo yo). ` +
+      `Y cuéntame: ¿el plan es *familiar*, con *amigos* o *empresarial*? 📍🏡`
+    );
+  }
+
+  // location + isEvento
+  if (has("location") && has("isEvento")) {
+    return (
+      `¿A qué *municipio o zona* quieren ir? (o te recomiendo yo). ` +
+      `Y cuéntame: ¿es *solo descanso* o también con *evento/celebración*? 📍🎉`
+    );
+  }
+
+  // location + dates
+  if (has("location") && has("dates")) {
+    return (
+      `¿A qué *municipio o zona* quieren ir? (o te recomiendo yo). ` +
+      `Y cuéntame: ¿qué *fechas* tienes en mente (entrada y salida)? 📍📅`
+    );
+  }
+
+  // dates + cupo
+  if (has("dates") && has("cupo")) {
+    return (
+      `¿Qué *fechas* tienes en mente (entrada y salida)? ` +
+      `Y cuéntame: ¿cuántas *personas* van en total? 📅👥`
+    );
+  }
+
+  // dates + planType
+  if (has("dates") && has("planType")) {
+    return (
+      `¿Qué *fechas* tienes en mente (entrada y salida)? ` +
+      `Y cuéntame: ¿el plan es *familiar*, con *amigos* o *empresarial*? 📅🏡`
+    );
+  }
+
+  // dates + isEvento
+  if (has("dates") && has("isEvento")) {
+    return (
+      `¿Qué *fechas* tienes en mente (entrada y salida)? ` +
+      `Y cuéntame: ¿es *solo descanso* o también con *evento/celebración*? 📅🎉`
+    );
+  }
+
+  return null;
 }
 
 /** Fragmentos muy cortos o poco claros (después del saludo inicial). */
@@ -156,6 +284,316 @@ REGLAS GLOBALES:
 - Nunca muestres JSON, IDs internos, ni términos técnicos al cliente.
 `.trim();
 
+/**
+ * Conocimiento canónico sobre mascotas (política, cargos y reglas de convivencia).
+ * Es info verificada — el bot SÍ puede responder con esto cuando el cliente pregunte
+ * (no debe decir "déjame confirmarlo con un asesor" para temas listados aquí).
+ *
+ * Source: copy oficial validado por Santiago/FincasYa (2026-05-08).
+ */
+export const PET_RULES_KNOWLEDGE = `
+POLÍTICA Y REGLAS DE MASCOTAS (info verificada — RESPONDER usando estos datos):
+
+Tus mascotas son bienvenidas en la mayoría de nuestras opciones de alojamiento. Algunas fincas no las permiten.
+
+CARGOS:
+- Depósito reembolsable: $100.000 por cada mascota.
+- Tarifa de ingreso: $30.000 a partir de la 3ª mascota.
+- Limpieza adicional: si el cliente viaja con 3 o más mascotas, $70.000 (cargo único de aseo).
+
+RECOMENDACIONES / REGLAS DE CONVIVENCIA (qué pueden y qué NO pueden hacer):
+- 🚫 No ingresar las mascotas a la piscina.
+- 🐾 Evitar orina o pelaje en zonas interiores.
+- 🛋️ No subirlas a muebles ni camas.
+- 🦴 Cuidar que no muerdan implementos de la casa.
+- 💩 Recoger sus necesidades constantemente.
+
+El incumplimiento de estas recomendaciones puede generar descuentos en el depósito.
+
+INSTRUCCIONES PARA EL ASISTENTE AL HABLAR DE MASCOTAS:
+- Si el cliente pregunta si su mascota PUEDE hacer X (entrar a la piscina, subir a muebles, etc.),
+  responde con la regla concreta de arriba — NO digas "déjame confirmarlo".
+- Si pregunta cuánto cuesta, cita los valores exactos. NO redondees ni inventes.
+- Si pregunta algo NO listado (tamaño máximo, raza específica, paseo, comida, etc.),
+  ahí sí responde "Déjame confirmarlo con un asesor para no darte un dato incorrecto."
+- Sé breve: 2-3 líneas con los datos pertinentes y luego retoma el siguiente paso del flujo.
+`.trim();
+
+/**
+ * Reglas anti-alucinación: el bot NUNCA debe inventar datos.
+ * Se inyectan en todos los system prompts del LLM.
+ */
+export const ANTI_HALLUCINATION_RULES = `
+REGLAS ANTI-INVENCIÓN (CRÍTICAS):
+- NO inventes precios. Solo cita precios que aparecen explícitos en este contexto.
+- NO inventes ubicación exacta de la finca. Solo confirma municipio. La dirección exacta se entrega después de firmar contrato y abonar 50%.
+- NO prometas servicios (jacuzzi, BBQ, internet, transporte, parqueadero, etc.) si no aparecen explícitamente en este contexto.
+- NO inventes capacidad, número de habitaciones, baños, ni cualquier detalle de la finca que no esté listado abajo.
+- NO listes ni numeres fincas usando nombres genéricos como "Finca A", "Finca B", "Opción 1", "Opción 2", etc. Las fichas reales del catálogo viajan por WhatsApp como tarjetas interactivas — el cliente las ve aparte. JAMÁS escribas una lista enumerada de fincas en texto.
+- Si el cliente pregunta algo cuya respuesta NO está en este contexto, responde literalmente: "Déjame confirmarlo con un asesor para no darte un dato incorrecto." y luego retoma el siguiente paso del proceso.
+- NO reenvíes bloques largos que ya enviamos en mensajes anteriores. Si el cliente solo saluda o no responde el dato pedido, reformula brevemente la pregunta puntual del dato que falta — máximo 2 líneas.
+- NO digas "un momento", "déjame revisar", "te respondo en breve", "voy a procesar". El bot solo responde cuando el cliente escribe; si dices que harás algo después, el cliente queda esperando.
+- NO prometas enviar nada (catálogo, contrato, fotos) más tarde. Si lo necesitas ahora, pídelo en el mismo mensaje.
+- Tono cálido, breve, en español colombiano.
+`.trim();
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Resumen humano-legible de las entidades (para inyectar en el system del LLM).
+// ─────────────────────────────────────────────────────────────────────────────
+
+function fmtYmd(iso?: string): string | null {
+  if (!iso || !/^\d{4}-\d{2}-\d{2}/.test(iso.trim())) return null;
+  const [y, m, d] = iso.trim().slice(0, 10).split("-");
+  return `${d}/${m}/${y}`;
+}
+
+/** Texto humano de lo que ya se sabe del cliente. Vacío si no hay nada. */
+export function entitiesSummaryHuman(e: BotEntities): string {
+  const lines: string[] = [];
+  const di = fmtYmd(e.checkIn);
+  const doOut = fmtYmd(e.checkOut);
+  if (di && doOut) lines.push(`- Fechas: ${di} → ${doOut}`);
+  else if (di) lines.push(`- Fecha de entrada: ${di} (falta salida)`);
+  if (e.cupo !== undefined) lines.push(`- Personas: ${e.cupo}`);
+  if (e.location)
+    lines.push(
+      `- Municipio/zona: ${e.location === "RECOMENDADAS" ? "sin preferencia (recomendar)" : e.location}`,
+    );
+  if (e.planType) lines.push(`- Tipo de grupo: ${e.planType}`);
+  if (e.isEvento !== undefined)
+    lines.push(`- Plan: ${e.isEvento ? "evento/celebración" : "solo descanso"}`);
+  if (e.isEvento === true && e.eventPeopleCount !== undefined)
+    lines.push(`- Personas del evento (total): ${e.eventPeopleCount}`);
+  if (e.isEvento === true && e.eventLogistics)
+    lines.push(
+      `- Logística del evento: ${e.eventLogistics === "extra" ? "lleva sonido pro / banda / DJ" : "solo sonido básico de la finca"}`,
+    );
+  if (e.selectedPropertyName) lines.push(`- Finca elegida: ${e.selectedPropertyName}`);
+  if (e.hasPets !== undefined) {
+    if (e.hasPets) lines.push(`- Mascotas: sí (${e.petCount ?? 1})`);
+    else lines.push(`- Mascotas: no`);
+  }
+  if (e.contractName) lines.push(`- Nombre: ${e.contractName}`);
+  if (e.contractCedula) lines.push(`- Cédula: ${e.contractCedula}`);
+  if (e.contractEmail) lines.push(`- Correo: ${e.contractEmail}`);
+  if (e.contractPhone) lines.push(`- Teléfono: ${e.contractPhone}`);
+  if (e.contractAddress) lines.push(`- Dirección: ${e.contractAddress}`);
+  return lines.join("\n");
+}
+
+/** Texto del dato puntual que está faltando para avanzar el FSM. */
+function nextStepHint(phase: BotPhase, e: BotEntities): string {
+  if (phase === "welcome" || phase === "collecting") {
+    if (!e.location) return "Falta el municipio (o decir que recomendamos).";
+    if (!e.checkIn || !e.checkOut) return "Faltan las fechas de entrada y salida.";
+    if (e.cupo === undefined || e.cupo <= 0) return "Falta cuántas personas van.";
+    if (!e.planType) return "Falta el tipo de grupo (familiar/amigos/empresarial).";
+    if (e.isEvento === undefined) return "Falta saber si es solo descanso o con evento.";
+    if (e.isEvento === true && (e.eventPeopleCount === undefined || e.eventPeopleCount <= 0))
+      return "Falta cuántas personas van al evento (dormir + pasadía).";
+    if (e.isEvento === true && !e.eventLogistics)
+      return "Falta la logística del evento (sonido pro/DJ, banda en vivo o solo sonido básico).";
+    return "Ya tenemos todos los datos: enviar catálogo en el siguiente turno.";
+  }
+  if (phase === "catalog_sent") {
+    return "El catálogo ya se envió. El cliente debe elegir una finca de las opciones que recibió.";
+  }
+  if (phase === "property_selected" || phase === "pet_check") {
+    if (e.hasPets === undefined) return "Falta confirmar si lleva mascotas y cuántas.";
+    return "Mascotas confirmadas; siguiente paso es el contrato.";
+  }
+  if (phase === "contract") {
+    const missing: string[] = [];
+    if (!e.contractName) missing.push("nombre completo");
+    if (!e.contractCedula) missing.push("cédula (número + ciudad de expedición + foto)");
+    if (!e.contractEmail) missing.push("correo electrónico");
+    if (!e.contractPhone && !e.contractAddress) missing.push("teléfono o dirección");
+    if (missing.length === 0) return "Datos completos: el contrato está listo para procesar.";
+    return `Faltan estos datos del contrato: ${missing.join(", ")}.`;
+  }
+  if (phase === "done") return "Reserva en proceso, escalada a un asesor humano.";
+  return "";
+}
+
+const PHASE_GOAL: Record<BotPhase, string> = {
+  welcome: "Saludar y empezar a recolectar datos para mostrar fincas disponibles.",
+  collecting: "Recolectar municipio, fechas, personas, tipo de grupo y si hay evento.",
+  catalog_sent: "El cliente debe elegir una de las fincas que recibió por catálogo.",
+  property_selected: "Confirmar mascotas para la finca elegida.",
+  pet_check: "Confirmar si lleva mascotas y cuántas.",
+  quote_shown: "Esperar confirmación del cliente para avanzar al contrato.",
+  contract: "Recolectar nombre, cédula, correo, teléfono y dirección para el contrato.",
+  done: "Cliente entregó datos del contrato; esperando que un asesor humano lo contacte.",
+};
+
+export interface ContextSystemPromptOpts {
+  /** Bloque de cotización ya calculado (alojamiento + mascotas), si existe. */
+  stayQuoteBlock?: string | null;
+  /** Texto adicional con datos verificados de la propiedad (capacidad, mascotas permitidas, etc.). */
+  propertyContext?: string | null;
+  /** Turnos consecutivos en esta misma fase. Si > 3, refuerza la instrucción anti-repetición. */
+  samePhaseTurnCount?: number;
+  /**
+   * Resultado de búsqueda en el RAG de FAQs (`searchFaqForBot`). Texto plano con
+   * los fragmentos más relevantes para la pregunta del cliente. Se inyecta como
+   * "info verificada — usar para responder" y tiene prioridad sobre lo que el
+   * modelo "crea saber".
+   */
+  ragContext?: string | null;
+}
+
+/**
+ * System prompt enriquecido para fallback inteligente.
+ * Se usa cuando el cliente sale del guion (preguntas, dudas, frustración, saludo repetido).
+ * Trae todo el estado del FSM + datos verificados + reglas anti-invención.
+ */
+export function buildContextSystemPrompt(
+  phase: BotPhase,
+  entities: BotEntities,
+  opts: ContextSystemPromptOpts = {},
+): string {
+  const summary = entitiesSummaryHuman(entities);
+  const hint = nextStepHint(phase, entities);
+  const stuck = (opts.samePhaseTurnCount ?? 0) >= 2;
+
+  const sections: string[] = [
+    IDENTITY,
+    "",
+    GLOBAL_RULES,
+    "",
+    ANTI_HALLUCINATION_RULES,
+    "",
+    "ESTADO ACTUAL DE LA CONVERSACIÓN:",
+    `- Fase del proceso: ${phase}`,
+    `- Objetivo de esta fase: ${PHASE_GOAL[phase] ?? ""}`,
+  ];
+
+  if (summary) {
+    sections.push("", "DATOS YA CONFIRMADOS POR EL CLIENTE:", summary);
+  } else {
+    sections.push("", "DATOS YA CONFIRMADOS: ninguno todavía.");
+  }
+
+  if (hint) {
+    sections.push("", `SIGUIENTE PASO: ${hint}`);
+  }
+
+  if (opts.propertyContext && opts.propertyContext.trim()) {
+    sections.push("", "DATOS VERIFICADOS DE LA FINCA SELECCIONADA:", opts.propertyContext.trim());
+  }
+
+  if (opts.stayQuoteBlock && opts.stayQuoteBlock.trim()) {
+    sections.push("", "COTIZACIÓN VIGENTE:", opts.stayQuoteBlock.trim());
+  }
+
+  if (opts.ragContext && opts.ragContext.trim()) {
+    sections.push(
+      "",
+      "INFO VERIFICADA DESDE LA BASE DE CONOCIMIENTO (RAG) — RESPONDER usando estos fragmentos cuando el cliente pregunte sobre estos temas. NO inventar más allá de lo que dice aquí:",
+      opts.ragContext.trim(),
+    );
+  }
+
+  sections.push(
+    "",
+    "REGLAS DE NEGOCIO FIJAS (úsalas cuando el cliente pregunte):",
+    "- Reserva: el cliente abona 50% para asegurar la fecha; el resto se paga según el contrato.",
+    "- Respaldo legal: RNT 163658, FincasYa.com.",
+    "- Ubicación exacta de la finca: solo se entrega después de firmar contrato y pagar el abono.",
+    "- Fechas: se trabajan en formato día/mes/año en el chat.",
+    "",
+    PET_RULES_KNOWLEDGE,
+    "",
+    "INSTRUCCIONES PARA TU RESPUESTA:",
+    "- Responde primero al mensaje del cliente (resolver duda, aclarar, reconocer cambio de plan).",
+    "- Cierra recordando brevemente el siguiente paso del proceso (lo de SIGUIENTE PASO de arriba), en una sola frase corta.",
+    "- Máximo 3 líneas. Tono natural, no robótico.",
+    "- Si el cliente saluda o repite algo, NO reenvíes los bloques largos que ya enviamos antes; solo recuerda el siguiente paso de forma breve.",
+  );
+
+  if (stuck) {
+    sections.push(
+      "- ⚠️ El cliente lleva varios turnos sin avanzar. Sé MUY breve, pregunta solo el dato puntual que falta y, si no lo da en el siguiente turno, ofrece pasarlo con un asesor humano.",
+    );
+  }
+
+  return sections.join("\n");
+}
+
+/** Mensaje cuando se detecta bucle de repetición y se ofrece humano. */
+export const LOOP_OFFER_HUMAN_MESSAGE =
+  `Veo que estamos dando vueltas 🙏 ¿Prefieres que te conecte con un asesor humano para terminar esto más rápido? Solo responde *sí* y te paso con alguien del equipo ✨`;
+
+/**
+ * Mensaje cuando el cliente declara más mascotas de las que el bot maneja
+ * automáticamente (ver `MAX_PETS_AUTO_HANDLING` en `entities.ts`). El bot NO
+ * calcula costo ni avanza al contrato: deja que un asesor evalúe condiciones
+ * especiales (aseo extra, finca con espacio suficiente, depósito ajustado).
+ */
+export function petsExceedLimitMessage(petCount: number): string {
+  const n = Math.max(0, Math.floor(petCount));
+  return [
+    `Para *${n} mascota${n === 1 ? "" : "s"}* necesito que un asesor te confirme las condiciones especiales 🤝`,
+    "",
+    "Nuestro bot maneja hasta *3 mascotas* automáticamente. Para grupos más grandes evaluamos caso por caso: aseo extra, disponibilidad de fincas con espacio suficiente, depósito ajustado, etc.",
+    "",
+    "Un agente te escribirá en breve para terminar tu reserva ✨",
+  ].join("\n");
+}
+
+/**
+ * Pregunta corta y natural de "siguiente paso" según la fase del FSM.
+ * Se usa para cerrar respuestas literales del RAG (cuando bypaseamos el LLM)
+ * sin perder el hilo del flujo comercial.
+ *
+ * Ejemplo: el cliente pregunta horarios en `pet_check` → respondemos con el
+ * texto del RAG literal + `"¿Me confirmas si llevas mascotas y cuántas?"`.
+ */
+export function nextStepFriendlyQuestion(
+  phase: BotPhase,
+  entities: BotEntities,
+  missingField?: keyof BotEntities,
+): string {
+  // pet_check / property_selected → preguntar mascotas si aún no respondió.
+  if (phase === "pet_check" || phase === "property_selected") {
+    if (entities.hasPets === undefined) {
+      return `¿Me confirmas si llevas *mascotas* (y cuántas) o sin ellas? 🐾`;
+    }
+    return `¿Avanzamos con los datos del contrato? 📋`;
+  }
+
+  // contract → recordar que faltan datos del contrato.
+  if (phase === "contract") {
+    const missing: string[] = [];
+    if (!entities.contractName) missing.push("nombre completo");
+    if (!entities.contractCedula) missing.push("cédula");
+    if (!entities.contractEmail) missing.push("correo");
+    if (!entities.contractPhone && !entities.contractAddress)
+      missing.push("teléfono o dirección");
+    if (missing.length === 0) {
+      return `¿Confirmamos para enviarte el contrato? ✨`;
+    }
+    if (missing.length === 1) {
+      return `¿Me compartes tu *${missing[0]}* para avanzar con el contrato? 📋`;
+    }
+    return `¿Me compartes tus *datos del contrato* (${missing.join(", ")}) para terminar la reserva? 📋`;
+  }
+
+  // catalog_sent → ya enviamos catálogo, pedir elección.
+  if (phase === "catalog_sent") {
+    return `¿Cuál de las opciones que te envié te llamó la atención? 🏡`;
+  }
+
+  // collecting / welcome → pedir el dato puntual que falta.
+  if (phase === "collecting" || phase === "welcome") {
+    if (missingField) return missingFieldQuestion(missingField, entities);
+    return `¡Listo! Te comparto las opciones disponibles 🏡✨`;
+  }
+
+  // done / quote_shown → cierre amable.
+  return `¿Continuamos con tu reserva? ✨`;
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Mensajes estáticos (sin LLM)
 // ─────────────────────────────────────────────────────────────────────────────
@@ -182,7 +620,7 @@ export function missingFieldQuestion(
 ): string {
   switch (field) {
     case "location":
-      return "¿A qué municipio o zona de Colombia quieres ir? (Melgar, Girardot, Fusagasugá, etc.) Si no tienes preferencia, te recomiendo yo 😊";
+      return "¿A qué municipio o zona de Colombia quieres ir? (Melgar, Girardot, Anapoima, etc.) Si no tienes preferencia, te recomiendo yo 😊";
     case "checkIn":
       return "¿Qué fechas tienes en mente? Dime la fecha de *entrada* y *salida* 📅";
     case "checkOut":
@@ -193,6 +631,18 @@ export function missingFieldQuestion(
       return "¿Su plan es *familiar*, con *amigos* o *empresarial*? (Así te muestro fincas que mejor encajan) 👨‍👩‍👧‍👦";
     case "isEvento":
       return "¿Van *solo de descanso* o también tendrán *evento o celebración* en la finca? (cumpleaños, fiesta, reunión, etc.) 🎉";
+    case "eventPeopleCount":
+      return "Cuéntame del evento: ¿*cuántas personas en total* van? (Las que se quedan a dormir + las que van solo por el día/pasadía) 🎉👥";
+    case "eventLogistics":
+      return [
+        "Para el evento, ¿qué tipo de logística vas a tener? 🎵",
+        "",
+        "🎧 *Sonido profesional / DJ / iluminación*",
+        "🎸 *Banda en vivo* o grupos musicales (mariachis, etc.)",
+        "🏡 O solo el *sonido básico de la finca* (departir tranquilos)",
+        "",
+        "Dime cuál opción es la que aplica 🤝",
+      ].join("\n");
     default:
       return "¿Puedes completar el dato que me falta para buscarte las mejores fincas? 😊";
   }
@@ -202,9 +652,17 @@ export function datesIncoherentMessage(entities: BotEntities): string {
   return `Parece que la fecha de salida (${entities.checkOut}) es antes de la de entrada (${entities.checkIn}) 😅 ¿Me confirmas las fechas correctas?`;
 }
 
-/** Texto breve ANTES de enviar el catálogo (sin repetir fechas, cupo ni municipio). */
-export function preCatalogText(_entities: BotEntities): string {
-  return `Te comparto unas opciones 🏡 Cuéntame cuál te llama la atención 😉`;
+/** Texto breve ANTES de enviar el catálogo (sin repetir fechas, cupo ni municipio).
+ *  Va seguido de las fichas reales de WhatsApp (catálogo interactivo), NO
+ *  enumera ni inventa nombres de fincas: las tarjetas son la fuente de verdad. */
+export function preCatalogText(_entities?: BotEntities): string {
+  void _entities;
+  return [
+    "Te comparto las opciones disponibles 🏡✨",
+    "",
+    "💰 Cada tarjeta muestra el valor *por noche* en temporada actual.",
+    "👉 Cuéntame *cuál te llama la atención* y te ayudo con la reserva 🤝",
+  ].join("\n");
 }
 
 /** Pregunta de mascotas. */
@@ -214,18 +672,36 @@ export function petCheckMessage(propertyName: string): string {
 Ten en cuenta que la mayoría de fincas cobran un adicional por mascota y algunas no las permiten.`;
 }
 
-/** Referencia de cargos por mascotas (política comercial) para el resumen tras elegir finca. */
+/**
+ * Bloque oficial de respuesta rápida para mascotas.
+ *
+ * Se concatena en el paquete que se envía tras `pet_check` cuando el cliente
+ * confirma que SÍ lleva mascotas (`hasPets === true`). Cuando dice que no
+ * (`hasPets === false`), devuelve cadena vacía y el flujo sigue sin este bloque.
+ *
+ * **NO editar sin consultar con FincasYa** — está alineado con la respuesta
+ * rápida oficial del equipo. Misma versión que `PET_RULES_KNOWLEDGE` (system)
+ * y que el seed `faq:mascotas-politica` (RAG) para consistencia total.
+ */
 export function petFeesSummaryForQuote(entities: BotEntities): string {
   if (!entities.hasPets) return "";
-  const n = Math.max(1, entities.petCount ?? 1);
-  const lines: string[] = [`🐾 *Mascotas (${n})* — referencia de cargos:`];
-  lines.push(`• 1ª y 2ª: depósito reembolsable *$100.000* c/u`);
-  if (n >= 3) {
-    lines.push(`• Desde la 3ª: tarifa de ingreso *$30.000* c/u (no reembolsable)`);
-    lines.push(`• Aseo adicional único (3 o más): *$70.000*`);
-  }
-  lines.push(`Los valores exactos van en tu contrato y confirmación de reserva 📄`);
-  return lines.join("\n");
+  return [
+    "✨🐶 Tus mascotas son bienvenidas en la mayoría de nuestras opciones de alojamiento 🐾",
+    "",
+    "💰 Depósito reembolsable: $100.000 por cada mascota.",
+    "✅️ Tarifa de ingreso: $30.000 a partir de la 3ª mascota.",
+    "",
+    "🧹 Limpieza adicional: si viajas con 3 o más mascotas, se cobrará una tarifa de aseo de $70.000.",
+    "",
+    "📌 Recomendaciones importantes:",
+    "• 🚫 No ingresar las mascotas a la piscina.",
+    "• 🐾 Evitar orina o pelaje en zonas interiores.",
+    "• 🛋️ No subirlas a muebles ni camas.",
+    "• 🦴 Cuidar que no muerdan implementos de la casa.",
+    "• 💩 Recoger sus necesidades constantemente.",
+    "",
+    "❗ Recuerda: el incumplimiento de estas recomendaciones puede generar descuentos en el depósito. Confiamos en tu especial cuidado para que disfrutes tu estadía al máximo junto a tus peluditos. 💚",
+  ].join("\n");
 }
 
 /** Mensaje de cotización. */

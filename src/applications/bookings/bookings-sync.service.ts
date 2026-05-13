@@ -1,4 +1,11 @@
-import { Injectable, forwardRef, Inject } from '@nestjs/common';
+import {
+  Injectable,
+  forwardRef,
+  Inject,
+  NotFoundException,
+  BadRequestException,
+  BadGatewayException,
+} from '@nestjs/common';
 import { ConvexService } from '../shared/services/convex.service';
 import { S3Service } from '../shared/services/s3.service';
 import { FincasService } from '../fincas/fincas.service';
@@ -407,6 +414,92 @@ export class BookingsSyncService {
    */
   async listBookings(params: any) {
     return this.convexService.query('bookings:list', params);
+  }
+
+  async getBookingByContractNumber(contractNumber: string) {
+    const booking = await this.convexService.query(
+      'bookings:getByContractNumber',
+      { contractNumber },
+    );
+    if (booking) return { ...booking, isContractSnapshot: false };
+    return this.convexService.query('adminContractSnapshots:getByContractNumber', {
+      contractNumber,
+    });
+  }
+
+  async saveContractSnapshot(body: {
+    contractNumber: string;
+    propertyId: string;
+    payload: Record<string, unknown>;
+  }) {
+    try {
+      return await this.convexService.mutation('adminContractSnapshots:upsert', {
+        contractNumber: body.contractNumber,
+        propertyId: body.propertyId as any,
+        payload: body.payload,
+      });
+    } catch (e) {
+      if (e instanceof BadGatewayException) throw e;
+      const msg = e instanceof Error ? e.message : String(e);
+      throw new BadGatewayException(
+        `No se pudo guardar el borrador del contrato en Convex: ${msg}`,
+      );
+    }
+  }
+
+  /**
+   * Tras generar la confirmación de pago: crea la reserva en Convex y elimina el borrador.
+   */
+  async finalizeContractSnapshot(args: {
+    snapshotId: string;
+    paymentStatus: string;
+  }) {
+    const row = await this.convexService.query('adminContractSnapshots:getById', {
+      id: args.snapshotId as any,
+    });
+    if (!row) {
+      throw new NotFoundException(
+        'No hay borrador para este contrato. Vuelve a generar el contrato o revisa el código.',
+      );
+    }
+    const p = row.payload as Record<string, any>;
+
+    const ps = String(args.paymentStatus ?? '')
+      .trim()
+      .toUpperCase();
+    const bookingStatus = ps === 'PAID' ? 'PAID' : 'PENDING_PAYMENT';
+
+    const { propertyId: _ignoreProp, ...rest } = p;
+    let created: { bookingId: string; integritySignature: string | null };
+    try {
+      created = await this.createBooking({
+        ...rest,
+        propertyId: row.propertyId as string,
+        status: bookingStatus,
+        isDirect: true,
+      } as Parameters<BookingsSyncService['createBooking']>[0]);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      throw new BadRequestException(
+        msg.includes('disponible') || msg.includes('Disponible')
+          ? msg
+          : `No se pudo registrar la reserva: ${msg}`,
+      );
+    }
+
+    await this.convexService.mutation('adminContractSnapshots:remove', {
+      id: args.snapshotId as any,
+    });
+
+    const ref = String(p.reference ?? '').trim();
+    const booking = ref
+      ? await this.getBookingByContractNumber(ref)
+      : null;
+    return {
+      bookingId: created.bookingId,
+      booking,
+      integritySignature: created.integritySignature,
+    };
   }
 
   async uploadMultimedia(bookingId: string, file: Express.Multer.File) {

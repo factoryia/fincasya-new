@@ -402,4 +402,231 @@ http.route({
   }),
 });
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Endpoints REST para el panel admin de Base de Conocimiento (RAG).
+//
+// Protegidos con `X-API-Key` (la misma key del resto del admin). Las routes
+// Next.js del front (FincasYaWeb/app/api/knowledge/*) proxean aquí con la key
+// guardada como env del servidor — nunca expuesta al navegador.
+//
+// Patrón idéntico al de `/api/ycloud/templates`.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Lista entradas (paginado). */
+http.route({
+  path: '/api/knowledge/list',
+  method: 'GET',
+  handler: httpAction(async (ctx, request) => {
+    const denied = requireYCloudApiKey(request);
+    if (denied) return denied;
+
+    const url = new URL(request.url);
+    const namespace = (url.searchParams.get('namespace') ?? 'fincas').trim();
+    const category = url.searchParams.get('category')?.trim() || undefined;
+    const cursor = url.searchParams.get('cursor');
+    const numItemsRaw = parseInt(url.searchParams.get('limit') ?? '20', 10);
+    const numItems = Number.isFinite(numItemsRaw)
+      ? Math.min(Math.max(numItemsRaw, 1), 100)
+      : 20;
+
+    const result = await ctx.runQuery(internal.knowledge.listForAdmin, {
+      namespace,
+      category,
+      paginationOpts: {
+        numItems,
+        cursor: cursor ?? null,
+      },
+    });
+
+    return jsonResponse(result, 200);
+  }),
+});
+
+/** Contenido indexado de una entrada (chunks unidos) + enlace al archivo si aplica. */
+http.route({
+  path: '/api/knowledge/entry',
+  method: 'GET',
+  handler: httpAction(async (ctx, request) => {
+    const denied = requireYCloudApiKey(request);
+    if (denied) return denied;
+
+    const url = new URL(request.url);
+    const entryId = url.searchParams.get('entryId')?.trim();
+    const namespace = (url.searchParams.get('namespace') ?? 'fincas').trim();
+    if (!entryId) {
+      return jsonResponse({ error: '`entryId` requerido' }, 400);
+    }
+
+    const data = await ctx.runQuery(
+      internal.knowledge.getEntryContentForAdmin,
+      {
+        namespace,
+        entryId: entryId as never,
+      },
+    );
+    if (!data) {
+      return jsonResponse({ error: 'Entrada no encontrada' }, 404);
+    }
+    return jsonResponse(data, 200);
+  }),
+});
+
+/** Sube un archivo (multipart/form-data) al RAG. */
+http.route({
+  path: '/api/knowledge/upload',
+  method: 'POST',
+  handler: httpAction(async (ctx, request) => {
+    const denied = requireYCloudApiKey(request);
+    if (denied) return denied;
+
+    let formData: FormData;
+    try {
+      formData = await request.formData();
+    } catch {
+      return jsonResponse(
+        { error: 'Body esperado: multipart/form-data con el archivo' },
+        400,
+      );
+    }
+
+    const file = formData.get('file') as File | null;
+    if (!file || typeof file.arrayBuffer !== 'function') {
+      return jsonResponse(
+        { error: 'Adjunta el archivo en el campo "file"' },
+        400,
+      );
+    }
+
+    const namespace = String(formData.get('namespace') ?? 'fincas').trim() || 'fincas';
+    const category = String(formData.get('category') ?? '').trim() || undefined;
+    const uploadedBy = String(formData.get('uploadedBy') ?? '').trim() || undefined;
+
+    const arrayBuffer = await file.arrayBuffer();
+    const bytes = new Uint8Array(arrayBuffer);
+    // base64 sin Node Buffer: chunked para no reventar string size en archivos grandes.
+    let binary = '';
+    const CHUNK = 0x8000;
+    for (let i = 0; i < bytes.length; i += CHUNK) {
+      binary += String.fromCharCode(...bytes.subarray(i, i + CHUNK));
+    }
+    const bytesBase64 = btoa(binary);
+
+    const result = await ctx.runAction(internal.knowledge.addFileForAdmin, {
+      filename: (file as File).name,
+      mimeType: (file as File).type || 'application/octet-stream',
+      bytesBase64,
+      category,
+      namespace,
+      uploadedBy,
+    });
+
+    return jsonResponse(result, 200);
+  }),
+});
+
+/** Añade texto plano al RAG. */
+http.route({
+  path: '/api/knowledge/text',
+  method: 'POST',
+  handler: httpAction(async (ctx, request) => {
+    const denied = requireYCloudApiKey(request);
+    if (denied) return denied;
+
+    let body: {
+      title?: string;
+      text?: string;
+      category?: string;
+      namespace?: string;
+      key?: string;
+      uploadedBy?: string;
+    };
+    try {
+      body = (await request.json()) as typeof body;
+    } catch {
+      return jsonResponse({ error: 'Body JSON inválido' }, 400);
+    }
+
+    const title = String(body?.title ?? '').trim();
+    const text = String(body?.text ?? '').trim();
+    if (!title || !text) {
+      return jsonResponse(
+        { error: 'Se requieren `title` y `text`' },
+        400,
+      );
+    }
+    const namespace = String(body?.namespace ?? 'fincas').trim() || 'fincas';
+    const category = String(body?.category ?? '').trim() || undefined;
+    const key = body?.key?.trim() || undefined;
+    const uploadedBy = body?.uploadedBy?.trim() || undefined;
+
+    const result = await ctx.runAction(internal.knowledge.addTextForAdmin, {
+      title,
+      text,
+      category,
+      namespace,
+      key,
+      uploadedBy,
+    });
+
+    return jsonResponse(result, 200);
+  }),
+});
+
+/** Elimina una entrada del RAG. */
+http.route({
+  path: '/api/knowledge/delete',
+  method: 'POST',
+  handler: httpAction(async (ctx, request) => {
+    const denied = requireYCloudApiKey(request);
+    if (denied) return denied;
+
+    let body: { entryId?: string; namespace?: string };
+    try {
+      body = (await request.json()) as typeof body;
+    } catch {
+      return jsonResponse({ error: 'Body JSON inválido' }, 400);
+    }
+
+    const entryId = String(body?.entryId ?? '').trim();
+    const namespace = String(body?.namespace ?? 'fincas').trim() || 'fincas';
+    if (!entryId) {
+      return jsonResponse({ error: '`entryId` requerido' }, 400);
+    }
+
+    await ctx.runAction(internal.knowledge.deleteForAdmin, {
+      entryId: entryId as never, // tipo `EntryId` viene del componente RAG; passthrough.
+      namespace,
+    });
+
+    return jsonResponse({ ok: true }, 200);
+  }),
+});
+
+/** Estado de un job de procesamiento (poll). */
+http.route({
+  path: '/api/knowledge/job',
+  method: 'GET',
+  handler: httpAction(async (ctx, request) => {
+    const denied = requireYCloudApiKey(request);
+    if (denied) return denied;
+
+    const url = new URL(request.url);
+    const jobId = url.searchParams.get('jobId')?.trim();
+    if (!jobId) {
+      return jsonResponse({ error: '`jobId` requerido' }, 400);
+    }
+
+    const status = await ctx.runQuery(internal.knowledge.getJobStatusForAdmin, {
+      jobId: jobId as never,
+    });
+
+    // `exists: true` significa el job aún está en cola = procesando.
+    // `exists: false` significa el job ya terminó (procesó y se borró el registro).
+    return jsonResponse(
+      { jobId, status: status.exists ? 'processing' : 'ready' },
+      200,
+    );
+  }),
+});
+
 export default http;

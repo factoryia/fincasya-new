@@ -38,6 +38,12 @@ export class ListFincasDto {
   @Min(1)
   minCapacity?: number;
 
+  /** Si true, `minCapacity` se compara contra cupo de evento cuando la finca lo tenga configurado. */
+  @IsOptional()
+  @Type(() => Boolean)
+  @IsBoolean()
+  isEvento?: boolean;
+
   @IsOptional()
   @Type(() => Number)
   @IsNumber()

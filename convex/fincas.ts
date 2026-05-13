@@ -1,4 +1,5 @@
 import { v } from 'convex/values';
+import { catalogPeopleCountForFilter } from './lib/propertyCatalogCapacity';
 import { query, mutation } from './_generated/server';
 import { internal } from './_generated/api';
 
@@ -13,6 +14,13 @@ const slugify = (text: string) => {
     .replace(/[^\w-]+/g, '') // Remove all non-word chars
     .replace(/--+/g, '-'); // Replace multiple - with single -
 };
+
+/** Cantidad de amenidad en ficha o plantilla (entero ≥ 1). */
+function normalizedFeatureQuantity(q: number | undefined | null): number {
+  const n = Math.floor(Number(q));
+  if (!Number.isFinite(n) || n < 1) return 1;
+  return n;
+}
 
 const SEARCH_STOPWORDS = new Set([
   'estoy',
@@ -95,6 +103,8 @@ export const list = query({
       ),
     ),
     minCapacity: v.optional(v.number()),
+    /** Si true, el cupo mínimo se compara contra capacidad de evento cuando aplique. */
+    isEvento: v.optional(v.boolean()),
     maxPrice: v.optional(v.number()),
     isFavorite: v.optional(v.boolean()),
     /** Si true, devuelve todas las fincas sin filtrar por active/visible (para admin). */
@@ -102,6 +112,13 @@ export const list = query({
   },
   handler: async (ctx, args) => {
     const limit = args.limit ?? 1000;
+
+    const canUseCapacityIndex =
+      args.minCapacity != null &&
+      args.isEvento !== true &&
+      !args.location &&
+      !args.type &&
+      !args.category;
 
     // Aplicar filtros con índices y obtener todas las propiedades
     const allPropertiesQuery = args.location
@@ -116,7 +133,7 @@ export const list = query({
           ? ctx.db
               .query('properties')
               .withIndex('by_category', (q) => q.eq('category', args.category!))
-          : args.minCapacity
+          : canUseCapacityIndex
             ? ctx.db
                 .query('properties')
                 .withIndex('by_capacity', (q) =>
@@ -148,11 +165,19 @@ export const list = query({
     }
 
     // Aplicar filtros adicionales que no tienen índice
-    if (args.minCapacity && !args.location && !args.type && !args.category) {
-      // Ya se aplicó con índice, no necesita filtrar de nuevo
+    if (args.minCapacity && canUseCapacityIndex) {
+      // Ya se aplicó con índice by_capacity, no filtrar de nuevo
     } else if (args.minCapacity) {
       filtered = filtered.filter(
-        (p: (typeof allProperties)[number]) => p.capacity >= args.minCapacity!,
+        (p: (typeof allProperties)[number]) =>
+          catalogPeopleCountForFilter(
+            p as {
+              capacity: number;
+              eventCapacity?: number | null;
+              allowsEventsContent?: boolean | null;
+            },
+            args.isEvento,
+          ) >= args.minCapacity!,
       );
     }
     if (args.maxPrice) {
@@ -194,9 +219,20 @@ export const list = query({
                   iconId: f.iconId,
                   iconUrl: icon?.iconUrl ?? null,
                   emoji: icon?.emoji ?? null,
+                  quantity: normalizedFeatureQuantity(f.quantity),
+                  zone: f.zone,
+                  zoneTemplateSourceId: f.zoneTemplateSourceId ?? null,
                 };
               }
-              return { name: f.name, iconId: null, iconUrl: null, emoji: null };
+              return {
+                name: f.name,
+                iconId: null,
+                iconUrl: null,
+                emoji: null,
+                quantity: normalizedFeatureQuantity(f.quantity),
+                zone: f.zone,
+                zoneTemplateSourceId: f.zoneTemplateSourceId ?? null,
+              };
             }),
           );
 
@@ -328,7 +364,9 @@ export const getById = query({
             iconId: f.iconId,
             iconUrl: icon?.iconUrl ?? null,
             emoji: icon?.emoji ?? null,
+            quantity: normalizedFeatureQuantity(f.quantity),
             zone: f.zone,
+            zoneTemplateSourceId: f.zoneTemplateSourceId ?? null,
           };
         }
         return {
@@ -336,7 +374,9 @@ export const getById = query({
           iconId: null,
           iconUrl: null,
           emoji: null,
+          quantity: normalizedFeatureQuantity(f.quantity),
           zone: f.zone,
+          zoneTemplateSourceId: f.zoneTemplateSourceId ?? null,
         };
       }),
     );
@@ -795,7 +835,9 @@ export const getByCode = query({
             iconId: f.iconId,
             iconUrl: icon?.iconUrl ?? null,
             emoji: icon?.emoji ?? null,
+            quantity: normalizedFeatureQuantity(f.quantity),
             zone: f.zone,
+            zoneTemplateSourceId: f.zoneTemplateSourceId ?? null,
           };
         }
         return {
@@ -803,7 +845,9 @@ export const getByCode = query({
           iconId: null,
           iconUrl: null,
           emoji: null,
+          quantity: normalizedFeatureQuantity(f.quantity),
           zone: f.zone,
+          zoneTemplateSourceId: f.zoneTemplateSourceId ?? null,
         };
       }),
     );
@@ -916,7 +960,9 @@ export const getBySlug = query({
             iconId: f.iconId,
             iconUrl: icon?.iconUrl ?? null,
             emoji: icon?.emoji ?? null,
+            quantity: normalizedFeatureQuantity(f.quantity),
             zone: f.zone,
+            zoneTemplateSourceId: f.zoneTemplateSourceId ?? null,
           };
         }
         return {
@@ -924,7 +970,9 @@ export const getBySlug = query({
           iconId: null,
           iconUrl: null,
           emoji: null,
+          quantity: normalizedFeatureQuantity(f.quantity),
           zone: f.zone,
+          zoneTemplateSourceId: f.zoneTemplateSourceId ?? null,
         };
       }),
     );
@@ -1063,18 +1111,31 @@ function catalogComfortCapacityMax(minPeople: number): number {
 }
 
 function comparePropertiesForCatalogCapacity(
-  a: { capacity: number; priceBase: number },
-  b: { capacity: number; priceBase: number },
+  a: {
+    capacity: number;
+    priceBase: number;
+    eventCapacity?: number | null;
+    allowsEventsContent?: boolean | null;
+  },
+  b: {
+    capacity: number;
+    priceBase: number;
+    eventCapacity?: number | null;
+    allowsEventsContent?: boolean | null;
+  },
   minPeople: number,
   sortByPrice: boolean,
+  forEvento: boolean | undefined,
 ): number {
   const capMax = catalogComfortCapacityMax(minPeople);
   const tierOf = (c: number) => (c <= capMax ? 0 : 1);
-  const ta = tierOf(a.capacity);
-  const tb = tierOf(b.capacity);
+  const aCap = catalogPeopleCountForFilter(a, forEvento);
+  const bCap = catalogPeopleCountForFilter(b, forEvento);
+  const ta = tierOf(aCap);
+  const tb = tierOf(bCap);
   if (ta !== tb) return ta - tb;
-  const excessA = a.capacity - minPeople;
-  const excessB = b.capacity - minPeople;
+  const excessA = aCap - minPeople;
+  const excessB = bCap - minPeople;
   if (excessA !== excessB) return excessA - excessB;
   if (sortByPrice) return a.priceBase - b.priceBase;
   return 0;
@@ -1095,6 +1156,7 @@ export const searchAvailableByLocationAndDates = query({
     excludePropertyIds: v.optional(v.array(v.id('properties'))),
     sortByPrice: v.optional(v.boolean()),
     allowsPets: v.optional(v.boolean()),
+    isEvento: v.optional(v.boolean()),
   },
   handler: async (ctx, args) => {
     const limit = args.limit ?? 30;
@@ -1112,7 +1174,17 @@ export const searchAvailableByLocationAndDates = query({
     );
 
     if (args.minCapacity != null) {
-      byLocation = byLocation.filter((p) => p.capacity >= args.minCapacity!);
+      byLocation = byLocation.filter(
+        (p) =>
+          catalogPeopleCountForFilter(
+            p as {
+              capacity: number;
+              eventCapacity?: number | null;
+              allowsEventsContent?: boolean | null;
+            },
+            args.isEvento,
+          ) >= args.minCapacity!,
+      );
     }
 
     // Si el cliente llevará mascotas, mostrar solo fincas que explícitamente las permitan.
@@ -1129,6 +1201,7 @@ export const searchAvailableByLocationAndDates = query({
           b,
           args.minCapacity!,
           args.sortByPrice === true,
+          args.isEvento,
         ),
       );
     }
@@ -1159,6 +1232,7 @@ export const searchAvailableByLocationAndDates = query({
           b,
           args.minCapacity!,
           args.sortByPrice === true,
+          args.isEvento,
         ),
       );
     } else if (args.sortByPrice) {
@@ -1199,6 +1273,7 @@ export const searchAvailableByDates = query({
     excludePropertyIds: v.optional(v.array(v.id('properties'))),
     sortByPrice: v.optional(v.boolean()),
     allowsPets: v.optional(v.boolean()),
+    isEvento: v.optional(v.boolean()),
   },
   handler: async (ctx, args) => {
     const limit = args.limit ?? 30;
@@ -1212,7 +1287,17 @@ export const searchAvailableByDates = query({
     );
 
     if (args.minCapacity != null) {
-      candidates = candidates.filter((p) => p.capacity >= args.minCapacity!);
+      candidates = candidates.filter(
+        (p) =>
+          catalogPeopleCountForFilter(
+            p as {
+              capacity: number;
+              eventCapacity?: number | null;
+              allowsEventsContent?: boolean | null;
+            },
+            args.isEvento,
+          ) >= args.minCapacity!,
+      );
     }
 
     if (args.allowsPets === true) {
@@ -1226,6 +1311,7 @@ export const searchAvailableByDates = query({
           b,
           args.minCapacity!,
           args.sortByPrice === true,
+          args.isEvento,
         ),
       );
     }
@@ -1256,6 +1342,7 @@ export const searchAvailableByDates = query({
           b,
           args.minCapacity!,
           args.sortByPrice === true,
+          args.isEvento,
         ),
       );
     }
@@ -1282,6 +1369,7 @@ export const searchAvailableByDates = query({
               b,
               args.minCapacity!,
               false,
+              args.isEvento,
             ),
           );
         }
@@ -1459,7 +1547,11 @@ export const create = mutation({
         v.object({
           name: v.string(),
           iconId: v.optional(v.id('iconography')),
+          quantity: v.optional(v.number()),
           zone: v.optional(v.string()),
+          zoneTemplateSourceId: v.optional(
+            v.id('propertyCategoryZoneTemplates'),
+          ),
         }),
       ),
     ),
@@ -1492,6 +1584,8 @@ export const create = mutation({
     zoneOrder: v.optional(v.array(v.string())),
     allowsPets: v.optional(v.boolean()),
     allowsEventsContent: v.optional(v.boolean()),
+    eventCapacity: v.optional(v.number()),
+    eventPackagePrice: v.optional(v.number()),
     familyOnly: v.optional(v.boolean()),
     serviceStaffAvailable: v.optional(v.boolean()),
     serviceStaffMandatory: v.optional(v.boolean()),
@@ -1541,6 +1635,8 @@ export const create = mutation({
       zoneOrder: args.zoneOrder,
       allowsPets: args.allowsPets,
       allowsEventsContent: args.allowsEventsContent,
+      eventCapacity: args.eventCapacity,
+      eventPackagePrice: args.eventPackagePrice,
       familyOnly: args.familyOnly,
       serviceStaffAvailable: args.serviceStaffAvailable,
       serviceStaffMandatory: args.serviceStaffMandatory,
@@ -1570,7 +1666,9 @@ export const create = mutation({
             propertyId,
             name: f.name,
             iconId: f.iconId,
+            quantity: normalizedFeatureQuantity(f.quantity),
             zone: f.zone,
+            zoneTemplateSourceId: f.zoneTemplateSourceId,
           });
         }),
       );
@@ -1684,7 +1782,11 @@ export const update = mutation({
         v.object({
           name: v.string(),
           iconId: v.optional(v.id('iconography')),
+          quantity: v.optional(v.number()),
           zone: v.optional(v.string()),
+          zoneTemplateSourceId: v.optional(
+            v.id('propertyCategoryZoneTemplates'),
+          ),
         }),
       ),
     ),
@@ -1693,6 +1795,8 @@ export const update = mutation({
     zoneOrder: v.optional(v.array(v.string())),
     allowsPets: v.optional(v.boolean()),
     allowsEventsContent: v.optional(v.boolean()),
+    eventCapacity: v.optional(v.number()),
+    eventPackagePrice: v.optional(v.number()),
     familyOnly: v.optional(v.boolean()),
     serviceStaffAvailable: v.optional(v.boolean()),
     serviceStaffMandatory: v.optional(v.boolean()),
@@ -1761,7 +1865,9 @@ export const update = mutation({
               propertyId: id,
               name: f.name,
               iconId: f.iconId,
+              quantity: normalizedFeatureQuantity(f.quantity),
               zone: f.zone,
+              zoneTemplateSourceId: f.zoneTemplateSourceId,
             });
           }),
         );
@@ -2144,6 +2250,10 @@ export const addFeature = mutation({
     name: v.string(),
     iconId: v.optional(v.id('iconography')),
     zone: v.optional(v.string()),
+    zoneTemplateSourceId: v.optional(
+      v.id('propertyCategoryZoneTemplates'),
+    ),
+    quantity: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
     const featureId = await ctx.db.insert('propertyFeatures', {
@@ -2151,6 +2261,8 @@ export const addFeature = mutation({
       name: args.name,
       iconId: args.iconId,
       zone: args.zone,
+      zoneTemplateSourceId: args.zoneTemplateSourceId,
+      quantity: normalizedFeatureQuantity(args.quantity),
     });
 
     return featureId;

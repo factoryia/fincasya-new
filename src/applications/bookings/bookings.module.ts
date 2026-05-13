@@ -5,11 +5,12 @@ import { AuthModule } from '../auth/auth.module';
 import { FincasModule } from '../fincas/fincas.module';
 import { BookingsSyncService } from './bookings-sync.service';
 import { BookingsRemindersService } from './bookings-reminders.service';
+import { RolesGuard } from '../shared/guards/roles.guard';
 
 @Module({
   imports: [SharedModule, AuthModule, forwardRef(() => FincasModule)],
   controllers: [BookingsController],
-  providers: [BookingsSyncService, BookingsRemindersService],
+  providers: [BookingsSyncService, BookingsRemindersService, RolesGuard],
   exports: [BookingsSyncService, BookingsRemindersService],
 })
 export class BookingsModule {}

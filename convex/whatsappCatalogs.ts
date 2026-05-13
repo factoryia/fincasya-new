@@ -6,6 +6,7 @@ import {
   type QueryCtx,
 } from "./_generated/server";
 import type { Id } from "./_generated/dataModel";
+import { catalogPeopleCountForFilter } from "./lib/propertyCatalogCapacity";
 
 /** Reglas de precio activas (misma idea que en `fincas.ts` / `calculateStayPrice`). */
 async function getActivePricingRulesForCatalog(
@@ -403,7 +404,19 @@ export const getBotStayQuoteByRetailerId = query({
     if (args.cupo != null && args.cupo > 0) {
       lines.push(`👥 *${args.cupo} personas*`);
     }
-    return { text: lines.join("\n") };
+    // Devolvemos también los números crudos para que el bot pueda calcular
+    // totales adicionales (mascotas, etc.) y mostrar un GRAN total al cliente.
+    return {
+      text: lines.join("\n"),
+      totals: {
+        propertyTitle: title,
+        nightly: stay.nightly,
+        nightsCount: stay.nightsCount,
+        subtotal: stay.subtotal,
+        appliedRule: stay.appliedRule,
+        cupo: args.cupo,
+      },
+    };
   },
 });
 
@@ -418,6 +431,10 @@ export const getPayloadByLocationForN8n = query({
     minCapacity: v.optional(v.number()),
     /** Capacidad máxima permitida (número de personas). Filtra fincas con capacity <= maxCapacity. */
     maxCapacity: v.optional(v.number()),
+    /** Capacidad máxima permitida en la pasada **intermedia** (cuando no hay
+     *  suficientes en el rango estricto). Mayor que `maxCapacity` pero acotada.
+     *  Si no se pasa, la pasada intermedia se omite y se cae al fallback sin tope. */
+    maxCapacityRelaxed: v.optional(v.number()),
     /** true = solo fincas para eventos; false = excluye fincas de eventos (descanso/familiar); undefined = sin filtro. */
     isEvento: v.optional(v.boolean()),
   },
@@ -481,12 +498,10 @@ export const getPayloadByLocationForN8n = query({
     const productQuoteLines: string[] = [];
     const productTitles: string[] = [];
 
-    // Recolección por pasadas con prioridad para tolerar BD escasa de favoritas:
-    //   Pasada 1 (RECOMENDADAS): isFavorite=true + cumple capacidad+evento.
-    //   Pasada 2 (RECOMENDADAS): isFavorite=true + ignora filtro de capacidad (favoritas que no cumplen capacity exacta).
-    //   Pasada 3 (RECOMENDADAS): cualquier finca visible con capacidad+evento OK (sin requerir isFavorite).
-    //   Pasada 4 (fallback duro): cualquier finca visible (sin capacidad ni isFavorite).
-    // Para municipio normal solo aplica un filtro de localización + capacidad+evento; si no quedan, expande a sin-capacidad.
+    // Recolección por pasadas con prioridad para tolerar BD escasa de favoritas.
+    // Si hay cupo (`minCapacity` > 0), NUNCA se omiten pasadas que respetan ese mínimo:
+    // no se rellena el catálogo con fincas más pequeñas que lo pedido (evita p. ej. 10 y 13 cuando pidieron 22).
+    // Sin cupo en args, se conserva el fallback amplio (favoritas sin capacidad / solo ubicación).
     type Pass = {
       label: string;
       keep: (p: any) => boolean;
@@ -495,10 +510,27 @@ export const getPayloadByLocationForN8n = query({
     const matchesLocation = (p: any) =>
       isRecomendadas ? true : p.location.toLowerCase().includes(locLower);
     const matchesCapacity = (p: any) => {
-      if (args.minCapacity != null && (p.capacity ?? 0) < args.minCapacity)
+      const cap = catalogPeopleCountForFilter(p, args.isEvento);
+      if (args.minCapacity != null && cap < args.minCapacity) return false;
+      if (args.maxCapacity != null && cap > args.maxCapacity) return false;
+      return true;
+    };
+    /**
+     * Pasada intermedia: respeta el mínimo de cupo y aplica un **techo relajado**
+     * (mayor que `maxCapacity`, pero acotado por `maxCapacityRelaxed`). Garantiza
+     * que NUNCA se ofrezca una finca con capacity < cupo del cliente, y tampoco
+     * una finca absurdamente grande (p. ej. una de 53 personas para alguien que
+     * pidió 22). Si `maxCapacityRelaxed` no viene, se comporta como solo-min.
+     */
+    const matchesCapacityRelaxed = (p: any) => {
+      const cap = catalogPeopleCountForFilter(p, args.isEvento);
+      if (args.minCapacity != null && cap < args.minCapacity) return false;
+      if (
+        args.maxCapacityRelaxed != null &&
+        cap > args.maxCapacityRelaxed
+      ) {
         return false;
-      if (args.maxCapacity != null && (p.capacity ?? 0) > args.maxCapacity)
-        return false;
+      }
       return true;
     };
     const matchesEvento = (p: any) => {
@@ -508,6 +540,11 @@ export const getPayloadByLocationForN8n = query({
       }
       return true;
     };
+
+    const enforceClientCupo =
+      args.minCapacity != null &&
+      Number.isFinite(args.minCapacity) &&
+      args.minCapacity > 0;
 
     const passes: Pass[] = isRecomendadas
       ? [
@@ -519,17 +556,32 @@ export const getPayloadByLocationForN8n = query({
               matchesEvento(p),
           },
           {
-            label: "fav+ev",
-            keep: (p) => p.isFavorite === true && matchesEvento(p),
+            label: "fav+capRelaxed+ev",
+            keep: (p) =>
+              p.isFavorite === true &&
+              matchesCapacityRelaxed(p) &&
+              matchesEvento(p),
           },
+          ...(enforceClientCupo
+            ? []
+            : [
+                {
+                  label: "fav+ev",
+                  keep: (p: any) =>
+                    p.isFavorite === true && matchesEvento(p),
+                } satisfies Pass,
+              ]),
           {
             label: "cap+ev",
             keep: (p) => matchesCapacity(p) && matchesEvento(p),
           },
           {
-            label: "any",
-            keep: () => true,
+            label: "capRelaxed+ev",
+            keep: (p) => matchesCapacityRelaxed(p) && matchesEvento(p),
           },
+          ...(enforceClientCupo
+            ? []
+            : [{ label: "any", keep: () => true } satisfies Pass]),
         ]
       : [
           {
@@ -537,14 +589,27 @@ export const getPayloadByLocationForN8n = query({
             keep: (p) =>
               matchesLocation(p) && matchesCapacity(p) && matchesEvento(p),
           },
+          // Respeta el cupo mínimo y aplica un techo relajado (`maxCapacityRelaxed`,
+          // ~1.7x el cupo). NO permite fincas absurdamente grandes (ej. una de 53
+          // para alguien que pidió 22).
           {
-            label: "loc+ev",
-            keep: (p) => matchesLocation(p) && matchesEvento(p),
+            label: "loc+capRelaxed+ev",
+            keep: (p) =>
+              matchesLocation(p) && matchesCapacityRelaxed(p) && matchesEvento(p),
           },
-          {
-            label: "loc",
-            keep: (p) => matchesLocation(p),
-          },
+          ...(enforceClientCupo
+            ? []
+            : [
+                {
+                  label: "loc+ev",
+                  keep: (p: any) =>
+                    matchesLocation(p) && matchesEvento(p),
+                } satisfies Pass,
+                {
+                  label: "loc",
+                  keep: (p: any) => matchesLocation(p),
+                } satisfies Pass,
+              ]),
         ];
 
     const seen = new Set<string>();

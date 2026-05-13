@@ -1,6 +1,8 @@
 import { v } from 'convex/values';
 import { query, mutation } from './_generated/server';
 import { api, internal } from './_generated/api';
+import type { Doc } from './_generated/dataModel';
+import { normalizeContractLookupQueryConvex } from './lib/contractLookup';
 
 /** Fecha calendario YYYY-MM-DD en hora de Colombia (negocio). */
 function calendarDateColombia(ms: number): string {
@@ -845,3 +847,75 @@ export const markReminderSent = mutation({
   },
 });
 
+/**
+ * Busca una reserva por número de contrato.
+ * Coincidencias: texto en `observaciones` (p. ej. "Contrato: FY-2005"), `reference`, sin depender
+ * solo de reservas "directas" ni de mayúsculas.
+ */
+export const getByContractNumber = query({
+  args: { contractNumber: v.string() },
+  handler: async (ctx, args) => {
+    const raw = args.contractNumber.trim();
+    if (!raw) return null;
+
+    const normalized = normalizeContractLookupQueryConvex(raw);
+    const needle = normalized.toLowerCase();
+    const withoutContratoPrefix = normalized
+      .replace(/^\s*contrato\s*:\s*/i, '')
+      .trim()
+      .toLowerCase();
+
+    const enrich = async (match: Doc<'bookings'>) => {
+      const property = match.propertyId
+        ? await ctx.db.get(match.propertyId)
+        : null;
+      return {
+        ...match,
+        propertyTitle: (property as any)?.title ?? '',
+        propertyLocation: (property as any)?.location ?? '',
+      };
+    };
+
+    // Búsqueda rápida por índice (nuevo: reference = número de contrato al crear desde admin)
+    const refCandidates = [...new Set([raw, normalized].filter((x) => x.length > 0))];
+    for (const c of refCandidates) {
+      const byRef = await ctx.db
+        .query('bookings')
+        .withIndex('by_reference', (q) => q.eq('reference', c))
+        .first();
+      if (byRef) {
+        return await enrich(byRef);
+      }
+    }
+
+    const all = await ctx.db.query('bookings').collect();
+    const sorted = [...all].sort(
+      (a, b) => (b.createdAt ?? 0) - (a.createdAt ?? 0),
+    );
+    const bookings = sorted.slice(0, 5000);
+
+    const matches = (b: (typeof bookings)[number]) => {
+      const obs = (b.observaciones ?? '').toLowerCase();
+      const ref = (b.reference ?? '').toLowerCase();
+      if (needle && obs.includes(needle)) return true;
+      if (
+        withoutContratoPrefix &&
+        withoutContratoPrefix !== needle &&
+        obs.includes(withoutContratoPrefix)
+      )
+        return true;
+      if (needle && ref && (ref === needle || ref.includes(needle))) return true;
+      const m = obs.match(/contrato\s*:\s*([^\s\n\r]+)/i);
+      if (m && m[1].toLowerCase() === needle) return true;
+      const rawLower = raw.toLowerCase();
+      if (rawLower !== needle && obs.includes(rawLower)) return true;
+      return false;
+    };
+
+    const match = bookings.find(matches);
+
+    if (!match) return null;
+
+    return await enrich(match);
+  },
+});

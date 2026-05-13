@@ -1,5 +1,13 @@
 import { ConvexError, v } from 'convex/values';
-import { action, mutation, query, QueryCtx } from './_generated/server';
+import {
+  action,
+  internalAction,
+  internalMutation,
+  internalQuery,
+  mutation,
+  query,
+  QueryCtx,
+} from './_generated/server';
 import {
   contentHashFromArrayBuffer,
   type Entry,
@@ -12,9 +20,79 @@ import { paginationOptsValidator } from 'convex/server';
 import { extractTextContent } from './lib/extractTextContent';
 import rag from './rag';
 import type { Id } from './_generated/dataModel';
-import { api } from './_generated/api';
+import { api, internal } from './_generated/api';
 
 const DEFAULT_NAMESPACE = 'fincas';
+
+/**
+ * Namespace separado para preguntas frecuentes que el bot puede consultar:
+ * políticas (mascotas, abono, RNT), reglas operativas (horarios, check-in/out),
+ * formas de pago, condiciones de cancelación, etc.
+ *
+ * Se mantiene aparte de "fincas" para que las búsquedas del bot devuelvan info
+ * de políticas y no descripciones de propiedades.
+ */
+export const FAQ_NAMESPACE = 'faq';
+
+/**
+ * Semilla inicial de FAQs. Cada entrada se inserta con un `key` estable, así
+ * que correr `seedFaqEntries` varias veces es idempotente (no duplica).
+ *
+ * Para añadir/modificar una FAQ:
+ *   1) Edita esta lista (o mete el copy oficial en el dashboard Convex).
+ *   2) Corre `bunx convex run knowledge:seedFaqEntries` para refrescar.
+ *
+ * Tip: usa `key` consistente — si cambias `text` pero mantienes `key`, el RAG
+ * lo reemplaza limpiamente en lugar de crear un duplicado.
+ */
+const FAQ_INITIAL_SEED: Array<{ key: string; title: string; text: string }> = [
+  {
+    key: 'faq:mascotas-politica',
+    title: 'Política y reglas de mascotas',
+    text: [
+      'Tus mascotas son bienvenidas en la mayoría de nuestras opciones de alojamiento. Algunas fincas no las permiten.',
+      '',
+      'Cargos por mascota:',
+      '- Depósito reembolsable: $100.000 por cada mascota.',
+      '- Tarifa de ingreso: $30.000 a partir de la 3ª mascota.',
+      '- Limpieza adicional: si viaja con 3 o más mascotas, $70.000 (cargo único de aseo).',
+      '',
+      'Recomendaciones importantes (qué pueden y qué NO pueden hacer):',
+      '- No ingresar las mascotas a la piscina.',
+      '- Evitar orina o pelaje en zonas interiores.',
+      '- No subirlas a muebles ni camas.',
+      '- Cuidar que no muerdan implementos de la casa.',
+      '- Recoger sus necesidades constantemente.',
+      '',
+      'El incumplimiento de estas recomendaciones puede generar descuentos en el depósito.',
+    ].join('\n'),
+  },
+  {
+    key: 'faq:reserva-abono',
+    title: 'Cómo se reserva: abono del 50%',
+    text: [
+      'Para asegurar la fecha, el cliente abona el 50% del valor total del alojamiento.',
+      'El 50% restante se paga según las condiciones del contrato.',
+      'Tras el abono se envía el contrato y el soporte oficial con la ubicación y detalles.',
+    ].join('\n'),
+  },
+  {
+    key: 'faq:rnt-respaldo',
+    title: 'RNT y respaldo legal',
+    text: [
+      'FincasYa.com cuenta con Registro Nacional de Turismo (RNT) 163658.',
+      'Toda reserva va con respaldo legal y contrato formal de arrendamiento.',
+    ].join('\n'),
+  },
+  {
+    key: 'faq:ubicacion-exacta',
+    title: 'Ubicación exacta de la finca',
+    text: [
+      'Por seguridad, la dirección y ubicación exacta de la finca se entrega ÚNICAMENTE después de firmar el contrato de arrendamiento y realizar el abono del 50%.',
+      'Antes de eso solo se confirma el municipio o zona general.',
+    ].join('\n'),
+  },
+];
 
 function guessMimeType(filename: string, bytes: ArrayBuffer): string {
   return (
@@ -474,6 +552,9 @@ export const indexFincas = action({
         description: string;
         location: string;
         capacity: number;
+        eventCapacity?: number;
+        eventPackagePrice?: number;
+        allowsEventsContent?: boolean;
         type: string;
         category: string;
         features?: { name: string; iconUrl: string | null }[];
@@ -489,6 +570,9 @@ export const indexFincas = action({
         description: string;
         location: string;
         capacity: number;
+        eventCapacity?: number;
+        eventPackagePrice?: number;
+        allowsEventsContent?: boolean;
         type: string;
         category: string;
         features?: { name: string; iconUrl: string | null }[];
@@ -502,6 +586,9 @@ export const indexFincas = action({
             description: p.description,
             location: p.location,
             capacity: p.capacity,
+            eventCapacity: p.eventCapacity,
+            eventPackagePrice: p.eventPackagePrice,
+            allowsEventsContent: p.allowsEventsContent,
             type: p.type,
             category: p.category,
             features: p.features,
@@ -517,6 +604,9 @@ export const indexFincas = action({
         description: string;
         location: string;
         capacity: number;
+        eventCapacity?: number;
+        eventPackagePrice?: number;
+        allowsEventsContent?: boolean;
         type: string;
         category: string;
         features?: { name: string; iconUrl: string | null }[];
@@ -528,6 +618,9 @@ export const indexFincas = action({
           description: p.description,
           location: p.location,
           capacity: p.capacity,
+          eventCapacity: p.eventCapacity,
+          eventPackagePrice: p.eventPackagePrice,
+          allowsEventsContent: p.allowsEventsContent,
           type: p.type,
           category: p.category,
           features: p.features,
@@ -542,7 +635,19 @@ export const indexFincas = action({
         `Título: ${prop.title}`,
         `Descripción: ${prop.description}`,
         `Ubicación: ${prop.location}`,
-        `Capacidad: ${prop.capacity} personas`,
+        `Capacidad hospedaje: ${prop.capacity} personas`,
+        prop.allowsEventsContent === true &&
+          prop.eventCapacity != null &&
+          prop.eventCapacity > 0
+          ? `Capacidad para evento/invitados: hasta ${prop.eventCapacity} personas`
+          : '',
+        prop.allowsEventsContent === true &&
+          prop.eventCapacity != null &&
+          prop.eventCapacity > 0 &&
+          prop.eventPackagePrice != null &&
+          prop.eventPackagePrice > 0
+          ? `Precio de referencia para evento (hasta ${prop.eventCapacity} invitados): ${prop.eventPackagePrice.toLocaleString('es-CO')} COP`
+          : '',
         `Tipo: ${prop.type}`,
         `Categoría: ${prop.category}`,
         prop.features?.length
@@ -570,3 +675,367 @@ export const indexFincas = action({
     return { indexed: indexed.length, entryIds: indexed };
   },
 });
+
+/**
+ * Búsqueda RAG para el bot de WhatsApp (sin auth de usuario).
+ *
+ * Diferencias clave con `search`:
+ *   - No requiere `ctx.auth.getUserIdentity()` (el bot corre en webhook).
+ *   - Usa por defecto el namespace `"faq"` (no `"fincas"`), así no mezcla
+ *     descripciones de propiedades con políticas operativas.
+ *   - Devuelve un texto plano listo para inyectar en el system prompt,
+ *     más una lista corta de títulos para referencia.
+ *
+ * El bot la invoca desde `inbound.ts` cuando detecta que el cliente preguntó
+ * algo tipo FAQ (ver `looksLikeQuestion`). Si no hay matches con score
+ * suficiente, devuelve `text: ""` y el bot sigue su flujo normal.
+ */
+export const searchFaqForBot = action({
+  args: {
+    query: v.string(),
+    namespace: v.optional(v.string()),
+    /** Score mínimo para considerar el match válido. Default 0.5 (suficientemente conservador
+     *  para evitar matches espurios sin requerir reranker). El componente `@convex-dev/rag`
+     *  devuelve scores de similitud de coseno aproximados (~0-1). */
+    minScore: v.optional(v.number()),
+  },
+  handler: async (
+    ctx,
+    args,
+  ): Promise<{
+    /** Texto del entry TOP-1 (no concatenación). Vacío si no hubo match >= minScore. */
+    text: string;
+    /** Título del entry TOP-1 (vacío si no hubo match válido). */
+    title: string;
+    /** Score del top match (0 si no hubo). Útil para el caller. */
+    score: number;
+  }> => {
+    const query = String(args.query ?? '').trim();
+    if (query.length < 3) return { text: '', title: '', score: 0 };
+
+    const namespace = args.namespace ?? FAQ_NAMESPACE;
+    const minScore = args.minScore ?? 0.5;
+
+    try {
+      const searchResult = await rag.search(ctx, {
+        namespace,
+        query,
+        // Pedimos hasta 4 chunks porque un mismo entry puede tener varios chunks
+        // pequeños; filtramos al top entry abajo.
+        limit: 4,
+      });
+
+      const results = searchResult.results ?? [];
+      const top = results[0];
+      if (!top || top.score < minScore) {
+        return { text: '', title: '', score: top?.score ?? 0 };
+      }
+
+      // Solo nos quedamos con los chunks del TOP entry (mismo entryId que el top).
+      // Si el RAG devolvió chunks de otros entries detrás, se descartan: queremos
+      // UN solo bloque temático, no una concatenación de FAQs distintas.
+      const topEntryId = top.entryId;
+      const chunksFromTopEntry = results
+        .filter((r) => r.entryId === topEntryId)
+        // ordenarlos por su `order` para reconstruir el texto en su orden original
+        .sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
+        .flatMap((r) => r.content ?? [])
+        .map((c) => String(c.text ?? '').trim())
+        .filter((t) => t.length > 0);
+
+      const text = chunksFromTopEntry.join('\n').trim();
+      const topEntry = (searchResult.entries ?? []).find(
+        (e) => e.entryId === topEntryId,
+      );
+      const title = String(topEntry?.title ?? topEntry?.key ?? '').trim();
+
+      return { text, title, score: top.score };
+    } catch (err) {
+      console.error('searchFaqForBot fallo:', err);
+      return { text: '', title: '', score: 0 };
+    }
+  },
+});
+
+/**
+ * Siembra (idempotente) las FAQs iniciales en el namespace `"faq"`.
+ *
+ * Uso típico (una sola vez tras desplegar, o al añadir nuevas entradas):
+ *   bunx convex run knowledge:seedFaqEntries
+ *
+ * El `key` es estable por entrada, así que correrlo varias veces no duplica:
+ * el RAG reusa el entry existente si el contenido coincide.
+ *
+ * Para añadir o modificar FAQs sin editar este archivo, también está disponible
+ * `addText` (UI autenticada) — solo asegúrate de pasar `namespace: "faq"`.
+ */
+export const seedFaqEntries = action({
+  args: {
+    namespace: v.optional(v.string()),
+    /** Si se pasa, se siembran solo estas entradas (override del seed por defecto). */
+    entries: v.optional(
+      v.array(
+        v.object({
+          key: v.string(),
+          title: v.string(),
+          text: v.string(),
+        }),
+      ),
+    ),
+  },
+  handler: async (
+    ctx,
+    args,
+  ): Promise<{ inserted: number; reused: number; keys: string[] }> => {
+    const namespace = args.namespace ?? FAQ_NAMESPACE;
+    const entries = args.entries ?? FAQ_INITIAL_SEED;
+    const keys: string[] = [];
+    let inserted = 0;
+    let reused = 0;
+
+    for (const entry of entries) {
+      const { created } = await rag.add(ctx, {
+        namespace,
+        text: entry.text,
+        key: entry.key,
+        title: entry.title,
+        metadata: {
+          uploadedBy: 'system:seed',
+          filename: entry.title,
+          category: 'faq',
+        } as EntryMetadata,
+      });
+      keys.push(entry.key);
+      if (created) inserted += 1;
+      else reused += 1;
+    }
+
+    return { inserted, reused, keys };
+  },
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Endpoints para el panel admin (sin auth de usuario Convex).
+//
+// Se usan desde `convex/http.ts` con protección `X-API-Key` (la misma del
+// resto del admin / panel). Comparten la lógica con las versiones públicas
+// autenticadas pero saltan el `ctx.auth.getUserIdentity()`, porque la auth
+// ya se valida a nivel HTTP en el handler.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Listar entradas (paginado) — versión admin. */
+export const listForAdmin = internalQuery({
+  args: {
+    namespace: v.string(),
+    category: v.optional(v.string()),
+    paginationOpts: paginationOptsValidator,
+  },
+  handler: async (ctx, args): Promise<{
+    page: KnowledgeFile[];
+    isDone: boolean;
+    continueCursor: string;
+  }> => {
+    const ns = await rag.getNamespace(ctx, { namespace: args.namespace });
+    if (!ns) {
+      return { page: [], isDone: true, continueCursor: '' };
+    }
+    const results = await rag.list(ctx, {
+      namespaceId: ns.namespaceId,
+      paginationOpts: args.paginationOpts,
+    });
+    const files = await Promise.all(
+      results.page.map((entry) => convertEntryToPublicFile(ctx, entry)),
+    );
+    const filtered = args.category
+      ? files.filter((file) => file.category === args.category)
+      : files;
+    return {
+      page: filtered,
+      isDone: results.isDone,
+      continueCursor: results.continueCursor,
+    };
+  },
+});
+
+const MAX_ENTRY_TEXT_CHARS = 400_000;
+
+/** Texto indexado (chunks) + metadatos — solo admin HTTP (X-API-Key). */
+export const getEntryContentForAdmin = internalQuery({
+  args: {
+    namespace: v.string(),
+    entryId: vEntryId,
+  },
+  handler: async (ctx, args) => {
+    const ns = await rag.getNamespace(ctx, { namespace: args.namespace });
+    if (!ns) return null;
+
+    const entry = await rag.getEntry(ctx, { entryId: args.entryId });
+    if (!entry) return null;
+
+    const metadata = entry.metadata as EntryMetadata | undefined;
+    let downloadUrl: string | null = null;
+    if (metadata?.storageId) {
+      try {
+        downloadUrl = await ctx.storage.getUrl(metadata.storageId);
+      } catch {
+        downloadUrl = null;
+      }
+    }
+
+    const parts: string[] = [];
+    let cursor: string | null = null;
+    let totalChars = 0;
+    for (let pageIdx = 0; pageIdx < 200; pageIdx++) {
+      const chunkPage = await rag.listChunks(ctx, {
+        entryId: args.entryId,
+        paginationOpts: { numItems: 80, cursor },
+        order: 'asc',
+      });
+      for (const ch of chunkPage.page) {
+        const t = ch.text ?? '';
+        if (totalChars + t.length > MAX_ENTRY_TEXT_CHARS) {
+          const slice = t.slice(0, Math.max(0, MAX_ENTRY_TEXT_CHARS - totalChars));
+          if (slice) parts.push(slice);
+          totalChars = MAX_ENTRY_TEXT_CHARS;
+          break;
+        }
+        parts.push(t);
+        totalChars += t.length;
+      }
+      if (totalChars >= MAX_ENTRY_TEXT_CHARS) break;
+      if (chunkPage.isDone) break;
+      cursor = chunkPage.continueCursor;
+      if (!cursor) break;
+    }
+
+    const fullText = parts.join('\n\n').trim();
+    const truncated = totalChars >= MAX_ENTRY_TEXT_CHARS;
+
+    return {
+      entryId: args.entryId,
+      key: entry.key ?? null,
+      title: entry.title ?? null,
+      category: metadata?.category ?? null,
+      status: entry.status,
+      fullText,
+      truncated,
+      downloadUrl,
+    };
+  },
+});
+
+/**
+ * Sube un archivo (bytes en base64) — versión admin sin auth.
+ * Encola el procesamiento en background y devuelve el jobId para que la UI
+ * pueda hacer poll del estado vía `getPendingUpload`.
+ */
+export const addFileForAdmin = internalAction({
+  args: {
+    filename: v.string(),
+    mimeType: v.string(),
+    bytesBase64: v.string(),
+    category: v.optional(v.string()),
+    namespace: v.string(),
+    /** Identificador opcional para auditoría. Default "admin:panel". */
+    uploadedBy: v.optional(v.string()),
+  },
+  handler: async (
+    ctx,
+    args,
+  ): Promise<{
+    jobId: Id<'pendingKnowledgeUploads'>;
+    storageId: Id<'_storage'>;
+    status: 'processing';
+    url: string | null;
+  }> => {
+    const bytes = base64ToBytes(args.bytesBase64);
+    const arrayBuffer = toArrayBuffer(bytes);
+    const mimeType = args.mimeType || guessMimeType(args.filename, arrayBuffer);
+    const blob = new Blob([arrayBuffer], { type: mimeType });
+    const storageId = await ctx.storage.store(blob);
+
+    const result = await ctx.runMutation(api.knowledge.enqueueFile, {
+      storageId,
+      filename: args.filename,
+      mimeType,
+      category: args.category,
+      namespace: args.namespace,
+      userId: args.uploadedBy ?? 'admin:panel',
+    });
+
+    return {
+      jobId: result.jobId as Id<'pendingKnowledgeUploads'>,
+      storageId,
+      status: 'processing' as const,
+      url: await ctx.storage.getUrl(storageId),
+    };
+  },
+});
+
+/** Añade texto plano al RAG — versión admin sin auth. */
+export const addTextForAdmin = internalAction({
+  args: {
+    title: v.string(),
+    text: v.string(),
+    category: v.optional(v.string()),
+    namespace: v.string(),
+    key: v.optional(v.string()),
+    uploadedBy: v.optional(v.string()),
+  },
+  handler: async (
+    ctx,
+    args,
+  ): Promise<{ entryId: string; created: boolean }> => {
+    const { entryId, created } = await rag.add(ctx, {
+      namespace: args.namespace,
+      text: args.text,
+      key: args.key ?? args.title,
+      title: args.title,
+      metadata: {
+        uploadedBy: args.uploadedBy ?? 'admin:panel',
+        filename: args.title,
+        category: args.category ?? null,
+      } as EntryMetadata,
+    });
+    return { entryId: entryId as string, created };
+  },
+});
+
+/** Elimina una entrada del RAG (y su archivo asociado en storage si existe). */
+export const deleteForAdmin = internalAction({
+  args: {
+    entryId: vEntryId,
+    namespace: v.string(),
+  },
+  handler: async (ctx, args): Promise<{ ok: true }> => {
+    const ns = await rag.getNamespace(ctx, { namespace: args.namespace });
+    if (!ns) throw new Error('Namespace no encontrado');
+
+    const entry = await rag.getEntry(ctx, { entryId: args.entryId });
+    if (!entry) throw new Error('Entrada no encontrada');
+
+    const metadata = entry.metadata as EntryMetadata | undefined;
+    if (metadata?.storageId) {
+      await ctx.storage.delete(metadata.storageId);
+    }
+
+    await rag.deleteAsync(ctx, { entryId: args.entryId });
+    return { ok: true as const };
+  },
+});
+
+/** Estado de un job de procesamiento (para poll desde el front). */
+export const getJobStatusForAdmin = internalQuery({
+  args: { jobId: v.id('pendingKnowledgeUploads') },
+  handler: async (
+    ctx,
+    args,
+  ): Promise<{ exists: boolean }> => {
+    const job = await ctx.db.get(args.jobId);
+    return { exists: job != null };
+  },
+});
+
+// Mantén el `internal` import vivo para futuros usos.
+void internal;
+void internalMutation;

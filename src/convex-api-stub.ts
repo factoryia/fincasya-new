@@ -4,7 +4,8 @@
  */
 import * as path from 'path';
 
-const generatedPath = path.join(process.cwd(), 'convex/_generated/api');
+/** Relativo al JS compilado (`dist/`) o fuente (`src/`) para no depender del cwd al arrancar Nest. */
+const generatedPath = path.join(__dirname, '..', 'convex', '_generated', 'api');
 let generated: any = { api: {} };
 
 try {

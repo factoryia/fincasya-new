@@ -40,8 +40,11 @@ export const upsert = internalMutation({
       selectedPropertyRetailerId: v.optional(v.string()),
       selectedPropertyName: v.optional(v.string()),
       catalogUserPickedReply: v.optional(v.boolean()),
+      puenteAcknowledged: v.optional(v.boolean()),
       hasPets: v.optional(v.boolean()),
       petCount: v.optional(v.number()),
+      eventPeopleCount: v.optional(v.number()),
+      eventLogistics: v.optional(v.string()),
       contractName: v.optional(v.string()),
       contractCedula: v.optional(v.string()),
       contractEmail: v.optional(v.string()),
@@ -49,6 +52,8 @@ export const upsert = internalMutation({
       contractAddress: v.optional(v.string()),
     }),
     turnCount: v.number(),
+    phaseEnteredAt: v.optional(v.number()),
+    samePhaseTurnCount: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
     const existing = await ctx.db
@@ -65,6 +70,8 @@ export const upsert = internalMutation({
         phase: args.phase,
         entities: args.entities,
         turnCount: args.turnCount,
+        ...(args.phaseEnteredAt !== undefined ? { phaseEnteredAt: args.phaseEnteredAt } : {}),
+        ...(args.samePhaseTurnCount !== undefined ? { samePhaseTurnCount: args.samePhaseTurnCount } : {}),
         updatedAt: now,
       });
       return existing._id;
@@ -76,6 +83,8 @@ export const upsert = internalMutation({
       phase: args.phase,
       entities: args.entities,
       turnCount: args.turnCount,
+      phaseEnteredAt: args.phaseEnteredAt ?? now,
+      samePhaseTurnCount: args.samePhaseTurnCount ?? 0,
       createdAt: now,
       updatedAt: now,
     });
@@ -105,6 +114,8 @@ export const reset = internalMutation({
         phase: "welcome",
         entities: emptyEntities,
         turnCount: 0,
+        phaseEnteredAt: now,
+        samePhaseTurnCount: 0,
         updatedAt: now,
       });
       return existing._id;
@@ -116,6 +127,8 @@ export const reset = internalMutation({
       phase: "welcome",
       entities: emptyEntities,
       turnCount: 0,
+      phaseEnteredAt: now,
+      samePhaseTurnCount: 0,
       createdAt: now,
       updatedAt: now,
     });

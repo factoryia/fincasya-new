@@ -6,6 +6,8 @@ import {
   IsEnum,
   IsBoolean,
   Min,
+  IsInt,
+  ValidateIf,
   ValidateNested,
 } from 'class-validator';
 import { Type, Transform, plainToInstance } from 'class-transformer';
@@ -59,6 +61,10 @@ export class FeatureItemDto {
   @IsOptional()
   @IsString()
   zone?: string;
+
+  @IsOptional()
+  @IsString()
+  zoneTemplateSourceId?: string;
 }
 
 const toNumber = (v: unknown) =>
@@ -178,7 +184,6 @@ export class CreateFincaDto {
       : value === true || value === 'true' || value === 1,
   )
   isFavorite?: boolean;
- politicalOnly?: boolean; // Wait, I used familyOnly in schema. Let's stick to familyOnly.
 
   @IsOptional()
   @IsBoolean()
@@ -197,6 +202,25 @@ export class CreateFincaDto {
       : value === true || value === 'true' || value === 1,
   )
   allowsEventsContent?: boolean;
+
+  /** Máximo de invitados para evento (puede ser mayor que `capacity` de hospedaje). */
+  @IsOptional()
+  @Transform(({ value }) => {
+    const n = toNumber(value);
+    if (n === undefined || !Number.isFinite(n) || n < 1) return undefined;
+    return Math.floor(n);
+  })
+  @ValidateIf((_, v) => v !== undefined && v !== null)
+  @IsInt()
+  @Min(1)
+  eventCapacity?: number;
+
+  /** Precio de referencia (COP) para evento hasta `eventCapacity` invitados. */
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  @Transform(({ value }) => toNumber(value))
+  eventPackagePrice?: number;
 
   @IsOptional()
   @IsBoolean()

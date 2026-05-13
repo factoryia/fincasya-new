@@ -1,6 +1,10 @@
 import type { Id } from "../../_generated/dataModel";
 import type { BotEntities } from "../bot/types";
-import { inferRetailerIdFromCatalogTitle } from "../bot/entities";
+import {
+  capacityCeilForCupo,
+  capacityCeilRelaxedForCupo,
+  inferRetailerIdFromCatalogTitle,
+} from "../bot/entities";
 import { INBOUND_DEBOUNCE_MS, MAX_CATALOG_PRODUCTS_PER_SEND } from "./constants";
 
 async function isStillThisTailUserMessage(
@@ -17,6 +21,50 @@ async function isStillThisTailUserMessage(
     scanLimit: 50,
   })) as { _id?: string } | null;
   return !!(latest && String(latest._id) === String(insertedMsgId));
+}
+
+/**
+ * Heurística para decidir si el mensaje del cliente parece una pregunta tipo FAQ
+ * que vale la pena resolver con el RAG (mascotas, horarios, pagos, ubicación, etc.).
+ *
+ * DELIBERADAMENTE conservadora: si hay duda, devuelve false. Disparar el RAG
+ * cuando el cliente está dando datos del flujo (ej. "quiero reservar 22 amigos
+ * en Melgar") rompe la experiencia con un volcado de FAQs.
+ *
+ * Reglas:
+ *   - Trae `?` o `¿` → true.
+ *   - Empieza con palabra interrogativa explícita (qué/cómo/cuál/dónde/cuándo/
+ *     cuánto/puedo/se puede/me regalas/me dices/sabes/tienen/aceptan/permiten/
+ *     hay/incluye) → true.
+ *   - Mensaje corto (<=120 chars) con término FAQ inequívoco (horario, check-in,
+ *     mascota, piscina, cancelación, formas de pago, política, reglas) → true.
+ *   - "reserva/reservar/abono/depósito" SOLO se consideran si ya cumplió alguna
+ *     de las reglas anteriores. Por sí solas NO disparan (son transaccionales).
+ *   - Default: false.
+ */
+function looksLikeQuestion(text: string): boolean {
+  const t = String(text ?? "").trim();
+  if (t.length < 4 || t.length > 250) return false;
+  if (t.includes("?") || t.includes("¿")) return true;
+
+  const lower = t.toLowerCase().normalize("NFD").replace(/\p{M}/gu, "");
+
+  // ¿Empieza con palabra interrogativa o frase de petición de info?
+  const startsAsQuestion =
+    /^(que\b|cual\b|cuales\b|cuando\b|donde\b|como\b|cuanto\b|cuanta\b|cuantos\b|cuantas\b|puedo\b|se puede\b|me regala|me regalas|me dices|me dice|me confirma|me explica|me explican|me cuent|sabes\b|saben\b|tienen\b|tiene\b|aceptan\b|acepta\b|permiten\b|permite\b|hay\b|incluye\b|incluyen\b|conoce|conoces|necesito saber|quisiera saber|una consulta|una pregunta)\b/.test(
+      lower,
+    );
+  if (startsAsQuestion) return true;
+
+  // Mensaje corto con términos FAQ inequívocos.
+  const shortAndFaqy =
+    t.length <= 120 &&
+    /\b(horario|horarios|check ?in|check ?out|hora\s+de\s+(entrada|salida|llegada|llegar)|mascota|mascotas|perr[oa]s?|gatos?|piscina|jacuzzi|bbq|raza|cancelaci[oó]n|cancelar|forma[s]?\s+de\s+pago|metodo[s]?\s+de\s+pago|c[oó]mo\s+pago|c[oó]mo\s+se\s+paga|pol[ií]tica|reglas?)\b/.test(
+      lower,
+    );
+  if (shortAndFaqy) return true;
+
+  return false;
 }
 
 /** Texto único para el turno: última ráfaga de mensajes del usuario hasta el último del asistente. */
@@ -106,17 +154,56 @@ export async function processInboundMessageV2(
   const burstText = mergeTrailingUserBurst(recentForBurst);
   const textForTurn = burstText || String(finalContent ?? "").trim();
 
-  const wantsHuman = /\b(hablar con|llamar|asesor|humano|persona real|agente)\b/i.test(textForTurn);
+  const lowerText = String(textForTurn ?? "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/\p{M}/gu, "");
+
+  // PQRS / queja / reclamo / problema operativo: NO es flujo de venta — escalar
+  // con mensaje empático específico (no el genérico de reserva).
+  const looksLikeComplaint =
+    /\b(pqrs|queja|quejas|quejarme|reclamo|reclamos|reclamar|reclamacion|denuncia|denunciar|peticion|inconformidad|inconforme)\b/.test(
+      lowerText,
+    ) ||
+    /\b(no estoy buscando (finca|reserva)|no (es|estoy) (para|por) (reserva|reservar|buscar)|no (quiero|deseo) reservar|no es para reservar)\b/.test(
+      lowerText,
+    ) ||
+    /\b(se da[nñ]o|se rompio|esta da[nñ]ad[oa]|no funciona|no sirve|esta malo|esta dañado)\b/.test(
+      lowerText,
+    );
+
+  // Petición explícita de asesor humano (flujo normal, no necesariamente queja).
+  const wantsHumanGeneric =
+    /\b(hablar con|llamar|asesor|humano|persona real|agente|persona|alguien (me )?ayud[ae]|me (puede|pueden) ayudar real|atencion humana|servicio al cliente|no me sirve (este|el) bot|no entiend[eo]s? nada|ya me cans[eé])\b/.test(
+      lowerText,
+    );
+
+  const wantsHuman = looksLikeComplaint || wantsHumanGeneric;
   if (wantsHuman) {
+    const t0 = Date.now();
     await ctx.runMutation(deps.internal.conversations.escalate, {
       conversationId,
       assignedUserId: process.env.CHATBOT_AUTO_ASSIGN_ADVISOR_ID?.trim() || undefined,
     });
-    const handoffMsg = "Perfecto, te comunico con un asesor. Un agente te escribirá en breve ✨";
+    const handoffMsg = looksLikeComplaint
+      ? "Lamento la situación 🙏 Te conecto con un asesor para gestionar tu solicitud. Un agente te escribirá en breve 🤝"
+      : "Perfecto, te comunico con un asesor. Un agente te escribirá en breve ✨";
     await ctx.runMutation(deps.internal.messages.insertAssistantMessage, {
       conversationId,
       content: handoffMsg,
-      createdAt: Date.now(),
+      createdAt: t0,
+    });
+    await ctx.runMutation(deps.internal.messages.insertSystemMessage, {
+      conversationId,
+      content:
+        looksLikeComplaint
+          ? "🚨 El cliente pidió atención humana (posible PQRS o tema operativo). Revisar y contactar. La IA quedó en pausa."
+          : "📣 El cliente pidió hablar con un asesor. Revisar conversación y contactar. La IA quedó en pausa.",
+      createdAt: t0 + 5,
+      metadata: {
+        kind: "inbox_escalation_alert",
+        escalationReason: looksLikeComplaint ? "client_complaint" : "client_requested",
+      },
     });
     await ctx.runAction(deps.internal.ycloud.sendWhatsAppMessage, {
       to: args.phone,
@@ -129,6 +216,8 @@ export async function processInboundMessageV2(
 
   const session = await ctx.runQuery(deps.internal.botSessions.getByConversation, { conversationId });
   const currentPhase = session?.phase ?? "welcome";
+  const currentSamePhaseTurnCount = session?.samePhaseTurnCount ?? 0;
+  const currentPhaseEnteredAt = session?.phaseEnteredAt ?? Date.now();
   let currentEntities = session?.entities ?? {};
   if (replyToWamid) {
     const pick = await ctx.runQuery(deps.internal.ycloud.getCatalogProductByOutboundWamid, {
@@ -162,11 +251,33 @@ export async function processInboundMessageV2(
       content: String(m.content ?? ""),
     }));
 
+  // Pre-fetch RAG (FAQs) si el mensaje parece una pregunta. Si no es pregunta,
+  // ahorramos la llamada de embeddings + vector search.
+  //
+  // `searchFaqForBot` ya devuelve SOLO el texto del top-1 entry (no concatena
+  // varias FAQs distintas), con su score. Si score < minScore o no hay match,
+  // devuelve `text: ""` y caemos al flujo normal sin RAG.
+  let faqContext: string | null = null;
+  if (looksLikeQuestion(textForTurn)) {
+    try {
+      const ragResult = (await ctx.runAction(deps.api.knowledge.searchFaqForBot, {
+        query: textForTurn,
+      })) as { text?: string; title?: string; score?: number } | null;
+      const t = String(ragResult?.text ?? "").trim();
+      if (t.length > 0) faqContext = t;
+    } catch (err) {
+      console.error("inbound: searchFaqForBot fallo (degradado, sigue sin RAG):", err);
+    }
+  }
+
   const result = await deps.runBotTurn({
     messageText: textForTurn,
     currentPhase,
     currentEntities,
     conversationHistory: history,
+    currentSamePhaseTurnCount,
+    currentPhaseEnteredAt,
+    faqContext,
     fetchStayQuote: async (e: BotEntities) => {
       const rid =
         e.selectedPropertyRetailerId?.trim() ||
@@ -180,8 +291,32 @@ export async function processInboundMessageV2(
         fechaEntrada: cin,
         fechaSalida: cout,
         cupo: e.cupo,
-      })) as { text?: string } | null;
-      return data?.text?.trim() ? data.text : null;
+      })) as {
+        text?: string;
+        totals?: {
+          propertyTitle?: string;
+          nightly?: number;
+          nightsCount?: number;
+          subtotal?: number;
+          appliedRule?: string;
+          cupo?: number;
+        };
+      } | null;
+      const text = String(data?.text ?? "").trim();
+      if (!text) return null;
+      return {
+        text,
+        totals: data?.totals
+          ? {
+              propertyTitle: String(data.totals.propertyTitle ?? "").trim(),
+              nightly: Number(data.totals.nightly ?? 0),
+              nightsCount: Number(data.totals.nightsCount ?? 0),
+              subtotal: Number(data.totals.subtotal ?? 0),
+              appliedRule: String(data.totals.appliedRule ?? "").trim(),
+              cupo: Number(data.totals.cupo ?? 0),
+            }
+          : undefined,
+      };
     },
   });
 
@@ -197,6 +332,8 @@ export async function processInboundMessageV2(
     phase: result.nextPhase,
     entities: result.updatedEntities,
     turnCount,
+    samePhaseTurnCount: result.samePhaseTurnCount,
+    phaseEnteredAt: result.phaseEnteredAt,
   });
 
   if (result.replyText) {
@@ -212,6 +349,29 @@ export async function processInboundMessageV2(
     });
   }
 
+  // Mensajes adicionales (paquetes multi-burbuja, p. ej. tras `pet_check`).
+  // Se envían en orden con un pequeño delay para que WhatsApp los muestre como
+  // burbujas separadas y no en una sola notificación. NO se incluye `wamid`
+  // (`context.message_id`) para que no queden todos citando el mismo mensaje
+  // del cliente — solo el primero lo hace.
+  const extras: string[] = Array.isArray(result.additionalMessages)
+    ? (result.additionalMessages as string[])
+    : [];
+  for (const extra of extras) {
+    const text = String(extra ?? "").trim();
+    if (!text) continue;
+    await new Promise((r) => setTimeout(r, 600));
+    await ctx.runMutation(deps.internal.messages.insertAssistantMessage, {
+      conversationId,
+      content: text,
+      createdAt: Date.now(),
+    });
+    await ctx.runAction(deps.internal.ycloud.sendWhatsAppMessage, {
+      to: args.phone,
+      text,
+    });
+  }
+
   const action = result.action;
   if (action.type === "send_catalog") {
     if (
@@ -219,13 +379,32 @@ export async function processInboundMessageV2(
     ) {
       return;
     }
+    // Si el cliente confirmó evento Y declaró capacidad de evento mayor que el
+    // cupo de hospedaje, el filtro de catálogo debe respetar la mayor. El helper
+    // server-side `catalogPeopleCountForFilter` ya considera `eventCapacity` de
+    // la finca cuando `isEvento=true`; aquí solo le pasamos el `minCapacity`
+    // correcto (lo que el cliente realmente necesita acomodar).
+    const eventPeople = Number(
+      result.updatedEntities.eventPeopleCount ?? 0,
+    );
+    const effectiveMinCapacity =
+      action.isEvento && eventPeople > action.cupo ? eventPeople : action.cupo;
+
     const catalogPayload = (await ctx.runQuery(
       deps.api.whatsappCatalogs.getPayloadByLocationForN8n,
       {
         location: action.location,
         fechaEntrada: action.checkIn,
         fechaSalida: action.checkOut,
-        minCapacity: action.cupo,
+        minCapacity: effectiveMinCapacity,
+        // Techo estricto: la primera pasada solo trae fincas en el rango ajustado.
+        // Ver `capacityCeilForCupo` (~cupo + buffer adaptativo).
+        maxCapacity: capacityCeilForCupo(effectiveMinCapacity),
+        // Techo relajado: si la pasada estricta no llena el catálogo, la
+        // intermedia amplía hasta `maxCapacityRelaxed` (~1.7x el cupo).
+        // EVITA que aparezcan fincas absurdamente grandes (ej. una de 53
+        // personas para alguien que pidió 22). Ver `capacityCeilRelaxedForCupo`.
+        maxCapacityRelaxed: capacityCeilRelaxedForCupo(effectiveMinCapacity),
         isEvento: action.isEvento,
       },
     )) as {
@@ -270,9 +449,27 @@ export async function processInboundMessageV2(
       }
     }
   } else if (action.type === "escalate_human") {
+    const reason = action.reason;
     await ctx.runMutation(deps.internal.conversations.escalate, {
       conversationId,
       assignedUserId: process.env.CHATBOT_AUTO_ASSIGN_ADVISOR_ID?.trim() || undefined,
+      ...(reason === "contract_complete" ? { priority: "urgent" as const } : {}),
+    });
+    const alertCreatedAt = Date.now() + (result.replyText ? 20 : 0);
+    const alertBody =
+      reason === "contract_complete"
+        ? "🚨 El cliente completó los datos del contrato por WhatsApp. Prioridad: revisar, avisar al equipo si aplica y contactar al cliente. La IA quedó en pausa."
+        : reason === "stuck_loop"
+          ? "⚠️ Escalación automática: el cliente llevaba varios turnos sin avanzar; se ofreció asesor humano. Revisar y contactar. La IA quedó en pausa."
+          : "ℹ️ Conversación pasada a asesor humano. La IA quedó en pausa.";
+    await ctx.runMutation(deps.internal.messages.insertSystemMessage, {
+      conversationId,
+      content: alertBody,
+      createdAt: alertCreatedAt,
+      metadata: {
+        kind: "inbox_escalation_alert",
+        escalationReason: reason ?? "generic",
+      },
     });
   }
 

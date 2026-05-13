@@ -19,6 +19,7 @@ import {
   Req,
   Res,
   StreamableFile,
+  BadRequestException,
 } from '@nestjs/common';
 import {
   FilesInterceptor,
@@ -27,6 +28,7 @@ import {
 } from '@nestjs/platform-express';
 import { memoryStorage } from 'multer';
 import { FincasService } from './fincas.service';
+import { PdfService } from '../shared/services/pdf.service';
 import { CreateFincaDto, PricingItemDto } from './dto/create-finca.dto';
 import { GlobalPricingRuleDto, UpdateGlobalPricingRuleDto } from './dto/global-pricing.dto';
 import { UpdateFincaDto } from './dto/update-finca.dto';
@@ -40,7 +42,29 @@ import type { Request, Response } from 'express';
 
 @Controller('fincas')
 export class FincasController {
-  constructor(private readonly fincasService: FincasService) {}
+  constructor(
+    private readonly fincasService: FincasService,
+    private readonly pdfService: PdfService,
+  ) {}
+
+  /** Convierte HTML a PDF usando puppeteer. Sin autenticación (usado desde Server Actions). */
+  @Post('html-to-pdf')
+  async htmlToPdf(
+    @Body() body: { html: string; filename?: string },
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    if (!body?.html?.trim()) {
+      throw new BadRequestException('Se requiere el campo html.');
+    }
+    const pdfBuffer = await this.pdfService.htmlToPdf(body.html);
+    const filename = (body.filename || 'Contrato').replace(/[^\w\-_.]/g, '_');
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader(
+      'Content-Disposition',
+      `attachment; filename="${filename}.pdf"`,
+    );
+    return new StreamableFile(pdfBuffer);
+  }
 
   @Get('slug/:slug')
   async getBySlug(@Param('slug') slug: string) {

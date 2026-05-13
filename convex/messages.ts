@@ -29,10 +29,39 @@ export const insertUserMessage = internalMutation({
       metadata: args.metadata,
       createdAt: args.createdAt,
     });
+    const conv = await ctx.db.get(args.conversationId);
+    const prevUnread = conv?.inboxUnreadCount ?? 0;
+    await ctx.db.patch(args.conversationId, {
+      lastMessageAt: args.createdAt,
+      inboxUnreadCount: prevUnread + 1,
+    });
+    return messageId;
+  },
+});
+
+/**
+ * Mensaje interno visible en el inbox (no WhatsApp).
+ * Usado para alertas de escalación a humano, etc.
+ */
+export const insertSystemMessage = internalMutation({
+  args: {
+    conversationId: v.id("conversations"),
+    content: v.string(),
+    createdAt: v.number(),
+    metadata: v.optional(v.any()),
+  },
+  handler: async (ctx, args) => {
+    await ctx.db.insert("messages", {
+      conversationId: args.conversationId,
+      sender: "system",
+      content: args.content,
+      type: "text",
+      createdAt: args.createdAt,
+      ...(args.metadata != null ? { metadata: args.metadata } : {}),
+    });
     await ctx.db.patch(args.conversationId, {
       lastMessageAt: args.createdAt,
     });
-    return messageId;
   },
 });
 

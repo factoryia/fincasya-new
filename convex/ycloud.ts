@@ -193,7 +193,15 @@ export const extractContractData = action({
       limit: 30,
     });
     const fullHistory = (messages as Array<{ sender?: string; content?: string }>)
-      .map((m) => `${m.sender === "assistant" ? "Asesor" : "Cliente"}: ${m.content ?? ""}`)
+      .map((m) => {
+        const role =
+          m.sender === "assistant"
+            ? "Asesor"
+            : m.sender === "system"
+              ? "Sistema"
+              : "Cliente";
+        return `${role}: ${m.content ?? ""}`;
+      })
       .join("\n");
     return extractContractDataFromHistory(fullHistory);
   },

@@ -71,11 +71,26 @@ export class InboxService {
     >;
     assignedUserIds?: string[];
     unassignedOnly?: boolean;
+    unreadOnly?: boolean;
+    tagsAny?: string[];
     lastMessageFrom?: number;
     lastMessageTo?: number;
     limit?: number;
   }) {
     return this.convexService.query('conversations:list', params);
+  }
+
+  async markInboxRead(conversationId: string) {
+    return this.convexService.mutation('conversations:markInboxRead', {
+      conversationId,
+    });
+  }
+
+  async setConversationTags(conversationId: string, tags: string[]) {
+    return this.convexService.mutation('conversations:setConversationTags', {
+      conversationId,
+      tags,
+    });
   }
 
   /**

@@ -11,6 +11,8 @@ import {
   UploadedFiles,
   UploadedFile,
   Req,
+  HttpException,
+  HttpStatus,
 } from '@nestjs/common';
 import type { Request } from 'express';
 import { FilesInterceptor, FileInterceptor } from '@nestjs/platform-express';
@@ -19,6 +21,9 @@ import { BookingsRemindersService } from './bookings-reminders.service';
 import { ConvexAuthGuard } from '../shared/guards/convex-auth.guard';
 import { AdminGuard } from '../shared/guards/admin.guard';
 import { OwnerOrAdminGuard } from '../shared/guards/owner-or-admin.guard';
+import { RolesGuard } from '../shared/guards/roles.guard';
+import { Roles } from '../shared/decorators/roles.decorator';
+import { UserRole } from '../shared/constants/user-role';
 import { AuthService } from '../auth/auth.service';
 
 @Controller('bookings')
@@ -63,6 +68,30 @@ export class BookingsController {
   @UseGuards(ConvexAuthGuard, OwnerOrAdminGuard)
   async list(@Query() query: any) {
     return this.bookingsSyncService.listBookings(query);
+  }
+
+  @Get('by-contract')
+  @UseGuards(ConvexAuthGuard, RolesGuard)
+  @Roles(UserRole.ADMIN, UserRole.ASSISTANT, UserRole.VENDEDOR)
+  async getByContractNumber(@Query('contractNumber') contractNumber: string) {
+    if (!contractNumber?.trim()) {
+      return null;
+    }
+    try {
+      return await this.bookingsSyncService.getBookingByContractNumber(
+        contractNumber.trim(),
+      );
+    } catch (err: unknown) {
+      const msg =
+        err instanceof Error ? err.message : typeof err === 'string' ? err : 'Error desconocido';
+      throw new HttpException(
+        {
+          error: 'Fallo al consultar reservas en Convex.',
+          message: msg,
+        },
+        HttpStatus.BAD_GATEWAY,
+      );
+    }
   }
 
   @Post('check-availability')
@@ -112,6 +141,31 @@ export class BookingsController {
   @Get('status/:reference')
   async getStatus(@Param('reference') reference: string) {
     return this.bookingsSyncService.checkPaymentStatus(reference);
+  }
+
+  @Post('contract-snapshot')
+  @UseGuards(ConvexAuthGuard, AdminGuard)
+  async saveContractSnapshot(
+    @Body()
+    body: {
+      contractNumber: string;
+      propertyId: string;
+      payload: Record<string, unknown>;
+    },
+  ) {
+    return this.bookingsSyncService.saveContractSnapshot(body);
+  }
+
+  @Post('finalize-contract-snapshot')
+  @UseGuards(ConvexAuthGuard, AdminGuard)
+  async finalizeContractSnapshot(
+    @Body()
+    body: {
+      snapshotId: string;
+      paymentStatus: string;
+    },
+  ) {
+    return this.bookingsSyncService.finalizeContractSnapshot(body);
   }
 
   @Post()

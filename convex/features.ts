@@ -128,6 +128,17 @@ export const removeIcon = mutation({
       );
     }
 
+    const inZoneTemplate = await ctx.db
+      .query('propertyCategoryZoneFeatures')
+      .withIndex('by_iconography', (q) => q.eq('iconographyId', args.id))
+      .first();
+
+    if (inZoneTemplate) {
+      throw new Error(
+        'No se puede eliminar el icono porque está en una plantilla de zona por categoría. Quitarlo de la plantilla primero.',
+      );
+    }
+
     await ctx.db.delete(args.id);
     return { success: true };
   },

@@ -144,11 +144,22 @@ function userMentionsFestiveOrBridge(lowerMerged: string): boolean {
 }
 
 /**
- * 1 noche en patrón fin-de-semana con puente (Colombia): no enviar catálogo hasta alargar estadía (mín. 2 noches).
+ * 1 noche en patrón puente festivo (Colombia): no enviar catálogo hasta alargar
+ * estadía (mín. 2 noches).
  *
- * Cubre:
- * - Sábado → domingo, si el **lunes siguiente** es festivo (o el usuario dice festivo/puente).
- * - Domingo → lunes, si ese **lunes** es festivo (o el usuario dice festivo/puente).
+ * Regla general: la noche reservada cuenta como **puente** si dentro del conjunto
+ * `{checkIn-1, checkIn, checkOut, checkOut+1}` hay un festivo del calendario
+ * colombiano. Cubre:
+ *   - Viernes festivo → Sábado (ej. 7-8 ago = Batalla de Boyacá).
+ *   - Jueves → Viernes festivo (ej. 2 abr Jueves Santo → 3 abr Viernes Santo).
+ *   - Sábado → Domingo + Lunes festivo (puente Emiliani clásico).
+ *   - Domingo → Lunes festivo.
+ *   - Sábado festivo → Domingo (festivos en sábado).
+ *   - Cualquier "víspera de festivo" en 1 noche.
+ *
+ * Si el cliente menciona explícitamente "festivo" / "puente" / "feriado" y solo
+ * pide 1 noche, también se bloquea (cubre festivos regionales no listados o
+ * desfases del calendario).
  */
 export function shouldBlockCatalogForPuenteOneNightSatSun(
   fechaEntrada: number,
@@ -158,20 +169,30 @@ export function shouldBlockCatalogForPuenteOneNightSatSun(
   const nights = countCatalogNights(fechaEntrada, fechaSalida);
   if (nights !== 1) return false;
 
+  const ONE_DAY_MS = 86_400_000;
+  const checkInYmd = toYmdColombia(fechaEntrada);
+  const checkInPrevYmd = toYmdColombia(fechaEntrada - ONE_DAY_MS);
+  const checkOutYmd = toYmdColombia(fechaSalida);
+  const checkOutNextYmd = toYmdColombia(fechaSalida + ONE_DAY_MS);
+
+  const hasHolidayInWindow =
+    isColombiaPublicHolidayYmd(checkInPrevYmd) ||
+    isColombiaPublicHolidayYmd(checkInYmd) ||
+    isColombiaPublicHolidayYmd(checkOutYmd) ||
+    isColombiaPublicHolidayYmd(checkOutNextYmd);
+
+  if (hasHolidayInWindow) return true;
+
+  // Festivo no listado o regional: si el cliente lo nombra explícitamente
+  // y solo pide 1 noche en patrón Sáb→Dom o Dom→Lun, también bloquear.
   const lower = mergedUserText.toLowerCase().normalize("NFD").replace(/\p{M}/gu, "");
-
-  if (isSaturdayCheckInSundayCheckOutBogota(fechaEntrada, fechaSalida)) {
-    if (userMentionsFestiveOrBridge(lower)) return true;
-    const monYmd = mondayAfterCheckoutSundayYmd(fechaSalida);
-    if (monYmd && isColombiaPublicHolidayYmd(monYmd)) return true;
-    return false;
-  }
-
-  if (isSundayCheckInMondayCheckOutBogota(fechaEntrada, fechaSalida)) {
-    if (userMentionsFestiveOrBridge(lower)) return true;
-    const monYmd = toYmdColombia(fechaSalida);
-    if (isColombiaPublicHolidayYmd(monYmd)) return true;
-    return false;
+  if (userMentionsFestiveOrBridge(lower)) {
+    if (
+      isSaturdayCheckInSundayCheckOutBogota(fechaEntrada, fechaSalida) ||
+      isSundayCheckInMondayCheckOutBogota(fechaEntrada, fechaSalida)
+    ) {
+      return true;
+    }
   }
 
   return false;
@@ -183,9 +204,9 @@ export function shouldBlockCatalogForPuenteOneNightSatSun(
  */
 export function buildPuenteShortNoticeEs(_checkIn: string, _checkOut: string): string {
   return [
-    "Las fechas que seleccionaste son en puente festivo, para este tipo de fines de semana te brindamos reservar como mínimo 2 noches 🏡",
+    "Las fechas que seleccionaste corresponden a un fin de semana con puente festivo, y para esas fechas manejamos una estadía mínima de 2 noches.",
     "",
-    "Si deseas reservar una sola noche puede ser fines de semana sin puentes festivos o entre semana 📅",
+    "Si deseas reservar solo una noche, con gusto podemos ofrecer disponibilidad en fines de semana sin puente festivo o entre semana ✨",
   ].join("\n");
 }
 
@@ -197,4 +218,175 @@ export function buildPuenteFollowUpConversationEs(_checkIn: string, _checkOut: s
     "Claro que sí 😊 Si deseas realizar una cotización por el mínimo de una noche, podrías contemplar entre semana o fines de semana; " +
     "sin puente festivo nos reconfirmas por favor fecha de entrada y salida 📅"
   );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Temporadas especiales con mínimo de noches propio
+// (Navidad / Fin de año / Reyes en Colombia)
+// ─────────────────────────────────────────────────────────────────────────────
+
+export type SpecialSeasonName = "navidad" | "fin_de_ano" | "reyes";
+
+export type SpecialSeasonInfo = {
+  name: SpecialSeasonName;
+  /** Texto humano-legible para mostrar al cliente. */
+  label: string;
+  emoji: string;
+  /** Mínimo de noches que se exige para reservar dentro de esta temporada. */
+  minNights: number;
+};
+
+const NAVIDAD: SpecialSeasonInfo = {
+  name: "navidad",
+  label: "Navidad",
+  emoji: "🎅🏻",
+  minNights: 3,
+};
+const FIN_DE_ANO: SpecialSeasonInfo = {
+  name: "fin_de_ano",
+  label: "Fin de año",
+  emoji: "☃️",
+  minNights: 6,
+};
+const REYES: SpecialSeasonInfo = {
+  name: "reyes",
+  label: "Reyes",
+  emoji: "🤴",
+  minNights: 2,
+};
+
+function ymdToBogotaNoonMsLocal(ymd: string): number {
+  const [y, m, d] = ymd.split("-").map((x) => parseInt(x, 10));
+  return bogotaWallClockNoon(y, m, d).getTime();
+}
+
+/** Día (en calendario Bogotá) que cae dentro del rango Navidad 20-26 dic. */
+function isInNavidadWindow(ymd: string): boolean {
+  const mmdd = ymd.slice(5); // "12-23"
+  return mmdd >= "12-20" && mmdd <= "12-26";
+}
+
+/** Día que cae en rango Fin de año 27 dic - 02 ene (wraparound de año). */
+function isInFinDeAnoWindow(ymd: string): boolean {
+  const mmdd = ymd.slice(5);
+  return mmdd >= "12-27" || mmdd <= "01-02";
+}
+
+/**
+ * Día que cae en "puente de Reyes": los 3 días anteriores al festivo trasladado
+ * de los Reyes Magos (típicamente el segundo lunes de enero por Ley Emiliani),
+ * inclusive el festivo mismo. Busca dinámicamente el primer festivo de enero
+ * en `CO_PUBLIC_HOLIDAYS` para el año del `ymd` dado.
+ */
+function isInReyesWindow(ymd: string): boolean {
+  const [yStr, mStr] = ymd.split("-");
+  const y = parseInt(yStr, 10);
+  const m = parseInt(mStr, 10);
+  if (m !== 1) return false;
+  for (let day = 1; day <= 31; day++) {
+    const candidate = `${y}-01-${String(day).padStart(2, "0")}`;
+    if (CO_PUBLIC_HOLIDAYS.has(candidate)) {
+      const reyesMs = ymdToBogotaNoonMsLocal(candidate);
+      const dayMs = ymdToBogotaNoonMsLocal(ymd);
+      // ventana: 3 días antes hasta el festivo inclusive
+      return dayMs >= reyesMs - 3 * 86_400_000 && dayMs <= reyesMs;
+    }
+  }
+  return false;
+}
+
+/**
+ * Detecta si el rango [checkIn, checkOut) toca alguna temporada especial.
+ * Itera día por día (Bogotá). Prioridad cuando hay solape:
+ *   Fin de año > Navidad > Reyes (en ese orden por restricción de mínimo).
+ */
+export function detectSpecialSeasonForRange(
+  checkInMs: number,
+  checkOutMs: number,
+): SpecialSeasonInfo | null {
+  const ONE_DAY = 86_400_000;
+  if (!Number.isFinite(checkInMs) || !Number.isFinite(checkOutMs)) return null;
+  if (checkOutMs <= checkInMs) return null;
+
+  let touchesFinDeAno = false;
+  let touchesNavidad = false;
+  let touchesReyes = false;
+
+  // Iteramos los días dormidos (desde checkIn hasta checkOut - 1 día inclusive).
+  for (let ms = checkInMs; ms < checkOutMs; ms += ONE_DAY) {
+    const ymd = toYmdColombia(ms);
+    if (isInFinDeAnoWindow(ymd)) touchesFinDeAno = true;
+    else if (isInNavidadWindow(ymd)) touchesNavidad = true;
+    else if (isInReyesWindow(ymd)) touchesReyes = true;
+  }
+
+  if (touchesFinDeAno) return FIN_DE_ANO;
+  if (touchesNavidad) return NAVIDAD;
+  if (touchesReyes) return REYES;
+  return null;
+}
+
+/**
+ * Si el rango cae en una temporada especial Y las noches son menores al mínimo,
+ * devuelve `{ season, currentNights }`. Si cumple el mínimo o no es temporada
+ * especial, devuelve null. El bot usa esto para enviar un mensaje específico
+ * pidiendo al cliente que extienda las fechas.
+ */
+export function shouldBlockCatalogForSpecialSeason(
+  checkInMs: number,
+  checkOutMs: number,
+): { season: SpecialSeasonInfo; currentNights: number } | null {
+  const season = detectSpecialSeasonForRange(checkInMs, checkOutMs);
+  if (!season) return null;
+  const nights = countCatalogNights(checkInMs, checkOutMs);
+  if (nights >= season.minNights) return null;
+  return { season, currentNights: nights };
+}
+
+/**
+ * Mensaje cuando el cliente pidió fechas dentro de Navidad / Fin de año / Reyes
+ * pero con menos noches que el mínimo de esa temporada.
+ *
+ * Alineado con el copy comercial: explica TODOS los mínimos (para que el cliente
+ * vea las tres opciones) y resalta la que aplica a sus fechas.
+ */
+export function buildSpecialSeasonNoticeEs(
+  season: SpecialSeasonInfo,
+  currentNights: number,
+): string {
+  const nochesActual = currentNights === 1 ? "1 noche" : `${currentNights} noches`;
+  return [
+    "Hola buen día, gusto saludarte 👋🏻",
+    "",
+    `Por favor ten presente que en temporadas especiales como *Fin de año*, *Navidad* y *puente de Reyes*, los costos y condiciones de alquiler son distintos ☝️🎄`,
+    "",
+    "🏡 Las propiedades tienen una *estancia mínima de noches*, que varía según la fecha:",
+    "",
+    "• *Navidad:* 3 a 4 noches mínimo 🎅🏻",
+    "• *Fin de año:* 6 a 7 noches mínimo ☃️",
+    "• *Reyes:* 2 a 3 noches mínimo 🤴",
+    "",
+    `Tus fechas caen en *${season.label}* ${season.emoji} y por ahora marcaste *${nochesActual}*. Para esa temporada necesitamos *mínimo ${season.minNights} noches*.`,
+    "",
+    "Por favor ajusta las fechas y con gusto te compartimos las opciones disponibles 🙌",
+  ].join("\n");
+}
+
+/**
+ * Recordatorio CORTO de temporada especial: se emite a partir del 2º turno
+ * con el bloqueo activo (cuando el cliente ya vio el aviso largo y aún no
+ * ajustó las fechas). Evita repetir el bloque grande pero mantiene el
+ * bloqueo del flujo del FSM hasta que las fechas cumplan el mínimo.
+ */
+export function buildSpecialSeasonShortReminderEs(
+  season: SpecialSeasonInfo,
+  currentNights: number,
+): string {
+  const nochesActual = currentNights === 1 ? "1 noche" : `${currentNights} noches`;
+  const sufijo = currentNights === 1 ? "" : "s";
+  return [
+    `Recuerda: para *${season.label}* ${season.emoji} necesitamos *mínimo ${season.minNights} noches*. Por ahora tienes *${nochesActual}* seleccionada${sufijo}.`,
+    "",
+    `📅 Por favor envíame las *nuevas fechas* (entrada y salida) con al menos ${season.minNights} noches y te comparto las opciones disponibles 🙌`,
+  ].join("\n");
 }

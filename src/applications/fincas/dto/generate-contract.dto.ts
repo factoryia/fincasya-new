@@ -1,3 +1,4 @@
+import { Transform } from 'class-transformer';
 import { IsString, IsNotEmpty, IsOptional } from 'class-validator';
 
 export class GenerateContractDto {
@@ -17,9 +18,15 @@ export class GenerateContractDto {
   @IsOptional()
   idNumber: string;
 
+  /** Si viene vacío, el servicio asigna uno automático (reserva directa / preview). */
+  @IsOptional()
   @IsString()
-  @IsNotEmpty()
-  contractNumber: string;
+  @Transform(({ value }) => {
+    if (value === null || value === undefined) return undefined;
+    const s = String(value).trim();
+    return s.length > 0 ? s : undefined;
+  })
+  contractNumber?: string;
 
   @IsString()
   @IsOptional()

@@ -16,7 +16,12 @@ export class ConvexService {
     const [module, functionName] = path.split(':');
     let fullPath = (api as any)[module]?.[functionName];
     if (!fullPath) {
-      fullPath = (anyApi as any)[module][functionName];
+      fullPath = (anyApi as any)[module]?.[functionName];
+    }
+    if (!fullPath && !token) {
+      throw new BadGatewayException(
+        `Convex: no hay referencia para "${path}". Ejecuta codegen y despliega Convex.`,
+      );
     }
     if (token) {
       const convexUrl = process.env.CONVEX_URL || 'https://adventurous-octopus-651.convex.cloud';
@@ -45,7 +50,12 @@ export class ConvexService {
     const [module, functionName] = path.split(':');
     let fullPath = (api as any)[module]?.[functionName];
     if (!fullPath) {
-      fullPath = (anyApi as any)[module][functionName];
+      fullPath = (anyApi as any)[module]?.[functionName];
+    }
+    if (!fullPath) {
+      throw new BadGatewayException(
+        `Convex: no hay referencia para "${path}". Ejecuta \`npx convex codegen\` en fincasya-new y despliega; el servidor debe ver convex/_generated junto a dist/.`,
+      );
     }
     // Ensure args is a plain object to avoid Convex validation errors with class instances
     // We use JSON.parse(JSON.stringify) to handle recursive plain object conversion

@@ -45,6 +45,29 @@ export type ReservationConfirmationData = {
 @Injectable()
 export class PdfService {
   /**
+   * Convierte cualquier cadena HTML a PDF usando puppeteer.
+   */
+  async htmlToPdf(html: string): Promise<Buffer> {
+    const puppeteer = await import('puppeteer');
+    const browser = await puppeteer.launch({
+      headless: true,
+      args: ['--no-sandbox', '--disable-setuid-sandbox'],
+    });
+    try {
+      const page = await browser.newPage();
+      await page.setContent(html, { waitUntil: 'networkidle0' });
+      const pdfBytes = await page.pdf({
+        format: 'A4',
+        printBackground: true,
+        margin: { top: '20mm', right: '20mm', bottom: '20mm', left: '20mm' },
+      });
+      return Buffer.from(pdfBytes);
+    } finally {
+      await browser.close();
+    }
+  }
+
+  /**
    * Genera el buffer de un PDF de confirmación de reserva.
    */
   async generateReservationConfirmationPdfBuffer(

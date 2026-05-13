@@ -66,6 +66,8 @@ export class InboxController {
     @Query('operationalStates') operationalStatesRaw?: string,
     @Query('assignedUserIds') assignedUserIdsRaw?: string,
     @Query('unassignedOnly') unassignedOnly?: string,
+    @Query('unreadOnly') unreadOnly?: string,
+    @Query('tagsAny') tagsAnyRaw?: string,
     @Query('lastMessageFrom') lastMessageFromRaw?: string,
     @Query('lastMessageTo') lastMessageToRaw?: string,
     @Query('limit') limit?: string,
@@ -89,6 +91,10 @@ export class InboxController {
       lastMessageToRaw !== undefined && lastMessageToRaw !== ''
         ? parseInt(lastMessageToRaw, 10)
         : undefined;
+    const tagsAny = tagsAnyRaw
+      ?.split(',')
+      .map((s) => s.trim())
+      .filter((s) => s.length > 0);
     return this.inboxService.listConversations({
       status,
       attended: attendedBool,
@@ -97,6 +103,8 @@ export class InboxController {
         operationalStates && operationalStates.length > 0 ? operationalStates : undefined,
       assignedUserIds: assignedUserIds && assignedUserIds.length > 0 ? assignedUserIds : undefined,
       unassignedOnly: unassignedOnly === 'true' ? true : undefined,
+      unreadOnly: unreadOnly === 'true' ? true : undefined,
+      tagsAny: tagsAny && tagsAny.length > 0 ? tagsAny : undefined,
       lastMessageFrom: Number.isFinite(lastMessageFrom) ? lastMessageFrom : undefined,
       lastMessageTo: Number.isFinite(lastMessageTo) ? lastMessageTo : undefined,
       limit: limitNum,
@@ -424,6 +432,28 @@ export class InboxController {
   @Patch(':conversationId/attended')
   async markAsAttended(@Param('conversationId') conversationId: string) {
     return this.inboxService.markAsAttended(conversationId);
+  }
+
+  /**
+   * Marcar conversación como leída en inbox (reinicia contador de no leídos del cliente).
+   * PATCH /api/inbox/:conversationId/read
+   */
+  @Patch(':conversationId/read')
+  async markInboxRead(@Param('conversationId') conversationId: string) {
+    return this.inboxService.markInboxRead(conversationId);
+  }
+
+  /**
+   * Etiquetas de negocio (varias por conversación).
+   * PATCH /api/inbox/:conversationId/tags
+   */
+  @Patch(':conversationId/tags')
+  async setConversationTags(
+    @Param('conversationId') conversationId: string,
+    @Body() body: { tags?: string[] },
+  ) {
+    const tags = Array.isArray(body?.tags) ? body.tags : [];
+    return this.inboxService.setConversationTags(conversationId, tags);
   }
 
   private inferTypeFromFile(file: Express.Multer.File): 'image' | 'audio' | 'document' {

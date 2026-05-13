@@ -14,6 +14,8 @@ import { firstMissingCatalogField, areDatesCoherent } from "./entities";
 import {
   bogotaWallClockNoon,
   shouldBlockCatalogForPuenteOneNightSatSun,
+  shouldBlockCatalogForSpecialSeason,
+  type SpecialSeasonInfo,
 } from "../colombiaPublicHolidays";
 
 export interface TransitionResult {
@@ -25,6 +27,14 @@ export interface TransitionResult {
   datesIncoherent?: boolean;
   /** 1 noche en fin de semana con puente (CO): pedir al menos 2 noches antes del catálogo. */
   catalogPuenteOneNight?: boolean;
+  /**
+   * Fechas dentro de Navidad / Fin de año / Reyes con menos noches que el mínimo
+   * de esa temporada. Tiene prioridad sobre `catalogPuenteOneNight`.
+   */
+  catalogSpecialSeason?: {
+    season: SpecialSeasonInfo;
+    currentNights: number;
+  };
 }
 
 /**
@@ -93,7 +103,10 @@ export function transition(
   if (phase === "contract") {
     const contractComplete = isContractComplete(entities);
     if (contractComplete) {
-      return { nextPhase: "done", action: { type: "escalate_human" } };
+      return {
+        nextPhase: "done",
+        action: { type: "escalate_human", reason: "contract_complete" },
+      };
     }
     return { nextPhase: "contract", action: { type: "reply_only" } };
   }
@@ -124,8 +137,40 @@ function transitionCollecting(
     };
   }
 
-  // Puente / 1 noche: avisar en cuanto haya fechas coherentes (no esperar municipio ni cupo).
-  if (entities.checkIn && entities.checkOut && areDatesCoherent(entities)) {
+  // Temporadas especiales (Navidad / Fin de año / Reyes) — TIENEN PRIORIDAD
+  // sobre el puente normal porque sus mínimos son específicos (3, 6, 2 noches).
+  // El bloqueo se ignora si `puenteAcknowledged=true` igual que el puente normal
+  // (en realidad ese flag se resetea al cambiar fechas, así que si el cliente
+  // ajusta y cumple el mínimo, el bloqueo desaparece naturalmente).
+  if (
+    entities.checkIn &&
+    entities.checkOut &&
+    areDatesCoherent(entities)
+  ) {
+    const checkInMs = ymdToBogotaNoonMs(entities.checkIn);
+    const checkOutMs = ymdToBogotaNoonMs(entities.checkOut);
+    const specialBlock = shouldBlockCatalogForSpecialSeason(checkInMs, checkOutMs);
+    if (specialBlock && !entities.puenteAcknowledged) {
+      const stillMissing = firstMissingCatalogField(entities);
+      return {
+        nextPhase: "collecting",
+        action: { type: "reply_only" },
+        catalogSpecialSeason: specialBlock,
+        ...(stillMissing ? { missingField: stillMissing } : {}),
+      };
+    }
+  }
+
+  // Puente / 1 noche: avisar UNA SOLA VEZ por combinación de fechas.
+  // Si el cliente ya recibió el aviso (puenteAcknowledged=true), no volver a bloquear:
+  // sigue el flujo normal de collecting. El flag se resetea cuando cambian las fechas
+  // (ver `replies.ts` / `extractor`: al setear nuevas checkIn/checkOut limpiamos el flag).
+  if (
+    !entities.puenteAcknowledged &&
+    entities.checkIn &&
+    entities.checkOut &&
+    areDatesCoherent(entities)
+  ) {
     const checkInMs = ymdToBogotaNoonMs(entities.checkIn);
     const checkOutMs = ymdToBogotaNoonMs(entities.checkOut);
     if (shouldBlockCatalogForPuenteOneNightSatSun(checkInMs, checkOutMs, incomingText)) {

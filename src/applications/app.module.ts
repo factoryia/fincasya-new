@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { AuthModule } from './auth/auth.module';
 import { CatalogsModule } from './catalogs/catalogs.module';
 import { FeaturesModule } from './features/features.module';
+import { CategoryZoneTemplatesModule } from './category-zone-templates/category-zone-templates.module';
 import { FincasModule } from './fincas/fincas.module';
 import { InboxModule } from './inbox/inbox.module';
 import { KnowledgeModule } from './knowledge/knowledge.module';
@@ -23,6 +24,7 @@ import { ScheduleModule } from '@nestjs/schedule';
     AuthModule,
     CatalogsModule,
     FeaturesModule,
+    CategoryZoneTemplatesModule,
     FincasModule,
     InboxModule,
     KnowledgeModule,
