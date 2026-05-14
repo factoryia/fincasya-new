@@ -102,7 +102,7 @@ function userAsksPuenteAlternative(incomingText: string): boolean {
 function petConfirmationMessage(entities: BotEntities): string {
   if (entities.hasPets) {
     const n = entities.petCount ?? 1;
-    return `Perfecto, anotamos ${n} mascota${n > 1 ? "s" : ""} 🐾 Te envío el resumen con el costo adicional.`;
+    return `Perfecto, anotamos ${n} mascota${n > 1 ? "s" : ""} 🐾 ¿Te envío el resumen con el costo adicional.?`;
   }
   return `Sin mascotas, ¡anotado! 👍 Te muestro el resumen de tu reserva.`;
 }
@@ -231,9 +231,12 @@ export async function generateReply(
   // Detección del paquete "tras confirmar mascotas → contrato".
   // Se descompone en 2-3 burbujas: (1) reglas/info de mascotas si aplica,
   // (2) resumen de la reserva, (3) pedido de datos del contrato.
+  // Solo aplica a sesiones legacy en `property_selected` (las nuevas pasan por
+  // `pet_check` → `pet_rules_shown` → `quote_shown` → `contract` paso a paso,
+  // con confirmación del cliente entre cada bloque).
   const firstContractPacketAfterPets =
     tr.nextPhase === "contract" &&
-    (currentPhase === "pet_check" || currentPhase === "property_selected") &&
+    currentPhase === "property_selected" &&
     entities.hasPets !== undefined &&
     !entities.contractName &&
     !entities.contractCedula &&
@@ -617,14 +620,63 @@ async function generateReplyText(input: ReplyInput): Promise<string> {
   }
 
   // ── Pet check ────────────────────────────────────────────────────────────
+  // Tres sub-casos:
+  //   1. `hasPets` indefinido → preguntar "¿llevas mascotas?".
+  //   2. `hasPets=true` pero `petCount` indefinido/≤0 → preguntar "¿cuántas?".
+  //   3. `hasPets` resuelto → la transición avanza a `pet_rules_shown` o
+  //      `quote_shown`. En este branch solo confirmamos antes de avanzar.
   if (currentPhase === "pet_check") {
-    if (entities.hasPets !== undefined) {
-      return respond(petConfirmationMessage(entities));
+    if (entities.hasPets === undefined) {
+      if (isGreetingOrVague) return fallback();
+      return respond(petCheckMessage(propertyDisplayNameForPet(entities)));
     }
-    if (isGreetingOrVague) {
-      return fallback();
+    if (
+      entities.hasPets === true &&
+      (entities.petCount === undefined || entities.petCount <= 0)
+    ) {
+      return respond(
+        "¡Genial, anotado! 🐾 ¿*Cuántas mascotas* vas a llevar en total? (Solo el número)",
+      );
     }
-    return respond(petCheckMessage(propertyDisplayNameForPet(entities)));
+    // hasPets resolved → la transición ya está pasando a `pet_rules_shown` o
+    // `quote_shown` — el manejo de esos casos viene más abajo. Aquí dejamos un
+    // texto puente por si la transición decide quedarse en pet_check.
+    return respond(petConfirmationMessage(entities));
+  }
+
+  // ── Pet rules shown (mascotas → mostrar reglas + esperar confirmación) ──
+  if (
+    currentPhase === "pet_rules_shown" ||
+    tr.nextPhase === "pet_rules_shown"
+  ) {
+    const n = Math.max(1, entities.petCount ?? 1);
+    const intro = `Perfecto, anotamos *${n} mascota${n === 1 ? "" : "s"}* 🐾 Te comparto las condiciones para que las revisemos:`;
+    const rules = petFeesSummaryForQuote(entities).trim();
+    return [
+      intro,
+      "",
+      rules,
+      "",
+      "¿*Estás de acuerdo* con estas condiciones? Responde *sí* y te comparto el resumen con el total 🤝",
+    ].join("\n");
+  }
+
+  // ── Quote shown (mostrar resumen con total + esperar confirmación) ──────
+  if (currentPhase === "quote_shown" || tr.nextPhase === "quote_shown") {
+    const intro = entities.hasPets
+      ? `Perfecto, anotamos *${Math.max(1, entities.petCount ?? 1)} mascota${(entities.petCount ?? 1) === 1 ? "" : "s"}* 🐾 Te envío el resumen con el costo total:`
+      : "Sin mascotas, ¡anotado! 👍 Te comparto el resumen de tu reserva:";
+    const summaryBody = buildSummaryWithTotals(
+      entities,
+      stayQuoteBlock,
+      input.stayQuoteTotals,
+      intro,
+    );
+    return [
+      summaryBody,
+      "",
+      "¿*Procedemos con los datos para el contrato* y separar la fecha? ✍️",
+    ].join("\n");
   }
 
   // ── Contract ──────────────────────────────────────────────────────────────

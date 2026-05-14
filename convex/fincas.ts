@@ -1590,6 +1590,7 @@ export const create = mutation({
     serviceStaffAvailable: v.optional(v.boolean()),
     serviceStaffMandatory: v.optional(v.boolean()),
     serviceStaffPrice: v.optional(v.number()),
+    catalogFilterTags: v.optional(v.array(v.string())),
   },
   handler: async (ctx, args) => {
     const now = Date.now();
@@ -1641,6 +1642,9 @@ export const create = mutation({
       serviceStaffAvailable: args.serviceStaffAvailable,
       serviceStaffMandatory: args.serviceStaffMandatory,
       serviceStaffPrice: args.serviceStaffPrice,
+      ...(args.catalogFilterTags !== undefined
+        ? { catalogFilterTags: args.catalogFilterTags }
+        : {}),
       createdAt: now,
       updatedAt: now,
     });
@@ -1801,6 +1805,7 @@ export const update = mutation({
     serviceStaffAvailable: v.optional(v.boolean()),
     serviceStaffMandatory: v.optional(v.boolean()),
     serviceStaffPrice: v.optional(v.number()),
+    catalogFilterTags: v.optional(v.array(v.string())),
     pricing: v.optional(
       v.array(
         v.object({

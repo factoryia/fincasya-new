@@ -14,8 +14,9 @@ export type BotPhase =
   | "collecting"       // location, fechas, cupo, planType, isEvento (descanso vs evento en finca)
   | "catalog_sent"     // catálogo enviado, esperando que el cliente elija finca
   | "property_selected"// cliente nombró/tocó una finca
-  | "pet_check"        // preguntando mascotas + reglas
-  | "quote_shown"      // cotización con precio+temporada enviada, esperando confirmación
+  | "pet_check"        // preguntando si lleva mascotas (y cuántas)
+  | "pet_rules_shown"  // se enviaron las reglas de mascotas, esperando confirmación para mostrar resumen
+  | "quote_shown"      // resumen con totales enviado, esperando confirmación para pedir datos de contrato
   | "contract"         // recolectando datos del contrato
   | "done";            // contrato recibido, escalado a humano
 
@@ -112,7 +113,13 @@ export type BotAction =
   | {
       type: "escalate_human";
       /** Quién disparó la escalada (para alertas en inbox). */
-      reason?: "contract_complete" | "stuck_loop" | "pets_exceed_limit";
+      reason?:
+        | "contract_complete"
+        | "stuck_loop"
+        | "pets_exceed_limit"
+        | "catalog_no_results"
+        | "event_after_catalog"
+        | "media_post_catalog";
     };
 
 /** Resultado que devuelve el orquestador por turno. */

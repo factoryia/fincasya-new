@@ -371,7 +371,13 @@ export class PdfService {
 </html>`;
   }
 
-  private async getLocalAssetDataUrl(
+  /**
+   * Lee un archivo local del disco y lo devuelve como data URL base64,
+   * intentando los candidatos en orden. Retorna `null` si ninguno existe.
+   * Pública para que otros servicios (ej. `FincasService`) puedan incrustar
+   * imágenes en sus HTML antes de pasarlos a `htmlToPdf`.
+   */
+  async getLocalAssetDataUrl(
     candidatePaths: string[],
   ): Promise<string | null> {
     for (const filePath of candidatePaths) {

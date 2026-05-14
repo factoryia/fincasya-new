@@ -144,6 +144,7 @@ function isPostCollectingPhase(phase: BotPhase): boolean {
     phase === "catalog_sent" ||
     phase === "property_selected" ||
     phase === "pet_check" ||
+    phase === "pet_rules_shown" ||
     phase === "quote_shown"
   );
 }

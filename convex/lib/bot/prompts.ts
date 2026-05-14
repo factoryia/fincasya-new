@@ -400,7 +400,16 @@ function nextStepHint(phase: BotPhase, e: BotEntities): string {
   }
   if (phase === "property_selected" || phase === "pet_check") {
     if (e.hasPets === undefined) return "Falta confirmar si lleva mascotas y cuántas.";
-    return "Mascotas confirmadas; siguiente paso es el contrato.";
+    if (
+      e.hasPets === true &&
+      (e.petCount === undefined || e.petCount <= 0)
+    ) {
+      return "Falta saber cuántas mascotas.";
+    }
+    return "Mascotas confirmadas; ahora mostramos las reglas y pedimos confirmación.";
+  }
+  if (phase === "pet_rules_shown") {
+    return "Cliente vio las reglas de mascotas. Esperando que confirme para mostrar el resumen con totales.";
   }
   if (phase === "contract") {
     const missing: string[] = [];
@@ -421,7 +430,10 @@ const PHASE_GOAL: Record<BotPhase, string> = {
   catalog_sent: "El cliente debe elegir una de las fincas que recibió por catálogo.",
   property_selected: "Confirmar mascotas para la finca elegida.",
   pet_check: "Confirmar si lleva mascotas y cuántas.",
-  quote_shown: "Esperar confirmación del cliente para avanzar al contrato.",
+  pet_rules_shown:
+    "Se mostraron las reglas de mascotas; esperar confirmación del cliente para mostrar el resumen con totales.",
+  quote_shown:
+    "Se mostró el resumen con el total; esperar confirmación del cliente para pedir los datos del contrato.",
   contract: "Recolectar nombre, cédula, correo, teléfono y dirección para el contrato.",
   done: "Cliente entregó datos del contrato; esperando que un asesor humano lo contacte.",
 };
@@ -559,7 +571,15 @@ export function nextStepFriendlyQuestion(
     if (entities.hasPets === undefined) {
       return `¿Me confirmas si llevas *mascotas* (y cuántas) o sin ellas? 🐾`;
     }
+    if (entities.hasPets === true && (entities.petCount === undefined || entities.petCount <= 0)) {
+      return `¿*Cuántas mascotas* en total? (Solo el número) 🐾`;
+    }
     return `¿Avanzamos con los datos del contrato? 📋`;
+  }
+
+  // pet_rules_shown → esperando confirmación sí/no.
+  if (phase === "pet_rules_shown") {
+    return `¿Estás de acuerdo con las condiciones de mascotas? Responde *sí* y te paso el resumen 🤝`;
   }
 
   // contract → recordar que faltan datos del contrato.

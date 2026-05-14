@@ -142,25 +142,66 @@ export async function extractEntities(
  */
 function sanitizeExtracted(p: ExtractedEntities): ExtractedEntities {
   if (!p.contractFields) return p;
-  const cf = { ...p.contractFields };
-  const emailOk =
-    typeof cf.contractEmail === "string" &&
-    /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(cf.contractEmail.trim());
-  const cedulaDigits = String(cf.contractCedula ?? "").replace(/\D/g, "");
-  const cedulaOk = cedulaDigits.length >= 5;
-  const phoneDigits = String(cf.contractPhone ?? "").replace(/\D/g, "");
-  const phoneOk = phoneDigits.length >= 7;
-  if (cf.contractEmail !== undefined && !emailOk) delete cf.contractEmail;
-  if (cf.contractCedula !== undefined && !cedulaOk) delete cf.contractCedula;
-  if (cf.contractPhone !== undefined && !phoneOk) delete cf.contractPhone;
-  // contractName y contractAddress: si vienen muy cortos, mejor descartar.
-  if (cf.contractName !== undefined && String(cf.contractName).trim().length < 3) {
-    delete cf.contractName;
+
+  // ⚠️ El prompt del LLM dice "contractFields: objeto con name, cedula, email,
+  // phone, address". A veces el modelo devuelve esos nombres SIN el prefijo
+  // `contract`. Si hacemos spread directo en `BotEntities`, terminamos con
+  // campos `name`, `address`, etc. que NO están en el schema → ArgumentValidationError.
+  //
+  // Aquí mapeamos ambas variantes al nombre canónico (`contractName`, etc.).
+  const raw = p.contractFields as Record<string, unknown>;
+  const pick = (canonical: string, alias: string): string | undefined => {
+    const v1 = raw[canonical];
+    if (typeof v1 === "string" && v1.trim().length > 0) return v1.trim();
+    const v2 = raw[alias];
+    if (typeof v2 === "string" && v2.trim().length > 0) return v2.trim();
+    return undefined;
+  };
+  const normalized: Partial<
+    Pick<
+      BotEntities,
+      "contractName" | "contractCedula" | "contractEmail" | "contractPhone" | "contractAddress"
+    >
+  > = {};
+  const name = pick("contractName", "name");
+  if (name) normalized.contractName = name;
+  const cedula = pick("contractCedula", "cedula");
+  if (cedula) normalized.contractCedula = cedula;
+  const email = pick("contractEmail", "email");
+  if (email) normalized.contractEmail = email;
+  const phone = pick("contractPhone", "phone");
+  if (phone) normalized.contractPhone = phone;
+  const address = pick("contractAddress", "address");
+  if (address) normalized.contractAddress = address;
+
+  // Validaciones de formato. Si no cumplen, descartamos para no marcar el
+  // contrato como "completo" con datos basura.
+  if (
+    normalized.contractEmail &&
+    !/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(normalized.contractEmail)
+  ) {
+    delete normalized.contractEmail;
   }
-  if (cf.contractAddress !== undefined && String(cf.contractAddress).trim().length < 5) {
-    delete cf.contractAddress;
+  if (
+    normalized.contractCedula &&
+    normalized.contractCedula.replace(/\D/g, "").length < 5
+  ) {
+    delete normalized.contractCedula;
   }
-  return { ...p, contractFields: cf };
+  if (
+    normalized.contractPhone &&
+    normalized.contractPhone.replace(/\D/g, "").length < 7
+  ) {
+    delete normalized.contractPhone;
+  }
+  if (normalized.contractName && normalized.contractName.length < 3) {
+    delete normalized.contractName;
+  }
+  if (normalized.contractAddress && normalized.contractAddress.length < 5) {
+    delete normalized.contractAddress;
+  }
+
+  return { ...p, contractFields: normalized };
 }
 
 function buildContextSummary(e: BotEntities): string {

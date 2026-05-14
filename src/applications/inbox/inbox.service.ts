@@ -394,6 +394,55 @@ export class InboxService {
         ? suggestedRaw
         : {};
 
+    // Mapear JSON en español de extractContractDataFromHistory → campos del formulario web
+    const mapExtracted = (raw: any) => {
+      if (!raw || typeof raw !== 'object') return;
+      if (raw.nombre && !raw.clientName) raw.clientName = String(raw.nombre).trim();
+      if (raw.cedula && !raw.clientId) raw.clientId = String(raw.cedula).trim();
+      if (raw.email && !raw.clientEmail) raw.clientEmail = String(raw.email).trim();
+      if (raw.telefono && !raw.clientPhone) raw.clientPhone = String(raw.telefono).trim();
+      if (raw.direccion && !raw.clientAddress)
+        raw.clientAddress = String(raw.direccion).trim();
+      if (raw.ciudad_expedicion && !raw.clientCity)
+        raw.clientCity = String(raw.ciudad_expedicion).trim();
+      if (raw.personas != null && raw.guests == null) {
+        const n = Number(raw.personas);
+        if (Number.isFinite(n) && n >= 1) raw.guests = n;
+      }
+      if (raw.mascotas != null && raw.petCount == null) {
+        const m = Number(raw.mascotas);
+        if (Number.isFinite(m) && m >= 0) raw.petCount = m;
+      }
+      if (raw.precioPorNocheCop != null && raw.nightlyPrice == null) {
+        const p = Math.round(Number(raw.precioPorNocheCop));
+        if (Number.isFinite(p) && p > 0) raw.nightlyPrice = String(p);
+      }
+      if (raw.aseoFinalCop != null && raw.cleaningFee == null) {
+        const a = Math.round(Number(raw.aseoFinalCop));
+        if (Number.isFinite(a) && a >= 0) raw.cleaningFee = String(a);
+      }
+      if (
+        raw.subtotalAlojamientoCop != null &&
+        !raw.nightlyPrice &&
+        raw.checkInDate &&
+        raw.checkOutDate
+      ) {
+        const d1 = new Date(String(raw.checkInDate));
+        const d2 = new Date(String(raw.checkOutDate));
+        if (!Number.isNaN(d1.getTime()) && !Number.isNaN(d2.getTime())) {
+          const n = Math.max(
+            1,
+            Math.ceil((d2.getTime() - d1.getTime()) / 86400000),
+          );
+          const sub = Math.round(Number(raw.subtotalAlojamientoCop));
+          if (Number.isFinite(sub) && sub > 0 && n > 0) {
+            raw.nightlyPrice = String(Math.round(sub / n));
+          }
+        }
+      }
+    };
+    mapExtracted(data);
+
     if (conv) {
       const contact = await this.convexService.query('contacts:getById', {
         contactId: conv.contactId,
@@ -450,7 +499,34 @@ export class InboxService {
       }
     }
 
+    if (!data.propertyId && data.finca && typeof data.finca === 'string') {
+      const resolved = await this.resolvePropertyIdFromFincaText(
+        String(data.finca),
+      );
+      if (resolved) data.propertyId = resolved;
+    }
+
     return data;
+  }
+
+  /** Busca id de propiedad por línea de catálogo / resumen (código MG#013 o búsqueda por texto). */
+  private async resolvePropertyIdFromFincaText(
+    fincaText: string,
+  ): Promise<string | undefined> {
+    const t = fincaText.trim();
+    if (!t) return undefined;
+    const codeMatch = t.match(/\b([A-Za-z]{2,}#[A-Za-z0-9]+)\b/);
+    if (codeMatch) {
+      const code = codeMatch[1].toUpperCase();
+      const byCode = await this.convexService
+        .query('fincas:getByCode', { code })
+        .catch(() => null);
+      if (byCode?._id) return byCode._id as string;
+    }
+    const results = (await this.convexService
+      .query('fincas:search', { query: t.slice(0, 120), limit: 8 })
+      .catch(() => [])) as { _id: string }[];
+    return results?.[0]?._id;
   }
 
   async getSuggestedBookingData(conversationId: string) {

@@ -453,8 +453,9 @@ export class FincasController {
     });
   }
 
+  /** Staff de inbox (assistant/vendedor) debe poder generar y enviar el PDF al chat, no solo admin. */
   @Post(':id/generate-contract')
-  @UseGuards(ConvexAuthGuard, AdminGuard)
+  @UseGuards(ConvexAuthGuard, OwnerOrAdminGuard)
   async generateContract(
     @Param('id') id: string,
     @Body() dto: GenerateContractDto,

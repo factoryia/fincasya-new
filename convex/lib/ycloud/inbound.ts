@@ -219,6 +219,61 @@ export async function processInboundMessageV2(
   const currentSamePhaseTurnCount = session?.samePhaseTurnCount ?? 0;
   const currentPhaseEnteredAt = session?.phaseEnteredAt ?? Date.now();
   let currentEntities = session?.entities ?? {};
+
+  // ── Media en fases post-catálogo → escalar a humano ──────────────────────
+  // En `contract` / `quote_shown` / `pet_rules_shown` / `pet_check` / `done`,
+  // si el cliente manda imagen / video / documento, casi siempre es:
+  //   - Foto de la cédula (parte del contrato).
+  //   - Comprobante de transferencia / pago.
+  //   - Documento o foto extra para el asesor.
+  // El bot NO sabe leer imágenes y no debería intentar adivinar. Escalamos
+  // automáticamente para que un humano verifique.
+  const isMediaMessage =
+    args.type === "image" || args.type === "video" || args.type === "document";
+  const phaseRequiresHumanForMedia: Array<typeof currentPhase> = [
+    "pet_check",
+    "pet_rules_shown",
+    "quote_shown",
+    "contract",
+    "done",
+  ];
+  if (isMediaMessage && phaseRequiresHumanForMedia.includes(currentPhase)) {
+    const tMedia = Date.now();
+    await ctx.runMutation(deps.internal.conversations.escalate, {
+      conversationId,
+      assignedUserId:
+        process.env.CHATBOT_AUTO_ASSIGN_ADVISOR_ID?.trim() || undefined,
+    });
+    const mediaHandoffMsg =
+      "Gracias por enviarnos el documento 📎 Te conecto con un asesor para revisarlo y confirmarte los siguientes pasos. Un agente te escribirá en breve 🤝 ✨";
+    await ctx.runMutation(deps.internal.messages.insertAssistantMessage, {
+      conversationId,
+      content: mediaHandoffMsg,
+      createdAt: tMedia,
+    });
+    await ctx.runMutation(deps.internal.messages.insertSystemMessage, {
+      conversationId,
+      content:
+        "📎 Cliente envió archivo/foto en fase post-catálogo. Revisar (puede ser cédula, comprobante de pago o documento adicional). La IA quedó en pausa.",
+      createdAt: tMedia + 5,
+      metadata: {
+        kind: "inbox_escalation_alert",
+        escalationReason: "media_post_catalog",
+        phaseAtEscalation: currentPhase,
+        mediaType: args.type,
+        mediaUrl: args.mediaUrl ?? null,
+      },
+    });
+    await ctx.runAction(deps.internal.ycloud.sendWhatsAppMessage, {
+      to: args.phone,
+      text: mediaHandoffMsg,
+      wamid: args.wamid,
+    });
+    await ctx.runMutation(deps.internal.conversations.updateLastMessageAt, {
+      conversationId,
+    });
+    return;
+  }
   if (replyToWamid) {
     const pick = await ctx.runQuery(deps.internal.ycloud.getCatalogProductByOutboundWamid, {
       conversationId,
@@ -336,7 +391,16 @@ export async function processInboundMessageV2(
     phaseEnteredAt: result.phaseEnteredAt,
   });
 
-  if (result.replyText) {
+  const action = result.action;
+
+  // ⚠️ Cuando `action === send_catalog`, DIFERIMOS el envío del replyText
+  // (pre-catálogo "Te comparto las opciones disponibles") hasta saber si
+  // hay fichas reales. Si el query devuelve vacío, NO enviamos el pre-catálogo
+  // y vamos directo al mensaje de escalada — así evitamos la incoherencia
+  // "te comparto opciones... no tengo opciones".
+  const deferReplyForCatalog = action.type === "send_catalog";
+
+  if (result.replyText && !deferReplyForCatalog) {
     await ctx.runMutation(deps.internal.messages.insertAssistantMessage, {
       conversationId,
       content: result.replyText,
@@ -354,25 +418,27 @@ export async function processInboundMessageV2(
   // burbujas separadas y no en una sola notificación. NO se incluye `wamid`
   // (`context.message_id`) para que no queden todos citando el mismo mensaje
   // del cliente — solo el primero lo hace.
+  //
+  // Estos también se difieren si la acción es send_catalog (mismo motivo).
   const extras: string[] = Array.isArray(result.additionalMessages)
     ? (result.additionalMessages as string[])
     : [];
-  for (const extra of extras) {
-    const text = String(extra ?? "").trim();
-    if (!text) continue;
-    await new Promise((r) => setTimeout(r, 600));
-    await ctx.runMutation(deps.internal.messages.insertAssistantMessage, {
-      conversationId,
-      content: text,
-      createdAt: Date.now(),
-    });
-    await ctx.runAction(deps.internal.ycloud.sendWhatsAppMessage, {
-      to: args.phone,
-      text,
-    });
+  if (!deferReplyForCatalog) {
+    for (const extra of extras) {
+      const text = String(extra ?? "").trim();
+      if (!text) continue;
+      await new Promise((r) => setTimeout(r, 600));
+      await ctx.runMutation(deps.internal.messages.insertAssistantMessage, {
+        conversationId,
+        content: text,
+        createdAt: Date.now(),
+      });
+      await ctx.runAction(deps.internal.ycloud.sendWhatsAppMessage, {
+        to: args.phone,
+        text,
+      });
+    }
   }
-
-  const action = result.action;
   if (action.type === "send_catalog") {
     if (
       !(await isStillThisTailUserMessage(ctx, deps, conversationId, String(insertedMsgId), now))
@@ -415,6 +481,34 @@ export async function processInboundMessageV2(
     } | null;
 
     if (catalogPayload?.productRetailerIds?.length) {
+      // Hay fichas → ahora SÍ enviamos el pre-catálogo diferido + extras + fichas.
+      if (result.replyText) {
+        await ctx.runMutation(deps.internal.messages.insertAssistantMessage, {
+          conversationId,
+          content: result.replyText,
+          createdAt: Date.now(),
+        });
+        await ctx.runAction(deps.internal.ycloud.sendWhatsAppMessage, {
+          to: args.phone,
+          text: result.replyText,
+          wamid: args.wamid,
+        });
+      }
+      for (const extra of extras) {
+        const text = String(extra ?? "").trim();
+        if (!text) continue;
+        await new Promise((r) => setTimeout(r, 600));
+        await ctx.runMutation(deps.internal.messages.insertAssistantMessage, {
+          conversationId,
+          content: text,
+          createdAt: Date.now(),
+        });
+        await ctx.runAction(deps.internal.ycloud.sendWhatsAppMessage, {
+          to: args.phone,
+          text,
+        });
+      }
+
       const cap = MAX_CATALOG_PRODUCTS_PER_SEND;
       const ids = catalogPayload.productRetailerIds.slice(0, cap);
       const lines = (catalogPayload.productQuoteLines ?? []).slice(0, cap);
@@ -447,6 +541,88 @@ export async function processInboundMessageV2(
           createdAt: tBase + i * 25,
         });
       }
+
+      // Si es EVENTO, tras enviar las fichas escalamos a humano: el bot no
+      // calcula el sobreprecio del evento (depende de logística, capacidad,
+      // horario, etc.). Enviamos un mensaje al cliente avisando + alerta inbox.
+      if (action.isEvento === true) {
+        const tEvent = Date.now() + 50;
+        const eventHandoffMsg = [
+          "Como es para *evento* 🎉, el precio final puede variar según la logística (sonido, banda, capacidad total).",
+          "",
+          "👉 Mientras revisas las opciones, te conecto con un asesor para confirmarte *precios y disponibilidad* del evento. Un agente te escribirá en breve 🤝 ✨",
+        ].join("\n");
+        await ctx.runMutation(deps.internal.conversations.escalate, {
+          conversationId,
+          assignedUserId:
+            process.env.CHATBOT_AUTO_ASSIGN_ADVISOR_ID?.trim() || undefined,
+        });
+        await ctx.runMutation(deps.internal.messages.insertAssistantMessage, {
+          conversationId,
+          content: eventHandoffMsg,
+          createdAt: tEvent,
+        });
+        await ctx.runMutation(deps.internal.messages.insertSystemMessage, {
+          conversationId,
+          content:
+            "🎉 Evento confirmado: el cliente recibió el catálogo. Confirmar precio/condiciones del evento (logística, capacidad, sobreprecio). La IA quedó en pausa.",
+          createdAt: tEvent + 5,
+          metadata: {
+            kind: "inbox_escalation_alert",
+            escalationReason: "event_after_catalog",
+            requestedLocation: action.location,
+            requestedCupo: action.cupo,
+            eventPeopleCount: result.updatedEntities.eventPeopleCount ?? null,
+            eventLogistics: result.updatedEntities.eventLogistics ?? null,
+          },
+        });
+        await ctx.runAction(deps.internal.ycloud.sendWhatsAppMessage, {
+          to: args.phone,
+          text: eventHandoffMsg,
+        });
+      }
+    } else {
+      // Catálogo vacío: ninguna finca cumple los filtros (cupo + evento +
+      // location + capacidad). El bot ya envió el pre-catálogo prometiendo
+      // opciones, pero las fichas reales no van a aparecer. Escalamos a humano
+      // con un mensaje específico para que el cliente NO quede esperando.
+      const noResultsMsg = [
+        "Por ahora no tengo opciones exactas para esos requisitos en el catálogo 🤔",
+        "",
+        "Te conecto con un asesor para evaluar disponibilidad especial y opciones personalizadas según tus fechas y tipo de plan 🤝 ✨",
+      ].join("\n");
+      await ctx.runMutation(deps.internal.conversations.escalate, {
+        conversationId,
+        assignedUserId:
+          process.env.CHATBOT_AUTO_ASSIGN_ADVISOR_ID?.trim() || undefined,
+      });
+      const tNoRes = Date.now();
+      await ctx.runMutation(deps.internal.messages.insertAssistantMessage, {
+        conversationId,
+        content: noResultsMsg,
+        createdAt: tNoRes,
+      });
+      await ctx.runMutation(deps.internal.messages.insertSystemMessage, {
+        conversationId,
+        content:
+          "🚨 Catálogo vacío: el cliente pidió fincas pero los filtros (cupo + evento + zona) no devolvieron opciones. Revisar requisitos y contactar.",
+        createdAt: tNoRes + 5,
+        metadata: {
+          kind: "inbox_escalation_alert",
+          escalationReason: "catalog_no_results",
+          requestedLocation: action.location,
+          requestedCupo: action.cupo,
+          requestedIsEvento: action.isEvento,
+        },
+      });
+      await ctx.runAction(deps.internal.ycloud.sendWhatsAppMessage, {
+        to: args.phone,
+        text: noResultsMsg,
+      });
+      await ctx.runMutation(deps.internal.conversations.updateLastMessageAt, {
+        conversationId,
+      });
+      return;
     }
   } else if (action.type === "escalate_human") {
     const reason = action.reason;
@@ -461,7 +637,15 @@ export async function processInboundMessageV2(
         ? "🚨 El cliente completó los datos del contrato por WhatsApp. Prioridad: revisar, avisar al equipo si aplica y contactar al cliente. La IA quedó en pausa."
         : reason === "stuck_loop"
           ? "⚠️ Escalación automática: el cliente llevaba varios turnos sin avanzar; se ofreció asesor humano. Revisar y contactar. La IA quedó en pausa."
-          : "ℹ️ Conversación pasada a asesor humano. La IA quedó en pausa.";
+          : reason === "pets_exceed_limit"
+            ? "🐾 El cliente declaró más de 3 mascotas. Evaluar condiciones especiales (aseo extra, fincas con espacio, depósito ajustado). La IA quedó en pausa."
+            : reason === "catalog_no_results"
+              ? "🚨 Catálogo vacío para los filtros del cliente. Revisar requisitos (cupo / evento / zona) y proponer opciones manualmente. La IA quedó en pausa."
+              : reason === "event_after_catalog"
+                ? "🎉 Evento confirmado: cliente recibió el catálogo. Confirmar precio y condiciones del evento (logística + capacidad). La IA quedó en pausa."
+                : reason === "media_post_catalog"
+                  ? "📎 Cliente envió archivo/foto en fase post-catálogo. Revisar (cédula, comprobante, doc). La IA quedó en pausa."
+                  : "ℹ️ Conversación pasada a asesor humano. La IA quedó en pausa.";
     await ctx.runMutation(deps.internal.messages.insertSystemMessage, {
       conversationId,
       content: alertBody,

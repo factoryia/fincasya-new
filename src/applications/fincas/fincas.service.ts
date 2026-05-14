@@ -6,6 +6,7 @@ import {
   Inject,
 } from '@nestjs/common';
 import { PDFDocument } from 'pdf-lib';
+import * as path from 'path';
 
 const PizZip = require('pizzip');
 
@@ -189,18 +190,18 @@ export class FincasService {
     return (
       extractContractSentAutomaticMessage(effectivePrompt) ||
       extractContractSentAutomaticMessage(DEFAULT_CONSULTANT_SYSTEM_PROMPT) ||
-      `✨ **Tu reserva, con respaldo y total confianza**
+      `✨ *Tu reserva, con respaldo y total confianza*
 
 Queremos que vivas una experiencia segura desde el primer momento. Por eso, antes de cualquier pago, recibirás tu **contrato de arrendamiento** y toda nuestra documentación legal para que valides quiénes somos y tengas plena tranquilidad 🔐
 
-💳 **Opciones de pago flexibles**
+💳 *Opciones de pago flexibles*
 Elige el medio que prefieras: Davivienda, BBVA, Bancolombia, Nequi, PSE, tarjeta de crédito o Llaves.
 
-💰 **¿Cómo aseguras tu finca?**
+💰 *¿Cómo aseguras tu finca?*
 Con un **anticipo del 50%** reservas tu fecha. El valor restante lo pagas directamente al momento de recibir la finca, una vez confirmes que todo está en perfecto estado 👌
 
-📍 **Después de tu reserva**
-Al confirmar tu pago, recibirás el **soporte oficial** junto con todos los detalles y la ubicación exacta de la propiedad.
+📍 *Después de tu reserva*
+Al confirmar tu pago, recibirás el *soporte oficial* junto con todos los detalles y la ubicación exacta de la propiedad.
 
 🤝 En FincasYa.com no solo reservas una finca, aseguras una experiencia confiable, clara y respaldada en cada paso.`
     );
@@ -708,6 +709,11 @@ Al confirmar tu pago, recibirás el **soporte oficial** junto con todos los deta
             ...(f.zoneTemplateSourceId
               ? { zoneTemplateSourceId: f.zoneTemplateSourceId }
               : {}),
+            ...(f.quantity != null &&
+            Number.isFinite(Number(f.quantity)) &&
+            Math.floor(Number(f.quantity)) >= 1
+              ? { quantity: Math.max(1, Math.floor(Number(f.quantity))) }
+              : {}),
           })) || [],
         ...(featuredIcons && { featuredIcons }),
         ...(zoneOrder && { zoneOrder }),
@@ -820,6 +826,11 @@ Al confirmar tu pago, recibirás el **soporte oficial** junto con todos los deta
           ...(f.zone ? { zone: f.zone } : {}),
           ...(f.zoneTemplateSourceId
             ? { zoneTemplateSourceId: f.zoneTemplateSourceId }
+            : {}),
+          ...(f.quantity != null &&
+          Number.isFinite(Number(f.quantity)) &&
+          Math.floor(Number(f.quantity)) >= 1
+            ? { quantity: Math.max(1, Math.floor(Number(f.quantity))) }
             : {}),
         }));
       }
@@ -1273,13 +1284,7 @@ Al confirmar tu pago, recibirás el **soporte oficial** junto con todos los deta
       `[api] >>> generateContract CODE=v5-gap-plaininner propertyId=${propertyId} preview=${!!options?.previewOnly}`,
     );
     try {
-      // 1. Obtener la finca y su plantilla
       const finca = await this.getById(propertyId);
-      if (!finca.contractTemplateUrl) {
-        throw new BadRequestException(
-          'Esta finca no tiene una plantilla de contrato configurada.',
-        );
-      }
 
       const resolvedContractNumber =
         (dto.contractNumber && String(dto.contractNumber).trim()) ||
@@ -1291,29 +1296,7 @@ Al confirmar tu pago, recibirás el **soporte oficial** junto con todos los deta
           ),
         ).slice(0, 28)}-${Date.now().toString(36).toUpperCase()}`;
 
-      // 2. Descargar la plantilla PDF
-      let templateResponse;
-      try {
-        templateResponse = await axios.get(finca.contractTemplateUrl, {
-          responseType: 'arraybuffer',
-          timeout: 120_000,
-          maxContentLength: 50 * 1024 * 1024,
-        });
-      } catch (err: unknown) {
-        const msg = err instanceof Error ? err.message : String(err);
-        throw new BadRequestException(
-          `No se pudo descargar la plantilla del contrato desde la URL configurada en la finca. ${msg}`,
-        );
-      }
-      if (templateResponse.status >= 400) {
-        throw new BadRequestException(
-          `La URL de la plantilla respondió HTTP ${templateResponse.status}. Revisa el archivo en la ficha de la finca.`,
-        );
-      }
-      const templateBytes = normalizeDownloadedFile(templateResponse.data);
-
-      // 3. Modificar el PDF con pdf-lib
-      // 2. Obtener informaciÃ³n de la conversaciÃ³n y contacto para el cliente
+      // Obtener informaciÃ³n de la conversaciÃ³n y contacto para el cliente
       let contact: any = null;
       if (dto.conversationId && dto.conversationId !== 'direct-reservation') {
         try {
@@ -1522,13 +1505,77 @@ Al confirmar tu pago, recibirás el **soporte oficial** junto con todos los deta
         }
       }
 
-      // --- DETECCIÓN DE FORMATO Y PROCESAMIENTO ---
-      const isDocx = templateBytes.slice(0, 2).toString() === 'PK';
-      const isHtml = templateBytes.slice(0, 500).toString().toLowerCase().includes('<html');
-      
+      let templateBytes: Buffer | null = null;
+      const templateUrl = finca.contractTemplateUrl?.trim();
+      if (templateUrl) {
+        let templateResponse;
+        try {
+          templateResponse = await axios.get(templateUrl, {
+            responseType: 'arraybuffer',
+            timeout: 120_000,
+            maxContentLength: 50 * 1024 * 1024,
+          });
+        } catch (err: unknown) {
+          const msg = err instanceof Error ? err.message : String(err);
+          throw new BadRequestException(
+            `No se pudo descargar la plantilla del contrato desde la URL configurada en la finca. ${msg}`,
+          );
+        }
+        if (templateResponse.status >= 400) {
+          throw new BadRequestException(
+            `La URL de la plantilla respondió HTTP ${templateResponse.status}. Revisa el archivo en la ficha de la finca.`,
+          );
+        }
+        templateBytes = normalizeDownloadedFile(templateResponse.data);
+      }
+
+      const sanitizedTitle = this.sanitizeFilename(finca.title || 'Finca');
+      const contractNumSuffix = resolvedContractNumber
+        ? `_${resolvedContractNumber}`
+        : '';
+
       let finalBuffer: Buffer;
       let finalFilename: string;
       let finalMimeType: string;
+
+      if (!templateBytes) {
+        const incomingCustomHtml =
+          typeof dto.customHtml === 'string' ? dto.customHtml.trim() : '';
+        const useCustomHtml =
+          incomingCustomHtml.length > 0 && incomingCustomHtml.length <= 400_000;
+
+        if (useCustomHtml) {
+          console.log(
+            `[api] Sin plantilla en la finca: usando customHtml del frontend (${incomingCustomHtml.length} chars).`,
+          );
+          const fullHtml = await this.wrapContractFragmentHtml(
+            incomingCustomHtml,
+            finca as { title?: string; location?: string },
+            resolvedContractNumber,
+          );
+          finalBuffer = await this.pdfService.htmlToPdf(fullHtml);
+        } else {
+          if (incomingCustomHtml.length > 400_000) {
+            console.warn(
+              `[api] customHtml descartado por tamaño (${incomingCustomHtml.length} chars). Cayendo a fallback.`,
+            );
+          } else {
+            console.log(
+              '[api] Sin plantilla en la finca: generando PDF desde HTML estándar (puppeteer).',
+            );
+          }
+          const fallbackHtml = this.buildContractFallbackHtml(
+            wordValues,
+            finca as { title?: string; location?: string },
+          );
+          finalBuffer = await this.pdfService.htmlToPdf(fallbackHtml);
+        }
+        finalFilename = `Contrato_${sanitizedTitle}${contractNumSuffix}.pdf`;
+        finalMimeType = 'application/pdf';
+      } else {
+      // --- DETECCIÓN DE FORMATO Y PROCESAMIENTO ---
+      const isDocx = templateBytes.slice(0, 2).toString() === 'PK';
+      const isHtml = templateBytes.slice(0, 500).toString().toLowerCase().includes('<html');
 
       if (isHtml) {
         console.log('[api] Detectado formato HTML (Word antiguo)');
@@ -1551,10 +1598,6 @@ Al confirmar tu pago, recibirás el **soporte oficial** junto con todos los deta
         }
         
         finalBuffer = Buffer.from(htmlString);
-        const sanitizedTitle = this.sanitizeFilename(finca.title || 'Finca');
-        const contractNumSuffix = resolvedContractNumber
-          ? `_${resolvedContractNumber}`
-          : '';
         finalFilename = `Contrato_${sanitizedTitle}${contractNumSuffix}.doc`;
         finalMimeType = 'application/msword';
         
@@ -1609,10 +1652,6 @@ Al confirmar tu pago, recibirás el **soporte oficial** junto con todos los deta
         }
 
         // Generar nombre de archivo base usando el nombre de la finca
-        const sanitizedTitle = this.sanitizeFilename(finca.title || 'Finca');
-        const contractNumSuffix = resolvedContractNumber
-          ? `_${resolvedContractNumber}`
-          : '';
         finalFilename = `Contrato_${sanitizedTitle}${contractNumSuffix}.docx`;
         finalMimeType =
           'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
@@ -1714,12 +1753,9 @@ Al confirmar tu pago, recibirás el **soporte oficial** junto con todos los deta
 
         const pdfSavedBytes = await pdfDoc.save();
         finalBuffer = Buffer.from(pdfSavedBytes);
-        const sanitizedTitle = this.sanitizeFilename(finca.title || 'Finca');
-        const contractNumSuffix = resolvedContractNumber
-          ? `_${resolvedContractNumber}`
-          : '';
         finalFilename = `Contrato_${sanitizedTitle}${contractNumSuffix}.pdf`;
         finalMimeType = 'application/pdf';
+      }
       }
 
       if (options?.previewOnly) {
@@ -2097,6 +2133,105 @@ Al confirmar tu pago, recibirás el **soporte oficial** junto con todos los deta
       .replace(/[^a-z0-9]/gi, '_') // Reemplazar caracteres no alfanumÃ©ricos por guiÃ³n bajo
       .replace(/_+/g, '_') // Reemplazar guiones bajos mÃºltiples por uno solo
       .replace(/^_|_$/g, ''); // Eliminar guiones bajos al inicio o final
+  }
+
+  /**
+   * Envuelve un fragmento HTML del contrato (construido en el frontend con
+   * cláusulas, cuentas y propietario) en un documento completo listo para PDF.
+   * Incrusta el logo de FincasYA como data URL para que aparezca en el PDF
+   * aunque puppeteer no tenga acceso al servidor de assets.
+   * El fragmento puede ya traer `<!DOCTYPE>` o `<html>`; si es así, lo
+   * devolvemos tal cual.
+   */
+  private async wrapContractFragmentHtml(
+    fragment: string,
+    finca: { title?: string; location?: string },
+    contractNumber: string,
+  ): Promise<string> {
+    const trimmed = fragment.trim();
+    if (/^<!doctype/i.test(trimmed) || /^<html[\s>]/i.test(trimmed)) {
+      return trimmed;
+    }
+    const titleParts = [
+      'Contrato',
+      contractNumber || '',
+      finca.title || '',
+    ].filter((s) => s && String(s).trim().length > 0);
+    const safeTitle = titleParts
+      .join(' - ')
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;');
+
+    const logoDataUrl = await this.pdfService
+      .getLocalAssetDataUrl([
+        path.resolve(
+          process.cwd(),
+          '../FincasYaWeb/public/logo-contrato.jpg',
+        ),
+        path.resolve(
+          process.cwd(),
+          '../FincasYaWeb/public/fincasya-negro-logo-reserva.png',
+        ),
+        path.resolve(process.cwd(), '../FincasYaWeb/public/icons/FincasYA.png'),
+        path.resolve(process.cwd(), '../FincasYaWeb/public/fincas-ya-logo.png'),
+      ])
+      .catch(() => null);
+
+    const logoHeader = logoDataUrl
+      ? `<div class="contract-logo"><img src="${logoDataUrl}" alt="FincasYA" /></div>`
+      : '';
+
+    return `<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8"/>
+<title>${safeTitle}</title>
+<style>
+  @page { size: A4; margin: 18mm 18mm 20mm 18mm; }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0;
+    padding: 0;
+    font-family: Arial, Helvetica, sans-serif;
+    font-size: 11pt;
+    color: #111;
+    line-height: 1.55;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+  body { padding: 0 4mm; }
+  .contract-logo {
+    margin: 0 0 12pt 0;
+    text-align: left;
+  }
+  .contract-logo img {
+    height: 70pt;
+    width: auto;
+    max-width: 180pt;
+    object-fit: contain;
+    display: inline-block;
+  }
+  p { margin: 0 0 8pt 0; text-align: justify; }
+  strong, b { color: #000; }
+  h1, h2, h3 { color: #000; }
+  h1 { font-size: 14pt; }
+  h2 { font-size: 12pt; margin-top: 14pt; margin-bottom: 6pt; }
+  ul, ol { margin: 4pt 0 8pt 22pt; padding: 0; }
+  li { margin-bottom: 4pt; text-align: justify; }
+  table { width: 100%; border-collapse: collapse; margin: 4pt 0 10pt 0; }
+  td, th { padding: 3pt 6pt; vertical-align: top; }
+  a { color: #1d4ed8; text-decoration: none; }
+  u { text-decoration: underline; }
+  /* Evita que firmas y bloques de cierre queden colgando solos */
+  div, p { page-break-inside: avoid; }
+</style>
+</head>
+<body>
+${logoHeader}
+${trimmed}
+</body>
+</html>`;
   }
 
   /**

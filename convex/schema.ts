@@ -85,6 +85,11 @@ export default defineSchema({
     reservable: v.optional(v.boolean()),
     /** URL de la plantilla del contrato en PDF. */
     contractTemplateUrl: v.optional(v.string()),
+    /**
+     * Etiquetas de filtros del sitio (pestañas del home): luxury, eventos, cerca-bogota, melgar, etc.
+     * Si el campo falta, la web usa reglas legacy por ubicación/texto. Si existe (puede ser []), aplica modo explícito.
+     */
+    catalogFilterTags: v.optional(v.array(v.string())),
     /** Bandera legacy para favoritos (para compatibilidad con documentos existentes). */
     isFavorite: v.optional(v.boolean()),
     /** Lista de IDs de la iconografía para mostrar en la card de la finca (máximo 4). */

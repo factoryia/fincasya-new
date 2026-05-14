@@ -9,6 +9,8 @@ import {
   IsInt,
   ValidateIf,
   ValidateNested,
+  ArrayUnique,
+  IsIn,
 } from 'class-validator';
 import { Type, Transform, plainToInstance } from 'class-transformer';
 
@@ -65,10 +67,36 @@ export class FeatureItemDto {
   @IsOptional()
   @IsString()
   zoneTemplateSourceId?: string;
+
+  /** Cantidad (ej. 2 hamacas). Alineado con Convex `propertyFeatures.quantity`. */
+  @IsOptional()
+  @Transform(({ value }) => {
+    if (value === '' || value === undefined || value === null) return undefined;
+    const n = Number(value);
+    if (!Number.isFinite(n) || n < 1) return undefined;
+    return Math.floor(n);
+  })
+  @ValidateIf((_, v) => v !== undefined && v !== null)
+  @IsInt()
+  @Min(1)
+  quantity?: number;
 }
 
 const toNumber = (v: unknown) =>
   v === '' || v === undefined || v === null ? undefined : Number(v);
+
+/** Pestañas del listado público (FincasYaWeb) salvo "todas" y "favoritas". */
+const CATALOG_FILTER_SITE_TAG_IDS = [
+  'luxury',
+  'eventos',
+  'cerca-bogota',
+  'melgar',
+  'villavicencio',
+  'anapoima',
+  'villeta',
+  'playa',
+  'eje-cafetero',
+] as const;
 
 export class CreateFincaDto {
   @IsString()
@@ -261,7 +289,7 @@ export class CreateFincaDto {
   @Transform(({ value }) => toNumber(value))
   priceOriginal?: number;
 
-  /** En multipart envía como JSON string de array de objetos { name, iconId } */
+  /** En multipart envía como JSON string de array de objetos { name, iconId?, quantity?, zone?, ... } */
   @IsOptional()
   @IsArray()
   @ValidateNested({ each: true })
@@ -308,6 +336,24 @@ export class CreateFincaDto {
   @IsOptional()
   @IsString()
   contractTemplateUrl?: string;
+
+  @IsOptional()
+  @Transform(({ value }) => {
+    if (value === undefined || value === null) return undefined;
+    if (typeof value === 'string') {
+      try {
+        return value.trim() === '' ? [] : JSON.parse(value);
+      } catch {
+        return [];
+      }
+    }
+    return Array.isArray(value) ? value : [];
+  })
+  @IsArray()
+  @IsString({ each: true })
+  @ArrayUnique()
+  @IsIn([...CATALOG_FILTER_SITE_TAG_IDS], { each: true })
+  catalogFilterTags?: string[];
 
   // Campos de archivos (multipart) gestionados por interceptores, no por el DTO.
   @IsOptional()

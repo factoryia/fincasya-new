@@ -105,4 +105,14 @@ export class GenerateContractDto {
   @IsOptional()
   @IsString()
   bookingId?: string;
+
+  /**
+   * HTML pre-renderizado en el frontend (preview rico con cláusulas, cuentas,
+   * propietario, etc.). Si la finca no tiene `contractTemplateUrl`, este HTML
+   * se usa tal cual para generar el PDF. Si la finca tiene plantilla propia,
+   * se ignora y se respeta la plantilla. Limitado a ~400KB para evitar abuso.
+   */
+  @IsOptional()
+  @IsString()
+  customHtml?: string;
 }

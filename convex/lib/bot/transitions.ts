@@ -88,15 +88,44 @@ export function transition(
   // ── PET_CHECK ─────────────────────────────────────────────────────────────
   if (phase === "pet_check") {
     // hasPets debe estar definido para avanzar
-    if (entities.hasPets !== undefined) {
-      return { nextPhase: "contract", action: { type: "reply_only" } };
+    if (entities.hasPets === undefined) {
+      return { nextPhase: "pet_check", action: { type: "reply_only" } };
     }
-    return { nextPhase: "pet_check", action: { type: "reply_only" } };
+    // Si lleva mascotas pero no sabemos cuántas, NO avanzar todavía: el bot pide el número.
+    if (
+      entities.hasPets === true &&
+      (entities.petCount === undefined || entities.petCount <= 0)
+    ) {
+      return { nextPhase: "pet_check", action: { type: "reply_only" } };
+    }
+    // Resolved. Si lleva mascotas, mostrar reglas (intermedio).
+    // Si no lleva, saltar directo al resumen (quote_shown).
+    if (entities.hasPets === true) {
+      return { nextPhase: "pet_rules_shown", action: { type: "reply_only" } };
+    }
+    return { nextPhase: "quote_shown", action: { type: "reply_only" } };
+  }
+
+  // ── PET_RULES_SHOWN ───────────────────────────────────────────────────────
+  // El cliente vio las reglas de mascotas. Esperamos confirmación para avanzar.
+  if (phase === "pet_rules_shown") {
+    const confirms = clientConfirms(incomingText);
+    if (confirms === true) {
+      return { nextPhase: "quote_shown", action: { type: "reply_only" } };
+    }
+    // Si dice que no o no es claro, nos quedamos en la misma fase
+    // (replies.ts decide si re-emitir el mensaje o el LLM contextual responde).
+    return { nextPhase: "pet_rules_shown", action: { type: "reply_only" } };
   }
 
   // ── QUOTE_SHOWN ───────────────────────────────────────────────────────────
+  // El cliente vio el resumen con totales. Esperamos confirmación para pedir datos de contrato.
   if (phase === "quote_shown") {
-    return { nextPhase: "contract", action: { type: "reply_only" } };
+    const confirms = clientConfirms(incomingText);
+    if (confirms === true) {
+      return { nextPhase: "contract", action: { type: "reply_only" } };
+    }
+    return { nextPhase: "quote_shown", action: { type: "reply_only" } };
   }
 
   // ── CONTRACT ──────────────────────────────────────────────────────────────
@@ -226,4 +255,38 @@ function isContractComplete(e: BotEntities): boolean {
     e.contractEmail &&
     (e.contractPhone || e.contractAddress)
   );
+}
+
+/**
+ * Detecta si el cliente está confirmando avanzar (sí), rechazando (no) o
+ * mandando algo ambiguo (null). Se usa en las fases intermedias
+ * `pet_rules_shown` y `quote_shown` que esperan un sí/no explícito antes
+ * de mostrar el siguiente bloque.
+ */
+function clientConfirms(text: string): boolean | null {
+  const t = String(text ?? "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/\p{M}/gu, "")
+    .trim();
+  if (t.length === 0 || t.length > 120) return null;
+  if (
+    /^(si|sii+|sip|claro|dale|listo|ok+|okey|perfecto|de acuerdo|procede|procedamos|continua|continuemos|adelante|sigamos|por supuesto|esta bien|todo bien|hagamoslo|hagamos|hagamoslo|sigue|avancemos|avanza|me sirve|me parece|de una|si por favor)\W*$/i.test(
+      t,
+    )
+  ) {
+    return true;
+  }
+  // Frases que contienen "sí" + algo más pero claramente afirman.
+  if (/\b(s[ií]\s+(procedamos|continuemos|sigamos|hagamoslo|avancemos))\b/.test(t)) {
+    return true;
+  }
+  if (
+    /^(no|nop+|nope|negativo|cancela|cancelar|olvidalo|olvidar|mejor no|aun no|todavia no)\W*$/i.test(
+      t,
+    )
+  ) {
+    return false;
+  }
+  return null;
 }
