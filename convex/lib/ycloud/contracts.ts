@@ -86,6 +86,7 @@ Esquema (incluye TODAS las claves; usa null cuando no encuentres dato; nunca inv
   "finca": string | null,
   "checkInDate": "YYYY-MM-DD" | null,
   "checkOutDate": "YYYY-MM-DD" | null,
+  "nochesMencionadas": number | null,
   "personas": number | null,
   "mascotas": number | null,
   "precioPorNocheCop": number | null,
@@ -94,14 +95,16 @@ Esquema (incluye TODAS las claves; usa null cuando no encuentres dato; nunca inv
 }
 Reglas:
 - Pesos colombianos: enteros sin puntos, comas, ni símbolos. "$1.250.000" → 1250000.
+- Si el asesor dice frases como "total por 2 noches ... es $4.800.000" o "por N noches ... $X", pon subtotalAlojamientoCop=X y nochesMencionadas=N (N entero ≥1).
 - Si el resumen menciona "precio por noche" y "total noches", llena precioPorNocheCop y subtotalAlojamientoCop.
 - Si solo aparece subtotal de alojamiento y las fechas, llena solo subtotalAlojamientoCop (el servidor calcula el precio/noche).
+- Si hay subtotalAlojamientoCop y nochesMencionadas pero NO hay precioPorNocheCop, déjalo null (el servidor puede derivar precio/noche).
 - Aseo final SOLO si se menciona aparte; si no aparece, null.
 - Fechas SIEMPRE YYYY-MM-DD.
 - Si el dato no aparece o es ambiguo, usa null. Nada de adivinanzas.`,
       messages: [{ role: "user", content: fullHistory }],
       temperature: 0,
-      maxTokens: 900,
+      maxTokens: 1100,
     });
     text = result.text ?? "";
   } catch (err) {

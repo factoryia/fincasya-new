@@ -440,6 +440,24 @@ export class InboxService {
           }
         }
       }
+      if (raw.nochesMencionadas != null) {
+        const nn = Math.round(Number(raw.nochesMencionadas));
+        if (Number.isFinite(nn) && nn >= 1) {
+          raw.quotedNights = nn;
+        }
+      }
+      if (
+        raw.nochesMencionadas != null &&
+        raw.subtotalAlojamientoCop != null &&
+        raw.nightlyPrice == null &&
+        (!raw.checkInDate || !raw.checkOutDate)
+      ) {
+        const nn = Math.max(1, Math.round(Number(raw.nochesMencionadas)));
+        const sub = Math.round(Number(raw.subtotalAlojamientoCop));
+        if (Number.isFinite(nn) && Number.isFinite(sub) && sub > 0) {
+          raw.nightlyPrice = String(Math.round(sub / nn));
+        }
+      }
     };
     mapExtracted(data);
 
@@ -638,7 +656,14 @@ export class InboxService {
       checkOutTime: String(
         contractData.checkOutTime || suggested.checkOutTime || '16:00',
       ),
-      guests: this.pdfService.toNumber(contractData.numeroPersonas || suggested.numeroPersonas || 1),
+      guests: this.pdfService.toNumber(
+        contractData.guests ||
+          contractData.numeroPersonas ||
+          suggested.guests ||
+          suggested.personas ||
+          suggested.numeroPersonas ||
+          1,
+      ),
       nights,
       depositAmount,
       depositDate: this.pdfService.toIsoDate(new Date()),

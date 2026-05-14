@@ -1,5 +1,5 @@
-import { Transform } from 'class-transformer';
-import { IsString, IsNotEmpty, IsOptional } from 'class-validator';
+import { Transform, Type } from 'class-transformer';
+import { IsString, IsNotEmpty, IsOptional, IsInt, Min, Max } from 'class-validator';
 
 export class GenerateContractDto {
   @IsString()
@@ -88,6 +88,14 @@ export class GenerateContractDto {
 
   @IsOptional()
   petCount?: number;
+
+  /** Huéspedes (para metadata de confirmación de reserva). */
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(500)
+  guests?: number;
 
   @IsOptional()
   serviceStaffFee?: number;

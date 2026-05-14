@@ -190,7 +190,7 @@ export const extractContractData = action({
   handler: async (ctx, args): Promise<Record<string, unknown>> => {
     const messages = await ctx.runQuery(api.messages.listRecent, {
       conversationId: args.conversationId,
-      limit: 30,
+      limit: 120,
     });
     const fullHistory = (messages as Array<{ sender?: string; content?: string }>)
       .map((m) => {

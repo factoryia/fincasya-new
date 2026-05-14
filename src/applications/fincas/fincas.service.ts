@@ -1821,6 +1821,10 @@ Al confirmar tu pago, recibirás el *soporte oficial* junto con todos los detall
           totalDays,
           subtotal: unitPriceNum * totalDays,
           totalPrice: totalPriceNum,
+          guests:
+            dto.guests != null && Number(dto.guests) >= 1
+              ? Math.round(Number(dto.guests))
+              : undefined,
           petCount: petCount,
           petSurchargeRefundable,
           petSurchargeNonRefundable,
