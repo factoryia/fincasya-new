@@ -10,7 +10,6 @@ import {
   ValidateIf,
   ValidateNested,
   ArrayUnique,
-  IsIn,
 } from 'class-validator';
 import { Type, Transform, plainToInstance } from 'class-transformer';
 
@@ -85,18 +84,6 @@ export class FeatureItemDto {
 const toNumber = (v: unknown) =>
   v === '' || v === undefined || v === null ? undefined : Number(v);
 
-/** Pestañas del listado público (FincasYaWeb) salvo "todas" y "favoritas". */
-const CATALOG_FILTER_SITE_TAG_IDS = [
-  'luxury',
-  'eventos',
-  'cerca-bogota',
-  'melgar',
-  'villavicencio',
-  'anapoima',
-  'villeta',
-  'playa',
-  'eje-cafetero',
-] as const;
 
 export class CreateFincaDto {
   @IsString()
@@ -337,22 +324,34 @@ export class CreateFincaDto {
   @IsString()
   contractTemplateUrl?: string;
 
+  /**
+   * IDs de pestañas del catálogo. Incluye los IDs del sitio (`luxury`, `melgar`, …)
+   * y categorías personalizadas creadas desde el admin (slug en kebab-case).
+   * Se valida formato básico para evitar contaminar la BD con IDs inválidos.
+   */
   @IsOptional()
   @Transform(({ value }) => {
     if (value === undefined || value === null) return undefined;
+    let arr: unknown;
     if (typeof value === 'string') {
       try {
-        return value.trim() === '' ? [] : JSON.parse(value);
+        arr = value.trim() === '' ? [] : JSON.parse(value);
       } catch {
-        return [];
+        arr = [];
       }
+    } else {
+      arr = value;
     }
-    return Array.isArray(value) ? value : [];
+    if (!Array.isArray(arr)) return [];
+    const cleaned = arr
+      .filter((x: unknown): x is string => typeof x === 'string')
+      .map((x: string) => x.trim().toLowerCase())
+      .filter((x: string) => /^[a-z0-9][a-z0-9-]{0,63}$/.test(x));
+    return Array.from(new Set(cleaned));
   })
   @IsArray()
   @IsString({ each: true })
   @ArrayUnique()
-  @IsIn([...CATALOG_FILTER_SITE_TAG_IDS], { each: true })
   catalogFilterTags?: string[];
 
   // Campos de archivos (multipart) gestionados por interceptores, no por el DTO.
