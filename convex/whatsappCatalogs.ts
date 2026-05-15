@@ -518,28 +518,42 @@ export const getPayloadByLocationForN8n = query({
      *   - `max` se compara contra `sleepCapacity` (siempre `capacity`, hospedaje).
      *     El techo `maxCapacity` está pensado para no ofrecer fincas con
      *     DEMASIADAS CAMAS al cliente (ej. finca de 30 a quien pidió 4 personas).
-     *     Para eventos, una `eventCapacity` grande NO es un problema: el cliente
-     *     no paga por camas extra; paga por el salón. Por eso el max NO mira
-     *     eventCapacity.
+     *
+     * IMPORTANTE: para EVENTOS (`args.isEvento === true`) el techo se OMITE
+     * por completo. Un cliente con 10 personas que va a hacer un cumpleaños
+     * puede usar perfectamente una finca de 25 PAX con `eventCapacity` 50 (le
+     * sobra espacio para la fiesta + cabe sin problema todo el grupo). Si
+     * aplicáramos el techo de hospedaje (~cupo + buffer) muchas fincas
+     * grandes de eventos quedarían descartadas — devolviendo "catálogo vacío"
+     * cuando claramente hay opciones servibles. El asesor / cliente decide
+     * si una finca es "demasiado grande" para su evento, no el filtro.
      */
     const matchesCapacity = (p: any) => {
       const eventEff = catalogPeopleCountForFilter(p, args.isEvento);
       const sleepCap = Math.max(0, Number(p.capacity ?? 0));
       if (args.minCapacity != null && eventEff < args.minCapacity) return false;
-      if (args.maxCapacity != null && sleepCap > args.maxCapacity) return false;
+      if (
+        args.isEvento !== true &&
+        args.maxCapacity != null &&
+        sleepCap > args.maxCapacity
+      ) {
+        return false;
+      }
       return true;
     };
     /**
      * Pasada intermedia: respeta el mínimo (usando eventCapacity si aplica) y
      * aplica un **techo relajado** sobre el cupo de hospedaje. Mismo principio
      * que `matchesCapacity`: el `max` solo limita CAMAS (`capacity`), no la
-     * capacidad de evento.
+     * capacidad de evento — y para EVENTOS, igual que arriba, el techo se
+     * omite por completo (cualquier finca lo suficientemente grande sirve).
      */
     const matchesCapacityRelaxed = (p: any) => {
       const eventEff = catalogPeopleCountForFilter(p, args.isEvento);
       const sleepCap = Math.max(0, Number(p.capacity ?? 0));
       if (args.minCapacity != null && eventEff < args.minCapacity) return false;
       if (
+        args.isEvento !== true &&
         args.maxCapacityRelaxed != null &&
         sleepCap > args.maxCapacityRelaxed
       ) {
@@ -547,13 +561,23 @@ export const getPayloadByLocationForN8n = query({
       }
       return true;
     };
-    const matchesEvento = (p: any) => {
-      if (args.isEvento === true) {
-        if (p.familyOnly === true) return false;
-        if (p.allowsEventsContent === false) return false;
-      }
-      return true;
-    };
+    /**
+     * Filtro de eventos: **DESACTIVADO por política comercial**.
+     *
+     * Antes excluía fincas con `familyOnly === true` y `allowsEventsContent
+     * === false` cuando el cliente confirmaba `isEvento=true`. Eso producía
+     * "catálogo vacío" en zonas donde la mayoría de fincas están marcadas
+     * "solo familiar" — aunque para un cumpleaños familiar básico aplican
+     * perfecto y la cliente quiere verlas.
+     *
+     * Política nueva: enviar TODAS las fincas que cuadran con capacidad +
+     * ubicación, independiente de los flags de evento. El asesor confirma
+     * caso por caso si la finca es adecuada cuando la logística del evento
+     * es pesada (DJ, banda); para eventos "básicos" (cumpleaños familiar
+     * con sonido de la finca) el cliente reserva normal. Ver guard 3.57 en
+     * `index.ts` y bloque post-catálogo evento en `inbound.ts`.
+     */
+    const matchesEvento = (_p: any) => true;
 
     const enforceClientCupo =
       args.minCapacity != null &&

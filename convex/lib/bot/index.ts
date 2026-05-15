@@ -123,11 +123,21 @@ function entitiesProgressed(prev: BotEntities, next: BotEntities): boolean {
 }
 
 /**
- * Detecta intención del cliente de empezar una cotización nueva o cambiar fechas/lugar
- * cuando ya estaba avanzado en el flujo. Patrones cubiertos:
+ * Detecta intención del cliente de empezar una cotización **completamente nueva**
+ * cuando ya estaba avanzado en el flujo (soft-reset COMPLETO: borra todo
+ * excepto datos personales del contrato).
+ *
+ * NO incluye frases tipo "otra zona", "otro municipio", "otra ciudad", ni
+ * "en otro lado" — esas las maneja `catalogFiltersChanged` con soft-reset
+ * PARCIAL cuando el extractor recoge un municipio diferente. Esto evita el
+ * bug donde el cliente dice "Si otra zona cercana por favor" (en respuesta a
+ * la sugerencia del bot) y el bot interpreta que quiere empezar de cero,
+ * borrando fechas/cupo/plan/evento y volviendo a preguntarlos uno por uno.
+ *
+ * Patrones cubiertos:
  *   "deseo hacer una nueva cotización", "otra cotización", "otra reserva",
- *   "cambiar fechas / cambiar la reserva", "otra fecha", "otro municipio",
- *   "otro lugar", "otra zona", "olvida lo anterior", "empezar de nuevo".
+ *   "cambiar fechas / cambiar la reserva", "otra fecha", "olvida lo anterior",
+ *   "empezar de nuevo", "reiniciar", "borrar todo".
  */
 function userWantsNewQuote(text: string): boolean {
   const t = String(text ?? "")
@@ -137,9 +147,8 @@ function userWantsNewQuote(text: string): boolean {
   if (t.length === 0 || t.length > 240) return false;
   return (
     /\b(nueva\s+(cotizacion|reserva|busqueda)|otra\s+(cotizacion|reserva|busqueda))\b/.test(t) ||
-    /\b(cambiar\s+(la\s+)?(reserva|cotizacion|fechas?|finca|lugar|municipio|zona))\b/.test(t) ||
+    /\b(cambiar\s+(la\s+)?(reserva|cotizacion|fechas?|finca))\b/.test(t) ||
     /\b(otra(s)?\s+fechas?|otros?\s+d[ií]as?|fechas?\s+diferentes?)\b/.test(t) ||
-    /\b(otro\s+(municipio|lugar|sitio)|otra\s+(zona|ciudad)|en\s+otro\s+lado)\b/.test(t) ||
     /\b(olvida(r)?\s+(lo\s+)?(anterior|previo)|empezar\s+de\s+nuevo|reiniciar|borrar\s+todo)\b/.test(t)
   );
 }
@@ -363,6 +372,53 @@ export async function runBotTurn(input: BotTurnInput): Promise<BotTurnResult> {
     };
   }
 
+  // 3.57 Política comercial de eventos: escalada SOLO para eventos con
+  // logística pesada ("extra": DJ, banda en vivo, sonido pro, iluminación,
+  // mariachis, grupos musicales, matrimonios, etc.). En esos casos el bot NO
+  // calcula el sobreprecio del evento (depende de horario, capacidad de la
+  // fiesta, equipos extras, condiciones especiales) — el asesor es quien
+  // confirma precio.
+  //
+  // En cambio, los eventos con logística "básica" (cumpleaños familiares,
+  // departir tranquilos con el sonido de la finca, reuniones íntimas) SIGUEN
+  // EL FLUJO NORMAL: pet_check → quote_shown → contract. La cotización
+  // estándar aplica sin sobreprecio.
+  //
+  // Esto cubre el caso post-catálogo: el cliente vio las opciones, eligió una,
+  // y dio los datos del evento que el bot le pidió DESPUÉS del catálogo (ver
+  // `inbound.ts` → bloque `action.isEvento === true`).
+  //
+  // Importante: este guard solo dispara cuando el cliente está post-catálogo
+  // (es decir, ya pasó por `catalog_sent`). Si el cliente está en `welcome` /
+  // `collecting` con `isEvento=true` pero todavía sin finca elegida, el
+  // catálogo debe enviarse primero (lo hace la transición normal).
+  const isPostCatalogEventReadyExtra =
+    updatedEntities.isEvento === true &&
+    (updatedEntities.eventPeopleCount ?? 0) > 0 &&
+    updatedEntities.eventLogistics === "extra" &&
+    !!(
+      (updatedEntities.selectedPropertyName ?? "").trim() ||
+      (updatedEntities.selectedPropertyRetailerId ?? "").trim()
+    ) &&
+    effectivePhase !== "welcome" &&
+    effectivePhase !== "collecting" &&
+    tr.action.type !== "escalate_human" &&
+    tr.action.type !== "send_catalog";
+  if (isPostCatalogEventReadyExtra) {
+    return {
+      replyText: [
+        "¡Perfecto! Con los datos del evento que me diste te conecto con un asesor para confirmarte el *precio final* y la *disponibilidad* del evento 🎉",
+        "",
+        "Un agente te escribirá en breve para finalizar los detalles 🤝 ✨",
+      ].join("\n"),
+      action: { type: "escalate_human", reason: "event_after_catalog" },
+      nextPhase: effectivePhase,
+      updatedEntities,
+      samePhaseTurnCount,
+      phaseEnteredAt,
+    };
+  }
+
   // 3.6 Anti-bucle: si el cliente lleva demasiados turnos atascado SIN APORTAR DATOS,
   // escalar a humano. `samePhaseTurnCount` ya es inteligente (resetea si hubo progreso).
   if (
@@ -384,10 +440,29 @@ export async function runBotTurn(input: BotTurnInput): Promise<BotTurnResult> {
 
   let stayQuoteBlock: string | null = null;
   let stayQuoteTotals: StayQuoteTotals | null = null;
-  const loadStayQuoteForContractHandoff =
-    tr.nextPhase === "contract" &&
-    (effectivePhase === "pet_check" || effectivePhase === "property_selected");
-  if (loadStayQuoteForContractHandoff && fetchStayQuote) {
+  // Cargar la cotización (alojamiento) cuando el bot vaya a mostrar el
+  // resumen al cliente. Esto ocurre en dos casos:
+  //
+  // (a) **Flujo nuevo (paso a paso):** la transición va a `quote_shown` desde
+  //     `pet_check` (sin mascotas) o desde `pet_rules_shown` (con mascotas).
+  //     `replies.ts` arma el resumen con `buildSummaryWithTotals` usando los
+  //     totals que cargamos acá. SIN esta carga, el resumen cae al fallback
+  //     "No pude calcular el valor automático... un asesor te confirma" — que
+  //     es exactamente el bug reportado por la usuaria con MELGAR QUINTA
+  //     TRAMONTINI: el bot pasó de pet_rules_shown a quote_shown pero NO
+  //     había cotización cargada porque el trigger viejo solo miraba
+  //     nextPhase==="contract".
+  //
+  // (b) **Flujo legacy (paquete contract):** la transición va directo de
+  //     `pet_check` o `property_selected` a `contract`. `generateReply`
+  //     arma `buildContractHandoffPacket` con las 3 burbujas (reglas
+  //     mascotas / resumen / pedido contrato) y necesita los totals para
+  //     calcular el gran total con cargos por mascotas.
+  const loadStayQuote =
+    tr.nextPhase === "quote_shown" ||
+    (tr.nextPhase === "contract" &&
+      (effectivePhase === "pet_check" || effectivePhase === "property_selected"));
+  if (loadStayQuote && fetchStayQuote) {
     const quote = await fetchStayQuote(updatedEntities);
     if (quote) {
       stayQuoteBlock = quote.text;

@@ -543,44 +543,126 @@ export async function processInboundMessageV2(
         });
       }
 
-      // Si es EVENTO, tras enviar las fichas escalamos a humano: el bot no
-      // calcula el sobreprecio del evento (depende de logística, capacidad,
-      // horario, etc.). Enviamos un mensaje al cliente avisando + alerta inbox.
+      // ── EVENTO: política comercial ─────────────────────────────────────
+      // Antes el bot escalaba a humano APENAS enviaba el catálogo cuando era
+      // evento. Eso producía dos malas UX: (a) el cliente recibía fichas y de
+      // inmediato un "te conecto con asesor" sin que hubiera podido elegir
+      // siquiera, y (b) si el cliente no llegaba a dar `eventPeopleCount` /
+      // `eventLogistics` por las preguntas que se hacían ANTES del catálogo,
+      // el flujo escalaba sin que el cliente viera ni una finca.
+      //
+      // Nueva política (refinada):
+      //   1. Mostrar primero el catálogo (siempre).
+      //   2. Preguntar detalles del evento (total de personas + logística)
+      //      DESPUÉS de mandar las fichas, SIN escalar todavía.
+      //   3. Cuando se conoce la logística:
+      //      - `extra` (DJ / banda / sonido pro / iluminación / matrimonios):
+      //        escalar al asesor — el bot no calcula sobreprecio.
+      //      - `basic` (cumpleaños familiar, sonido de la finca, departir
+      //        tranquilos): SEGUIR EL FLUJO NORMAL — el bot continúa con
+      //        pet_check → quote_shown → contract. La cotización estándar
+      //        aplica sin sobreprecio.
       if (action.isEvento === true) {
         const tEvent = Date.now() + 50;
-        const eventHandoffMsg = [
-          "Como es para *evento* 🎉, el precio final puede variar según la logística (sonido, banda, capacidad total).",
-          "",
-          "👉 Mientras revisas las opciones, te conecto con un asesor para confirmarte *precios y disponibilidad* del evento. Un agente te escribirá en breve 🤝 ✨",
-        ].join("\n");
-        await ctx.runMutation(deps.internal.conversations.escalate, {
-          conversationId,
-          assignedUserId:
-            process.env.CHATBOT_AUTO_ASSIGN_ADVISOR_ID?.trim() || undefined,
-        });
-        await ctx.runMutation(deps.internal.messages.insertAssistantMessage, {
-          conversationId,
-          content: eventHandoffMsg,
-          createdAt: tEvent,
-        });
-        await ctx.runMutation(deps.internal.messages.insertSystemMessage, {
-          conversationId,
-          content:
-            "🎉 Evento confirmado: el cliente recibió el catálogo. Confirmar precio/condiciones del evento (logística, capacidad, sobreprecio). La IA quedó en pausa.",
-          createdAt: tEvent + 5,
-          metadata: {
-            kind: "inbox_escalation_alert",
-            escalationReason: "event_after_catalog",
-            requestedLocation: action.location,
-            requestedCupo: action.cupo,
-            eventPeopleCount: result.updatedEntities.eventPeopleCount ?? null,
-            eventLogistics: result.updatedEntities.eventLogistics ?? null,
-          },
-        });
-        await ctx.runAction(deps.internal.ycloud.sendWhatsAppMessage, {
-          to: args.phone,
-          text: eventHandoffMsg,
-        });
+        const peopleCount = Number(
+          result.updatedEntities.eventPeopleCount ?? 0,
+        );
+        const peopleCountMissing = !peopleCount || peopleCount <= 0;
+        const logistics = result.updatedEntities.eventLogistics ?? null;
+        const logisticsMissing = !logistics;
+        const needsEventDetails = peopleCountMissing || logisticsMissing;
+
+        if (needsEventDetails) {
+          // Aún faltan datos del evento → preguntar SIN escalar. El bot sigue
+          // activo esperando que el cliente elija finca + entregue detalles.
+          const askLines: string[] = [
+            "Como es para *evento* 🎉, mientras revisas las opciones te hago un par de preguntas 👇",
+            "",
+          ];
+          if (peopleCountMissing) {
+            askLines.push(
+              "👥 *Total de personas en el evento* (las que duermen + las que van solo por el día / pasadía).",
+            );
+          }
+          if (logisticsMissing) {
+            askLines.push(
+              "🎵 *Logística del evento*:",
+              "🎧 Sonido profesional / DJ / iluminación",
+              "🎸 Banda en vivo o grupos musicales",
+              "🏡 O solo el sonido básico de la finca (departir tranquilos)",
+            );
+          }
+          askLines.push(
+            "",
+            "Cuéntame cuál finca te gusta y estos datos para confirmarte la disponibilidad 🤝",
+          );
+          const eventQuestionsMsg = askLines.join("\n");
+          await ctx.runMutation(deps.internal.messages.insertAssistantMessage, {
+            conversationId,
+            content: eventQuestionsMsg,
+            createdAt: tEvent,
+          });
+          await ctx.runAction(deps.internal.ycloud.sendWhatsAppMessage, {
+            to: args.phone,
+            text: eventQuestionsMsg,
+          });
+        } else if (logistics === "extra") {
+          // Logística pesada (DJ / banda / sonido pro / iluminación) →
+          // escalar al asesor: el bot NO calcula sobreprecio del evento.
+          const eventHandoffMsg = [
+            "Como es para *evento* 🎉, el precio final puede variar según la logística (sonido pro, banda, equipos).",
+            "",
+            "👉 Mientras revisas las opciones, te conecto con un asesor para confirmarte *precios y disponibilidad* del evento. Un agente te escribirá en breve 🤝 ✨",
+          ].join("\n");
+          await ctx.runMutation(deps.internal.conversations.escalate, {
+            conversationId,
+            assignedUserId:
+              process.env.CHATBOT_AUTO_ASSIGN_ADVISOR_ID?.trim() || undefined,
+          });
+          await ctx.runMutation(deps.internal.messages.insertAssistantMessage, {
+            conversationId,
+            content: eventHandoffMsg,
+            createdAt: tEvent,
+          });
+          await ctx.runMutation(deps.internal.messages.insertSystemMessage, {
+            conversationId,
+            content:
+              "🎉 Evento con logística *extra* (DJ/banda/sonido pro). El cliente recibió el catálogo + entregó detalles. Confirmar precio/condiciones del evento. La IA quedó en pausa.",
+            createdAt: tEvent + 5,
+            metadata: {
+              kind: "inbox_escalation_alert",
+              escalationReason: "event_after_catalog",
+              requestedLocation: action.location,
+              requestedCupo: action.cupo,
+              eventPeopleCount: peopleCount,
+              eventLogistics: logistics,
+            },
+          });
+          await ctx.runAction(deps.internal.ycloud.sendWhatsAppMessage, {
+            to: args.phone,
+            text: eventHandoffMsg,
+          });
+        } else {
+          // Logística básica (cumpleaños familiar, departir tranquilos) → NO
+          // escalar. El bot sigue el flujo normal: en el próximo turno cuando
+          // el cliente elija una finca, transition catalog_sent → pet_check
+          // y de ahí avanza a quote_shown + contract con la cotización
+          // estándar (sin sobreprecio de evento, porque no aplica).
+          const basicEventAckMsg = [
+            "¡Perfecto! 🎉 Para tu evento *básico* (sin sonido pro ni banda) te aplica la tarifa normal de la finca.",
+            "",
+            "Cuéntame *cuál finca te llama la atención* y seguimos con la reserva 🤝",
+          ].join("\n");
+          await ctx.runMutation(deps.internal.messages.insertAssistantMessage, {
+            conversationId,
+            content: basicEventAckMsg,
+            createdAt: tEvent,
+          });
+          await ctx.runAction(deps.internal.ycloud.sendWhatsAppMessage, {
+            to: args.phone,
+            text: basicEventAckMsg,
+          });
+        }
       }
     } else {
       // Catálogo vacío: ninguna finca cumple los filtros (cupo + evento +

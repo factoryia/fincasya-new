@@ -67,8 +67,15 @@ export function mergeEntities(
 }
 
 /**
- * Orden: ubicación → fechas → cupo → tipo de grupo → evento vs solo descanso
- *        → (si evento) detalle del evento (capacidad total + logística) → catálogo.
+ * Orden: ubicación → fechas → cupo → tipo de grupo → evento vs solo descanso → catálogo.
+ *
+ * NOTA: los detalles del evento (`eventPeopleCount`, `eventLogistics`) NO se
+ * piden antes del catálogo. La política comercial es: **mostrar primero las
+ * fincas** disponibles para la capacidad básica del cliente, y SOLO DESPUÉS
+ * (cuando ya vio opciones reales) preguntar los detalles del evento que el
+ * asesor necesita para confirmar el precio del evento. Esto evita el patrón
+ * "responde 4 preguntas → escalada inmediata sin ver ni una finca" que pasaba
+ * antes cuando los filtros estrictos no traían matches.
  */
 export function firstMissingCatalogField(
   e: BotEntities,
@@ -79,12 +86,6 @@ export function firstMissingCatalogField(
   if (e.cupo === undefined || e.cupo <= 0) return "cupo";
   if (!normalizePlanType(e.planType)) return "planType";
   if (e.isEvento === undefined) return "isEvento";
-  // Si el cliente confirmó evento, también pedimos detalles antes del catálogo.
-  if (e.isEvento === true) {
-    if (e.eventPeopleCount === undefined || e.eventPeopleCount <= 0)
-      return "eventPeopleCount";
-    if (!e.eventLogistics) return "eventLogistics";
-  }
   return null;
 }
 
