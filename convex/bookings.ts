@@ -301,6 +301,35 @@ export const checkAvailability = query({
   },
 });
 
+/**
+ * Rangos de fechas ocupadas para deshabilitar en el calendario público.
+ * Usa la misma fuente que checkAvailability (reservas no canceladas).
+ */
+export const getBlockedDateRanges = query({
+  args: {
+    propertyId: v.id('properties'),
+    monthsAhead: v.optional(v.number()),
+  },
+  handler: async (ctx, args) => {
+    const now = Date.now();
+    const months = args.monthsAhead ?? 12;
+    const futureLimit = now + months * 30 * 24 * 60 * 60 * 1000;
+
+    const bookings = await ctx.db
+      .query('bookings')
+      .withIndex('by_property', (q) => q.eq('propertyId', args.propertyId))
+      .filter((q) => q.neq(q.field('status'), 'CANCELLED'))
+      .collect();
+
+    return bookings
+      .filter((b) => b.fechaSalida > now && b.fechaEntrada < futureLimit)
+      .map((b) => ({
+        fechaEntrada: b.fechaEntrada,
+        fechaSalida: b.fechaSalida,
+      }));
+  },
+});
+
 // ============ MUTATIONS ============
 
 /**

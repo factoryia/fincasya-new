@@ -131,6 +131,27 @@ export class BookingsController {
   }
 
   /**
+   * Rangos ocupados para deshabilitar fechas en el calendario público.
+   */
+  @Get('blocked-dates-public')
+  async getBlockedDatesPublic(
+    @Query('propertyId') propertyId: string,
+    @Query('monthsAhead') monthsAhead?: string,
+  ) {
+    if (!propertyId) {
+      throw new HttpException(
+        'propertyId es requerido',
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+    const months = monthsAhead ? parseInt(monthsAhead, 10) : 12;
+    return this.bookingsSyncService.getBlockedDateRanges(
+      propertyId,
+      Number.isFinite(months) ? months : 12,
+    );
+  }
+
+  /**
    * Endpoint público para reservas directas (desde la web)
    */
   @Post('direct')

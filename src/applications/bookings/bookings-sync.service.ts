@@ -38,6 +38,13 @@ export class BookingsSyncService {
     });
   }
 
+  async getBlockedDateRanges(propertyId: string, monthsAhead = 12) {
+    return this.convexService.query('bookings:getBlockedDateRanges', {
+      propertyId: propertyId as any,
+      monthsAhead,
+    });
+  }
+
   /**
    * Crear una reserva en Convex y sincronizarla con Google Calendar.
    */
