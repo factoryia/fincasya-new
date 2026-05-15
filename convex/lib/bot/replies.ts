@@ -14,7 +14,8 @@ import type { BotPhase, BotEntities, StayQuoteTotals } from "./types";
 import { formatCop, petCostBreakdown } from "./entities";
 import { isPureGreeting, type TransitionResult } from "./transitions";
 import {
-  WELCOME_MESSAGE,
+  buildWelcomeMessage,
+  buildShortGreeting,
   missingFieldQuestion,
   missingFieldsBundle,
   combinedQuestionForMissing,
@@ -126,6 +127,14 @@ export interface ReplyInput {
    * modelo responda con datos verificados (mascotas, horarios, pagos, etc.).
    */
   faqContext?: string | null;
+  /**
+   * Nombre del contacto (perfil de WhatsApp del cliente) tal como llega del
+   * webhook de YCloud. Se usa SOLO para personalizar el saludo de bienvenida
+   * y el short greeting del "first turn has content". El helper
+   * `firstNameForGreeting` decide si es usable; si no, el copy cae a "¡Hola!"
+   * sin nombre.
+   */
+  contactName?: string | null;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -278,7 +287,7 @@ export async function generateReply(
   if (firstTurnHasContent) {
     return {
       reply: [
-        "🙋‍♂️ ¡Hola! Te saluda *Hernán* de FincasYa.com.",
+        buildShortGreeting(input.contactName),
         "",
         text,
       ].join("\n"),
@@ -511,16 +520,18 @@ async function generateReplyText(input: ReplyInput): Promise<string> {
 
   // ── Bienvenida pura ───────────────────────────────────────────────────────
   if (currentPhase === "welcome") {
-    return respond(WELCOME_MESSAGE);
+    // Personalizamos con el primer nombre del contacto (si YCloud lo trajo).
+    // El anti-repetición compara contra el WELCOME_MESSAGE genérico (alias),
+    // así que aunque el texto personalizado difiera en los primeros 50 chars
+    // el chequeo `wasJustSent` no genera falso positivo aquí (welcome solo
+    // se emite una vez por sesión normalmente).
+    return respond(buildWelcomeMessage(input.contactName));
   }
 
-  /** Sesiones antiguas: ya en quote_shown y el siguiente paso es contract (solo pedido contrato). */
-  if (currentPhase === "quote_shown" && tr.nextPhase === "contract") {
-    if (!entities.contractName && !entities.contractCedula && !entities.contractEmail) {
-      return respond(CONTRACT_REQUEST_MESSAGE);
-    }
-  }
-
+  // NOTA: el paso `quote_shown → contract` cae al branch `contract` más abajo
+  // (con `tr.nextPhase === "contract"`), que ya gestiona la primera vez con
+  // `CONTRACT_REQUEST_MESSAGE` y la anti-duplicación.
+  //
   // NOTA: el paquete `pet_check → contract` (mascotas / resumen / contrato) se
   // maneja arriba en `generateReply` (wrapper), que lo descompone en 2-3 burbujas.
   // Aquí ya no lo procesamos para no devolver un muro de texto compuesto.
@@ -623,8 +634,11 @@ async function generateReplyText(input: ReplyInput): Promise<string> {
   // Tres sub-casos:
   //   1. `hasPets` indefinido → preguntar "¿llevas mascotas?".
   //   2. `hasPets=true` pero `petCount` indefinido/≤0 → preguntar "¿cuántas?".
-  //   3. `hasPets` resuelto → la transición avanza a `pet_rules_shown` o
-  //      `quote_shown`. En este branch solo confirmamos antes de avanzar.
+  //   3. `hasPets` resuelto → DEJAR CAER al branch `pet_rules_shown` (si
+  //      tiene mascotas) o `quote_shown` (si no), que vienen más abajo. NO
+  //      retornamos `petConfirmationMessage` aquí porque ese mensaje promete
+  //      "Te envío el resumen" sin enviarlo realmente, y bloquea el avance
+  //      al branch que sí muestra reglas/resumen.
   if (currentPhase === "pet_check") {
     if (entities.hasPets === undefined) {
       if (isGreetingOrVague) return fallback();
@@ -638,17 +652,22 @@ async function generateReplyText(input: ReplyInput): Promise<string> {
         "¡Genial, anotado! 🐾 ¿*Cuántas mascotas* vas a llevar en total? (Solo el número)",
       );
     }
-    // hasPets resolved → la transición ya está pasando a `pet_rules_shown` o
-    // `quote_shown` — el manejo de esos casos viene más abajo. Aquí dejamos un
-    // texto puente por si la transición decide quedarse en pet_check.
-    return respond(petConfirmationMessage(entities));
+    // hasPets resuelto → fall-through al branch que corresponda según
+    // `tr.nextPhase`. (No `return` aquí.)
   }
 
-  // ── Pet rules shown (mascotas → mostrar reglas + esperar confirmación) ──
-  if (
-    currentPhase === "pet_rules_shown" ||
-    tr.nextPhase === "pet_rules_shown"
-  ) {
+  // ── Pet rules shown ─────────────────────────────────────────────────────
+  // Sólo emitimos las reglas cuando la transición nos ESTÁ LLEVANDO a esta
+  // fase (`tr.nextPhase === "pet_rules_shown"`) y veníamos de otra (típica-
+  // mente `pet_check`). Si ya estábamos en `pet_rules_shown` y la transición
+  // se queda en `pet_rules_shown`, significa que el cliente NO confirmó —
+  // dejamos al LLM contextual gestionar la respuesta (puede aclarar dudas
+  // sobre las reglas, costos, depósito, etc.) sin reenviar el bloque entero.
+  if (tr.nextPhase === "pet_rules_shown") {
+    if (currentPhase === "pet_rules_shown") {
+      // Cliente está en pet_rules_shown pero no confirmó: LLM contextual.
+      return fallback();
+    }
     const n = Math.max(1, entities.petCount ?? 1);
     const intro = `Perfecto, anotamos *${n} mascota${n === 1 ? "" : "s"}* 🐾 Te comparto las condiciones para que las revisemos:`;
     const rules = petFeesSummaryForQuote(entities).trim();
@@ -661,8 +680,15 @@ async function generateReplyText(input: ReplyInput): Promise<string> {
     ].join("\n");
   }
 
-  // ── Quote shown (mostrar resumen con total + esperar confirmación) ──────
-  if (currentPhase === "quote_shown" || tr.nextPhase === "quote_shown") {
+  // ── Quote shown ─────────────────────────────────────────────────────────
+  // Igual que pet_rules_shown: sólo emitimos el resumen cuando la transición
+  // nos LLEVA a `quote_shown`. Si ya estábamos en `quote_shown` y no avanzó
+  // a `contract`, es que el cliente no confirmó — caemos al LLM contextual.
+  if (tr.nextPhase === "quote_shown") {
+    if (currentPhase === "quote_shown") {
+      // Cliente está en quote_shown pero no confirmó proceder al contrato.
+      return fallback();
+    }
     const intro = entities.hasPets
       ? `Perfecto, anotamos *${Math.max(1, entities.petCount ?? 1)} mascota${(entities.petCount ?? 1) === 1 ? "" : "s"}* 🐾 Te envío el resumen con el costo total:`
       : "Sin mascotas, ¡anotado! 👍 Te comparto el resumen de tu reserva:";

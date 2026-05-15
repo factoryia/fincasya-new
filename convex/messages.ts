@@ -123,14 +123,22 @@ export const listRecent = query({
   args: {
     conversationId: v.id("conversations"),
     limit: v.optional(v.number()),
+    /**
+     * Si se envía, devuelve los mensajes anteriores a este `createdAt` (exclusivo),
+     * en orden cronológico ascendente (igual que sin cursor). Sirve para scroll infinito hacia arriba.
+     */
+    beforeCreatedAt: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
-    const limit = args.limit ?? 20;
+    const limit = Math.min(Math.max(args.limit ?? 50, 1), 150);
     const list = await ctx.db
       .query("messages")
-      .withIndex("by_conversation", (q) =>
-        q.eq("conversationId", args.conversationId)
-      )
+      .withIndex("by_conversation", (q) => {
+        const base = q.eq("conversationId", args.conversationId);
+        return args.beforeCreatedAt != null
+          ? base.lt("createdAt", args.beforeCreatedAt)
+          : base;
+      })
       .order("desc")
       .take(limit);
     return list.reverse();

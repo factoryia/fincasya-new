@@ -76,6 +76,12 @@ export interface BotTurnInput {
    * lugar de inventar o caer en "déjame confirmarlo".
    */
   faqContext?: string | null;
+  /**
+   * Nombre del contacto desde el perfil de WhatsApp (lo pasa YCloud en el
+   * webhook). Se usa SOLO para personalizar el saludo de bienvenida. Si está
+   * vacío o no es usable, el copy cae a "¡Hola!" sin nombre.
+   */
+  contactName?: string | null;
 }
 
 /** Si el cliente lleva más de N turnos consecutivos en la misma fase sin avanzar,
@@ -197,6 +203,7 @@ export async function runBotTurn(input: BotTurnInput): Promise<BotTurnResult> {
     currentSamePhaseTurnCount,
     currentPhaseEnteredAt,
     faqContext,
+    contactName,
   } = input;
 
   // 1. Extraer entidades del mensaje actual
@@ -399,6 +406,7 @@ export async function runBotTurn(input: BotTurnInput): Promise<BotTurnResult> {
     stayQuoteTotals,
     samePhaseTurnCount,
     faqContext,
+    contactName,
   });
 
   // 4.5 Si en este turno se emitió el aviso de puente festivo O el aviso de

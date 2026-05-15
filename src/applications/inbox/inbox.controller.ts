@@ -119,9 +119,14 @@ export class InboxController {
   async getMessages(
     @Param('conversationId') conversationId: string,
     @Query('limit') limit?: string,
+    @Query('beforeCreatedAt') beforeCreatedAt?: string,
   ) {
     const limitNum = limit ? parseInt(limit, 10) : undefined;
-    return this.inboxService.getMessages(conversationId, limitNum);
+    const beforeMs = beforeCreatedAt ? parseInt(beforeCreatedAt, 10) : undefined;
+    return this.inboxService.getMessages(conversationId, {
+      limit: limitNum,
+      beforeCreatedAt: Number.isFinite(beforeMs) ? beforeMs : undefined,
+    });
   }
 
   /**

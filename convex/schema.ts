@@ -83,6 +83,10 @@ export default defineSchema({
     active: v.optional(v.boolean()),
     /** Si true, se puede reservar desde la página web. */
     reservable: v.optional(v.boolean()),
+    /** Si true, aparece en /marketplace (fincas en venta) y el detalle ofrece contacto por WhatsApp. */
+    marketplaceForSale: v.optional(v.boolean()),
+    /** Valor de venta de referencia en COP (marketplace). */
+    salePriceCop: v.optional(v.number()),
     /** URL de la plantilla del contrato en PDF. */
     contractTemplateUrl: v.optional(v.string()),
     /**
@@ -341,6 +345,17 @@ export default defineSchema({
     payload: v.any(),
     createdAt: v.number(),
   }).index('by_contract_number', ['contractNumber']),
+
+  /**
+   * Ajustes globales del contrato (administrador, cuentas bancarias, cláusulas, etc.).
+   * Un solo documento por deployment (`scope === "global"`).
+   */
+  adminContractSettings: defineTable({
+    scope: v.literal('global'),
+    /** Snapshot JSON alineado con `ContractSettingsPersistedSnapshot` en el front. */
+    payload: v.any(),
+    updatedAt: v.number(),
+  }).index('by_scope', ['scope']),
 
   // Tabla de pagos
   payments: defineTable({

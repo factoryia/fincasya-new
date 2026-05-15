@@ -333,6 +333,7 @@ export async function processInboundMessageV2(
     currentSamePhaseTurnCount,
     currentPhaseEnteredAt,
     faqContext,
+    contactName: args.name,
     fetchStayQuote: async (e: BotEntities) => {
       const rid =
         e.selectedPropertyRetailerId?.trim() ||
@@ -589,7 +590,9 @@ export async function processInboundMessageV2(
       const noResultsMsg = [
         "Por ahora no tengo opciones exactas para esos requisitos en el catálogo 🤔",
         "",
-        "Te conecto con un asesor para evaluar disponibilidad especial y opciones personalizadas según tus fechas y tipo de plan 🤝 ✨",
+        "*Te conecto con un asesor* para evaluar disponibilidad especial y opciones personalizadas según tus fechas y tipo de plan 🤝",
+        "",
+        "Un agente te escribirá en breve para ayudarte ✨",
       ].join("\n");
       await ctx.runMutation(deps.internal.conversations.escalate, {
         conversationId,

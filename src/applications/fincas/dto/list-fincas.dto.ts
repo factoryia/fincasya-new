@@ -60,6 +60,12 @@ export class ListFincasDto {
   @IsBoolean()
   all?: boolean;
 
+  /** Si true, solo fincas publicadas en marketplace (venta). */
+  @IsOptional()
+  @Type(() => Boolean)
+  @IsBoolean()
+  marketplaceOnly?: boolean;
+
   @IsOptional()
   @IsString()
   search?: string;

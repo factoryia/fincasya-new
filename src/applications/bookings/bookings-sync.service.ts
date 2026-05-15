@@ -80,6 +80,8 @@ export class BookingsSyncService {
       multimediaLinks?:
         | string
         | Array<{ url: string; name?: string; type?: string }>;
+      /** Si true, no genera contrato en S3 (p. ej. confirmación desde inbox con contrato ya firmado). */
+      skipAutoContract?: boolean | string;
     },
     multimediaFiles?: Express.Multer.File[],
   ) {
@@ -117,6 +119,9 @@ export class BookingsSyncService {
     const tieneMascotasBool = parseBool(params.tieneMascotas);
     const isDirectBool = parseBool(params.isDirect);
     const isEventoBool = parseBool(params.isEvento);
+    const skipAutoContractBool =
+      params.skipAutoContract === true ||
+      String(params.skipAutoContract).toLowerCase() === 'true';
     const normalizedStatus =
       typeof params.status === 'string' ? params.status.trim().toUpperCase() : undefined;
     const allowedStatuses = new Set([
@@ -232,42 +237,44 @@ export class BookingsSyncService {
     
     // 4. Generar contrato automáticamente para reservas directas (o todas si se desea)
     // El usuario solicitó que "una vez creada la reserva, crea también el contrato"
-    try {
-      console.log(`[api] Generando contrato automático para la reserva ${bookingId}...`);
-      
-      const checkInDateStr = params.fechaEntrada ? (typeof params.fechaEntrada === 'number' ? new Date(params.fechaEntrada).toISOString().split('T')[0] : String(params.fechaEntrada)) : '';
-      const checkOutDateStr = params.fechaSalida ? (typeof params.fechaSalida === 'number' ? new Date(params.fechaSalida).toISOString().split('T')[0] : String(params.fechaSalida)) : '';
+    if (!skipAutoContractBool) {
+      try {
+        console.log(`[api] Generando contrato automático para la reserva ${bookingId}...`);
 
-      await this.fincasService.generateContract(propertyId, {
-        propertyId,
-        bookingId,
-        clientName: params.nombreCompleto,
-        clientId: params.cedula,
-        clientEmail: params.correo,
-        clientPhone: params.celular,
-        idNumber: params.cedula,
-        clientCity: params.city || '',
-        clientAddress: params.address || '',
-        checkInDate: checkInDateStr,
-        checkOutDate: checkOutDateStr,
-        checkInTime: params.horaEntrada || '03:00 PM',
-        checkOutTime: params.horaSalida || '01:00 PM',
-        nightlyPrice: String(precioTotalNum / (Math.max(1, Math.ceil((fechaSalidaNum - fechaEntradaNum) / (1000 * 60 * 60 * 24))))), 
-        totalPrice: String(precioTotalNum),
-        contractNumber: params.reference || `REC-${bookingId.slice(-6)}`,
-        bankName: 'Bold/FincasYa',
-        accountNumber: 'N/A',
-        accountHolder: 'FincasYa',
-        conversationId: isDirectBool ? 'direct-reservation' : 'internal-booking',
-        petCount: numeroMascotasNum,
-        petDeposit: depositoMascotasNum,
-        petSurcharge: sobrecargoMascotasNum,
-        serviceStaffFee: costoPersonalServicioNum,
-      });
-      console.log(`[api] Contrato automático generado para ${bookingId}`);
-    } catch (contractErr) {
-      console.error(`[api] Error generando contrato automático para ${bookingId}:`, contractErr.message);
-      // No lanzamos error para no romper el flujo de creación de la reserva
+        const checkInDateStr = params.fechaEntrada ? (typeof params.fechaEntrada === 'number' ? new Date(params.fechaEntrada).toISOString().split('T')[0] : String(params.fechaEntrada)) : '';
+        const checkOutDateStr = params.fechaSalida ? (typeof params.fechaSalida === 'number' ? new Date(params.fechaSalida).toISOString().split('T')[0] : String(params.fechaSalida)) : '';
+
+        await this.fincasService.generateContract(propertyId, {
+          propertyId,
+          bookingId,
+          clientName: params.nombreCompleto,
+          clientId: params.cedula,
+          clientEmail: params.correo,
+          clientPhone: params.celular,
+          idNumber: params.cedula,
+          clientCity: params.city || '',
+          clientAddress: params.address || '',
+          checkInDate: checkInDateStr,
+          checkOutDate: checkOutDateStr,
+          checkInTime: params.horaEntrada || '03:00 PM',
+          checkOutTime: params.horaSalida || '01:00 PM',
+          nightlyPrice: String(precioTotalNum / (Math.max(1, Math.ceil((fechaSalidaNum - fechaEntradaNum) / (1000 * 60 * 60 * 24))))), 
+          totalPrice: String(precioTotalNum),
+          contractNumber: params.reference || `REC-${bookingId.slice(-6)}`,
+          bankName: 'Bold/FincasYa',
+          accountNumber: 'N/A',
+          accountHolder: 'FincasYa',
+          conversationId: isDirectBool ? 'direct-reservation' : 'internal-booking',
+          petCount: numeroMascotasNum,
+          petDeposit: depositoMascotasNum,
+          petSurcharge: sobrecargoMascotasNum,
+          serviceStaffFee: costoPersonalServicioNum,
+        });
+        console.log(`[api] Contrato automático generado para ${bookingId}`);
+      } catch (contractErr) {
+        console.error(`[api] Error generando contrato automático para ${bookingId}:`, contractErr.message);
+        // No lanzamos error para no romper el flujo de creación de la reserva
+      }
     }
 
     // 5. Generar firma de integridad para Bold...

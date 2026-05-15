@@ -629,4 +629,54 @@ http.route({
   }),
 });
 
+/** Ajustes globales del contrato (cuentas bancarias, cláusulas, etc.). */
+http.route({
+  path: '/api/admin/contract-settings',
+  method: 'GET',
+  handler: httpAction(async (ctx, request) => {
+    const denied = requireYCloudApiKey(request);
+    if (denied) return denied;
+
+    const row = await ctx.runQuery(
+      internal.adminContractSettings.getForAdmin,
+      {},
+    );
+    if (!row) {
+      return jsonResponse({ document: null }, 200);
+    }
+    return jsonResponse(
+      {
+        document: row.payload,
+        updatedAt: row.updatedAt,
+      },
+      200,
+    );
+  }),
+});
+
+http.route({
+  path: '/api/admin/contract-settings',
+  method: 'PUT',
+  handler: httpAction(async (ctx, request) => {
+    const denied = requireYCloudApiKey(request);
+    if (denied) return denied;
+
+    let body: unknown;
+    try {
+      body = await request.json();
+    } catch {
+      return jsonResponse({ error: 'Body JSON inválido' }, 400);
+    }
+    if (body == null || typeof body !== 'object') {
+      return jsonResponse({ error: 'Se esperaba un objeto JSON' }, 400);
+    }
+
+    await ctx.runMutation(internal.adminContractSettings.replaceForAdmin, {
+      payload: body,
+    });
+
+    return jsonResponse({ ok: true }, 200);
+  }),
+});
+
 export default http;

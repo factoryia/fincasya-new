@@ -324,6 +324,23 @@ export class CreateFincaDto {
   @IsString()
   contractTemplateUrl?: string;
 
+  /** Si true, la finca aparece en /marketplace; el detalle prioriza contacto por WhatsApp para la compra. */
+  @IsOptional()
+  @IsBoolean()
+  @Transform(({ value }) =>
+    value === undefined || value === null
+      ? false
+      : value === true || value === 'true' || value === 1,
+  )
+  marketplaceForSale?: boolean;
+
+  /** Valor de venta de referencia en COP (marketplace). */
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  @Transform(({ value }) => toNumber(value))
+  salePriceCop?: number;
+
   /**
    * IDs de pestañas del catálogo. Incluye los IDs del sitio (`luxury`, `melgar`, …)
    * y categorías personalizadas creadas desde el admin (slug en kebab-case).

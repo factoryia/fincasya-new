@@ -142,10 +142,14 @@ export class InboxService {
     });
   }
 
-  async getMessages(conversationId: string, limit?: number) {
+  async getMessages(
+    conversationId: string,
+    opts?: { limit?: number; beforeCreatedAt?: number },
+  ) {
     return this.convexService.query('messages:listRecent', {
       conversationId,
-      limit,
+      limit: opts?.limit,
+      beforeCreatedAt: opts?.beforeCreatedAt,
     });
   }
 
@@ -413,6 +417,24 @@ export class InboxService {
         const m = Number(raw.mascotas);
         if (Number.isFinite(m) && m >= 0) raw.petCount = m;
       }
+      if (raw.tipoGrupo != null && !raw.groupType) {
+        const tg = String(raw.tipoGrupo).trim().toUpperCase();
+        if (['FAMILIAR', 'EVENTO', 'AMIGOS', 'EMPRESA'].includes(tg)) {
+          raw.groupType = tg;
+        } else {
+          const t = String(raw.tipoGrupo)
+            .normalize('NFD')
+            .replace(/[\u0300-\u036f]/g, '')
+            .toLowerCase();
+          if (t.includes('familiar') || t.includes('familia')) raw.groupType = 'FAMILIAR';
+          else if (t.includes('evento') || t.includes('fiesta')) raw.groupType = 'EVENTO';
+          else if (t.includes('amigo')) raw.groupType = 'AMIGOS';
+          else if (t.includes('empresa') || t.includes('corporat')) raw.groupType = 'EMPRESA';
+        }
+      }
+      if (raw.propositoEstancia && !raw.purpose) {
+        raw.purpose = String(raw.propositoEstancia).trim().slice(0, 280);
+      }
       if (raw.precioPorNocheCop != null && raw.nightlyPrice == null) {
         const p = Math.round(Number(raw.precioPorNocheCop));
         if (Number.isFinite(p) && p > 0) raw.nightlyPrice = String(p);
@@ -552,6 +574,36 @@ export class InboxService {
     return this.getSuggestedContractData(conversationId);
   }
 
+  /**
+   * Último PDF de contrato generado en el chat (mensaje assistant con metadata `generated_contract`).
+   * Se usa para adjuntar el mismo archivo a la reserva (multimedia) al confirmar desde inbox.
+   */
+  private async getLatestGeneratedContractPdfFromConversation(
+    conversationId: string,
+  ): Promise<{ url: string; name: string } | null> {
+    const messages = (await this.convexService
+      .query('messages:listRecent', { conversationId, limit: 120 })
+      .catch(() => [])) as any[];
+
+    const latest = [...(messages || [])]
+      .reverse()
+      .find(
+        (msg: any) =>
+          msg?.sender === 'assistant' &&
+          msg?.type === 'document' &&
+          msg?.metadata?.kind === 'generated_contract',
+      );
+
+    const url = String(latest?.mediaUrl || '').trim();
+    if (!url) return null;
+
+    const contractData = latest?.metadata?.contractData || {};
+    const name =
+      String(contractData.generatedFileName || '').trim() || 'Contrato_reserva.pdf';
+
+    return { url, name };
+  }
+
   async getReservationConfirmationData(conversationId: string) {
     const [messages, conv, suggestedRaw] = await Promise.all([
       this.convexService.query('messages:listRecent', { conversationId, limit: 120 }),
@@ -681,6 +733,13 @@ export class InboxService {
       totalAmount,
       paymentMethod: 'bancolombia',
       paymentStatus: 'pending',
+      groupType: String(suggested.groupType || contractData.groupType || '').trim(),
+      purpose: String(
+        suggested.purpose ||
+          contractData.purpose ||
+          suggested.propositoEstancia ||
+          '',
+      ).trim(),
     };
 
     return {
@@ -721,7 +780,102 @@ export class InboxService {
       conversationId,
       payload,
     );
-    const pdfBuffer = await this.pdfService.generateReservationConfirmationPdfBuffer(prepared);
+
+    const propertyId = (prepared.propertyId || '').trim();
+    if (!propertyId) {
+      throw new BadRequestException(
+        'Se requiere la propiedad (propertyId) para crear la reserva en el calendario.',
+      );
+    }
+    if (!(prepared.clientPhone || '').trim()) {
+      throw new BadRequestException(
+        'Se requiere el teléfono del cliente para crear la reserva.',
+      );
+    }
+
+    const fechaEntrada = this.isoYmdToBogotaMidnightUtcMs(prepared.checkInDate);
+    const fechaSalida = this.isoYmdToBogotaMidnightUtcMs(prepared.checkOutDate);
+    if (!Number.isFinite(fechaEntrada) || !Number.isFinite(fechaSalida)) {
+      throw new BadRequestException(
+        'Las fechas de entrada o salida no son válidas (use formato YYYY-MM-DD).',
+      );
+    }
+
+    const rawContract = (prepared.contractNumber || '').trim();
+    const weakContract =
+      rawContract.length < 4 ||
+      (rawContract.length < 10 && !/\d/.test(rawContract));
+
+    const contractDoc =
+      await this.getLatestGeneratedContractPdfFromConversation(conversationId);
+    const multimediaForBooking: { url: string; name: string; type: string }[] = [];
+    if (contractDoc?.url) {
+      multimediaForBooking.push({
+        url: contractDoc.url,
+        name: contractDoc.name,
+        type: 'application/pdf',
+      });
+    }
+
+    const observaciones = [
+      'Reserva creada al enviar confirmación desde inbox.',
+      contractDoc?.url
+        ? 'Auditoría: contrato del chat enlazado en multimedia de la reserva.'
+        : 'Auditoría: no se detectó PDF de contrato en mensajes recientes.',
+      `Conversación: ${conversationId}`,
+    ].join(' ');
+
+    const groupType = String(prepared.groupType || '').trim() || undefined;
+    const purpose = String(prepared.purpose || '').trim() || undefined;
+
+    let bookingId: string;
+    try {
+      const result = await this.bookingsSyncService.createBooking(
+        {
+          propertyId,
+          nombreCompleto: prepared.clientName.trim(),
+          cedula: (prepared.clientId || '').trim() || 'SIN-DOC',
+          celular: prepared.clientPhone.trim(),
+          correo:
+            (prepared.clientEmail || '').trim() ||
+            `sin-correo-${Date.now()}@reserva-inbox.fincasya.local`,
+          fechaEntrada,
+          fechaSalida,
+          numeroPersonas: prepared.guests,
+          precioTotal: prepared.totalAmount,
+          subtotal: prepared.rentAmount,
+          temporada: 'ESTANDAR',
+          horaEntrada: prepared.checkInTime,
+          horaSalida: prepared.checkOutTime,
+          city: '',
+          address: prepared.clientAddress || '',
+          isDirect: false,
+          reference: weakContract ? undefined : rawContract.replace(/\s+/g, ''),
+          observaciones,
+          status: prepared.paymentStatus === 'paid' ? 'PAID' : 'CONFIRMED',
+          skipAutoContract: true,
+          multimediaLinks:
+            multimediaForBooking.length > 0 ? multimediaForBooking : undefined,
+          groupType,
+          purpose,
+        },
+        undefined,
+      );
+      bookingId = String(result.bookingId);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      throw new BadRequestException(
+        `No se pudo crear la reserva en el calendario: ${msg}`,
+      );
+    }
+
+    if (weakContract && bookingId) {
+      const suffix = bookingId.replace(/[^a-zA-Z0-9]/g, '').slice(-10).toUpperCase();
+      prepared.contractNumber = `FY-${suffix}`;
+    }
+
+    const pdfBuffer =
+      await this.pdfService.generateReservationConfirmationPdfBuffer(prepared);
     const safeContract = (prepared.contractNumber || String(Date.now())).replace(
       /[^a-zA-Z0-9_-]/g,
       '',
@@ -749,12 +903,36 @@ export class InboxService {
       metadata: {
         kind: 'reservation_confirmation',
         reservationConfirmationData: prepared,
+        bookingId,
       },
     });
+
+    try {
+      const confirmationUrl = await this.s3Service.uploadFile(
+        generatedFile,
+        'bookings/multimedia',
+      );
+      await this.convexService.mutation('bookings:appendMultimedia', {
+        bookingId: bookingId as any,
+        file: {
+          url: confirmationUrl,
+          name: filename,
+          type: 'application/pdf',
+          size: generatedFile.size,
+          uploadedAt: Date.now(),
+        },
+      });
+    } catch (attachErr) {
+      console.error(
+        '[inbox] No se pudo adjuntar PDF de confirmación a la reserva:',
+        attachErr instanceof Error ? attachErr.message : String(attachErr),
+      );
+    }
 
     return {
       success: true,
       filename,
+      bookingId,
       message: 'Confirmacion de reserva enviada correctamente',
     };
   }
@@ -847,6 +1025,10 @@ export class InboxService {
       paymentStatus:
         safePayload.paymentStatus === 'paid' ? 'paid' : 'pending',
     };
+    const g = String(safePayload.groupType || '').trim();
+    const p = String(safePayload.purpose || '').trim();
+    if (g) prepared.groupType = g;
+    if (p) prepared.purpose = p;
 
     if (!prepared.clientName || !prepared.checkInDate || !prepared.checkOutDate) {
       throw new BadRequestException(
@@ -870,6 +1052,17 @@ export class InboxService {
     }
 
     return prepared;
+  }
+
+  /**
+   * Inicio del día civil en America/Bogotá (UTC-5 sin DST) como ms UTC,
+   * alineado con `bookings` / `assertBookingDatesAreFuture` (calendarDateColombia).
+   */
+  private isoYmdToBogotaMidnightUtcMs(ymd: string): number {
+    const iso = this.pdfService.toIsoDate(ymd);
+    if (!iso || !/^\d{4}-\d{2}-\d{2}$/.test(iso)) return NaN;
+    const [y, m, d] = iso.split('-').map(Number);
+    return Date.UTC(y, m - 1, d, 5, 0, 0, 0);
   }
 
   private extractContractNumber(input: string): string {

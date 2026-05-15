@@ -618,7 +618,53 @@ export function nextStepFriendlyQuestion(
 // Mensajes estáticos (sin LLM)
 // ─────────────────────────────────────────────────────────────────────────────
 
-export const WELCOME_MESSAGE = `¡Hola! Es un gusto saludarte. Te escribe Hernán de FincasYa.com 🏡✨
+/**
+ * Extrae el primer nombre "saludable" del contactName que YCloud nos pasa
+ * (suele venir del perfil de WhatsApp del cliente). Devuelve `null` cuando el
+ * valor no es usable como saludo personalizado, para que el copy caiga al
+ * "¡Hola!" genérico sin romperse.
+ *
+ * Reglas:
+ *   - Trim + descartar vacío.
+ *   - Descartar si parece teléfono o solo dígitos/símbolos (`+57 321...`).
+ *   - Limpiar caracteres no alfabéticos (emojis, comillas raras) preservando
+ *     tildes, ñ, apóstrofes y guiones (D'Costa, José-María).
+ *   - Tomar SOLO el primer token (los apellidos no se usan en saludo).
+ *   - Capitalizar (Adriana, José, María) con locale `es-CO`.
+ *   - Longitud útil: 2..20 caracteres. Fuera de eso → null (probable basura).
+ */
+export function firstNameForGreeting(rawName?: string | null): string | null {
+  const raw = String(rawName ?? "").trim();
+  if (!raw) return null;
+  // Teléfonos o cadenas sin letras → descartar.
+  if (/^[\d+\-\s()]+$/.test(raw)) return null;
+  const cleaned = raw
+    .replace(/[^\p{L}\p{N}\s'\-.]/gu, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!cleaned) return null;
+  const firstWord = cleaned.split(" ")[0];
+  if (firstWord.length < 2 || firstWord.length > 20) return null;
+  return (
+    firstWord.charAt(0).toLocaleUpperCase("es-CO") +
+    firstWord.slice(1).toLocaleLowerCase("es-CO")
+  );
+}
+
+/**
+ * Construye el mensaje de bienvenida, personalizado con el primer nombre del
+ * cliente cuando es usable. Si no hay nombre o no es válido, cae al saludo
+ * genérico ("¡Hola!").
+ *
+ * Mantenemos `WELCOME_MESSAGE` (sin nombre) como alias para el chequeo de
+ * anti-repetición y para call sites legacy.
+ */
+export function buildWelcomeMessage(contactName?: string | null): string {
+  const first = firstNameForGreeting(contactName);
+  const opener = first
+    ? `¡Hola ${first}! Es un gusto saludarte. Te escribe Hernán de FincasYa.com 🏡✨`
+    : `¡Hola! Es un gusto saludarte. Te escribe Hernán de FincasYa.com 🏡✨`;
+  return `${opener}
 
 Tenemos opciones espectaculares de fincas listas para ti 🤩 y quiero ayudarte a encontrar la ideal según tu plan.
 
@@ -632,6 +678,21 @@ Con esto te envío opciones disponibles, fotos, precios y promociones ajustadas 
 
 Estoy atento para ayudarte a reservar tu finca perfecta ✨
 `;
+}
+
+/** Alias genérico (sin nombre). Usado para chequeos de anti-repetición. */
+export const WELCOME_MESSAGE = buildWelcomeMessage();
+
+/**
+ * Saludo corto que se prepende al "first turn has content" (cuando el cliente
+ * dio datos útiles en su primer mensaje y saltamos el welcome largo).
+ */
+export function buildShortGreeting(contactName?: string | null): string {
+  const first = firstNameForGreeting(contactName);
+  return first
+    ? `🙋‍♂️ ¡Hola ${first}! Te saluda *Hernán* de FincasYa.com.`
+    : `🙋‍♂️ ¡Hola! Te saluda *Hernán* de FincasYa.com.`;
+}
 
 /** Pregunta específica según qué campo falta. */
 export function missingFieldQuestion(

@@ -40,6 +40,9 @@ export type ReservationConfirmationData = {
   totalAmount: number;
   paymentMethod: ReservationPaymentMethod;
   paymentStatus: ReservationPaymentStatus;
+  /** Passthrough al crear reserva desde inbox (no se imprimen en el PDF actual). */
+  groupType?: string;
+  purpose?: string;
 };
 
 @Injectable()
@@ -269,7 +272,7 @@ export class PdfService {
         <div class="header-title-container">
           <div class="header-title">Confirmaci&oacute;n de Reserva N.&ordm; ${this.escapeHtml(data.contractNumber || '-')}</div>
         </div>
-        <div class="header-contact">${whatsappIconHtml}315 777 3937</div>
+        <div class="header-contact">${whatsappIconHtml} 3007984139</div>
       </div>
 
       <table class="table-1">
@@ -298,7 +301,7 @@ export class PdfService {
           <td class="peach" style="width: 18%;">Propiedad</td>
           <td class="value-cell" style="width: 31%;">${this.escapeHtml(data.propertyName || '-')}</td>
           <td colspan="2" class="value-cell" style="width: 32%;">Contrato: ${this.escapeHtml(data.contractNumber || '-')}</td>
-          <td rowspan="5" class="empty-box" style="width: 19%;"></td>
+          <td rowspan="6" class="empty-box" style="width: 19%;"></td>
         </tr>
         <tr>
           <td class="peach">Ubicaci&oacute;n</td>
@@ -319,6 +322,12 @@ export class PdfService {
           <td class="value-cell">${this.escapeHtml(String(data.guests || 1))}</td>
           <td class="peach">Noches</td>
           <td class="value-cell">${this.escapeHtml(String(data.nights || 1).padStart(2, '0'))}</td>
+        </tr>
+        <tr>
+          <td class="peach">Tipo de grupo</td>
+          <td class="value-cell">${this.escapeHtml((data.groupType || '').trim() || '-')}</td>
+          <td colspan="2" class="peach">Prop&oacute;sito estancia</td>
+          <td class="value-cell">${this.escapeHtml((data.purpose || '').trim() || '-')}</td>
         </tr>
         <tr>
           <td class="peach">Valor Abono</td>

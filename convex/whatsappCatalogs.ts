@@ -509,25 +509,39 @@ export const getPayloadByLocationForN8n = query({
 
     const matchesLocation = (p: any) =>
       isRecomendadas ? true : p.location.toLowerCase().includes(locLower);
+    /**
+     * Filtro de capacidad:
+     *   - `min` se compara contra `effectivePeopleCount` (capacity para descanso,
+     *     o max(capacity, eventCapacity) si es evento Y la finca permite eventos).
+     *     Una finca con `eventCapacity=80` puede albergar a un cliente que pidió 20
+     *     en evento aunque solo duerma 22 personas.
+     *   - `max` se compara contra `sleepCapacity` (siempre `capacity`, hospedaje).
+     *     El techo `maxCapacity` está pensado para no ofrecer fincas con
+     *     DEMASIADAS CAMAS al cliente (ej. finca de 30 a quien pidió 4 personas).
+     *     Para eventos, una `eventCapacity` grande NO es un problema: el cliente
+     *     no paga por camas extra; paga por el salón. Por eso el max NO mira
+     *     eventCapacity.
+     */
     const matchesCapacity = (p: any) => {
-      const cap = catalogPeopleCountForFilter(p, args.isEvento);
-      if (args.minCapacity != null && cap < args.minCapacity) return false;
-      if (args.maxCapacity != null && cap > args.maxCapacity) return false;
+      const eventEff = catalogPeopleCountForFilter(p, args.isEvento);
+      const sleepCap = Math.max(0, Number(p.capacity ?? 0));
+      if (args.minCapacity != null && eventEff < args.minCapacity) return false;
+      if (args.maxCapacity != null && sleepCap > args.maxCapacity) return false;
       return true;
     };
     /**
-     * Pasada intermedia: respeta el mínimo de cupo y aplica un **techo relajado**
-     * (mayor que `maxCapacity`, pero acotado por `maxCapacityRelaxed`). Garantiza
-     * que NUNCA se ofrezca una finca con capacity < cupo del cliente, y tampoco
-     * una finca absurdamente grande (p. ej. una de 53 personas para alguien que
-     * pidió 22). Si `maxCapacityRelaxed` no viene, se comporta como solo-min.
+     * Pasada intermedia: respeta el mínimo (usando eventCapacity si aplica) y
+     * aplica un **techo relajado** sobre el cupo de hospedaje. Mismo principio
+     * que `matchesCapacity`: el `max` solo limita CAMAS (`capacity`), no la
+     * capacidad de evento.
      */
     const matchesCapacityRelaxed = (p: any) => {
-      const cap = catalogPeopleCountForFilter(p, args.isEvento);
-      if (args.minCapacity != null && cap < args.minCapacity) return false;
+      const eventEff = catalogPeopleCountForFilter(p, args.isEvento);
+      const sleepCap = Math.max(0, Number(p.capacity ?? 0));
+      if (args.minCapacity != null && eventEff < args.minCapacity) return false;
       if (
         args.maxCapacityRelaxed != null &&
-        cap > args.maxCapacityRelaxed
+        sleepCap > args.maxCapacityRelaxed
       ) {
         return false;
       }
@@ -682,25 +696,49 @@ export const getPayloadByLocationForN8n = query({
   },
 });
 
-/** Dado un product_retailer_id (de una tarjeta de catálogo WhatsApp), devuelve el nombre y ubicación de la propiedad. */
+/** Dado un product_retailer_id (de una tarjeta de catálogo WhatsApp), devuelve datos para UI (inbox / n8n). */
 export const getPropertyByRetailerId = query({
   args: {
     productRetailerId: v.string(),
   },
   handler: async (ctx, args) => {
     const rid = args.productRetailerId.trim();
-    if (!rid) return { propertyName: "", location: "", productRetailerId: "" };
+    const empty = {
+      propertyName: "",
+      location: "",
+      productRetailerId: rid,
+      propertyId: "",
+      slug: "",
+      imageUrl: "",
+      priceBase: 0,
+    };
+    if (!rid) return { ...empty, productRetailerId: "" };
     const links = await ctx.db.query("propertyWhatsAppCatalog").collect();
     const link = links.find(
       (l) => String(l.productRetailerId || "").trim() === rid,
     );
-    if (!link) return { propertyName: "", location: "", productRetailerId: rid };
+    if (!link) return empty;
     const property = await ctx.db.get(link.propertyId);
-    if (!property) return { propertyName: "", location: "", productRetailerId: rid };
+    if (!property) {
+      return {
+        ...empty,
+        propertyId: link.propertyId,
+      };
+    }
+    const images = await ctx.db
+      .query("propertyImages")
+      .withIndex("by_property", (q) => q.eq("propertyId", link.propertyId))
+      .collect();
+    const sorted = images.sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+    const imageUrl = sorted[0]?.url ?? "";
     return {
-      propertyName: property.title ?? property.title ?? "",
+      propertyName: property.title ?? "",
       location: property.location ?? "",
       productRetailerId: rid,
+      propertyId: property._id,
+      slug: (property.slug ?? property.code ?? "").trim(),
+      imageUrl,
+      priceBase: typeof property.priceBase === "number" ? property.priceBase : 0,
     };
   },
 });

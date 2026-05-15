@@ -109,6 +109,8 @@ export const list = query({
     isFavorite: v.optional(v.boolean()),
     /** Si true, devuelve todas las fincas sin filtrar por active/visible (para admin). */
     all: v.optional(v.boolean()),
+    /** Si true, solo fincas marcadas para marketplace (venta). */
+    marketplaceOnly: v.optional(v.boolean()),
   },
   handler: async (ctx, args) => {
     const limit = args.limit ?? 1000;
@@ -188,6 +190,12 @@ export const list = query({
     if (args.isFavorite !== undefined) {
       filtered = filtered.filter(
         (p: (typeof allProperties)[number]) => p.isFavorite === args.isFavorite,
+      );
+    }
+    if (args.marketplaceOnly === true) {
+      filtered = filtered.filter(
+        (p: (typeof allProperties)[number]) =>
+          (p as { marketplaceForSale?: boolean }).marketplaceForSale === true,
       );
     }
 
@@ -1591,6 +1599,8 @@ export const create = mutation({
     serviceStaffMandatory: v.optional(v.boolean()),
     serviceStaffPrice: v.optional(v.number()),
     catalogFilterTags: v.optional(v.array(v.string())),
+    marketplaceForSale: v.optional(v.boolean()),
+    salePriceCop: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
     const now = Date.now();
@@ -1645,6 +1655,8 @@ export const create = mutation({
       ...(args.catalogFilterTags !== undefined
         ? { catalogFilterTags: args.catalogFilterTags }
         : {}),
+      marketplaceForSale: args.marketplaceForSale ?? false,
+      ...(args.salePriceCop !== undefined ? { salePriceCop: args.salePriceCop } : {}),
       createdAt: now,
       updatedAt: now,
     });
@@ -1806,6 +1818,8 @@ export const update = mutation({
     serviceStaffMandatory: v.optional(v.boolean()),
     serviceStaffPrice: v.optional(v.number()),
     catalogFilterTags: v.optional(v.array(v.string())),
+    marketplaceForSale: v.optional(v.boolean()),
+    salePriceCop: v.optional(v.number()),
     pricing: v.optional(
       v.array(
         v.object({
