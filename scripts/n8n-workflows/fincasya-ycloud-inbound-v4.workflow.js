@@ -1173,15 +1173,15 @@ const sendCatalogViaYCloud = node({
           '  const j = $json;\n' +
           '  const to = String(j.phoneE164 || \'\').trim();\n' +
           '  if (j._mode === \'text\') {\n' +
-          '    return { from: "+573007984139", to: to, type: "text", text: { body: String(j.textBody || "") } };\n' +
+          '    return { from: "+573157773937", to: to, type: "text", text: { body: String(j.textBody || "") } };\n' +
           '  }\n' +
           '  const cid = String(j.catalogId || "");\n' +
           '  const pid = String(j.productRetailerId || "");\n' +
           '  if (!to || !cid || !pid) {\n' +
-          '    return { from: "+573007984139", to: to || "+000", type: "text", text: { body: "" } };\n' +
+          '    return { from: "+573157773937", to: to || "+000", type: "text", text: { body: "" } };\n' +
           '  }\n' +
           '  return {\n' +
-          '    from: "+573007984139",\n' +
+          '    from: "+573157773937",\n' +
           '    to: to,\n' +
           '    type: "interactive",\n' +
           '    interactive: {\n' +
@@ -1282,7 +1282,7 @@ const sendPreCatalogText = node({
           '  // Sanitiza: si el modelo dejó el sentinel "RECOMENDADAS" en el texto al cliente, sobreescribimos con el fallback amigable.\n' +
           '  if (/RECOMENDADAS/.test(txt)) txt = fallback;\n' +
           '  return {\n' +
-          '    "from": "+573007984139",\n' +
+          '    "from": "+573157773937",\n' +
           '    "to": merge.phoneE164,\n' +
           '    "type": "text",\n' +
           '    "text": { "body": txt }\n' +
@@ -1362,7 +1362,7 @@ const sendTextViaYCloud = node({
       specifyBody: 'json',
       jsonBody: expr(
         '={{ {\n' +
-          '  "from": "+573007984139",\n' +
+          '  "from": "+573157773937",\n' +
           '  "to": $json.phoneE164,\n' +
           '  "type": "text",\n' +
           '  "text": { "body": $json.text }\n' +
