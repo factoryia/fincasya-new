@@ -406,6 +406,15 @@ export const getBotStayQuoteByRetailerId = query({
     }
     // Devolvemos también los números crudos para que el bot pueda calcular
     // totales adicionales (mascotas, etc.) y mostrar un GRAN total al cliente.
+    const damageDeposit = Math.max(
+      0,
+      Number(property.depositoDanosReembolsable ?? 0) || 0,
+    );
+    const wristbandFee = Math.max(
+      0,
+      Number(property.manillaCondominio ?? 0) || 0,
+    );
+
     return {
       text: lines.join("\n"),
       totals: {
@@ -415,6 +424,8 @@ export const getBotStayQuoteByRetailerId = query({
         subtotal: stay.subtotal,
         appliedRule: stay.appliedRule,
         cupo: args.cupo,
+        damageDeposit,
+        wristbandFee,
       },
     };
   },
@@ -451,6 +462,16 @@ export const getPayloadByLocationForN8n = query({
      * "cumaral"]` y esas fincas no aparecen.
      */
     excludeLocationKeywords: v.optional(v.array(v.string())),
+    /**
+     * Lista de keywords de ubicación que RESTRINGEN el resultado: solo se
+     * incluyen fincas cuya `property.location` contenga alguna keyword. Útil
+     * cuando el cliente dice "cerca a Bogotá" → restringimos a municipios de
+     * Cundinamarca; "en Tolima" → solo Tolima; etc.
+     *
+     * Si está vacío o undefined, NO restringe (acepta cualquier ubicación,
+     * sujeto a las demás reglas — `matchesLocation` y excluyentes).
+     */
+    restrictToLocationKeywords: v.optional(v.array(v.string())),
   },
   handler: async (ctx, args) => {
     const cap = Math.min(Math.max(args.limit ?? 30, 1), 30);
@@ -699,25 +720,34 @@ export const getPayloadByLocationForN8n = query({
       (args.excludeRetailerIds ?? []).map((s) => String(s ?? "").trim()).filter(Boolean),
     );
 
-    // Keywords de ubicación a excluir (cliente dijo "no llanos", etc.).
-    // Normalizamos (lowercase, sin tildes) para matchear `property.location`.
-    const excludeLocationKeywordsLower = (args.excludeLocationKeywords ?? [])
-      .map((k) =>
-        String(k ?? "")
-          .trim()
-          .toLowerCase()
-          .normalize("NFD")
-          .replace(/\p{M}/gu, ""),
-      )
-      .filter(Boolean);
-    const matchesExcludedLocation = (p: any): boolean => {
-      if (excludeLocationKeywordsLower.length === 0) return false;
-      const propLocLower = String(p.location ?? "")
+    // Helper para normalizar texto (lowercase + sin tildes) y comparar.
+    const normalizeLoc = (s: string): string =>
+      String(s ?? "")
         .toLowerCase()
         .normalize("NFD")
         .replace(/\p{M}/gu, "");
+
+    // Keywords de ubicación a excluir (cliente dijo "no llanos", etc.).
+    const excludeLocationKeywordsLower = (args.excludeLocationKeywords ?? [])
+      .map((k) => normalizeLoc(String(k ?? "").trim()))
+      .filter(Boolean);
+    const matchesExcludedLocation = (p: any): boolean => {
+      if (excludeLocationKeywordsLower.length === 0) return false;
+      const propLocLower = normalizeLoc(String(p.location ?? ""));
       if (!propLocLower) return false;
       return excludeLocationKeywordsLower.some((kw) => propLocLower.includes(kw));
+    };
+
+    // Keywords de ubicación que RESTRINGEN: solo aceptamos fincas que
+    // matcheen alguna. Útil para "cerca a Bogotá" → restrict Cundinamarca.
+    const restrictToLocationKeywordsLower = (args.restrictToLocationKeywords ?? [])
+      .map((k) => normalizeLoc(String(k ?? "").trim()))
+      .filter(Boolean);
+    const matchesRestrictedLocation = (p: any): boolean => {
+      if (restrictToLocationKeywordsLower.length === 0) return true; // no restriction
+      const propLocLower = normalizeLoc(String(p.location ?? ""));
+      if (!propLocLower) return false;
+      return restrictToLocationKeywordsLower.some((kw) => propLocLower.includes(kw));
     };
 
     // Materializa links con propiedad ya cargada (evita re-leer entre pasadas).
@@ -729,6 +759,7 @@ export const getPayloadByLocationForN8n = query({
       if (!id) continue;
       if (excludeSet.has(id)) continue;
       if (matchesExcludedLocation(p)) continue;
+      if (!matchesRestrictedLocation(p)) continue;
       candidates.push({ link, property: p, retailerId: id });
     }
 
@@ -1115,6 +1146,11 @@ export const diagnoseCatalogFincaVisibility = query({
         allowsEventsContent: property.allowsEventsContent,
         active: property.active,
         visible: property.visible,
+        // Campos que aparecen en el resumen del bot. Si están en 0 o null,
+        // NO se muestran en la cotización.
+        priceBase: property.priceBase,
+        depositoDanosReembolsable: property.depositoDanosReembolsable ?? null,
+        manillaCondominio: property.manillaCondominio ?? null,
       },
       link: link
         ? { productRetailerId: link.productRetailerId, catalogId: link.catalogId }

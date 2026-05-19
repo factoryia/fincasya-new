@@ -36,6 +36,8 @@ export type ReservationConfirmationData = {
   balanceDate: string;
   rentAmount: number;
   cleaningFee: number;
+  /** Aseo único por 3+ mascotas (distinto de limpieza general de la finca). */
+  petCleaningFee?: number;
   refundableDeposit: number;
   totalAmount: number;
   paymentMethod: ReservationPaymentMethod;
@@ -85,9 +87,11 @@ export class PdfService {
 
     try {
       const page = await browser.newPage();
+      page.setDefaultNavigationTimeout(60_000);
+      page.setDefaultTimeout(60_000);
       await page.setViewport({ width: 1400, height: 990, deviceScaleFactor: 1 });
       await page.emulateMediaType('screen');
-      await page.setContent(html, { waitUntil: 'networkidle0' });
+      await page.setContent(html, { waitUntil: 'domcontentloaded' });
       const pdfBuffer = await page.pdf({
         width: '297mm',
         height: '210mm',
@@ -341,6 +345,16 @@ export class PdfService {
           <td colspan="2" class="peach right-align">Valor Limpieza General</td>
           <td class="value-cell">${this.escapeHtml(this.formatCurrency(data.cleaningFee))}</td>
         </tr>
+        ${
+          (data.petCleaningFee ?? 0) > 0
+            ? `<tr>
+          <td class="peach"></td>
+          <td class="value-cell"></td>
+          <td colspan="2" class="peach right-align">Aseo por mascotas (3+)</td>
+          <td class="value-cell">${this.escapeHtml(this.formatCurrency(data.petCleaningFee ?? 0))}</td>
+        </tr>`
+            : ''
+        }
         <tr>
           <td class="peach">Valor Saldo</td>
           <td class="value-cell">${this.escapeHtml(this.formatCurrency(data.balanceAmount))}</td>

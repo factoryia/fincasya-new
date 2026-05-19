@@ -89,6 +89,17 @@ Reglas estrictas:
                           o que NO lleva nada extra.
                   Omite el campo si no se mencionó el tema de logística.
 - contractFields: objeto con name, cedula, email, phone, address — solo si los menciona.
+- confirmsCurrentStep: "yes" | "no" | null — clasifica si el cliente está CONFIRMANDO o
+  NEGANDO la última pregunta/propuesta del bot (proceder con reglas de mascotas,
+  proceder con contrato, etc.). Tolera typos y combinaciones libres:
+    "yes" si dice cualquier variante afirmativa, aunque tenga errores ortográficos:
+       "si", "sí", "si por favor", "si pro favor" (typo de "por"), "si porfavor", "si porfa",
+       "claro", "dale", "ok", "perfecto", "listo", "de acuerdo", "de una", "vale",
+       "bueno", "genial", "chévere", "ya te dije que sí", "obvio", "exacto", "tal cual",
+       "afirmativo", combinaciones tipo "si dale", "claro porfa", etc.
+    "no" si dice "no", "cancela", "olvídalo", "mejor no", "todavía no", "negativo".
+    null si la respuesta es ambigua, una pregunta, o no es respuesta directa a algo del bot.
+  Solo lo defines si el ÚLTIMO mensaje del asistente contenía una pregunta de confirmación.
 MEMORIA / TURNO ACTUAL:
 - NUNCA pongas cadenas vacías. Si un campo no cambia en este mensaje, **omítelo** del JSON (no uses "").
 - Si el mensaje actual solo aclara municipio, "no sé", "recomiéndame", etc., **no vuelvas a incluir** checkIn/checkOut salvo que el cliente **cambie** las fechas en este mensaje.

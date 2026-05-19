@@ -139,6 +139,7 @@ import { S3Service } from '../shared/services/s3.service';
 import { InboxService } from '../inbox/inbox.service';
 import { CreateFincaDto } from './dto/create-finca.dto';
 import { UpdateFincaDto } from './dto/update-finca.dto';
+import { mergeDepositIntoPropertyDescription } from './property-description-deposits';
 import { ListFincasDto } from './dto/list-fincas.dto';
 import { PdfService, ReservationConfirmationData } from '../shared/services/pdf.service';
 import { parseExcelToFincas } from './excel-parser';
@@ -756,6 +757,12 @@ Al confirmar tu pago, recibirás el *soporte oficial* junto con todos los detall
         });
       }
 
+      fincaData.description = mergeDepositIntoPropertyDescription(
+        typeof rest.description === 'string' ? rest.description : '',
+        rest.depositoDanosReembolsable,
+        rest.manillaCondominio,
+      );
+
       const propertyId = await this.convexService.mutation(
         'fincas:create',
         fincaData,
@@ -812,6 +819,27 @@ Al confirmar tu pago, recibirás el *soporte oficial* junto con todos los detall
       }
       if (contractTemplateUrl) {
         updateData.contractTemplateUrl = contractTemplateUrl;
+      }
+
+      const shouldSyncDescription =
+        updateData.description !== undefined ||
+        updateData.depositoDanosReembolsable !== undefined ||
+        updateData.manillaCondominio !== undefined;
+
+      if (shouldSyncDescription) {
+        const needsCurrent =
+          updateData.description === undefined ||
+          updateData.depositoDanosReembolsable === undefined ||
+          updateData.manillaCondominio === undefined;
+        const current = needsCurrent ? await this.getById(id) : null;
+
+        updateData.description = mergeDepositIntoPropertyDescription(
+          (updateData.description as string | undefined) ?? current?.description,
+          (updateData.depositoDanosReembolsable as number | undefined) ??
+            current?.depositoDanosReembolsable,
+          (updateData.manillaCondominio as number | undefined) ??
+            current?.manillaCondominio,
+        );
       }
 
       const mutationPayload: any = {
@@ -1367,12 +1395,14 @@ Al confirmar tu pago, recibirás el *soporte oficial* junto con todos los detall
         ? providedTotal 
         : (unitPriceNum * totalDays);
 
-      // Política de mascotas (Calculamos para el desglose, pero no sumamos al total si ya venía de la pasarela):
-      // - Primeras 2: 100,000 COP c/u (Reembolsable)
-      // - 3ª en adelante: 30,000 COP c/u (No Reembolsable)
+      // Política de mascotas (desglose; el total enviado desde inbox ya incluye todo):
+      // - 1ª-2ª: $100.000 reembolsable c/u
+      // - 3ª+: $30.000 tarifa de ingreso c/u (no reembolsable)
+      // - Con 3+ mascotas: $70.000 aseo por mascotas (aparte del aseo final de la finca)
       const petCount = Number(dto.petCount) || 0;
       const petSurchargeRefundable = Math.min(petCount, 2) * 100000;
       const petSurchargeNonRefundable = Math.max(0, petCount - 2) * 30000;
+      const petCleaningFee = petCount >= 3 ? 70000 : 0;
 
       // Sumar al precio final si no venía de la pasarela
 

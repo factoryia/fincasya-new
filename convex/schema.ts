@@ -112,6 +112,16 @@ export default defineSchema({
     serviceStaffMandatory: v.optional(v.boolean()),
     /** Precio por estadía del personal de servicio. */
     serviceStaffPrice: v.optional(v.number()),
+    /**
+     * Depósito reembolsable por daños a la propiedad (COP). Se muestra en el
+     * resumen del chat y se precarga al generar contrato.
+     */
+    depositoDanosReembolsable: v.optional(v.number()),
+    /**
+     * Valor de la manilla de ingreso al condominio (COP). Aplica a fincas en
+     * conjunto cerrado / condominio.
+     */
+    manillaCondominio: v.optional(v.number()),
     createdAt: v.number(),
     updatedAt: v.number(),
   })

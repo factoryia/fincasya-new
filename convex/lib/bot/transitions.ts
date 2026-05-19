@@ -48,6 +48,13 @@ export function transition(
   phase: BotPhase,
   entities: BotEntities,
   incomingText: string,
+  /**
+   * Clasificación del extractor LLM sobre si el cliente confirma/niega la
+   * última pregunta del bot. Si viene "yes"/"no", se prefiere sobre la
+   * heurística regex (que es solo fallback). Permite reconocer typos y
+   * variantes naturales tipo "si pro favor", "claro pue", "obvio dale".
+   */
+  extractedConfirms?: "yes" | "no" | null,
 ): TransitionResult {
   // ── WELCOME ──────────────────────────────────────────────────────────────
   if (phase === "welcome") {
@@ -122,7 +129,7 @@ export function transition(
   // ── PET_RULES_SHOWN ───────────────────────────────────────────────────────
   // El cliente vio las reglas de mascotas. Esperamos confirmación para avanzar.
   if (phase === "pet_rules_shown") {
-    const confirms = clientConfirms(incomingText);
+    const confirms = clientConfirms(incomingText, extractedConfirms);
     if (confirms === true) {
       return { nextPhase: "quote_shown", action: { type: "reply_only" } };
     }
@@ -134,7 +141,7 @@ export function transition(
   // ── QUOTE_SHOWN ───────────────────────────────────────────────────────────
   // El cliente vio el resumen con totales. Esperamos confirmación para pedir datos de contrato.
   if (phase === "quote_shown") {
-    const confirms = clientConfirms(incomingText);
+    const confirms = clientConfirms(incomingText, extractedConfirms);
     if (confirms === true) {
       return { nextPhase: "contract", action: { type: "reply_only" } };
     }
@@ -276,7 +283,19 @@ function isContractComplete(e: BotEntities): boolean {
  * `pet_rules_shown` y `quote_shown` que esperan un sí/no explícito antes
  * de mostrar el siguiente bloque.
  */
-function clientConfirms(text: string): boolean | null {
+function clientConfirms(
+  text: string,
+  /**
+   * Hint del extractor LLM. Si llega definido (no null/undefined), se prefiere
+   * sobre la heurística regex de abajo. La regex queda solo como red de
+   * seguridad para casos donde el LLM no clasificó (campo omitido).
+   */
+  llmHint?: "yes" | "no" | null,
+): boolean | null {
+  // PRIORIDAD: si el LLM clasificó, confiar en su resultado.
+  if (llmHint === "yes") return true;
+  if (llmHint === "no") return false;
+
   const t = String(text ?? "")
     .toLowerCase()
     .normalize("NFD")
@@ -298,13 +317,26 @@ function clientConfirms(text: string): boolean | null {
     .map((l) => l.trim())
     .filter(Boolean);
 
+  // Frases de confirmación atómicas: "si", "dale", "ok", "de una", "por
+  // favor", "porfa", etc. La regex compound de abajo permite COMBINACIONES
+  // libres (ej. "si de una", "claro dale", "ok por favor", "dale claro de
+  // una", "si porfavor", "si porfa").
+  //
+  // Variantes informales incluidas: "porfavor" / "porfa" / "pofa" (sin
+  // espacio, abreviaturas comunes en español colombiano).
+  const CONFIRM_PHRASE =
+    "(?:si|sii+|sip|claro|dale|listo|ok+|okey|perfecto|procede|procedamos|continua|continuemos|adelante|sigamos|hagamoslo|hagamos|sigue|avancemos|avanza|me\\s+sirve|me\\s+parece|de\\s+una(?:\\s+vez)?|por\\s+favor|porfavor|porfa|pofa|porfis|plis|please|por\\s+supuesto|esta\\s+bien|todo\\s+bien|de\\s+acuerdo|bueno|vale|genial|excelente|chevere|chevre|bacano|listoco|listocho|de\\s+ley)";
+  const compoundConfirmRegex = new RegExp(
+    `^(?:${CONFIRM_PHRASE}[\\s,.\\-:!?]*)+$`,
+    "i",
+  );
+
   for (const line of lines) {
     if (line.length === 0 || line.length > 120) continue;
-    if (
-      /^(si|sii+|sip|claro|dale|listo|ok+|okey|perfecto|de acuerdo|procede|procedamos|continua|continuemos|adelante|sigamos|por supuesto|esta bien|todo bien|hagamoslo|hagamos|sigue|avancemos|avanza|me sirve|me parece|de una|si por favor)\W*$/i.test(
-        line,
-      )
-    ) {
+    // Match cualquier combinación de frases de confirmación seguidas (ej.
+    // "si", "si de una", "claro si", "ok dale", "si por favor", "perfecto
+    // dale de una").
+    if (compoundConfirmRegex.test(line)) {
       return true;
     }
     if (/\b(s[ií]\s+(procedamos|continuemos|sigamos|hagamoslo|avancemos))\b/.test(line)) {

@@ -12,10 +12,31 @@ async function isStillThisTailUserMessage(
   deps: { api: any },
   conversationId: Id<"conversations">,
   insertedMsgId: string,
-  insertedAt: number,
+  _insertedAt: number,
 ): Promise<boolean> {
+  // Antes este chequeo también miraba `conv.lastMessageAt > insertedAt`. Eso
+  // causaba RACE CONDITION cuando el bot estaba enviando un batch de catálogo
+  // (con delays entre cards) y el cliente pickaba una finca DURANTE el envío:
+  //
+  //   1. Cliente envía msgs M1 (al inicio del flujo).
+  //   2. Bot procesa M1 → empieza a enviar 4 cards de catálogo (~3s).
+  //   3. Cliente, ANTES de que termine el envío, responde con "Quiero esta"
+  //      (M2). Inserta M2 con createdAt=T.
+  //   4. Bot termina el catálogo + closing message → llama
+  //      `updateLastMessageAt` → conv.lastMessageAt = T+3.
+  //   5. M2 termina el debounce (4s). Llama isStillThisTailUserMessage.
+  //      Chequeo viejo: T+3 > T → return false → M2 se cancela.
+  //   6. El "Quiero esta" queda SIN procesarse y el bot nunca llega a
+  //      preguntar por mascotas.
+  //
+  // Solución: el segundo chequeo (getLatestUserMessage) ya cubre el caso
+  // legítimo "skip mensajes user anteriores cuando hay uno más reciente". El
+  // chequeo viejo de lastMessageAt agregaba un falso negativo cuando el bot
+  // estaba activo. Por eso lo removemos: confiamos solo en que el msg
+  // insertado siga siendo el último mensaje DEL USUARIO.
+  void _insertedAt;
   const conv = await ctx.runQuery(deps.api.conversations.getById, { conversationId });
-  if (!conv || (conv.lastMessageAt ?? 0) > insertedAt) return false;
+  if (!conv) return false;
   const latest = (await ctx.runQuery(deps.api.messages.getLatestUserMessage, {
     conversationId,
     scanLimit: 50,
@@ -81,33 +102,117 @@ function wantsExpandedSearch(text: string): boolean {
 const CATALOG_EXPANDED_LIMIT = 25;
 
 /**
+ * Mapeo regional oficial (lista enviada por Adriana 2026-05-19): municipios
+ * agrupados por macro-zona. Se usa para detectar inclusión ("cerca a Bogotá"
+ * → Cundinamarca) o exclusión ("no en los llanos" → Meta/Llanos).
+ *
+ * Keywords normalizadas (lowercase, sin tildes) para matchear contra
+ * `property.location`. Comparación por `includes`, así que keywords cortas
+ * cubren variantes ("apiay" matchea "Vereda Apiay").
+ */
+const REGIONS = {
+  LLANOS: [
+    "villavicencio",
+    "restrepo",
+    "san martin",
+    "granada",
+    "cumaral",
+    "apiay",
+    "paratebueno",
+    "puerto lopez",
+    "puerto gaitan",
+    "guamal",
+    "barranca de upia",
+    "barranca",
+    "acacias",
+    "meta",
+  ],
+  TOLIMA: [
+    "flandes",
+    "carmen de apicala",
+    "honda",
+    "herveo",
+    "lerida",
+    "ortega",
+    "melgar",
+    "armero",
+    "san antonio",
+    "icononzo",
+    "venadillo",
+    "ambalema",
+    "villarica",
+    "libano",
+    "valle de san juan",
+    "alvarado",
+    "cunday",
+    "anzoategui",
+    "murillo",
+    "san luis",
+    "prado",
+    "santa isabel",
+    "suarez",
+    "piedras",
+    "planadas",
+    "ibague",
+    "tolima",
+  ],
+  CUNDINAMARCA: [
+    "nilo",
+    "tocaima",
+    "girardot",
+    "villapinzon",
+    "zipaquira",
+    "facatativa",
+    "choconta",
+    "cogua",
+    "tabio",
+    "guaduas",
+    "bojaca",
+    "gachala",
+    "la mesa",
+    "pacho",
+    "san cayetano",
+    "soacha",
+    "la calera",
+    "puerto salgar",
+    "villeta",
+    "la pena",
+    "caqueza",
+    "funza",
+    "yacopi",
+    "nemocon",
+    "anapoima",
+    "viota",
+    "tenjo",
+    "cundinamarca",
+  ],
+};
+
+/**
  * Detecta zonas geográficas que el cliente quiere EXCLUIR del catálogo.
- * Mapeo macro-zona → keywords de `property.location` que serán filtradas.
- *
- * Soporta:
- *   - "no en los llanos" / "fuera del llano" / "lejos del llano" / "no en el
- *     llano" / "evita los llanos" → excluye Villavicencio, Restrepo,
- *     Acacías, Cumaral, Puerto López.
- *
- * Para agregar otras zonas en el futuro (ej. "no costa", "no eje cafetero"),
- * agregar otra entrada al `ZONE_EXCLUSIONS` con la regex de detección y la
- * lista de keywords.
+ * Mapea frases naturales → lista de keywords de `property.location` a filtrar.
  */
 const ZONE_EXCLUSIONS: Array<{
   triggerRegex: RegExp;
   excludeLocationKeywords: string[];
 }> = [
   {
+    // "no llanos", "no en los llanos", "no en el meta", "fuera del llano", etc.
     triggerRegex:
-      /\b(no\s+(?:en\s+)?(?:los\s+)?llanos?|fuera\s+(?:de\s+)?(?:los\s+)?llanos?|lejos\s+(?:de\s+)?(?:los\s+)?llanos?|no\s+(?:en\s+)?(?:el\s+)?llano|evita\s+(?:los\s+)?llanos?|que\s+no\s+sea\s+(?:en\s+)?(?:los\s+)?llanos?)\b/i,
-    excludeLocationKeywords: [
-      "villavicencio",
-      "restrepo",
-      "acacias",
-      "cumaral",
-      "puerto lopez",
-      "puerto gaitan",
-    ],
+      /\b(no\s+(?:en\s+)?(?:los\s+|el\s+)?(?:llanos?|meta)|fuera\s+(?:de\s+)?(?:los\s+)?(?:llanos?|meta)|lejos\s+(?:de\s+)?(?:los\s+)?(?:llanos?|meta)|evita\s+(?:los\s+)?(?:llanos?|meta)|que\s+no\s+sea\s+(?:en\s+)?(?:los\s+)?(?:llanos?|meta))\b/i,
+    excludeLocationKeywords: REGIONS.LLANOS,
+  },
+  {
+    // "no en tolima", "fuera de tolima", "evita tolima".
+    triggerRegex:
+      /\b(no\s+(?:en\s+)?tolima|fuera\s+(?:de\s+)?tolima|evita\s+tolima|que\s+no\s+sea\s+(?:en\s+)?tolima)\b/i,
+    excludeLocationKeywords: REGIONS.TOLIMA,
+  },
+  {
+    // "no en cundinamarca", etc.
+    triggerRegex:
+      /\b(no\s+(?:en\s+)?cundinamarca|fuera\s+(?:de\s+)?cundinamarca|evita\s+cundinamarca)\b/i,
+    excludeLocationKeywords: REGIONS.CUNDINAMARCA,
   },
 ];
 function detectExcludedZoneKeywords(text: string): string[] {
@@ -119,6 +224,61 @@ function detectExcludedZoneKeywords(text: string): string[] {
   for (const rule of ZONE_EXCLUSIONS) {
     if (rule.triggerRegex.test(t)) {
       for (const kw of rule.excludeLocationKeywords) out.add(kw);
+    }
+  }
+  return Array.from(out);
+}
+
+/**
+ * Detecta zonas geográficas que el cliente quiere INCLUIR (restricción
+ * positiva). Mapea frases naturales → lista de keywords obligatorias.
+ *
+ * Soporta:
+ *   - "cerca a Bogotá" / "cerca de Bogotá" → CUNDINAMARCA (los municipios
+ *     cercanos a la capital están en este departamento).
+ *   - "en Tolima" / "por Tolima" → TOLIMA.
+ *   - "en los llanos" / "en el meta" → LLANOS.
+ *   - "en Cundinamarca" → CUNDINAMARCA.
+ *
+ * No se confunde con "no en X": las reglas de inclusión solo disparan si NO
+ * hay negación antes (ej. "en los llanos" sí, "no en los llanos" no).
+ */
+const ZONE_INCLUSIONS: Array<{
+  triggerRegex: RegExp;
+  restrictToLocationKeywords: string[];
+}> = [
+  {
+    // "cerca a bogota", "cerca de bogota", "cerca por bogota", "alrededor de bogota"
+    triggerRegex:
+      /\b(?<!no\s)cerca\s+(a|de|por)\s+(bogota|la\s+capital)\b/i,
+    restrictToLocationKeywords: REGIONS.CUNDINAMARCA,
+  },
+  {
+    // "en tolima", "por tolima" (sin "no" antes)
+    triggerRegex: /\b(?<!no\s)(?:en|por)\s+tolima\b/i,
+    restrictToLocationKeywords: REGIONS.TOLIMA,
+  },
+  {
+    // "en llanos", "en los llanos", "en el llano", "en meta" (sin "no" antes)
+    triggerRegex:
+      /\b(?<!no\s)(?:en|por)\s+(?:los\s+|el\s+)?(?:llanos?|meta)\b/i,
+    restrictToLocationKeywords: REGIONS.LLANOS,
+  },
+  {
+    // "en cundinamarca", "por cundinamarca" (sin "no" antes)
+    triggerRegex: /\b(?<!no\s)(?:en|por)\s+cundinamarca\b/i,
+    restrictToLocationKeywords: REGIONS.CUNDINAMARCA,
+  },
+];
+function detectRestrictedZoneKeywords(text: string): string[] {
+  const t = String(text ?? "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/\p{M}/gu, "");
+  const out = new Set<string>();
+  for (const rule of ZONE_INCLUSIONS) {
+    if (rule.triggerRegex.test(t)) {
+      for (const kw of rule.restrictToLocationKeywords) out.add(kw);
     }
   }
   return Array.from(out);
@@ -547,6 +707,8 @@ export async function processInboundMessageV2(
           subtotal?: number;
           appliedRule?: string;
           cupo?: number;
+          damageDeposit?: number;
+          wristbandFee?: number;
         };
       } | null;
       const text = String(data?.text ?? "").trim();
@@ -561,6 +723,8 @@ export async function processInboundMessageV2(
               subtotal: Number(data.totals.subtotal ?? 0),
               appliedRule: String(data.totals.appliedRule ?? "").trim(),
               cupo: Number(data.totals.cupo ?? 0),
+              damageDeposit: Number(data.totals.damageDeposit ?? 0),
+              wristbandFee: Number(data.totals.wristbandFee ?? 0),
             }
           : undefined,
       };
@@ -666,12 +830,11 @@ export async function processInboundMessageV2(
       }
     }
 
-    // Exclusión por zona: si el cliente pidió "no en los llanos" / "fuera del
-    // llano" / similar, agregamos las palabras clave de esa zona al filtro
-    // del query. Mapping: "llanos" → [Villavicencio, Restrepo, Acacías,
-    // Cumaral, Puerto López]. Para otras zonas geográficas, agregar
-    // mappings adicionales aquí.
+    // Filtros geográficos: el cliente puede pedir inclusión ("cerca a
+    // Bogotá" → Cundinamarca; "en Tolima"; "en los llanos") o exclusión
+    // ("no en los llanos"; "fuera de Tolima"). Mapping en REGIONS.
     const excludeLocationKeywords = detectExcludedZoneKeywords(textForTurn);
+    const restrictToLocationKeywords = detectRestrictedZoneKeywords(textForTurn);
 
     // Modo "alrededores" / multi-zona: el cliente quiere ver opciones de
     // varios lugares cercanos (no un solo municipio específico). En ese caso
@@ -701,6 +864,7 @@ export async function processInboundMessageV2(
         isEvento: action.isEvento,
         excludeRetailerIds,
         excludeLocationKeywords,
+        restrictToLocationKeywords,
         // En modo expandido pedimos hasta 25 candidates al query (cap interno
         // de la query es 30); en modo normal usamos el default (30 también
         // pero el send se corta a 12).

@@ -79,6 +79,10 @@ export interface StayQuoteTotals {
   appliedRule: string;
   /** Cupo solicitado por el cliente (de las entidades, no del precio). */
   cupo: number;
+  /** Depósito reembolsable por daños (configurado en la finca). */
+  damageDeposit?: number;
+  /** Manilla de condominio (configurado en la finca). */
+  wristbandFee?: number;
 }
 
 /** Resultado de `fetchStayQuote`: texto formateado + totales numéricos para cálculos. */
@@ -104,6 +108,17 @@ export interface ExtractedEntities {
   eventLogistics?: "basic" | "extra";
   contractFields?: Partial<Pick<BotEntities, "contractName"|"contractCedula"|"contractEmail"|"contractPhone"|"contractAddress">>;
   wantsRecomendadas?: boolean;     // dijo "no sé", "recomiéndame", etc.
+  /**
+   * Clasificación LLM de si el mensaje confirma/niega la última pregunta del bot.
+   * "yes" → cliente confirmó (incluye typos: "si pro favor", combos "claro dale",
+   *         frustración "ya te dije que sí", coloquialismos "vale", "chevere", etc.)
+   * "no"  → cliente negó.
+   * null  → ambiguo / no es respuesta directa.
+   *
+   * Reemplaza la heurística regex `clientConfirms` para casos donde el regex
+   * no captura todas las variantes naturales de lenguaje.
+   */
+  confirmsCurrentStep?: "yes" | "no" | null;
 }
 
 /** Qué acción debe ejecutar el orquestador después de generar el reply. */

@@ -1,4 +1,14 @@
-import { Controller, Get, Post, Query, Req, Res } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  HttpException,
+  Post,
+  Put,
+  Query,
+  Req,
+  Res,
+} from '@nestjs/common';
 import type { Request, Response } from 'express';
 import { GoogleCalendarService } from '../shared/services/google-calendar.service';
 
@@ -87,5 +97,64 @@ export class AdminController {
   @Post('google-calendar/disconnect')
   async disconnect() {
     return this.googleCalendarService.disconnect();
+  }
+
+  /**
+   * Ajustes globales del contrato (cuentas, cláusulas). Proxea a Convex HTTP porque
+   * en producción `/api/*` cae en NestJS vía rewrite de Next.js.
+   */
+  @Get('contract-settings')
+  async getContractSettings() {
+    return this.proxyConvexAdminJson('/api/admin/contract-settings', 'GET');
+  }
+
+  @Put('contract-settings')
+  async putContractSettings(@Body() body: Record<string, unknown>) {
+    return this.proxyConvexAdminJson(
+      '/api/admin/contract-settings',
+      'PUT',
+      body,
+    );
+  }
+
+  private async proxyConvexAdminJson(
+    path: string,
+    method: 'GET' | 'PUT',
+    body?: Record<string, unknown>,
+  ) {
+    const baseUrl = (
+      process.env.CONVEX_SITE_URL || 'https://adventurous-octopus-651.convex.site'
+    ).replace(/\/$/, '');
+    const apiKey =
+      process.env.CONVEX_ADMIN_API_KEY?.trim() ||
+      process.env.YCLOUD_API_KEY?.trim() ||
+      '';
+    if (!apiKey) {
+      return {
+        error:
+          'Falta CONVEX_ADMIN_API_KEY o YCLOUD_API_KEY en el servidor NestJS',
+      };
+    }
+    const res = await fetch(`${baseUrl}${path}`, {
+      method,
+      headers: {
+        'X-API-Key': apiKey,
+        ...(method === 'PUT' ? { 'Content-Type': 'application/json' } : {}),
+      },
+      ...(method === 'PUT' && body != null
+        ? { body: JSON.stringify(body) }
+        : {}),
+    });
+    const text = await res.text();
+    let payload: unknown = text;
+    try {
+      payload = text ? JSON.parse(text) : null;
+    } catch {
+      payload = { error: text || res.statusText };
+    }
+    if (!res.ok) {
+      throw new HttpException(payload as object, res.status);
+    }
+    return payload;
   }
 }

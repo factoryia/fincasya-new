@@ -781,12 +781,15 @@ export const calculateStayPrice = query({
     const numeroMascotas = args.numeroMascotas ?? 0;
     const petRefundable = Math.min(numeroMascotas, 2) * 100000;
     const petServiceFee = Math.max(0, numeroMascotas - 2) * 30000;
-    const petTotal = petRefundable + petServiceFee;
+    const petCleaningFee = numeroMascotas >= 3 ? 70000 : 0;
+    const petTotal = petRefundable + petServiceFee + petCleaningFee;
 
     const serviceStaffFee = args.incluirServicio ? (property.serviceStaffPrice || 0) * Math.max(1, nights.length) : 0;
-    
+    const damageDeposit = Math.max(0, Number(property.depositoDanosReembolsable ?? 0) || 0);
+    const wristbandFee = Math.max(0, Number(property.manillaCondominio ?? 0) || 0);
+
     return {
-      total: total + petTotal + serviceStaffFee,
+      total: total + petTotal + serviceStaffFee + damageDeposit + wristbandFee,
       subtotal: total,
       nightsCount: nights.length,
       nights,
@@ -796,6 +799,7 @@ export const calculateStayPrice = query({
         count: numeroMascotas,
         refundable: petRefundable,
         serviceFee: petServiceFee,
+        cleaningFee: petCleaningFee,
         total: petTotal,
       },
       serviceStaff: {
@@ -803,7 +807,9 @@ export const calculateStayPrice = query({
         price: property.serviceStaffPrice || 0,
         included: !!args.incluirServicio,
         fee: args.incluirServicio ? (property.serviceStaffPrice || 0) : 0,
-      }
+      },
+      damageDeposit,
+      wristbandFee,
     };
   },
 });
@@ -1598,6 +1604,8 @@ export const create = mutation({
     serviceStaffAvailable: v.optional(v.boolean()),
     serviceStaffMandatory: v.optional(v.boolean()),
     serviceStaffPrice: v.optional(v.number()),
+    depositoDanosReembolsable: v.optional(v.number()),
+    manillaCondominio: v.optional(v.number()),
     catalogFilterTags: v.optional(v.array(v.string())),
     marketplaceForSale: v.optional(v.boolean()),
     salePriceCop: v.optional(v.number()),
@@ -1652,6 +1660,12 @@ export const create = mutation({
       serviceStaffAvailable: args.serviceStaffAvailable,
       serviceStaffMandatory: args.serviceStaffMandatory,
       serviceStaffPrice: args.serviceStaffPrice,
+      ...(args.depositoDanosReembolsable !== undefined
+        ? { depositoDanosReembolsable: args.depositoDanosReembolsable }
+        : {}),
+      ...(args.manillaCondominio !== undefined
+        ? { manillaCondominio: args.manillaCondominio }
+        : {}),
       ...(args.catalogFilterTags !== undefined
         ? { catalogFilterTags: args.catalogFilterTags }
         : {}),
@@ -1817,6 +1831,8 @@ export const update = mutation({
     serviceStaffAvailable: v.optional(v.boolean()),
     serviceStaffMandatory: v.optional(v.boolean()),
     serviceStaffPrice: v.optional(v.number()),
+    depositoDanosReembolsable: v.optional(v.number()),
+    manillaCondominio: v.optional(v.number()),
     catalogFilterTags: v.optional(v.array(v.string())),
     marketplaceForSale: v.optional(v.boolean()),
     salePriceCop: v.optional(v.number()),

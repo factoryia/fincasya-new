@@ -270,6 +270,20 @@ export class CreateFincaDto {
   @Transform(({ value }) => toNumber(value))
   serviceStaffPrice?: number;
 
+  /** Depósito reembolsable por daños a la propiedad (COP). */
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  @Transform(({ value }) => toNumber(value))
+  depositoDanosReembolsable?: number;
+
+  /** Valor de manilla de ingreso al condominio (COP). */
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  @Transform(({ value }) => toNumber(value))
+  manillaCondominio?: number;
+
   @IsOptional()
   @IsNumber()
   @Min(0)

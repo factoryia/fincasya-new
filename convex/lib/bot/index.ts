@@ -404,7 +404,12 @@ export async function runBotTurn(input: BotTurnInput): Promise<BotTurnResult> {
   }
 
   // 3. Calcular transición (determinista)
-  let tr = transition(effectivePhase, updatedEntities, messageText);
+  let tr = transition(
+    effectivePhase,
+    updatedEntities,
+    messageText,
+    extracted.confirmsCurrentStep,
+  );
 
   // 3.05 Paginación del catálogo: si el cliente está en una fase post-catálogo
   // y pide "ver más opciones", forzamos un nuevo `send_catalog` (con flag

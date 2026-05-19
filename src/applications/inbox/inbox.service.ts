@@ -828,45 +828,73 @@ export class InboxService {
     const groupType = String(prepared.groupType || '').trim() || undefined;
     const purpose = String(prepared.purpose || '').trim() || undefined;
 
-    let bookingId: string;
-    try {
-      const result = await this.bookingsSyncService.createBooking(
-        {
-          propertyId,
-          nombreCompleto: prepared.clientName.trim(),
-          cedula: (prepared.clientId || '').trim() || 'SIN-DOC',
-          celular: prepared.clientPhone.trim(),
-          correo:
-            (prepared.clientEmail || '').trim() ||
-            `sin-correo-${Date.now()}@reserva-inbox.fincasya.local`,
-          fechaEntrada,
-          fechaSalida,
-          numeroPersonas: prepared.guests,
-          precioTotal: prepared.totalAmount,
-          subtotal: prepared.rentAmount,
-          temporada: 'ESTANDAR',
-          horaEntrada: prepared.checkInTime,
-          horaSalida: prepared.checkOutTime,
-          city: '',
-          address: prepared.clientAddress || '',
-          isDirect: false,
-          reference: weakContract ? undefined : rawContract.replace(/\s+/g, ''),
-          observaciones,
-          status: prepared.paymentStatus === 'paid' ? 'PAID' : 'CONFIRMED',
-          skipAutoContract: true,
-          multimediaLinks:
-            multimediaForBooking.length > 0 ? multimediaForBooking : undefined,
-          groupType,
-          purpose,
-        },
-        undefined,
+    const bookingPayload = {
+      propertyId,
+      nombreCompleto: prepared.clientName.trim(),
+      cedula: (prepared.clientId || '').trim() || 'SIN-DOC',
+      celular: prepared.clientPhone.trim(),
+      correo:
+        (prepared.clientEmail || '').trim() ||
+        `sin-correo-${Date.now()}@reserva-inbox.fincasya.local`,
+      fechaEntrada,
+      fechaSalida,
+      numeroPersonas: prepared.guests,
+      precioTotal: prepared.totalAmount,
+      subtotal: prepared.rentAmount,
+      temporada: 'ESTANDAR',
+      horaEntrada: prepared.checkInTime,
+      horaSalida: prepared.checkOutTime,
+      city: '',
+      address: prepared.clientAddress || '',
+      isDirect: false,
+      reference: weakContract ? undefined : rawContract.replace(/\s+/g, ''),
+      observaciones,
+      status: prepared.paymentStatus === 'paid' ? 'PAID' : 'CONFIRMED',
+      skipAutoContract: true,
+      multimediaLinks:
+        multimediaForBooking.length > 0 ? multimediaForBooking : undefined,
+      groupType,
+      purpose,
+    };
+
+    let bookingId =
+      await this.findExistingInboxBookingForConversation(
+        conversationId,
+        propertyId,
+        fechaEntrada,
+        fechaSalida,
       );
-      bookingId = String(result.bookingId);
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : String(err);
-      throw new BadRequestException(
-        `No se pudo crear la reserva en el calendario: ${msg}`,
+    let createdInThisRequest = false;
+
+    if (!bookingId) {
+      const availability = await this.bookingsSyncService.checkAvailability(
+        propertyId,
+        fechaEntrada,
+        fechaSalida,
       );
+      if (!availability.available) {
+        throw new BadRequestException(
+          this.formatAvailabilityError(
+            availability.conflictingBookings,
+            prepared.checkInDate,
+            prepared.checkOutDate,
+          ),
+        );
+      }
+
+      try {
+        const result = await this.bookingsSyncService.createBooking(
+          bookingPayload,
+          undefined,
+        );
+        bookingId = String(result.bookingId);
+        createdInThisRequest = true;
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : String(err);
+        throw new BadRequestException(
+          `No se pudo crear la reserva en el calendario: ${msg}`,
+        );
+      }
     }
 
     if (weakContract && bookingId) {
@@ -874,38 +902,59 @@ export class InboxService {
       prepared.contractNumber = `FY-${suffix}`;
     }
 
-    const pdfBuffer =
-      await this.pdfService.generateReservationConfirmationPdfBuffer(prepared);
     const safeContract = (prepared.contractNumber || String(Date.now())).replace(
       /[^a-zA-Z0-9_-]/g,
       '',
     );
     const filename = `Confirmacion_Reserva_${safeContract}.pdf`;
 
-    const generatedFile: Express.Multer.File = {
-      fieldname: 'file',
-      originalname: filename,
-      encoding: '7bit',
-      mimetype: 'application/pdf',
-      buffer: Buffer.from(pdfBuffer),
-      size: pdfBuffer.byteLength,
-      stream: null as any,
-      destination: '',
-      filename: '',
-      path: '',
-    };
+    let generatedFile: Express.Multer.File;
+    try {
+      const pdfBuffer =
+        await this.pdfService.generateReservationConfirmationPdfBuffer(prepared);
+      generatedFile = {
+        fieldname: 'file',
+        originalname: filename,
+        encoding: '7bit',
+        mimetype: 'application/pdf',
+        buffer: Buffer.from(pdfBuffer),
+        size: pdfBuffer.byteLength,
+        stream: null as any,
+        destination: '',
+        filename: '',
+        path: '',
+      };
 
-    await this.sendMessage(conversationId, {
-      type: 'document',
-      text: `Hola ${prepared.clientName}, aqui tienes tu confirmacion de reserva No. ${prepared.contractNumber}.`,
-      file: generatedFile,
-      filename,
-      metadata: {
-        kind: 'reservation_confirmation',
-        reservationConfirmationData: prepared,
-        bookingId,
-      },
-    });
+      await this.sendMessage(conversationId, {
+        type: 'document',
+        text: `Hola ${prepared.clientName}, aqui tienes tu confirmacion de reserva No. ${prepared.contractNumber}.`,
+        file: generatedFile,
+        filename,
+        metadata: {
+          kind: 'reservation_confirmation',
+          reservationConfirmationData: prepared,
+          bookingId,
+        },
+      });
+    } catch (postCreateErr) {
+      if (createdInThisRequest && bookingId) {
+        try {
+          await this.convexService.mutation('bookings:cancel', {
+            id: bookingId as any,
+            reason:
+              'Cancelada: falló envío de confirmación desde inbox (reintente).',
+          });
+        } catch (rollbackErr) {
+          console.error(
+            '[inbox] No se pudo revertir reserva tras error de confirmación:',
+            rollbackErr instanceof Error
+              ? rollbackErr.message
+              : String(rollbackErr),
+          );
+        }
+      }
+      throw postCreateErr;
+    }
 
     try {
       const confirmationUrl = await this.s3Service.uploadFile(
@@ -933,7 +982,9 @@ export class InboxService {
       success: true,
       filename,
       bookingId,
-      message: 'Confirmacion de reserva enviada correctamente',
+      message: bookingId && !createdInThisRequest
+        ? 'Confirmacion reenviada (la reserva ya existia en el calendario)'
+        : 'Confirmacion de reserva enviada correctamente',
     };
   }
 
@@ -990,9 +1041,11 @@ export class InboxService {
     const payloadTotal = this.pdfService.toNumber(safePayload.totalAmount);
     const rentAmount = this.pdfService.toNumber(safePayload.rentAmount);
     const cleaningFee = this.pdfService.toNumber(safePayload.cleaningFee);
+    const petCleaningFee = this.pdfService.toNumber(safePayload.petCleaningFee);
     const refundableDeposit = this.pdfService.toNumber(safePayload.refundableDeposit);
     const computedTotal =
-      payloadTotal || rentAmount + cleaningFee + refundableDeposit;
+      payloadTotal ||
+      rentAmount + cleaningFee + petCleaningFee + refundableDeposit;
 
     const prepared: ReservationConfirmationData = {
       propertyId,
@@ -1019,6 +1072,7 @@ export class InboxService {
       balanceDate: this.pdfService.toIsoDate(safePayload.balanceDate || checkInDate),
       rentAmount,
       cleaningFee,
+      petCleaningFee,
       refundableDeposit,
       totalAmount: computedTotal,
       paymentMethod: this.pdfService.normalizePaymentMethod(safePayload.paymentMethod),
@@ -1052,6 +1106,64 @@ export class InboxService {
     }
 
     return prepared;
+  }
+
+  /** Reserva previa del mismo envío desde inbox (reintento tras fallo de PDF/WhatsApp). */
+  private async findExistingInboxBookingForConversation(
+    conversationId: string,
+    propertyId: string,
+    fechaEntrada: number,
+    fechaSalida: number,
+  ): Promise<string | null> {
+    const marker = `Conversación: ${conversationId}`;
+    const result = await this.convexService.query('bookings:list', {
+      propertyId: propertyId as any,
+      limit: 200,
+    });
+    const bookings = (result as { bookings?: Array<Record<string, unknown>> })
+      ?.bookings;
+    if (!Array.isArray(bookings)) return null;
+
+    for (const b of bookings) {
+      if (b.status === 'CANCELLED') continue;
+      const obs = String(b.observaciones || '');
+      if (!obs.includes(marker)) continue;
+      if (b.fechaEntrada === fechaEntrada && b.fechaSalida === fechaSalida) {
+        return String(b._id);
+      }
+    }
+    return null;
+  }
+
+  private formatAvailabilityError(
+    conflicts: Array<{
+      nombreCompleto?: string;
+      fechaEntrada?: number;
+      fechaSalida?: number;
+      status?: string;
+    }> | undefined,
+    checkInDate: string,
+    checkOutDate: string,
+  ): string {
+    const base =
+      'La propiedad no está disponible para las fechas seleccionadas';
+    if (!conflicts?.length) {
+      return `${base} (${checkInDate} → ${checkOutDate}).`;
+    }
+    const details = conflicts
+      .map((c) => {
+        const inDate = c.fechaEntrada
+          ? this.pdfService.toIsoDate(String(c.fechaEntrada)) ||
+            new Date(c.fechaEntrada).toISOString().slice(0, 10)
+          : '?';
+        const outDate = c.fechaSalida
+          ? this.pdfService.toIsoDate(String(c.fechaSalida)) ||
+            new Date(c.fechaSalida).toISOString().slice(0, 10)
+          : '?';
+        return `${c.nombreCompleto || 'Reserva'} (${inDate} → ${outDate}, ${c.status || 'activa'})`;
+      })
+      .join('; ');
+    return `${base} (${checkInDate} → ${checkOutDate}). Conflicto con: ${details}.`;
   }
 
   /**

@@ -442,14 +442,37 @@ function buildSummaryWithTotals(
     );
   }
 
-  const grandTotal = t.subtotal + petsTotal;
+  const damageDeposit = Math.max(0, Number(t.damageDeposit ?? 0) || 0);
+  const wristbandFee = Math.max(0, Number(t.wristbandFee ?? 0) || 0);
+
+  if (damageDeposit > 0) {
+    lines.push(
+      `🛡️ Depósito por daños (reembolsable): ${formatCop(damageDeposit)}`,
+    );
+  }
+  if (wristbandFee > 0) {
+    lines.push(`🎫 Manilla condominio: ${formatCop(wristbandFee)}`);
+  }
+
+  const grandTotal = t.subtotal + petsTotal + damageDeposit + wristbandFee;
   lines.push("━━━━━━━━━━━━━━━━━━━━");
   lines.push(`💳 *Total estimado:* ${formatCop(grandTotal)}`);
 
+  const footnotes: string[] = [];
   if (petsTotal > 0) {
+    footnotes.push(
+      "El depósito de mascotas es reembolsable al check-out si no hay novedades",
+    );
+  }
+  if (damageDeposit > 0) {
+    footnotes.push(
+      "el depósito por daños se reintegra al check-out si la propiedad queda en orden",
+    );
+  }
+  if (footnotes.length > 0) {
     lines.push(
       "",
-      "_(El depósito de mascotas es reembolsable al check-out si no hay novedades. El asesor confirma el total final en tu contrato.)_",
+      `_(${footnotes.join(". ")}. El asesor confirma el total final en tu contrato.)_`,
     );
   }
 
