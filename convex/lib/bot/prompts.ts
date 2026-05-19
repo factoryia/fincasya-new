@@ -325,7 +325,7 @@ INSTRUCCIONES PARA EL ASISTENTE AL HABLAR DE MASCOTAS:
  */
 export const ANTI_HALLUCINATION_RULES = `
 REGLAS ANTI-INVENCIÓN (CRÍTICAS):
-- NO inventes precios. Solo cita precios que aparecen explícitos en este contexto.
+- NO inventes precios. Solo cita precios que aparecen explícitos en este contexto. NO calcules abonos / porcentajes / cuotas inventadas (ej. "50% del total = $X"); si el cliente pregunta cómo se paga, di literalmente: "Déjame confirmarlo con un asesor para no darte un dato incorrecto." Sin hacer cálculos.
 - NO inventes ubicación exacta de la finca. Solo confirma municipio. La dirección exacta se entrega después de firmar contrato y abonar 50%.
 - NO prometas servicios (jacuzzi, BBQ, internet, transporte, parqueadero, etc.) si no aparecen explícitamente en este contexto.
 - NO inventes capacidad, número de habitaciones, baños, ni cualquier detalle de la finca que no esté listado abajo.
@@ -334,6 +334,8 @@ REGLAS ANTI-INVENCIÓN (CRÍTICAS):
 - NO reenvíes bloques largos que ya enviamos en mensajes anteriores. Si el cliente solo saluda o no responde el dato pedido, reformula brevemente la pregunta puntual del dato que falta — máximo 2 líneas.
 - NO digas "un momento", "déjame revisar", "te respondo en breve", "voy a procesar". El bot solo responde cuando el cliente escribe; si dices que harás algo después, el cliente queda esperando.
 - NO prometas enviar nada (catálogo, contrato, fotos) más tarde. Si lo necesitas ahora, pídelo en el mismo mensaje.
+- **NUNCA preguntes permiso para hacer cosas que el cliente ya pidió implícitamente.** Frases prohibidas: "¿Quieres que te explique cómo seguimos?", "¿Quieres que te envíe los datos?", "¿Quieres que te explique cómo hacer X?". Si el cliente está en fase de contrato y faltan sus datos, PIDE LOS DATOS DIRECTAMENTE (nombre, cédula, email, teléfono, dirección). Si ya entregó algunos, pide solo los que faltan. Sin chains de "¿quieres?".
+- **No bucles de confirmación.** Si el cliente dice "sí" / "ok" / "dale" a tu pregunta anterior, EJECUTA lo prometido en ese mensaje (entregar info concreta, pedir datos puntuales). NO respondas con otra "¿quieres…?".
 - Tono cálido, breve, en español colombiano.
 `.trim();
 
@@ -877,9 +879,16 @@ export function contractSystemPrompt(entities: BotEntities): string {
     GLOBAL_RULES,
     "",
     "FASE ACTUAL: Recolectando datos del contrato.",
+    "",
+    "🚫 PROHIBIDO ABSOLUTAMENTE EN ESTA FASE:",
+    "- NO reenvíes el resumen / la cotización / el desglose de precios. El resumen ya se envió en la fase quote_shown como mensaje estructurado del bot. Si el cliente pide ver el resumen otra vez, responde **literalmente**: 'El resumen ya te lo compartí; el total exacto lo confirmamos al firmar el contrato 📋' y vuelve a pedir los datos del contrato que falten.",
+    "- NO calcules nada numérico: alojamiento, depósito, tarifa, total, abono, 50%, IVA. Si el cliente pregunta '¿cuánto sería?' o '¿cuánto es el abono?', responde **literalmente**: 'El total exacto lo confirmamos en el contrato 📋' y NO inventes cifras.",
+    "- NO escribas listas tipo 'Alojamiento 2 noches: $X', 'Depósito mascotas: $Y', 'Total: $Z'. Eso lo hizo el bot en su mensaje estructurado de quote_shown; tú **solo** pides datos del contrato.",
+    "- NO menciones '50%', 'abono', 'porcentaje', 'cuota'.",
+    "",
     missing.length > 0
-      ? `Datos que aún faltan: ${missing.join(", ")}. Pídelos de forma amable, uno por uno si es posible.`
-      : "Ya tienes todos los datos del contrato. Agradece y confirma que procesarás la reserva.",
+      ? `Datos que aún faltan: ${missing.join(", ")}. Pídelos de forma amable, uno por uno si es posible. Si el cliente intenta desviarse al resumen / pago, retoma con los datos del contrato.`
+      : "Ya tienes todos los datos del contrato. Agradece y confirma que procesarás la reserva. NO menciones precios.",
     "",
     "Datos del contrato recolectados hasta ahora:",
     JSON.stringify(

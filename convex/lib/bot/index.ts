@@ -82,6 +82,17 @@ export interface BotTurnInput {
    * vacío o no es usable, el copy cae a "¡Hola!" sin nombre.
    */
   contactName?: string | null;
+  /**
+   * `productRetailerId`s del ÚLTIMO batch de catálogo enviado en esta
+   * conversación. Lo rellena `inbound.ts` con
+   * `internal.ycloud.getLatestCatalogRetailerIds`. Se usa para resolver picks
+   * ambiguos del cliente: cuando dice "Quiero esta" / "esa" sin más contexto
+   * y el último catálogo contenía exactamente UNA finca, podemos asumir que
+   * se refiere a ella y setear `selectedPropertyRetailerId` automáticamente.
+   * Sin esto, `fetchStayQuote` no podía resolver el retailerId y el resumen
+   * caía al fallback "No pude calcular el valor automático…".
+   */
+  lastCatalogRetailerIds?: string[];
 }
 
 /** Si el cliente lleva más de N turnos consecutivos en la misma fase sin avanzar,
@@ -165,6 +176,35 @@ function isPostCollectingPhase(phase: BotPhase): boolean {
 }
 
 /**
+ * Detecta intención del cliente de ver MÁS opciones del catálogo (paginación).
+ * NO es soft-reset; mantiene los filtros actuales (location, dates, cupo,
+ * etc.) y solicita otro batch de fincas excluyendo las ya enviadas.
+ *
+ * Patrones cubiertos:
+ *   "ver más", "ver mas", "más opciones", "mas opciones", "muéstrame más",
+ *   "muestrame mas", "quiero ver más", "tienes más", "hay más", "más fincas",
+ *   "otras opciones", "otras fincas", "muestra más", "envíame más".
+ */
+function userWantsMoreCatalogOptions(text: string): boolean {
+  const t = String(text ?? "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/\p{M}/gu, "");
+  if (t.length === 0 || t.length > 200) return false;
+  return (
+    /\b(ver|mostrar|muestrame|envia(me)?|env[ií]ame|quiero\s+ver|qu[ie]ero|necesito|dame)\s+(mas|m[aá]s|otras?)\s+(opciones|fincas|alternativas|opcion)\b/.test(
+      t,
+    ) ||
+    /\b(mas|m[aá]s)\s+(opciones|fincas|alternativas)\b/.test(t) ||
+    /\b(otras?)\s+(opciones|fincas|alternativas)\b/.test(t) ||
+    /\b(hay|tienes|tenes|tendr[aá])s?\s+(mas|m[aá]s|otras?)\s*(fincas|opciones|alternativas)?\b/.test(
+      t,
+    ) ||
+    /\b(quiero\s+ver\s+m[aá]s|qu[ie]ero\s+m[aá]s|ver\s+otras?)\b/.test(t)
+  );
+}
+
+/**
  * Campos que filtran el catálogo. Si cualquiera cambia estando ya post-catálogo,
  * el catálogo viejo deja de ser válido y hay que regenerarlo.
  *
@@ -213,6 +253,7 @@ export async function runBotTurn(input: BotTurnInput): Promise<BotTurnResult> {
     currentPhaseEnteredAt,
     faqContext,
     contactName,
+    lastCatalogRetailerIds,
   } = input;
 
   // 1. Extraer entidades del mensaje actual
@@ -335,8 +376,65 @@ export async function runBotTurn(input: BotTurnInput): Promise<BotTurnResult> {
     updatedEntities = mergeEntities(updatedEntities, { selectedPropertyRetailerId: ridGuess });
   }
 
+  // Resolución de pick ambiguo: el cliente dijo "Quiero esta" sin más contexto
+  // (selectedPropertyName quedó como "esta" / "esa" o vacío, y NO trae código
+  // tipo "VLL#002" para que `inferRetailerIdFromCatalogTitle` lo resuelva).
+  // Si el último catálogo contenía EXACTAMENTE UNA finca, asumimos que se
+  // refiere a ella y seteamos el retailerId. Sin esto, `fetchStayQuote` no
+  // resuelve y el resumen cae al fallback "No pude calcular el valor
+  // automático…".
+  //
+  // No aplicamos esta heurística cuando el batch tiene 2+ retailerIds, porque
+  // "esta" ahí es genuinamente ambiguo y necesitamos que el cliente especifique.
+  const pickedVaguelyOrEmpty =
+    !(updatedEntities.selectedPropertyRetailerId ?? "").trim() &&
+    (!updatedEntities.selectedPropertyName?.trim() ||
+      isVaguePropertyLabel(updatedEntities.selectedPropertyName));
+  if (
+    pickedVaguelyOrEmpty &&
+    lastCatalogRetailerIds &&
+    lastCatalogRetailerIds.length === 1
+  ) {
+    const onlyRetailerId = lastCatalogRetailerIds[0].trim();
+    if (onlyRetailerId) {
+      updatedEntities = mergeEntities(updatedEntities, {
+        selectedPropertyRetailerId: onlyRetailerId,
+      });
+    }
+  }
+
   // 3. Calcular transición (determinista)
-  const tr = transition(effectivePhase, updatedEntities, messageText);
+  let tr = transition(effectivePhase, updatedEntities, messageText);
+
+  // 3.05 Paginación del catálogo: si el cliente está en una fase post-catálogo
+  // y pide "ver más opciones", forzamos un nuevo `send_catalog` (con flag
+  // `paginate: true` para que `inbound.ts` aplique `excludeRetailerIds`).
+  // No es soft-reset: mantenemos los filtros (location, dates, cupo, plan,
+  // evento) y simplemente le pedimos al query la SIGUIENTE página de fincas.
+  //
+  // Solo aplica cuando ya tenemos toda la data del catálogo (location +
+  // checkIn + checkOut + cupo). Si falta algo, dejamos el flujo normal.
+  if (
+    userWantsMoreCatalogOptions(messageText) &&
+    isPostCollectingPhase(currentPhase) &&
+    updatedEntities.location &&
+    updatedEntities.checkIn &&
+    updatedEntities.checkOut &&
+    (updatedEntities.cupo ?? 0) > 0
+  ) {
+    tr = {
+      nextPhase: "catalog_sent",
+      action: {
+        type: "send_catalog",
+        location: updatedEntities.location,
+        checkIn: updatedEntities.checkIn,
+        checkOut: updatedEntities.checkOut,
+        cupo: updatedEntities.cupo!,
+        isEvento: updatedEntities.isEvento === true,
+        paginate: true,
+      },
+    };
+  }
 
   // 3.5 Calcular contador de turnos consecutivos SIN PROGRESO en la misma fase.
   // Se resetea a 0 cuando: (a) cambia la fase, (b) el cliente aportó datos

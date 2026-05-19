@@ -714,7 +714,15 @@ export const searchFaqForBot = action({
     if (query.length < 3) return { text: '', title: '', score: 0 };
 
     const namespace = args.namespace ?? FAQ_NAMESPACE;
-    const minScore = args.minScore ?? 0.5;
+    // Default minScore = 0.35 (antes 0.5). Bajamos el umbral porque las
+    // preguntas coloquiales del cliente ("que horarios ahi", "y los horarios?",
+    // "como es el abono") tienen embedding similarity moderada vs. los títulos
+    // formales del FAQ ("Horarios de check-in entrada y salida"). Con 0.5
+    // perdíamos matches válidos. text-embedding-3-small típicamente devuelve
+    // 0.3-0.7 para matches relevantes; 0.35 es un balance entre cobertura y
+    // ruido. Si surgen falsos positivos, subir; si siguen faltando matches,
+    // bajar más.
+    const minScore = args.minScore ?? 0.35;
 
     try {
       const searchResult = await rag.search(ctx, {

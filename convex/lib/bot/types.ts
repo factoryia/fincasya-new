@@ -109,7 +109,21 @@ export interface ExtractedEntities {
 /** Qué acción debe ejecutar el orquestador después de generar el reply. */
 export type BotAction =
   | { type: "reply_only" }
-  | { type: "send_catalog"; location: string; checkIn: string; checkOut: string; cupo: number; isEvento: boolean }
+  | {
+      type: "send_catalog";
+      location: string;
+      checkIn: string;
+      checkOut: string;
+      cupo: number;
+      isEvento: boolean;
+      /**
+       * True cuando el cliente pidió "ver más" / "más opciones". El orquestador
+       * (`inbound.ts`) cargará TODOS los retailerIds ya enviados en esta
+       * conversación y los pasará como `excludeRetailerIds` al query del
+       * catálogo, devolviendo el siguiente batch de fincas distintas.
+       */
+      paginate?: boolean;
+    }
   | {
       type: "escalate_human";
       /** Quién disparó la escalada (para alertas en inbox). */

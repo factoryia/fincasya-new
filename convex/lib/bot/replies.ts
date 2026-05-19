@@ -294,6 +294,38 @@ export async function generateReply(
     };
   }
 
+  // ── Burst con pregunta + dato de flujo ────────────────────────────────────
+  // El cliente envió DOS cosas en el mismo turno (ej. "Tengo 3 mascotas + ¿cuáles
+  // son los horarios?"). El extractor recogió el dato de flujo (mascotas) y la
+  // transición AVANZÓ de fase (pet_check → pet_rules_shown), pero la pregunta
+  // de horarios quedó sin responder porque el FSM emitió el bloque estático de
+  // reglas y el RAG bypass se inhibió (precisamente por estar avanzando).
+  //
+  // Aquí emitimos DOS burbujas separadas en el mismo turno:
+  //   1. La respuesta literal del RAG a la pregunta del cliente.
+  //   2. El mensaje del FSM correspondiente a la nueva fase (`text`).
+  //
+  // Condiciones (TODAS):
+  //   - `faqContext` substancial (>= 30 chars). `searchFaqForBot` ya filtró por
+  //     score y devolvió SOLO el top-1.
+  //   - la transición avanzó de fase (`tr.nextPhase !== currentPhase`).
+  //   - la fase ANTERIOR no era welcome / collecting (donde interrumpir con FAQ
+  //     rompe el flujo de recolección de datos).
+  //   - el FSM ya emitió un texto NO vacío (sino no tiene sentido la segunda
+  //     burbuja).
+  const faqLiteralCompound = (input.faqContext ?? "").trim();
+  const phaseAdvancedCompound = tr.nextPhase !== currentPhase;
+  const compoundPhaseAllowed =
+    currentPhase !== "welcome" && currentPhase !== "collecting";
+  if (
+    faqLiteralCompound.length >= 30 &&
+    phaseAdvancedCompound &&
+    compoundPhaseAllowed &&
+    text.trim().length > 0
+  ) {
+    return { reply: faqLiteralCompound, extras: [text] };
+  }
+
   return { reply: text };
 }
 
@@ -364,11 +396,14 @@ function buildSummaryWithTotals(
     return [intro, stayQuoteBlock.trim()].filter(Boolean).join("\n\n");
   }
 
-  // Sin nada → fallback.
+  // Sin nada → fallback. Texto pensado para NO ser contradictorio con el
+  // pedido de datos del contrato que viene después (antes decía "Un asesor te
+  // confirma el total" pero seguía pidiendo datos para contrato — mensaje
+  // mixto que confundía al cliente).
   if (!stayQuoteTotals) {
     return [
       intro,
-      "No pude calcular el valor automático con los datos guardados. Un asesor te confirma el total en segundos 📲",
+      "El *total exacto* (incluyendo cargos por mascotas si aplica) queda confirmado en el contrato 📋",
     ]
       .filter(Boolean)
       .join("\n\n");
@@ -443,6 +478,24 @@ async function generateReplyText(input: ReplyInput): Promise<string> {
     faqContext,
   } = input;
 
+  // PAGINACIÓN DEL CATÁLOGO: si el cliente pidió "ver más opciones" y el
+  // guard de `index.ts` sobrescribió `tr` con `action: send_catalog +
+  // paginate: true`, devolvemos el texto pre-catálogo de paginación INMEDIA-
+  // TAMENTE — sin pasar por las ramas del FSM ni por el LLM. Si caemos al
+  // LLM, este dice "esas son las opciones" y después llegan las fichas
+  // nuevas de la paginación, generando una respuesta contradictoria.
+  if (
+    tr.action.type === "send_catalog" &&
+    tr.action.paginate === true
+  ) {
+    return [
+      "Aquí van *más opciones* 🏡✨",
+      "",
+      "💰 Cada tarjeta muestra el valor por noche en temporada actual.",
+      "👉 Cuéntame *cuál te llama la atención* y te ayudo con la reserva 🤝",
+    ].join("\n");
+  }
+
   // Si el cliente envió datos útiles en el PRIMER mensaje (fase `welcome`),
   // saltamos el WELCOME_MESSAGE genérico y tratamos la fase efectiva como
   // `collecting` para el resto del flujo (catálogo, missing fields, puente,
@@ -495,10 +548,22 @@ async function generateReplyText(input: ReplyInput): Promise<string> {
   //     construyendo la reserva (dando municipio, fechas, cupo, etc.) — interrumpirlo
   //     con un bloque FAQ rompe el flujo aunque el extractor reconozca alguna
   //     palabra "FAQ-y" en el texto.
+  //   - la transición NO avanza de fase (`tr.nextPhase === currentPhase`). Si
+  //     el cliente progresó el flujo en el mismo turno (ej. "tengo 3 mascotas
+  //     + ¿cuáles son los horarios?"), el wrapper `generateReply` se encarga
+  //     de emitir DOS burbujas separadas: (1) la FAQ literal y (2) el mensaje
+  //     del FSM correspondiente al nuevo phase. Aquí solo cubrimos preguntas
+  //     "puras" donde el cliente NO aportó datos nuevos.
   const faqLiteral = (faqContext ?? "").trim();
   const phaseAllowsRagBypass =
     currentPhase !== "welcome" && currentPhase !== "collecting";
-  if (faqLiteral.length >= 30 && phaseAllowsRagBypass && !isGreetingOrVague) {
+  const phaseAdvancing = tr.nextPhase !== currentPhase;
+  if (
+    faqLiteral.length >= 30 &&
+    phaseAllowsRagBypass &&
+    !isGreetingOrVague &&
+    !phaseAdvancing
+  ) {
     const closing = nextStepFriendlyQuestion(
       currentPhase,
       entities,
@@ -612,14 +677,23 @@ async function generateReplyText(input: ReplyInput): Promise<string> {
       entities.selectedPropertyRetailerId ||
       entities.catalogUserPickedReply;
     if (picked) {
-      return respond(petCheckMessage(propertyDisplayNameForPet(entities)));
+      // Si el cliente solo eligió la finca (sin dar info de mascotas en el
+      // mismo turno), preguntamos por mascotas. Si YA dio info de mascotas
+      // (burst tipo "Quiero esta + Tengo 3 mascotas"), dejamos caer a los
+      // branches de pet_rules_shown / quote_shown según `tr.nextPhase`
+      // — la transición ya tomó esa decisión arriba en `transitions.ts`.
+      if (entities.hasPets === undefined) {
+        return respond(petCheckMessage(propertyDisplayNameForPet(entities)));
+      }
+      // Fall-through al branch que corresponda según tr.nextPhase.
+    } else {
+      if (isGreetingOrVague) {
+        return respond(followUpCatalogSentVagueMessage());
+      }
+      // Cliente preguntó algo (precio, detalles, otra zona, etc.) → LLM
+      // contextual, que ya tiene fase + entidades + reglas anti-invención.
+      return fallback();
     }
-    if (isGreetingOrVague) {
-      return respond(followUpCatalogSentVagueMessage());
-    }
-    // Cliente preguntó algo (precio, detalles, otra zona, etc.) → LLM contextual,
-    // que ya tiene fase + entidades + reglas anti-invención.
-    return fallback();
   }
 
   // ── Property selected → pet check (o confirmación si ya respondió mascotas) ─
@@ -681,14 +755,22 @@ async function generateReplyText(input: ReplyInput): Promise<string> {
   }
 
   // ── Quote shown ─────────────────────────────────────────────────────────
-  // Igual que pet_rules_shown: sólo emitimos el resumen cuando la transición
-  // nos LLEVA a `quote_shown`. Si ya estábamos en `quote_shown` y no avanzó
-  // a `contract`, es que el cliente no confirmó — caemos al LLM contextual.
+  // Sólo emitimos el resumen cuando la transición nos LLEVA a `quote_shown`,
+  // o cuando el cliente se queda en quote_shown sin confirmar claramente. En
+  // este último caso ANTES caíamos al LLM contextual — pero el LLM, al verse
+  // pidiendo un resumen sin tener `stayQuoteTotals` resuelto, inventaba
+  // números absurdos (ej. multiplicaba el precio mal, calculaba 3 depósitos
+  // en lugar de 2 según la política de mascotas). El bug era una violación
+  // sistemática de `ANTI_HALLUCINATION_RULES` que afectaba la cotización
+  // final visible al cliente.
+  //
+  // Solución: cuando estamos en quote_shown stay, re-emitir el MISMO resumen
+  // estructurado (con cotización si está, o fallback "el total exacto se
+  // confirma en el contrato"). Es determinístico y nunca inventa números.
+  // Si el cliente pregunta algo ortogonal (ej. "tienen wifi?"), el wrapper
+  // `generateReply` adicionará la respuesta FAQ como burbuja previa si el
+  // RAG matchea.
   if (tr.nextPhase === "quote_shown") {
-    if (currentPhase === "quote_shown") {
-      // Cliente está en quote_shown pero no confirmó proceder al contrato.
-      return fallback();
-    }
     const intro = entities.hasPets
       ? `Perfecto, anotamos *${Math.max(1, entities.petCount ?? 1)} mascota${(entities.petCount ?? 1) === 1 ? "" : "s"}* 🐾 Te envío el resumen con el costo total:`
       : "Sin mascotas, ¡anotado! 👍 Te comparto el resumen de tu reserva:";
@@ -708,11 +790,22 @@ async function generateReplyText(input: ReplyInput): Promise<string> {
   // ── Contract ──────────────────────────────────────────────────────────────
   if (currentPhase === "contract" || tr.nextPhase === "contract") {
     // Primer turno en contract → pedir todos los datos. Si el bloque ya se envió
-    // recientemente (incluso incrustado en un mensaje compuesto), NO duplicarlo:
-    // usar LLM contextual para reformular puntualmente.
+    // recientemente (incluso incrustado en un mensaje compuesto), NO caemos al
+    // LLM (que tiende a entrar en loops de "¿quieres que te explique?" + invenc-
+    // ión de cálculos de abono). En su lugar, mandamos un recordatorio CORTO
+    // y determinístico que pide los datos puntuales. Solo después de 12+
+    // mensajes desde el primer envío permitimos LLM para reformular puntual-
+    // mente — para entonces ya pasaron varios turnos y el contexto es otro.
     if (!entities.contractName && !entities.contractCedula && !entities.contractEmail) {
-      if (recentlySent(CONTRACT_REQUEST_MESSAGE, conversationHistory, 6)) {
-        return fallback();
+      if (recentlySent(CONTRACT_REQUEST_MESSAGE, conversationHistory, 12)) {
+        return (
+          "Cuando tengas a la mano los datos, me los pasas para preparar el contrato 📋\n\n" +
+          "👤 Nombre completo\n" +
+          "🪪 Cédula\n" +
+          "📧 Correo electrónico\n" +
+          "📱 Teléfono\n" +
+          "🏠 Dirección"
+        );
       }
       return CONTRACT_REQUEST_MESSAGE;
     }

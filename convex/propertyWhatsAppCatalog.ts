@@ -251,3 +251,201 @@ export const detachBrokenPropertyCatalogLink = internalMutation({
     await ctx.db.delete(row._id);
   },
 });
+
+/**
+ * BULK SCRIPT: vincula todas las fincas activas + visibles al catálogo
+ * WhatsApp cuya `locationKeyword` matchee su ubicación.
+ *
+ * Esto es lo que se debe correr cuando se agregan fincas a la BD y se quiere
+ * que aparezcan en los envíos del bot por WhatsApp. Sin esta vinculación, el
+ * query `getPayloadByLocationForN8n` no devuelve esas fincas aunque estén
+ * activas en el catálogo de la web.
+ *
+ * Idempotente: si una finca ya tiene link al catálogo correcto, NO se duplica.
+ * Si una finca no encaja con ninguna `locationKeyword`, se reporta en
+ * `noMatchingCatalog` (no se intenta vincular al default).
+ *
+ * Convención: `productRetailerId = String(propertyId)` (igual que el sync
+ * existente con Meta).
+ *
+ * Uso:
+ *   bunx convex run propertyWhatsAppCatalog:bulkLinkActivePropertiesToWhatsAppCatalogs
+ *   bunx convex run propertyWhatsAppCatalog:bulkLinkActivePropertiesToWhatsAppCatalogs '{"dryRun": true}'
+ *
+ * Con `dryRun: true` no inserta nada, solo retorna el reporte de lo que
+ * haría. Útil para verificar antes de ejecutar el cambio real.
+ *
+ * Nota: NO sincroniza a Meta automáticamente. Después de correr esto, ejecuta
+ * `metaCatalog:resyncAllLinkedPropertiesToMeta` para empujar los cambios al
+ * catálogo de Meta. Los nuevos links recién creados también se programan
+ * automáticamente vía `setPropertyInCatalog` → `syncProductToMetaCatalog`,
+ * pero el resync global garantiza consistencia si algo falló.
+ */
+export const bulkLinkActivePropertiesToWhatsAppCatalogs = mutation({
+  args: {
+    /** Si true, solo retorna el reporte sin insertar links. Default false. */
+    dryRun: v.optional(v.boolean()),
+    /**
+     * Si una finca no matchea ninguna locationKeyword, también vincularla al
+     * catálogo `isDefault: true` (si existe). Default false (la finca queda
+     * sin vincular y aparece en el reporte).
+     */
+    fallbackToDefault: v.optional(v.boolean()),
+  },
+  handler: async (ctx, args) => {
+    const dryRun = args.dryRun === true;
+    const fallbackToDefault = args.fallbackToDefault === true;
+    const now = Date.now();
+
+    const properties = await ctx.db.query("properties").collect();
+    const catalogs = await ctx.db.query("whatsappCatalogs").collect();
+    const allLinks = await ctx.db.query("propertyWhatsAppCatalog").collect();
+
+    const defaultCatalog = catalogs.find((c) => c.isDefault === true) ?? null;
+    const linksByProp = new Map<
+      Id<"properties">,
+      Array<{ catalogId: Id<"whatsappCatalogs">; productRetailerId: string }>
+    >();
+    for (const l of allLinks) {
+      const arr = linksByProp.get(l.propertyId) ?? [];
+      arr.push({
+        catalogId: l.catalogId,
+        productRetailerId: l.productRetailerId,
+      });
+      linksByProp.set(l.propertyId, arr);
+    }
+
+    const report = {
+      totalProperties: properties.length,
+      skippedInactive: 0,
+      skippedInvisible: 0,
+      alreadyLinked: 0,
+      newlyLinked: 0,
+      noMatchingCatalog: 0,
+      linkedToDefault: 0,
+      details: [] as Array<{
+        propertyId: string;
+        title: string | undefined;
+        location: string;
+        action: "skip-inactive" | "skip-invisible" | "already-linked" | "newly-linked" | "linked-to-default" | "no-matching-catalog";
+        catalog?: { id: string; name?: string; locationKeyword?: string };
+      }>,
+    };
+
+    for (const property of properties) {
+      const id = property._id;
+      const title = property.title;
+      const location = String(property.location ?? "");
+      if (property.active === false) {
+        report.skippedInactive++;
+        report.details.push({
+          propertyId: String(id),
+          title,
+          location,
+          action: "skip-inactive",
+        });
+        continue;
+      }
+      if (property.visible === false) {
+        report.skippedInvisible++;
+        report.details.push({
+          propertyId: String(id),
+          title,
+          location,
+          action: "skip-invisible",
+        });
+        continue;
+      }
+
+      const locLower = location.toLowerCase();
+      let matchingCatalog =
+        catalogs.find(
+          (c) =>
+            c.locationKeyword &&
+            locLower.includes(c.locationKeyword.toLowerCase()),
+        ) ?? null;
+      let linkedToDefault = false;
+      if (!matchingCatalog && fallbackToDefault && defaultCatalog) {
+        matchingCatalog = defaultCatalog;
+        linkedToDefault = true;
+      }
+      if (!matchingCatalog) {
+        report.noMatchingCatalog++;
+        report.details.push({
+          propertyId: String(id),
+          title,
+          location,
+          action: "no-matching-catalog",
+        });
+        continue;
+      }
+
+      const propLinks = linksByProp.get(id) ?? [];
+      const existing = propLinks.find((l) => l.catalogId === matchingCatalog._id);
+      if (existing) {
+        report.alreadyLinked++;
+        report.details.push({
+          propertyId: String(id),
+          title,
+          location,
+          action: "already-linked",
+          catalog: {
+            id: String(matchingCatalog._id),
+            name: matchingCatalog.name,
+            locationKeyword: matchingCatalog.locationKeyword,
+          },
+        });
+        continue;
+      }
+
+      if (!dryRun) {
+        const retailerId = String(id);
+        await ctx.db.insert("propertyWhatsAppCatalog", {
+          propertyId: id,
+          catalogId: matchingCatalog._id,
+          productRetailerId: retailerId,
+          createdAt: now,
+          updatedAt: now,
+        });
+        // Programar push a Meta. Si META_CATALOG_ACCESS_TOKEN no está, el
+        // handler de syncProductToMetaCatalog lo loguea y sigue.
+        await ctx.scheduler.runAfter(
+          0,
+          internal.metaCatalog.syncProductToMetaCatalog,
+          {
+            whatsappCatalogId: matchingCatalog.whatsappCatalogId,
+            propertyId: id,
+            method: "CREATE",
+          },
+        );
+      }
+      if (linkedToDefault) report.linkedToDefault++;
+      else report.newlyLinked++;
+      report.details.push({
+        propertyId: String(id),
+        title,
+        location,
+        action: linkedToDefault ? "linked-to-default" : "newly-linked",
+        catalog: {
+          id: String(matchingCatalog._id),
+          name: matchingCatalog.name,
+          locationKeyword: matchingCatalog.locationKeyword,
+        },
+      });
+    }
+
+    return {
+      dryRun,
+      summary: {
+        totalProperties: report.totalProperties,
+        skippedInactive: report.skippedInactive,
+        skippedInvisible: report.skippedInvisible,
+        alreadyLinked: report.alreadyLinked,
+        newlyLinked: report.newlyLinked,
+        linkedToDefault: report.linkedToDefault,
+        noMatchingCatalog: report.noMatchingCatalog,
+      },
+      details: report.details,
+    };
+  },
+});

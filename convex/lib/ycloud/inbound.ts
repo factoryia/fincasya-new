@@ -42,6 +42,108 @@ async function isStillThisTailUserMessage(
  *     de las reglas anteriores. Por sí solas NO disparan (son transaccionales).
  *   - Default: false.
  */
+/**
+ * Detecta si el cliente está pidiendo el modo "alrededores" / multi-zona: en
+ * lugar de un solo municipio, quiere ver opciones de VARIOS lugares cercanos
+ * (o sin preferencia específica). Cuando se detecta, el catálogo amplía el
+ * cap a 25 fincas (vs. las 12 por defecto) y se priorizan las favoritas.
+ *
+ * Patrones cubiertos:
+ *   - "alrededores", "los alrededores", "por los alrededores"
+ *   - "alrededor de Bogotá", "cerca a Bogotá", "cerca de Bogotá"
+ *   - "varias zonas", "diferentes zonas", "varios sitios"
+ *   - "opciones de varios lados", "muestrame opciones cercanas"
+ *
+ * No se confunde con "no preferencia" pura: las frases tipo "no sé / donde sea"
+ * disparan `wantsRecomendadas` en el extractor pero NO se consideran
+ * "alrededores" (el cliente sin preferencia ve el cap normal, no expandido).
+ */
+function wantsExpandedSearch(text: string): boolean {
+  const t = String(text ?? "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/\p{M}/gu, "");
+  if (t.length === 0 || t.length > 240) return false;
+  return (
+    /\b(alrededor(es)?|por\s+los?\s+alrededor(es)?|en\s+los?\s+alrededor(es)?)\b/.test(
+      t,
+    ) ||
+    /\bcerca\s+(a|de|por)\s+(bogota|cundinamarca|la\s+capital)\b/.test(t) ||
+    /\b(varias?|diferentes?|distintas?)\s+(zonas|ciudades|lugares|municipios|sitios)\b/.test(
+      t,
+    ) ||
+    /\b(opciones?|fincas?)\s+(de|en)\s+(varios?|diferentes?|distintas?)\s+(lados|lugares|zonas|sitios|municipios)\b/.test(
+      t,
+    )
+  );
+}
+
+const CATALOG_EXPANDED_LIMIT = 25;
+
+/**
+ * Detecta zonas geográficas que el cliente quiere EXCLUIR del catálogo.
+ * Mapeo macro-zona → keywords de `property.location` que serán filtradas.
+ *
+ * Soporta:
+ *   - "no en los llanos" / "fuera del llano" / "lejos del llano" / "no en el
+ *     llano" / "evita los llanos" → excluye Villavicencio, Restrepo,
+ *     Acacías, Cumaral, Puerto López.
+ *
+ * Para agregar otras zonas en el futuro (ej. "no costa", "no eje cafetero"),
+ * agregar otra entrada al `ZONE_EXCLUSIONS` con la regex de detección y la
+ * lista de keywords.
+ */
+const ZONE_EXCLUSIONS: Array<{
+  triggerRegex: RegExp;
+  excludeLocationKeywords: string[];
+}> = [
+  {
+    triggerRegex:
+      /\b(no\s+(?:en\s+)?(?:los\s+)?llanos?|fuera\s+(?:de\s+)?(?:los\s+)?llanos?|lejos\s+(?:de\s+)?(?:los\s+)?llanos?|no\s+(?:en\s+)?(?:el\s+)?llano|evita\s+(?:los\s+)?llanos?|que\s+no\s+sea\s+(?:en\s+)?(?:los\s+)?llanos?)\b/i,
+    excludeLocationKeywords: [
+      "villavicencio",
+      "restrepo",
+      "acacias",
+      "cumaral",
+      "puerto lopez",
+      "puerto gaitan",
+    ],
+  },
+];
+function detectExcludedZoneKeywords(text: string): string[] {
+  const t = String(text ?? "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/\p{M}/gu, "");
+  const out = new Set<string>();
+  for (const rule of ZONE_EXCLUSIONS) {
+    if (rule.triggerRegex.test(t)) {
+      for (const kw of rule.excludeLocationKeywords) out.add(kw);
+    }
+  }
+  return Array.from(out);
+}
+
+/**
+ * Aísla las líneas del burst que parecen contener UNA PREGUNTA. Se usa para
+ * armar la query del RAG cuando el cliente mezcla data de flujo con una
+ * pregunta en el mismo turno (ej. "3 mascotas\nQué horarios maneja").
+ *
+ * Si NINGUNA línea parece pregunta, devuelve `null` para evitar la llamada
+ * al RAG. Si todo el texto parece pregunta, devuelve el texto original.
+ */
+function extractQuestionLines(text: string): string | null {
+  const lines = String(text ?? "")
+    .split(/\n+/)
+    .map((l) => l.trim())
+    .filter(Boolean);
+  if (lines.length === 0) return null;
+  if (lines.length === 1) return looksLikeQuestion(lines[0]) ? lines[0] : null;
+  const questionLines = lines.filter((l) => looksLikeQuestion(l));
+  if (questionLines.length === 0) return null;
+  return questionLines.join("\n");
+}
+
 function looksLikeQuestion(text: string): boolean {
   const t = String(text ?? "").trim();
   if (t.length < 4 || t.length > 250) return false;
@@ -55,6 +157,23 @@ function looksLikeQuestion(text: string): boolean {
       lower,
     );
   if (startsAsQuestion) return true;
+
+  // Patrones de AFIRMACIÓN: el cliente está aportando datos de flujo, no
+  // preguntando. NUNCA tratar estos como pregunta aunque contengan keywords
+  // FAQ-y (ej. "Voy a llevar 3 mascotas" → mencionando "mascotas" no es una
+  // pregunta sobre la política de mascotas). Sin esta exclusión el RAG hace
+  // match sobre la keyword prominente y termina respondiendo con la FAQ que
+  // el FSM ya iba a emitir como bloque estructurado — duplicando contenido.
+  //
+  // Cubrimos también prefijos de confirmación tipo "si voy a llevar 3 perros",
+  // "dale, llevo 2 gatos", "ok, somos 5", etc. — donde el cliente confirma +
+  // aporta el dato en el mismo mensaje. Sin el prefijo opcional, el check fallaba
+  // porque la línea empezaba con "si"/"dale" y no con el verbo de estado.
+  const isStatementPattern =
+    /^((?:s[ií]|dale|claro|listo|ok+|okey|perfecto|por supuesto)[\s,.\-:]+)?(tengo|llevo|voy\s+(a|con)\b|vamos\s+(a|con)\b|viajo\s+con\b|viajamos\s+con\b|traigo|trae|soy\s+con\b|somos|llevar[ée]|llevamos|ire?\s+con|iremos\s+con|estoy\s+con\b|estamos\s+con\b)\b/.test(
+      lower,
+    );
+  if (isStatementPattern) return false;
 
   // Mensaje corto con términos FAQ inequívocos.
   const shortAndFaqy =
@@ -274,10 +393,55 @@ export async function processInboundMessageV2(
     });
     return;
   }
-  if (replyToWamid) {
+  // Resolución de retailerId vía `replyToWamid`:
+  //
+  // El cliente puede haber enviado un BURST tipo:
+  //   1. "quiero esta" (respondiendo a la tarjeta del catálogo → replyToWamid SET)
+  //   2. "Voy a llevar 3 mascotas" (sin quote → replyToWamid NULL)
+  //
+  // Con el debounce, solo se procesa el ÚLTIMO webhook (mensaje #2). Su
+  // `args.replyToWamid` viene NULL. Si solo miráramos `args.replyToWamid` aquí,
+  // perderíamos la pista del catálogo que el cliente eligió en el mensaje #1.
+  //
+  // Solución: si el webhook actual NO trae replyToWamid, escanear los mensajes
+  // de usuario recientes (desde el último mensaje del asistente) y usar el
+  // PRIMER `replyToWamid` que encontremos en sus metadatos. Esto recupera la
+  // selección del cliente aunque haya sido en un mensaje intermedio del burst.
+  let resolvableReplyToWamid: string = replyToWamid;
+  if (!resolvableReplyToWamid && !(currentEntities.selectedPropertyRetailerId ?? "").trim()) {
+    try {
+      const recentRaw = (await ctx.runQuery(deps.api.messages.listRecent, {
+        conversationId,
+        limit: 12,
+      })) as Array<{
+        sender?: string;
+        content?: string;
+        metadata?: { replyToWamid?: string };
+      }>;
+      // Recorrer DESC desde el más reciente hasta el último mensaje del asistente.
+      for (let i = recentRaw.length - 1; i >= 0; i--) {
+        const m = recentRaw[i];
+        if (m.sender === "assistant") break;
+        if (m.sender === "user") {
+          const w = String(m.metadata?.replyToWamid ?? "").trim();
+          if (w.length >= 8) {
+            resolvableReplyToWamid = w;
+            break;
+          }
+        }
+      }
+    } catch (err) {
+      console.error(
+        "inbound: error escaneando replyToWamid en historial reciente (degradado):",
+        err,
+      );
+    }
+  }
+
+  if (resolvableReplyToWamid) {
     const pick = await ctx.runQuery(deps.internal.ycloud.getCatalogProductByOutboundWamid, {
       conversationId,
-      wamid: replyToWamid,
+      wamid: resolvableReplyToWamid,
     });
     if (pick?.productRetailerId) {
       const prop = await ctx.runQuery(deps.api.whatsappCatalogs.getPropertyByRetailerId, {
@@ -312,17 +476,43 @@ export async function processInboundMessageV2(
   // `searchFaqForBot` ya devuelve SOLO el texto del top-1 entry (no concatena
   // varias FAQs distintas), con su score. Si score < minScore o no hay match,
   // devuelve `text: ""` y caemos al flujo normal sin RAG.
+  //
+  // IMPORTANTE: cuando el cliente envía un burst (varias cosas en mensajes
+  // separados que se mergean con `\n`), por ejemplo "3 mascotas\nQué horarios
+  // maneja", consultar el texto completo hace que el embedding semántico
+  // matchee la palabra más prominente ("mascotas") en lugar de la pregunta
+  // real ("horarios"). El RAG devolvería la FAQ de mascotas — que el FSM ya
+  // va a emitir como pet_rules_shown estructurado — creando una respuesta
+  // duplicada. Por eso aislamos la(s) línea(s) de pregunta del burst antes
+  // de consultar el RAG.
   let faqContext: string | null = null;
-  if (looksLikeQuestion(textForTurn)) {
+  const questionTextForRag = extractQuestionLines(textForTurn);
+  if (questionTextForRag && looksLikeQuestion(questionTextForRag)) {
     try {
       const ragResult = (await ctx.runAction(deps.api.knowledge.searchFaqForBot, {
-        query: textForTurn,
+        query: questionTextForRag,
       })) as { text?: string; title?: string; score?: number } | null;
       const t = String(ragResult?.text ?? "").trim();
       if (t.length > 0) faqContext = t;
     } catch (err) {
       console.error("inbound: searchFaqForBot fallo (degradado, sigue sin RAG):", err);
     }
+  }
+
+  // Recuperar los retailerIds del último batch de catálogo enviado. Se usa en
+  // `runBotTurn` para resolver picks ambiguos del cliente (ej. "Quiero esta")
+  // cuando el último catálogo contenía exactamente UNA finca.
+  let lastCatalogRetailerIds: string[] = [];
+  try {
+    lastCatalogRetailerIds = (await ctx.runQuery(
+      deps.internal.ycloud.getLatestCatalogRetailerIds,
+      { conversationId },
+    )) as string[];
+  } catch (err) {
+    console.error(
+      "inbound: getLatestCatalogRetailerIds fallo (degradado, sigue sin resolver pick vago):",
+      err,
+    );
   }
 
   const result = await deps.runBotTurn({
@@ -334,6 +524,7 @@ export async function processInboundMessageV2(
     currentPhaseEnteredAt,
     faqContext,
     contactName: args.name,
+    lastCatalogRetailerIds,
     fetchStayQuote: async (e: BotEntities) => {
       const rid =
         e.selectedPropertyRetailerId?.trim() ||
@@ -457,6 +648,41 @@ export async function processInboundMessageV2(
     const effectiveMinCapacity =
       action.isEvento && eventPeople > action.cupo ? eventPeople : action.cupo;
 
+    // Paginación: si `action.paginate === true` (cliente pidió "ver más"),
+    // excluimos del query todos los retailerIds ya enviados a esta conversación
+    // para no repetir las mismas fincas.
+    let excludeRetailerIds: string[] = [];
+    if (action.paginate === true) {
+      try {
+        excludeRetailerIds = (await ctx.runQuery(
+          deps.internal.ycloud.getAllCatalogRetailerIdsForConversation,
+          { conversationId },
+        )) as string[];
+      } catch (err) {
+        console.error(
+          "inbound: getAllCatalogRetailerIdsForConversation fallo (paginación degradada):",
+          err,
+        );
+      }
+    }
+
+    // Exclusión por zona: si el cliente pidió "no en los llanos" / "fuera del
+    // llano" / similar, agregamos las palabras clave de esa zona al filtro
+    // del query. Mapping: "llanos" → [Villavicencio, Restrepo, Acacías,
+    // Cumaral, Puerto López]. Para otras zonas geográficas, agregar
+    // mappings adicionales aquí.
+    const excludeLocationKeywords = detectExcludedZoneKeywords(textForTurn);
+
+    // Modo "alrededores" / multi-zona: el cliente quiere ver opciones de
+    // varios lugares cercanos (no un solo municipio específico). En ese caso
+    // ampliamos el cap del catálogo de 12 → 25 para que vea más variedad de
+    // zonas. El sort de favoritas-primero (en `whatsappCatalogs.ts`)
+    // garantiza que las marcadas como favoritas salgan al inicio.
+    const expandedMode = wantsExpandedSearch(textForTurn);
+    const effectiveSendCap = expandedMode
+      ? CATALOG_EXPANDED_LIMIT
+      : MAX_CATALOG_PRODUCTS_PER_SEND;
+
     const catalogPayload = (await ctx.runQuery(
       deps.api.whatsappCatalogs.getPayloadByLocationForN8n,
       {
@@ -473,6 +699,12 @@ export async function processInboundMessageV2(
         // personas para alguien que pidió 22). Ver `capacityCeilRelaxedForCupo`.
         maxCapacityRelaxed: capacityCeilRelaxedForCupo(effectiveMinCapacity),
         isEvento: action.isEvento,
+        excludeRetailerIds,
+        excludeLocationKeywords,
+        // En modo expandido pedimos hasta 25 candidates al query (cap interno
+        // de la query es 30); en modo normal usamos el default (30 también
+        // pero el send se corta a 12).
+        limit: effectiveSendCap,
       },
     )) as {
       catalogId?: string;
@@ -510,7 +742,7 @@ export async function processInboundMessageV2(
         });
       }
 
-      const cap = MAX_CATALOG_PRODUCTS_PER_SEND;
+      const cap = effectiveSendCap;
       const ids = catalogPayload.productRetailerIds.slice(0, cap);
       const lines = (catalogPayload.productQuoteLines ?? []).slice(0, cap);
       const titles = (catalogPayload.productTitles ?? []).slice(0, cap);
@@ -540,6 +772,29 @@ export async function processInboundMessageV2(
             productTitle: title,
           },
           createdAt: tBase + i * 25,
+        });
+      }
+
+      // ── Mensaje de cierre del catálogo ─────────────────────────────────
+      // Después de mandar todas las fichas, enviamos UNA línea final para
+      // cerrar el bloque: el cliente ve un mensaje claro de "estas son las
+      // opciones" + invitación a elegir / pedir más info. Sin esto, el
+      // catálogo termina sin cierre y el cliente queda sin saber qué hacer.
+      //
+      // SE OMITE para eventos (más abajo viene la lógica específica de
+      // preguntas del evento / escalada).
+      if (action.isEvento !== true) {
+        const tClose = Date.now() + 50;
+        const closeMsg =
+          "✨ Perfecto, estas son las *fincas disponibles*. Dime *cuál te gustó* o si quieres información adicional 🤝";
+        await ctx.runMutation(deps.internal.messages.insertAssistantMessage, {
+          conversationId,
+          content: closeMsg,
+          createdAt: tClose,
+        });
+        await ctx.runAction(deps.internal.ycloud.sendWhatsAppMessage, {
+          to: args.phone,
+          text: closeMsg,
         });
       }
 

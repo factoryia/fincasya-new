@@ -126,6 +126,81 @@ export const getCatalogProductByOutboundWamid = internalQuery({
   },
 });
 
+/**
+ * Devuelve TODOS los `productRetailerId` únicos enviados a esta conversación,
+ * para excluirlos en la siguiente página del catálogo cuando el cliente pide
+ * "ver más". Sin esto, el segundo envío repetiría las mismas fincas.
+ */
+export const getAllCatalogRetailerIdsForConversation = internalQuery({
+  args: {
+    conversationId: v.id("conversations"),
+  },
+  handler: async (ctx, args) => {
+    const rows = await ctx.db
+      .query("ycloudCatalogMessageWamids")
+      .withIndex("by_conversation", (q) =>
+        q.eq("conversationId", args.conversationId),
+      )
+      .order("desc")
+      .take(200);
+    const seen = new Set<string>();
+    const out: string[] = [];
+    for (const r of rows) {
+      const rid = r.productRetailerId.trim();
+      if (!rid || seen.has(rid)) continue;
+      seen.add(rid);
+      out.push(rid);
+    }
+    return out;
+  },
+});
+
+/**
+ * Devuelve los `productRetailerId` del ÚLTIMO batch de catálogo enviado en
+ * esta conversación. Definimos "batch" como las entradas con `createdAt`
+ * dentro de una ventana de 5 segundos respecto a la más reciente — el envío
+ * de un catálogo crea N entradas con timestamps casi idénticos.
+ *
+ * Se usa para resolver picks ambiguos del cliente: cuando dice "Quiero esta"
+ * sin más contexto y el último catálogo contenía exactamente UNA finca,
+ * podemos asumir que se refiere a ella y setear `selectedPropertyRetailerId`
+ * automáticamente. Sin esto, `fetchStayQuote` no podía resolver el retailerId
+ * y el resumen caía al fallback "No pude calcular el valor automático...".
+ *
+ * Devuelve `[]` si no hay catálogos enviados o si la conversación no tiene
+ * entradas en `ycloudCatalogMessageWamids`.
+ */
+export const getLatestCatalogRetailerIds = internalQuery({
+  args: {
+    conversationId: v.id("conversations"),
+  },
+  handler: async (ctx, args) => {
+    const rows = await ctx.db
+      .query("ycloudCatalogMessageWamids")
+      .withIndex("by_conversation", (q) =>
+        q.eq("conversationId", args.conversationId),
+      )
+      .order("desc")
+      .take(20);
+    if (rows.length === 0) return [] as string[];
+    const latestTs = rows[0].createdAt;
+    const BATCH_WINDOW_MS = 5000;
+    const batch = rows.filter(
+      (r) => Math.abs(r.createdAt - latestTs) <= BATCH_WINDOW_MS,
+    );
+    // Dedup (defensivo) preservando orden.
+    const seen = new Set<string>();
+    const out: string[] = [];
+    for (const r of batch) {
+      const rid = r.productRetailerId.trim();
+      if (!rid || seen.has(rid)) continue;
+      seen.add(rid);
+      out.push(rid);
+    }
+    return out;
+  },
+});
+
 export const sendWhatsAppCatalogList = internalAction({
   args: {
     to: v.string(),

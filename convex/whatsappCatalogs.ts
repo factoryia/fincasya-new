@@ -437,6 +437,20 @@ export const getPayloadByLocationForN8n = query({
     maxCapacityRelaxed: v.optional(v.number()),
     /** true = solo fincas para eventos; false = excluye fincas de eventos (descanso/familiar); undefined = sin filtro. */
     isEvento: v.optional(v.boolean()),
+    /**
+     * Lista de `productRetailerId` a EXCLUIR del resultado. Se usa para
+     * paginación: cuando el cliente pide "ver más", el inbound pasa los
+     * retailerIds ya enviados (via `getAllCatalogRetailerIdsForConversation`)
+     * y el query devuelve solo fincas nuevas.
+     */
+    excludeRetailerIds: v.optional(v.array(v.string())),
+    /**
+     * Lista de keywords de ubicación a EXCLUIR (cualquier match parcial en
+     * `property.location` descarta la finca). Útil cuando el cliente dice
+     * "no en los llanos" → se pasa `["villavicencio", "restrepo", "acacias",
+     * "cumaral"]` y esas fincas no aparecen.
+     */
+    excludeLocationKeywords: v.optional(v.array(v.string())),
   },
   handler: async (ctx, args) => {
     const cap = Math.min(Math.max(args.limit ?? 30, 1), 30);
@@ -635,8 +649,31 @@ export const getPayloadByLocationForN8n = query({
             keep: (p) =>
               matchesLocation(p) && matchesCapacityRelaxed(p) && matchesEvento(p),
           },
+          // Pasada final cuando enforceClientCupo: respeta el cupo mínimo
+          // pero IGNORA el techo de hospedaje. Captura fincas grandes (ej. 25
+          // PAX para alguien con cupo 13). El cliente decide si son
+          // demasiado grandes o si le sirven. Esta pasada se agrega para
+          // garantizar que el catálogo no quede escaso (objetivo: enviar
+          // mínimo 8 fincas si hay disponibles en la zona).
           ...(enforceClientCupo
-            ? []
+            ? [
+                {
+                  label: "loc+minOnly+ev",
+                  keep: (p: any) => {
+                    const eventEff = catalogPeopleCountForFilter(
+                      p,
+                      args.isEvento,
+                    );
+                    if (
+                      args.minCapacity != null &&
+                      eventEff < args.minCapacity
+                    ) {
+                      return false;
+                    }
+                    return matchesLocation(p) && matchesEvento(p);
+                  },
+                } satisfies Pass,
+              ]
             : [
                 {
                   label: "loc+ev",
@@ -656,6 +693,33 @@ export const getPayloadByLocationForN8n = query({
       property: any;
       retailerId: string;
     };
+    // Set de retailerIds a excluir (paginación: cliente pidió "ver más", ya
+    // vio estas fincas en envíos anteriores).
+    const excludeSet = new Set(
+      (args.excludeRetailerIds ?? []).map((s) => String(s ?? "").trim()).filter(Boolean),
+    );
+
+    // Keywords de ubicación a excluir (cliente dijo "no llanos", etc.).
+    // Normalizamos (lowercase, sin tildes) para matchear `property.location`.
+    const excludeLocationKeywordsLower = (args.excludeLocationKeywords ?? [])
+      .map((k) =>
+        String(k ?? "")
+          .trim()
+          .toLowerCase()
+          .normalize("NFD")
+          .replace(/\p{M}/gu, ""),
+      )
+      .filter(Boolean);
+    const matchesExcludedLocation = (p: any): boolean => {
+      if (excludeLocationKeywordsLower.length === 0) return false;
+      const propLocLower = String(p.location ?? "")
+        .toLowerCase()
+        .normalize("NFD")
+        .replace(/\p{M}/gu, "");
+      if (!propLocLower) return false;
+      return excludeLocationKeywordsLower.some((kw) => propLocLower.includes(kw));
+    };
+
     // Materializa links con propiedad ya cargada (evita re-leer entre pasadas).
     const candidates: LinkProp[] = [];
     for (const link of links) {
@@ -663,8 +727,51 @@ export const getPayloadByLocationForN8n = query({
       if (!p || p.active === false || p.visible === false) continue;
       const id = String(link.productRetailerId || "").trim();
       if (!id) continue;
+      if (excludeSet.has(id)) continue;
+      if (matchesExcludedLocation(p)) continue;
       candidates.push({ link, property: p, retailerId: id });
     }
+
+    // Ordenar candidatos por TIERS:
+    //   1. Favoritas primero (`isFavorite === true`) — política comercial:
+    //      las fincas marcadas como favoritas son las que el equipo quiere
+    //      destacar primero al cliente.
+    //   2. Dentro de cada tier, por PROXIMIDAD al cupo solicitado (closest
+    //      match) — un cliente pidiendo 13 personas ve 13 → 14 → 15 → 16 →
+    //      ... → 25 PAX en ese orden, no mezclado.
+    //   3. Empate por distancia: precio asc (cliente ve opciones más baratas
+    //      primero), luego orden alfabético del título para consistencia.
+    //
+    // Métrica de proximidad: `effectivePeopleCount` (para eventos =
+    // max(capacity, eventCapacity); para descanso = capacity). Distancia
+    // = |effective - cupo|.
+    //
+    // Si no se pasó `minCapacity` (cliente sin cupo definido), el orden es
+    // solo favoritas → no-favoritas (sin sort por distancia porque no
+    // tenemos referencia).
+    candidates.sort((a, b) => {
+      // Tier 1: favoritas primero
+      const aFav = a.property.isFavorite === true ? 0 : 1;
+      const bFav = b.property.isFavorite === true ? 0 : 1;
+      if (aFav !== bFav) return aFav - bFav;
+
+      // Tier 2: proximidad al cupo (solo si hay cupo)
+      if (args.minCapacity != null && args.minCapacity > 0) {
+        const targetCupo = args.minCapacity;
+        const aEff = catalogPeopleCountForFilter(a.property, args.isEvento);
+        const bEff = catalogPeopleCountForFilter(b.property, args.isEvento);
+        const aDist = Math.abs(aEff - targetCupo);
+        const bDist = Math.abs(bEff - targetCupo);
+        if (aDist !== bDist) return aDist - bDist;
+      }
+
+      // Tier 3: precio asc (más barato primero)
+      const aPrice = Number(a.property.priceBase ?? 0);
+      const bPrice = Number(b.property.priceBase ?? 0);
+      if (aPrice !== bPrice) return aPrice - bPrice;
+
+      return 0;
+    });
 
     for (const pass of passes) {
       if (productRetailerIds.length >= cap) break;
@@ -763,6 +870,255 @@ export const getPropertyByRetailerId = query({
       slug: (property.slug ?? property.code ?? "").trim(),
       imageUrl,
       priceBase: typeof property.priceBase === "number" ? property.priceBase : 0,
+    };
+  },
+});
+
+/**
+ * Diagnóstico: explica POR QUÉ una finca específica aparece o NO aparece en
+ * el catálogo WhatsApp para una búsqueda dada. Util para debuggear casos como
+ * "Villa Nativa no me sale en Villavicencio aunque la veo en la web".
+ *
+ * Devuelve cada paso de verificación con un veredicto (`pass` / `fail`) y la
+ * razón. La usuaria/admin puede correr esto desde el panel o `bunx convex run`:
+ *
+ *   bunx convex run whatsappCatalogs:diagnoseCatalogFincaVisibility '{
+ *     "productRetailerIdOrSlug": "VC#016",
+ *     "location": "Villavicencio",
+ *     "cupo": 13,
+ *     "isEvento": false
+ *   }'
+ */
+export const diagnoseCatalogFincaVisibility = query({
+  args: {
+    /** Puede ser productRetailerId (ej. "VC#016") o slug de la finca. */
+    productRetailerIdOrSlug: v.string(),
+    /** Municipio que el cliente solicitó (ej. "Villavicencio"). */
+    location: v.string(),
+    /** Cupo solicitado (personas). */
+    cupo: v.number(),
+    /** Si es evento. */
+    isEvento: v.optional(v.boolean()),
+  },
+  handler: async (ctx, args) => {
+    const steps: Array<{
+      step: string;
+      verdict: "pass" | "fail" | "info";
+      detail: string;
+    }> = [];
+    const id = args.productRetailerIdOrSlug.trim();
+    if (!id) {
+      return {
+        steps: [
+          {
+            step: "input",
+            verdict: "fail" as const,
+            detail: "productRetailerIdOrSlug vacío",
+          },
+        ],
+      };
+    }
+
+    // 1. Encontrar el catálogo WhatsApp para la ubicación pedida.
+    const catalogs = await ctx.db.query("whatsappCatalogs").collect();
+    const locLower = args.location.trim().toLowerCase();
+    const byKw = catalogs.find(
+      (c) =>
+        c.locationKeyword &&
+        locLower.includes(c.locationKeyword.toLowerCase()),
+    );
+    const byDefault = catalogs.find((c) => c.isDefault === true);
+    const catalog = byKw ?? byDefault ?? catalogs[0] ?? null;
+    if (!catalog) {
+      steps.push({
+        step: "catálogo-por-ubicación",
+        verdict: "fail",
+        detail: "No hay catálogos WhatsApp configurados en la BD.",
+      });
+      return { steps };
+    }
+    steps.push({
+      step: "catálogo-por-ubicación",
+      verdict: "pass",
+      detail: `Usando catálogo "${catalog.name ?? catalog._id}" (locationKeyword="${catalog.locationKeyword ?? ""}", isDefault=${catalog.isDefault === true}).`,
+    });
+
+    // 2. Buscar la finca: por productRetailerId en links O por slug en properties.
+    const allLinks = await ctx.db
+      .query("propertyWhatsAppCatalog")
+      .withIndex("by_catalog", (q) => q.eq("catalogId", catalog._id))
+      .collect();
+    let link = allLinks.find(
+      (l) => String(l.productRetailerId || "").trim() === id,
+    );
+    let property: any = null;
+    if (link) {
+      property = await ctx.db.get(link.propertyId);
+      steps.push({
+        step: "link-por-retailerId",
+        verdict: "pass",
+        detail: `Link encontrado: productRetailerId="${link.productRetailerId}", propertyId="${link.propertyId}".`,
+      });
+    } else {
+      // Buscar property por slug/code y luego ver si tiene link a este catálogo.
+      const props = await ctx.db.query("properties").collect();
+      const propBySlug = props.find(
+        (p) =>
+          (p.slug ?? "").trim().toLowerCase() === id.toLowerCase() ||
+          (p.code ?? "").trim().toLowerCase() === id.toLowerCase(),
+      );
+      if (propBySlug) {
+        property = propBySlug;
+        const allLinksGlobal = await ctx.db
+          .query("propertyWhatsAppCatalog")
+          .collect();
+        const linksForThisProp = allLinksGlobal.filter(
+          (l) => l.propertyId === propBySlug._id,
+        );
+        if (linksForThisProp.length === 0) {
+          steps.push({
+            step: "link-por-slug",
+            verdict: "fail",
+            detail: `La finca "${propBySlug.title ?? propBySlug.slug}" existe en \`properties\` (id=${propBySlug._id}) pero NO está vinculada a NINGÚN catálogo WhatsApp. Hay que crear el link en \`propertyWhatsAppCatalog\` desde el panel admin con el productRetailerId correcto.`,
+          });
+          return { steps, property: { id: propBySlug._id, title: propBySlug.title } };
+        }
+        const linkForThisCatalog = linksForThisProp.find(
+          (l) => l.catalogId === catalog._id,
+        );
+        if (!linkForThisCatalog) {
+          steps.push({
+            step: "link-por-slug",
+            verdict: "fail",
+            detail: `La finca "${propBySlug.title}" está vinculada a OTRO catálogo (no al de "${catalog.locationKeyword ?? catalog.name}"). Vinculaciones existentes: ${linksForThisProp
+              .map((l) => `catalogId=${l.catalogId} retailerId=${l.productRetailerId}`)
+              .join(" | ")}.`,
+          });
+          return { steps, property: { id: propBySlug._id, title: propBySlug.title } };
+        }
+        link = linkForThisCatalog;
+        steps.push({
+          step: "link-por-slug",
+          verdict: "pass",
+          detail: `Link encontrado para este catálogo: retailerId="${link.productRetailerId}".`,
+        });
+      } else {
+        steps.push({
+          step: "buscar-finca",
+          verdict: "fail",
+          detail: `No se encontró ninguna finca con productRetailerId="${id}", slug="${id}", ni code="${id}". Verifica el código exacto.`,
+        });
+        return { steps };
+      }
+    }
+    if (!property) {
+      steps.push({
+        step: "cargar-property",
+        verdict: "fail",
+        detail: `Link existe pero property con id ${link?.propertyId} no se pudo cargar.`,
+      });
+      return { steps };
+    }
+
+    // 3. Flags active/visible.
+    if (property.active === false) {
+      steps.push({
+        step: "flag-active",
+        verdict: "fail",
+        detail: "property.active === false → excluida del catálogo.",
+      });
+    } else {
+      steps.push({
+        step: "flag-active",
+        verdict: "pass",
+        detail: `active=${property.active ?? "(unset, OK)"}`,
+      });
+    }
+    if (property.visible === false) {
+      steps.push({
+        step: "flag-visible",
+        verdict: "fail",
+        detail: "property.visible === false → excluida del catálogo.",
+      });
+    } else {
+      steps.push({
+        step: "flag-visible",
+        verdict: "pass",
+        detail: `visible=${property.visible ?? "(unset, OK)"}`,
+      });
+    }
+
+    // 4. Filtro de ubicación (loc en property.location).
+    const propLocLower = String(property.location ?? "").toLowerCase();
+    const matchesLoc = propLocLower.includes(locLower);
+    steps.push({
+      step: "filtro-ubicación",
+      verdict: matchesLoc ? "pass" : "fail",
+      detail: matchesLoc
+        ? `property.location="${property.location}" contiene "${args.location}".`
+        : `property.location="${property.location}" NO contiene "${args.location}". Esto la excluye del catálogo en esta búsqueda.`,
+    });
+
+    // 5. Filtro de capacidad.
+    const eventEff = catalogPeopleCountForFilter(property, args.isEvento);
+    const sleepCap = Math.max(0, Number(property.capacity ?? 0));
+    const minOk = args.cupo > 0 ? eventEff >= args.cupo : true;
+    steps.push({
+      step: "filtro-capacidad-min",
+      verdict: minOk ? "pass" : "fail",
+      detail: `effectivePeopleCount=${eventEff} ${minOk ? ">=" : "<"} cupo solicitado=${args.cupo}. (sleepCapacity=${sleepCap}${args.isEvento ? ", eventCapacity=" + (property.eventCapacity ?? "unset") : ""})`,
+    });
+    steps.push({
+      step: "filtro-capacidad-max",
+      verdict: "info",
+      detail: `sleepCapacity=${sleepCap}. Para descanso, el techo estricto es cupo+buffer (cupo 13 → max 19) y el relajado ~1.7x (max 23). Para eventos NO se aplica techo. Sin pasar el techo, la pasada estricta o relajada la incluye; con el nuevo pase "loc+minOnly+ev" se incluye independiente del techo.`,
+    });
+
+    // 6. Filtro de eventos (familyOnly / allowsEventsContent).
+    if (args.isEvento === true) {
+      if (property.familyOnly === true) {
+        steps.push({
+          step: "filtro-evento",
+          verdict: "info",
+          detail: "property.familyOnly=true. Anteriormente la excluía; ahora `matchesEvento` devuelve true siempre, así que NO se filtra.",
+        });
+      } else if (property.allowsEventsContent === false) {
+        steps.push({
+          step: "filtro-evento",
+          verdict: "info",
+          detail: "property.allowsEventsContent=false. Anteriormente la excluía; ahora `matchesEvento` devuelve true siempre, así que NO se filtra.",
+        });
+      } else {
+        steps.push({
+          step: "filtro-evento",
+          verdict: "pass",
+          detail: "Cumple filtros de evento (allowsEventsContent y familyOnly).",
+        });
+      }
+    } else {
+      steps.push({
+        step: "filtro-evento",
+        verdict: "info",
+        detail: "Búsqueda no-evento → `matchesEvento` no aplica restricciones.",
+      });
+    }
+
+    return {
+      steps,
+      property: {
+        id: property._id,
+        title: property.title,
+        location: property.location,
+        capacity: property.capacity,
+        eventCapacity: property.eventCapacity,
+        familyOnly: property.familyOnly,
+        allowsEventsContent: property.allowsEventsContent,
+        active: property.active,
+        visible: property.visible,
+      },
+      link: link
+        ? { productRetailerId: link.productRetailerId, catalogId: link.catalogId }
+        : null,
     };
   },
 });

@@ -63,11 +63,14 @@ Reglas estrictas:
 - planType: "familia"|"amigos"|"empresa"|"pareja"|"otro" — solo si el cliente indica tipo de grupo.
              "empresa" si dice empresarial/corporativo/equipo de trabajo. NO rellenes planType solo porque dijo "van 10" o un número.
 - location: nombre exacto del municipio, o "RECOMENDADAS" si el cliente expresa que no tiene
-  preferencia / no conoce / quiere que recomendemos. Patrones que cuentan como RECOMENDADAS:
+  preferencia / no conoce / quiere que recomendemos / quiere ver varias zonas. Patrones:
   "no sé", "no se", "no tengo lugar", "no tengo idea", "no tengo preferencia", "no tengo en mente",
   "donde sea", "donde recomiendes", "donde tú me digas", "lo que tú me digas", "cualquier lugar",
   "cualquier zona", "cualquiera", "da igual", "me da lo mismo", "tú decides", "sorpréndeme",
-  "recomiéndame", "recomiéndeme", "que me recomiendes", "lo que sugieras", "lo que prefieras".
+  "recomiéndame", "recomiéndeme", "que me recomiendes", "lo que sugieras", "lo que prefieras",
+  **"alrededores"**, **"los alrededores"**, **"por los alrededores"**, **"cerca a Bogotá"**,
+  **"cerca de Bogotá"**, **"alrededor de Bogotá"**, **"varias zonas"**, **"diferentes zonas"**,
+  **"opciones de diferentes lugares"**, **"varios sitios"**.
   Si dice cualquier variante de las anteriores → location="RECOMENDADAS".
 - wantsRecomendadas: true si encaja con cualquier patrón de los anteriores.
 - selectedPropertyName: nombre claro de una finca (título real). Si solo dice "esta", "esa", "quiero esta", etc., **omite** el campo (no inventes nombre).

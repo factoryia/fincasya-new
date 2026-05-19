@@ -70,8 +70,21 @@ export function transition(
       entities.selectedPropertyName ||
       entities.selectedPropertyRetailerId ||
       entities.catalogUserPickedReply;
-    // Ir directo a mascotas (evita fase intermedia y doble pregunta).
     if (picked) {
+      // Si en el MISMO turno el cliente ya entregó info de mascotas (burst tipo
+      // "Quiero esta + Tengo 3 mascotas"), saltamos pet_check para no volver a
+      // preguntar lo mismo.
+      if (
+        entities.hasPets === true &&
+        (entities.petCount ?? 0) > 0
+      ) {
+        return { nextPhase: "pet_rules_shown", action: { type: "reply_only" } };
+      }
+      if (entities.hasPets === false) {
+        return { nextPhase: "quote_shown", action: { type: "reply_only" } };
+      }
+      // Caso normal: cliente eligió pero falta info de mascotas → pet_check.
+      // (También cubre hasPets=true && petCount undefined: pet_check pide el número.)
       return { nextPhase: "pet_check", action: { type: "reply_only" } };
     }
     return { nextPhase: "catalog_sent", action: { type: "reply_only" } };
@@ -269,24 +282,57 @@ function clientConfirms(text: string): boolean | null {
     .normalize("NFD")
     .replace(/\p{M}/gu, "")
     .trim();
-  if (t.length === 0 || t.length > 120) return null;
-  if (
-    /^(si|sii+|sip|claro|dale|listo|ok+|okey|perfecto|de acuerdo|procede|procedamos|continua|continuemos|adelante|sigamos|por supuesto|esta bien|todo bien|hagamoslo|hagamos|hagamoslo|sigue|avancemos|avanza|me sirve|me parece|de una|si por favor)\W*$/i.test(
-      t,
-    )
-  ) {
-    return true;
+  if (t.length === 0 || t.length > 240) return null;
+
+  // El cliente puede enviar un burst con varias cosas: la confirmación primero,
+  // y después una pregunta o un dato extra. Ejemplo: "si,\ncuales son los
+  // horarios". Si NO partimos por líneas, la regex estricta `^si\W*$` falla
+  // porque el texto completo no termina con "si"; entonces no se confirma y
+  // la transición se queda en pet_rules_shown / quote_shown, cayendo al LLM
+  // (que termina parafraseando y prometiendo el resumen sin entregarlo).
+  //
+  // Evaluamos cada LÍNEA independientemente: si CUALQUIERA matchea la
+  // confirmación estricta, devolvemos true. Idem para negación.
+  const lines = t
+    .split(/\n+/)
+    .map((l) => l.trim())
+    .filter(Boolean);
+
+  for (const line of lines) {
+    if (line.length === 0 || line.length > 120) continue;
+    if (
+      /^(si|sii+|sip|claro|dale|listo|ok+|okey|perfecto|de acuerdo|procede|procedamos|continua|continuemos|adelante|sigamos|por supuesto|esta bien|todo bien|hagamoslo|hagamos|sigue|avancemos|avanza|me sirve|me parece|de una|si por favor)\W*$/i.test(
+        line,
+      )
+    ) {
+      return true;
+    }
+    if (/\b(s[ií]\s+(procedamos|continuemos|sigamos|hagamoslo|avancemos))\b/.test(line)) {
+      return true;
+    }
+    // Frustración + afirmación: el cliente repite que ya confirmó ("ya te dije
+    // que sí", "ya dije que sí", "te dije sí", "ya te dije dale", etc.). Antes
+    // estos quedaban sin reconocer y el bot se atascaba re-emitiendo el mismo
+    // resumen / pregunta.
+    if (
+      /\b(ya\s+)?(te\s+|le\s+|lo\s+)?dij[eo]\s+(que\s+)?(s[ií]|dale|ok+|claro|listo|procede(mos)?)\b/.test(
+        line,
+      )
+    ) {
+      return true;
+    }
   }
-  // Frases que contienen "sí" + algo más pero claramente afirman.
-  if (/\b(s[ií]\s+(procedamos|continuemos|sigamos|hagamoslo|avancemos))\b/.test(t)) {
-    return true;
+
+  for (const line of lines) {
+    if (line.length === 0 || line.length > 120) continue;
+    if (
+      /^(no|nop+|nope|negativo|cancela|cancelar|olvidalo|olvidar|mejor no|aun no|todavia no)\W*$/i.test(
+        line,
+      )
+    ) {
+      return false;
+    }
   }
-  if (
-    /^(no|nop+|nope|negativo|cancela|cancelar|olvidalo|olvidar|mejor no|aun no|todavia no)\W*$/i.test(
-      t,
-    )
-  ) {
-    return false;
-  }
+
   return null;
 }
