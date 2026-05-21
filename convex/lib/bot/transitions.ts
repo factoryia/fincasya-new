@@ -188,9 +188,12 @@ function transitionCollecting(
 
   // Temporadas especiales (Navidad / Fin de año / Reyes) — TIENEN PRIORIDAD
   // sobre el puente normal porque sus mínimos son específicos (3, 6, 2 noches).
-  // El bloqueo se ignora si `puenteAcknowledged=true` igual que el puente normal
-  // (en realidad ese flag se resetea al cambiar fechas, así que si el cliente
-  // ajusta y cumple el mínimo, el bloqueo desaparece naturalmente).
+  // BLOQUEO DURO: mientras las fechas no cumplan el mínimo de noches, el FSM
+  // NUNCA progresa al catálogo (no importa `puenteAcknowledged`). El flag solo
+  // controla aviso completo vs recordatorio corto en `replies.ts`. Si el
+  // cliente extiende las fechas y cumple el mínimo, el bloqueo desaparece
+  // naturalmente (la condición deja de cumplirse). Si nunca las corrige, el
+  // anti-bucle de `index.ts` lo escala a un asesor humano.
   if (
     entities.checkIn &&
     entities.checkOut &&
@@ -199,7 +202,7 @@ function transitionCollecting(
     const checkInMs = ymdToBogotaNoonMs(entities.checkIn);
     const checkOutMs = ymdToBogotaNoonMs(entities.checkOut);
     const specialBlock = shouldBlockCatalogForSpecialSeason(checkInMs, checkOutMs);
-    if (specialBlock && !entities.puenteAcknowledged) {
+    if (specialBlock) {
       const stillMissing = firstMissingCatalogField(entities);
       return {
         nextPhase: "collecting",
@@ -210,12 +213,16 @@ function transitionCollecting(
     }
   }
 
-  // Puente / 1 noche: avisar UNA SOLA VEZ por combinación de fechas.
-  // Si el cliente ya recibió el aviso (puenteAcknowledged=true), no volver a bloquear:
-  // sigue el flujo normal de collecting. El flag se resetea cuando cambian las fechas
-  // (ver `replies.ts` / `extractor`: al setear nuevas checkIn/checkOut limpiamos el flag).
+  // Puente / 1 noche — BLOQUEO DURO. Regla comercial: en un puente festivo
+  // manejamos mínimo 2 noches. Mientras las fechas sean 1 noche sobre un
+  // puente, el FSM NUNCA envía el catálogo (no importa `puenteAcknowledged`,
+  // que solo decide aviso completo vs recordatorio corto en `replies.ts`).
+  // Antes el flag hacía "avisar una vez y dejar pasar" → el bot decía
+  // "mínimo 2 noches" y luego igual mandaba el catálogo de 1 noche
+  // (incoherente). Ahora se cumple lo que se dice: si el cliente extiende a
+  // 2+ noches el bloqueo cae; si insiste en 1 noche, el anti-bucle de
+  // `index.ts` lo escala a un asesor humano.
   if (
-    !entities.puenteAcknowledged &&
     entities.checkIn &&
     entities.checkOut &&
     areDatesCoherent(entities)

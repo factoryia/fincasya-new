@@ -1,7 +1,19 @@
 import { v } from 'convex/values';
-import { internalMutation, internalQuery } from './_generated/server';
+import { internalMutation, internalQuery, query } from './_generated/server';
 
 const GLOBAL_SCOPE = 'global' as const;
+
+/** Snapshot global del contrato (admin, cláusulas, propietario por finca). Usado al generar .docx. */
+export const getGlobalPayload = query({
+  args: {},
+  handler: async (ctx) => {
+    const row = await ctx.db
+      .query('adminContractSettings')
+      .withIndex('by_scope', (q) => q.eq('scope', GLOBAL_SCOPE))
+      .unique();
+    return row?.payload ?? null;
+  },
+});
 
 export const getForAdmin = internalQuery({
   args: {},

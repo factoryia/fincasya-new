@@ -33,8 +33,10 @@ import {
   nextStepFriendlyQuestion,
 } from "./prompts";
 import {
+  buildPuenteExplanationEs,
   buildPuenteFollowUpConversationEs,
   buildPuenteShortNoticeEs,
+  buildPuenteShortReminderEs,
   buildSpecialSeasonNoticeEs,
   buildSpecialSeasonShortReminderEs,
 } from "../colombiaPublicHolidays";
@@ -81,6 +83,42 @@ function planTypeWhyAnswerAndReask(): string {
     `No es para subir precio por decir “amigos” o “familiar” 🙂\n\n` +
     `¿Van más en plan *familiar*, con *amigos* o *empresarial*? 👨‍👩‍👧‍👦`
   ).trim();
+}
+
+/**
+ * El cliente NO entiende el aviso de puente y pide una explicación:
+ * "¿cómo así que un puente festivo?", "¿qué es eso?", "no entiendo",
+ * "¿por qué 2 noches?". Distinto de `userAsksPuenteAlternative` (que pide
+ * otra fecha / una sola noche).
+ */
+function userAsksWhatIsPuente(incomingText: string): boolean {
+  const t = String(incomingText ?? "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/\p{M}/gu, "");
+  const asksWhatWhy =
+    /\b(como\s+as[ií]|que\s+es|qu[eé]\s+significa|por\s+qu[eé]|no\s+entiendo|a\s+que\s+te\s+refieres|expl[ií]ca\w*|expl[ií]que\w*|no\s+s[eé]\s+que\s+es)\b/.test(
+      t,
+    );
+  const mentionsPuente = /\b(puente|festivo|feriado|2\s+noches|dos\s+noches)\b/.test(
+    t,
+  );
+  return asksWhatWhy && mentionsPuente;
+}
+
+/**
+ * ¿El fragmento del RAG es la *política de mascotas*? Se usa para NO duplicar:
+ * el bloque `pet_rules_shown` del FSM YA es la política de mascotas completa
+ * (mismo contenido que la FAQ `faq:mascotas-politica`), así que compoundar esa
+ * FAQ encima sería repetir lo mismo dos veces (bug "le repitió el mensaje de
+ * mascotas"). Distintos a otras FAQs (wifi, horarios…), que sí deben mostrarse.
+ */
+function faqLooksLikePetPolicy(faq: string): boolean {
+  const t = String(faq ?? "").toLowerCase();
+  return (
+    /\b(mascota|perr|gato)/.test(t) &&
+    /(deposito|dep[oó]sito|piscina|pelaje|muebles|muerdan)/.test(t)
+  );
 }
 
 function userAsksPuenteAlternative(incomingText: string): boolean {
@@ -228,6 +266,49 @@ export type GenerateReplyResult = {
 };
 
 /**
+ * Cupo mínimo para considerar una reserva "de capacidad de grupo" y disparar
+ * el mensaje complementario de personal de servicio (Escenario B del spec).
+ * Reservas más pequeñas (parejas, familias chicas) no lo reciben.
+ */
+const PERSONAL_SERVICIO_GROUP_THRESHOLD = 10;
+
+/**
+ * Mensaje complementario sobre PERSONAL DE SERVICIO (Escenario B del spec).
+ *
+ * Se envía automáticamente como burbuja informativa cuando el cliente ve la
+ * cotización (entra a `quote_shown`) de un hospedaje con capacidad de grupo
+ * (`cupo >= PERSONAL_SERVICIO_GROUP_THRESHOLD`). NO es respuesta a una
+ * pregunta — por eso el opener es "Un dato útil…" en vez de "¡Claro que sí!"
+ * (ese copy formal es el de la FAQ, Escenario A, que responde cuando el
+ * cliente pregunta explícitamente).
+ *
+ * Regla de negocio: si `cupo > 15`, el párrafo que sugiere contratar 2
+ * personas de servicio se RESALTA (⚠️ + mención explícita del tamaño del
+ * grupo) para darle prioridad visual, según el spec.
+ */
+function buildPersonalServicioInfo(cupo: number): string {
+  const bigGroup = cupo > 15;
+  const dosPersonasLine = bigGroup
+    ? `• ⚠️ *Tu grupo es de ${cupo} personas:* para asegurar una atención excelente durante las ~8 horas de servicio, *te recomendamos contratar 2 personas de servicio* ✅.`
+    : "• 👥 *Grupos mayores a 15 personas:* sugerimos contratar 2 personas de servicio para garantizar una atención excelente ✅.";
+  return [
+    "💡 Un dato útil para tu estadía — *personal de servicio*:",
+    "",
+    "🤝 Podemos recomendarte personal de confianza que te colabore con la *cocina y el aseo* durante tu estadía.",
+    "",
+    "• ⏰ *Duración:* la tarifa cubre una jornada de ~8 horas de servicio ⏳.",
+    "• 💰 *Precio:* desde $100.000 COP por día, según la temporada ☀️.",
+    "• 📋 *Condiciones:* los costos finales y las tareas específicas las coordinas directamente con la persona que te presentemos.",
+    "",
+    "⚠️ *Importante:*",
+    dosPersonasLine,
+    "• 🏠 En algunas fincas la contratación del personal de servicio es *obligatoria* por políticas de cuidado de la casa.",
+    "",
+    "Si quieres que te contactemos con el personal para tu fecha, avísale a tu asesor para coordinarlo 👨‍💻✨",
+  ].join("\n");
+}
+
+/**
  * Genera la respuesta del bot para este turno. Puede ser 1 mensaje (caso normal)
  * o varios (paquete tras `pet_check` → contrato, que se descompone en mascotas /
  * resumen / pedido de datos para evitar el muro de texto en WhatsApp).
@@ -285,13 +366,19 @@ export async function generateReply(
       tr.datesIncoherent === true ||
       tr.action.type === "send_catalog");
   if (firstTurnHasContent) {
-    return {
-      reply: [
-        buildShortGreeting(input.contactName),
-        "",
-        text,
-      ].join("\n"),
-    };
+    const greeting = buildShortGreeting(input.contactName);
+    // Si además el cliente hizo una pregunta clara en su primer mensaje
+    // (`faqContext` poblado por el RAG), la respondemos como PRIMERA burbuja
+    // (con el saludo corto) y dejamos los datos faltantes como segunda. Sin
+    // esto la pregunta quedaría sin responder.
+    const faqFirstTurn = (input.faqContext ?? "").trim();
+    if (faqFirstTurn.length >= 30 && text.trim().length > 0) {
+      return {
+        reply: [greeting, "", faqFirstTurn].join("\n"),
+        extras: [text],
+      };
+    }
+    return { reply: [greeting, "", text].join("\n") };
   }
 
   // ── Burst con pregunta + dato de flujo ────────────────────────────────────
@@ -317,13 +404,63 @@ export async function generateReply(
   const phaseAdvancedCompound = tr.nextPhase !== currentPhase;
   const compoundPhaseAllowed =
     currentPhase !== "welcome" && currentPhase !== "collecting";
+
+  // ── Personal de servicio — Escenario B (mensaje automático) ───────────────
+  // Cuando el cliente ENTRA a `quote_shown` (acaba de "cotizar", ve el resumen
+  // con totales) Y la reserva es de capacidad de grupo, adjuntamos una burbuja
+  // informativa sobre el personal de servicio. Solo al ENTRAR (no al quedarse
+  // en quote_shown re-emitiendo el resumen) → se envía exactamente una vez.
+  const enteringQuoteShown =
+    tr.nextPhase === "quote_shown" && currentPhase !== "quote_shown";
+  const personalServicioExtra =
+    enteringQuoteShown &&
+    (entities.cupo ?? 0) >= PERSONAL_SERVICIO_GROUP_THRESHOLD
+      ? buildPersonalServicioInfo(entities.cupo as number)
+      : null;
+
+  // Defensa anti-duplicado: si el FSM va a emitir el bloque `pet_rules_shown`
+  // (que YA es la política de mascotas completa) y la FAQ matcheada es
+  // justamente la de mascotas, NO compoundamos — sería el MISMO contenido dos
+  // veces. Otras FAQs (wifi, horarios, ubicación…) sí se compoundan normal.
+  const faqDuplicatesPetBlock =
+    tr.nextPhase === "pet_rules_shown" &&
+    faqLooksLikePetPolicy(faqLiteralCompound);
+
   if (
     faqLiteralCompound.length >= 30 &&
     phaseAdvancedCompound &&
     compoundPhaseAllowed &&
+    text.trim().length > 0 &&
+    !faqDuplicatesPetBlock
+  ) {
+    const extras = personalServicioExtra
+      ? [text, personalServicioExtra]
+      : [text];
+    return { reply: faqLiteralCompound, extras };
+  }
+
+  // ── Pregunta FAQ durante welcome / collecting ─────────────────────────────
+  // El cliente hizo una pregunta clara (ej. "¿tienen personal de servicio?")
+  // mientras aún se recogen los datos de la reserva. El RAG-bypass de
+  // `generateReplyText` se inhibe en welcome/collecting (para no interrumpir
+  // la recolección con FAQs disparadas por palabras sueltas), así que sin
+  // esto la pregunta del cliente quedaba SIN responder.
+  //
+  // Es seguro responderla aquí: `faqContext` solo viene poblado cuando
+  // `inbound.ts` ya clasificó el mensaje como pregunta REAL — `looksLikeQuestion`
+  // excluye los statements tipo "tengo 3 perros" / "somos 10" — y además hubo
+  // match con score suficiente en el RAG. Emitimos 2 burbujas: (1) la
+  // respuesta FAQ literal y (2) la pregunta del FSM por los datos que faltan.
+  if (
+    (currentPhase === "welcome" || currentPhase === "collecting") &&
+    faqLiteralCompound.length >= 30 &&
     text.trim().length > 0
   ) {
     return { reply: faqLiteralCompound, extras: [text] };
+  }
+
+  if (personalServicioExtra) {
+    return { reply: text, extras: [personalServicioExtra] };
   }
 
   return { reply: text };
@@ -626,7 +763,15 @@ async function generateReplyText(input: ReplyInput): Promise<string> {
 
   // ── Collecting: pregunta por campo faltante ───────────────────────────────
   if (currentPhase === "collecting" || tr.nextPhase === "collecting") {
-    if (tr.datesIncoherent) return respond(datesIncoherentMessage(entities));
+    // Fechas incoherentes = BLOQUEO duro. Devolvemos el texto DIRECTO (sin
+    // `respond()`): si cayéramos al `fallback()` por anti-repetición (el
+    // mensaje ya se envió un turno antes), el LLM IGNORA el problema de
+    // fechas y alucina un happy-path — "¡Ya tengo todo, te envío el
+    // catálogo!" — sin que el catálogo exista (las fechas inválidas impiden
+    // generarlo). Repetir la pregunta de fechas es correcto y necesario; el
+    // anti-bucle de `index.ts` (con `madeProgress` bloqueado por fechas
+    // incoherentes) escala a un asesor si el cliente nunca las corrige.
+    if (tr.datesIncoherent) return datesIncoherentMessage(entities);
     const userSaysTheyAlreadyAnswered =
       /\b(ya te hab[ií]a dicho|ya te lo dije|ya te dije|eso ya te|pero si te dije|ya lo dije arriba)\b/i.test(
         incomingText,
@@ -660,13 +805,28 @@ async function generateReplyText(input: ReplyInput): Promise<string> {
       );
     }
     if (tr.catalogPuenteOneNight) {
+      // BLOQUEO DURO de puente: SIEMPRE devolvemos texto DIRECTO (sin
+      // `respond()`). Si cayéramos al `fallback()` por anti-repetición el LLM
+      // ignoraría el bloqueo y alucinaría "ya tengo todo, te envío el
+      // catálogo" — el mismo bug que teníamos con `datesIncoherent`. Repetir
+      // el recordatorio de puente es correcto; el anti-bucle de `index.ts`
+      // escala a un asesor si el cliente nunca extiende las fechas.
       if (entities.checkIn && entities.checkOut) {
-        if (userAsksPuenteAlternative(incomingText)) {
-          return respond(buildPuenteFollowUpConversationEs(entities.checkIn, entities.checkOut));
+        // "¿cómo así que un puente festivo?" → explicación clara.
+        if (userAsksWhatIsPuente(incomingText)) {
+          return buildPuenteExplanationEs(entities.checkIn, entities.checkOut);
         }
-        return respond(buildPuenteShortNoticeEs(entities.checkIn, entities.checkOut));
+        // El cliente pide/insiste en 1 noche u otra fecha → copy de seguimiento.
+        if (userAsksPuenteAlternative(incomingText)) {
+          return buildPuenteFollowUpConversationEs(entities.checkIn, entities.checkOut);
+        }
+        // 1er turno con bloqueo → aviso completo (nombra el festivo).
+        // 2º+ turno (ya avisado, no extendió fechas) → recordatorio corto.
+        return entities.puenteAcknowledged === true
+          ? buildPuenteShortReminderEs(entities.checkIn, entities.checkOut)
+          : buildPuenteShortNoticeEs(entities.checkIn, entities.checkOut);
       }
-      return respond(buildPuenteShortNoticeEs("", ""));
+      return buildPuenteShortNoticeEs("", "");
     }
     if (tr.missingField === "planType" && userAsksWhyPlanTypeMatters(incomingText)) {
       return respond(planTypeWhyAnswerAndReask());

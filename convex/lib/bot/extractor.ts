@@ -62,8 +62,19 @@ Reglas estrictas:
              "Familiar/amigos" como tipo de grupo NO implica isEvento.
 - planType: "familia"|"amigos"|"empresa"|"pareja"|"otro" — solo si el cliente indica tipo de grupo.
              "empresa" si dice empresarial/corporativo/equipo de trabajo. NO rellenes planType solo porque dijo "van 10" o un número.
-- location: nombre exacto del municipio, o "RECOMENDADAS" si el cliente expresa que no tiene
-  preferencia / no conoce / quiere que recomendemos / quiere ver varias zonas. Patrones:
+- location: nombre del municipio colombiano, CORREGIDO Y NORMALIZADO. El cliente
+  escribe rápido y con errores — DEBES interpretar y devolver el nombre real
+  del municipio, no el texto literal. Ejemplos de corrección de typos:
+    "melar", "mlgar", "melgr", "melgaar" → "Melgar"
+    "viavicencio", "villaviciencio", "vilavicencio", "villavi" → "Villavicencio"
+    "jirardot", "girardó", "girardot" → "Girardot"
+    "anapoma", "anapoyma" → "Anapoima"
+    "carmen apicala", "apicala", "carmen de apical" → "Carmen de Apicalá"
+    "restrpo", "restrepo" → "Restrepo"
+  Reconoce el municipio aunque venga con preposición ("en melar", "para melgar",
+  "voy a melgar"), en minúsculas, sin tildes o con typos de 1-2 letras.
+  Devuelve "RECOMENDADAS" si el cliente expresa que NO tiene preferencia /
+  no conoce / quiere que recomendemos / quiere ver varias zonas. Patrones:
   "no sé", "no se", "no tengo lugar", "no tengo idea", "no tengo preferencia", "no tengo en mente",
   "donde sea", "donde recomiendes", "donde tú me digas", "lo que tú me digas", "cualquier lugar",
   "cualquier zona", "cualquiera", "da igual", "me da lo mismo", "tú decides", "sorpréndeme",
@@ -100,6 +111,16 @@ Reglas estrictas:
     "no" si dice "no", "cancela", "olvídalo", "mejor no", "todavía no", "negativo".
     null si la respuesta es ambigua, una pregunta, o no es respuesta directa a algo del bot.
   Solo lo defines si el ÚLTIMO mensaje del asistente contenía una pregunta de confirmación.
+- requestsHumanAgent: true | false — true SOLO si el cliente pide EXPLÍCITAMENTE hablar
+  con un humano / asesor / agente / persona real, o expresa que el bot no le sirve.
+  Ejemplos true: "quiero hablar con un asesor", "pásame con alguien real", "necesito
+    una persona", "me pueden llamar?", "este bot no me sirve", "quiero atención humana",
+    "comuníqueme con un agente", "ya me cansé de este bot".
+  Ejemplos false (NO es petición de humano): "somos 13 personas", "5 personas familia"
+    (está dando el cupo), "voy a llamar a mi familia", cualquier mensaje que solo
+    da datos de la reserva (fechas, municipio, cupo, mascotas) o hace preguntas
+    normales sobre fincas. Ante la duda → false.
+  Omite el campo (no lo incluyas) si es false — solo ponlo cuando sea true.
 MEMORIA / TURNO ACTUAL:
 - NUNCA pongas cadenas vacías. Si un campo no cambia en este mensaje, **omítelo** del JSON (no uses "").
 - Si el mensaje actual solo aclara municipio, "no sé", "recomiéndame", etc., **no vuelvas a incluir** checkIn/checkOut salvo que el cliente **cambie** las fechas en este mensaje.

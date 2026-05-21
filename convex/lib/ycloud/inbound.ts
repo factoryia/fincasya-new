@@ -99,6 +99,54 @@ function wantsExpandedSearch(text: string): boolean {
   );
 }
 
+/**
+ * Detecta si el cliente pregunta por un PASADÍA (plan de día sin hospedaje).
+ *
+ * El pasadía es un servicio aparte: el cliente llega en la mañana y se va en
+ * la tarde, sin pernoctar. Tiene reglas propias (solo Villavicencio, martes a
+ * jueves, 9am-5pm) y el valor lo configura un asesor.
+ *
+ * Triggers: "pasadía", "pasar el día", "pasar un día", "plan de día",
+ * "day pass", "solo por el día" (sin quedarse a dormir).
+ */
+function looksLikePasadia(text: string): boolean {
+  const t = String(text ?? "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/\p{M}/gu, "");
+  if (t.length === 0 || t.length > 240) return false;
+  return (
+    /\bpasa?d[ií]as?\b/.test(t) ||
+    /\bpasar\s+(el|un|los?)\s+d[ií]as?\b/.test(t) ||
+    /\bplan\s+de\s+d[ií]a\b/.test(t) ||
+    /\bday\s*pass\b/.test(t) ||
+    /\b(solo|nada\s+mas|unicamente)\s+(por\s+)?el\s+d[ií]a\b/.test(t)
+  );
+}
+
+/**
+ * ¿El último mensaje del asistente fue el OFRECIMIENTO de pasadía (turno 1)?
+ * Se usa para saber que el mensaje actual del cliente es la RESPUESTA a ese
+ * ofrecimiento (turno 2) — el cliente normalmente contesta "sí" / "no" /
+ * "quiero hospedaje", sin repetir la palabra "pasadía", así que no se puede
+ * depender de `looksLikePasadia` para detectar el turno 2.
+ *
+ * Firma: el mensaje del turno 1 contiene "*pasadías*" + "martes a jueves".
+ * Los mensajes de cierre / escalada de pasadía NO llevan "martes a jueves",
+ * así que no generan falso positivo (no hay bucle).
+ */
+function lastAssistantMsgIsPasadiaOffer(
+  msgs: Array<{ sender?: string; content?: string }>,
+): boolean {
+  for (let i = msgs.length - 1; i >= 0; i--) {
+    if (msgs[i].sender === "assistant") {
+      const c = String(msgs[i].content ?? "").toLowerCase();
+      return c.includes("pasad") && c.includes("martes a jueves");
+    }
+  }
+  return false;
+}
+
 const CATALOG_EXPANDED_LIMIT = 25;
 
 /**
@@ -285,23 +333,25 @@ function detectRestrictedZoneKeywords(text: string): string[] {
 }
 
 /**
- * Aísla las líneas del burst que parecen contener UNA PREGUNTA. Se usa para
- * armar la query del RAG cuando el cliente mezcla data de flujo con una
- * pregunta en el mismo turno (ej. "3 mascotas\nQué horarios maneja").
+ * Aísla las líneas del burst que parecen contener UNA PREGUNTA. Devuelve un
+ * ARRAY: cada elemento es una pregunta separada. El cliente suele mezclar
+ * varias preguntas + datos de flujo en un mismo burst:
+ *   "Esta opción me gusta\nHay algo adicional?\nCuáles son los horarios\nTengo 2 mascotas"
+ * → preguntas = ["Hay algo adicional?", "Cuáles son los horarios"]
  *
- * Si NINGUNA línea parece pregunta, devuelve `null` para evitar la llamada
- * al RAG. Si todo el texto parece pregunta, devuelve el texto original.
+ * Cada pregunta se consulta por separado en el RAG (ver `inbound.ts`), para
+ * que el bot pueda responder TODAS — no solo la primera que matchee.
+ *
+ * Si NINGUNA línea parece pregunta, devuelve `[]`.
  */
-function extractQuestionLines(text: string): string | null {
+function extractQuestionLinesArray(text: string): string[] {
   const lines = String(text ?? "")
     .split(/\n+/)
     .map((l) => l.trim())
     .filter(Boolean);
-  if (lines.length === 0) return null;
-  if (lines.length === 1) return looksLikeQuestion(lines[0]) ? lines[0] : null;
-  const questionLines = lines.filter((l) => looksLikeQuestion(l));
-  if (questionLines.length === 0) return null;
-  return questionLines.join("\n");
+  if (lines.length === 0) return [];
+  if (lines.length === 1) return looksLikeQuestion(lines[0]) ? [lines[0]] : [];
+  return lines.filter((l) => looksLikeQuestion(l));
 }
 
 function looksLikeQuestion(text: string): boolean {
@@ -335,10 +385,37 @@ function looksLikeQuestion(text: string): boolean {
     );
   if (isStatementPattern) return false;
 
+  // Respuesta de DATO puro: "2 perros", "3 mascotas", "17 personas", "2",
+  // "dos perros", "1 niño". El cliente está RESPONDIENDO un dato del flujo
+  // (cuántas mascotas / personas) que el bot le acaba de preguntar — NO está
+  // preguntando. Sin esta exclusión, "2 perros" matchea `perros` en
+  // `shortAndFaqy`, dispara la FAQ de mascotas, y el wrapper la compounda con
+  // el bloque `pet_rules_shown` del FSM → el cliente ve la política de
+  // mascotas DOS veces (bug reportado: "le repitió el mensaje de mascotas").
+  const isBareDataAnswer =
+    /^(\d{1,3}|un[oa]?|dos|tres|cuatro|cinco|seis|siete|ocho|nueve|diez)\s*(perr[oa]s?|gat[oa]s?|mascotas?|personas?|pax|adultos?|ninos?|noches?|dias?)?[\s.!]*$/.test(
+      lower,
+    );
+  if (isBareDataAnswer) return false;
+
+  // RECHAZO / negación: "no quiero personal de servicio", "no gracias",
+  // "no necesito", "no". El cliente está DECLINANDO algo, NO preguntando —
+  // aunque la frase contenga una keyword FAQ-y ("personal de servicio").
+  // Sin esto, "NO QUIERO PERSONAL DE SERVICIO" matchea `personal de servicio`
+  // en `shortAndFaqy`, dispara la FAQ y el bot le RE-ENVÍA todo el bloque de
+  // personal de servicio que el cliente acaba de rechazar.
+  const isRefusalStatement =
+    /^no\b[\s,.!]*$/.test(lower) ||
+    /^no\s+(quiero|necesito|deseo|requiero|me\s+interesa|voy\s+a|gracias|por\s+ahora|hace\s+falta)\b/.test(
+      lower,
+    ) ||
+    /^(no\s+gracias|as[ií]\s+esta\s+bien|nada\s+mas\s+gracias)\b/.test(lower);
+  if (isRefusalStatement) return false;
+
   // Mensaje corto con términos FAQ inequívocos.
   const shortAndFaqy =
-    t.length <= 120 &&
-    /\b(horario|horarios|check ?in|check ?out|hora\s+de\s+(entrada|salida|llegada|llegar)|mascota|mascotas|perr[oa]s?|gatos?|piscina|jacuzzi|bbq|raza|cancelaci[oó]n|cancelar|forma[s]?\s+de\s+pago|metodo[s]?\s+de\s+pago|c[oó]mo\s+pago|c[oó]mo\s+se\s+paga|pol[ií]tica|reglas?)\b/.test(
+    t.length <= 140 &&
+    /\b(horario|horarios|check ?in|check ?out|hora\s+de\s+(entrada|salida|llegada|llegar)|mascota|mascotas|perr[oa]s?|gatos?|piscina|jacuzzi|bbq|raza|cancelaci[oó]n|cancelar|forma[s]?\s+de\s+pago|metodo[s]?\s+de\s+pago|c[oó]mo\s+pago|c[oó]mo\s+se\s+paga|pol[ií]tica|reglas?|personal\s+de\s+servicio|cocinera|empleada|servicio\s+dom[eé]stico|aseo|ubicaci[oó]n|direcci[oó]n|d[oó]nde\s+queda|d[oó]nde\s+esta|c[oó]mo\s+llego|early\s+check|late\s+check|entrada\s+anticipada|salida\s+tardia)\b/.test(
       lower,
     );
   if (shortAndFaqy) return true;
@@ -452,8 +529,14 @@ export async function processInboundMessageV2(
     );
 
   // Petición explícita de asesor humano (flujo normal, no necesariamente queja).
+  //
+  // ⚠️ CRÍTICO: NO incluir la palabra suelta "persona". El cliente dice
+  // constantemente "somos 13 personas", "13 persona familia", "para 5
+  // personas" al dar el cupo — eso NO es pedir un asesor. Igual con la
+  // palabra suelta "llamar" ("voy a llamar a mi familia"). Solo cuentan
+  // patrones inequívocos de petición de atención humana.
   const wantsHumanGeneric =
-    /\b(hablar con|llamar|asesor|humano|persona real|agente|persona|alguien (me )?ayud[ae]|me (puede|pueden) ayudar real|atencion humana|servicio al cliente|no me sirve (este|el) bot|no entiend[eo]s? nada|ya me cans[eé])\b/.test(
+    /\b(hablar con (un |una )?(asesor|agente|persona|humano|alguien)|persona real|asesor|agente|atencion humana|servicio al cliente|comunicame con|pasame con|me comunican con|que me llamen|me pueden llamar|alguien (me )?ayud[ae]|me (puede|pueden) ayudar real|no me sirve (este|el) bot|no entiend[eo]s? nada|ya me cans[eé] del bot)\b/.test(
       lowerText,
     );
 
@@ -498,6 +581,139 @@ export async function processInboundMessageV2(
   const currentSamePhaseTurnCount = session?.samePhaseTurnCount ?? 0;
   const currentPhaseEnteredAt = session?.phaseEnteredAt ?? Date.now();
   let currentEntities = session?.entities ?? {};
+
+  // ── PASADÍA (plan de día, sin hospedaje) — flujo de 2 turnos ─────────────
+  // El pasadía es un servicio aparte del hospedaje: SOLO Villavicencio, martes
+  // a jueves, 9am-5pm, y el VALOR lo confirma un asesor (no está automatizado).
+  //
+  //   TURNO 1 — el cliente menciona "pasadía" → el bot explica las condiciones
+  //     (solo Villavicencio) y pregunta si quiere continuar con el pasadía
+  //     (→ asesor) o prefiere reservar una finca para hospedaje. NO envía
+  //     catálogo, NO escala, NO re-pregunta datos que el cliente ya dio.
+  //   TURNO 2 — el cliente responde al ofrecimiento:
+  //     • Quiere hospedaje / otra reserva → cae al flujo normal (runBotTurn).
+  //     • Declina del todo → cierre cordial breve, sin escalar.
+  //     • Cualquier otra cosa (confirma el pasadía) → escala al asesor.
+  //
+  // Solo dispara en fases tempranas (welcome / collecting / catalog_sent).
+  const pasadiaPhaseOk =
+    currentPhase === "welcome" ||
+    currentPhase === "collecting" ||
+    currentPhase === "catalog_sent";
+  const isPasadiaFollowUp =
+    pasadiaPhaseOk && lastAssistantMsgIsPasadiaOffer(recentForBurst);
+  const isPasadiaTrigger =
+    pasadiaPhaseOk && !isPasadiaFollowUp && looksLikePasadia(textForTurn);
+
+  if (isPasadiaTrigger) {
+    // TURNO 1 — explicar condiciones + preguntar. SIN catálogo, SIN escalar.
+    const tPas = Date.now();
+    const pasadiaMsg = [
+      "¡Hola! ☀️ Qué buena idea planear un día de descanso.",
+      "",
+      "Te cuento que nuestros *pasadías* funcionan bajo estas condiciones:",
+      "",
+      "• 📍 *Ubicación:* disponible *únicamente en Villavicencio*.",
+      "• 📅 *Días:* entre semana, de martes a jueves.",
+      "• ⏰ *Horario:* de 9:00 a.m. a 5:00 p.m.",
+      "",
+      "El *valor* del pasadía lo confirma directamente un asesor.",
+      "",
+      "¿Quieres que te conecte con un asesor para coordinar tu *pasadía en Villavicencio*? 🤝",
+      "",
+      "O si prefieres, te ayudo a *reservar una finca para hospedaje* (con noche) en la fecha y el lugar que quieras 🏡",
+    ].join("\n");
+    await ctx.runMutation(deps.internal.messages.insertAssistantMessage, {
+      conversationId,
+      content: pasadiaMsg,
+      createdAt: tPas,
+    });
+    await ctx.runAction(deps.internal.ycloud.sendWhatsAppMessage, {
+      to: args.phone,
+      text: pasadiaMsg,
+      wamid: args.wamid,
+    });
+    await ctx.runMutation(deps.internal.conversations.updateLastMessageAt, {
+      conversationId,
+    });
+    return;
+  }
+
+  if (isPasadiaFollowUp) {
+    // TURNO 2 — el cliente respondió al ofrecimiento del pasadía.
+    const wantsHospedajeInstead =
+      /\b(hospedaje|hospedarme|hospedarnos|alojamiento|alojarme|reservar (una )?finca|alquilar (una )?finca|con noche|por noche|noches?|dormir|quedarnos|quedarme|pernoctar|otra fecha|otras fechas|mas fechas|otro lugar|otro municipio|otra ciudad|otra zona)\b/.test(
+        lowerText,
+      );
+    const declinesEverything =
+      !wantsHospedajeInstead &&
+      /^(no|no gracias|nada mas|ya no|ninguno|asi no|no por ahora)\b[\s.!]*$/.test(
+        lowerText,
+      );
+
+    if (wantsHospedajeInstead) {
+      // El cliente pivotó a hospedaje normal → NO escalamos ni enviamos
+      // catálogo aquí: dejamos que el flujo normal (`runBotTurn`, más abajo)
+      // recoja los datos. No hacemos `return`.
+    } else if (declinesEverything) {
+      // El cliente no quiere nada más → cierre cordial breve, sin escalar.
+      const tDecl = Date.now();
+      const declMsg =
+        "Entiendo 🙏 El *pasadía* lo manejamos únicamente en Villavicencio. Si más adelante quieres reservar una finca para *hospedaje*, con gusto te ayudo 🏡✨";
+      await ctx.runMutation(deps.internal.messages.insertAssistantMessage, {
+        conversationId,
+        content: declMsg,
+        createdAt: tDecl,
+      });
+      await ctx.runAction(deps.internal.ycloud.sendWhatsAppMessage, {
+        to: args.phone,
+        text: declMsg,
+        wamid: args.wamid,
+      });
+      await ctx.runMutation(deps.internal.conversations.updateLastMessageAt, {
+        conversationId,
+      });
+      return;
+    } else {
+      // El cliente confirma interés en el pasadía → escalar al asesor (el
+      // valor del pasadía es manual, no está en el flujo automatizado).
+      const tEsc = Date.now();
+      const escMsg = [
+        "¡Listo! ☀️ Te conecto con un asesor que coordina la *disponibilidad* y el *valor* de tu pasadía en Villavicencio.",
+        "",
+        "En breve te escribe para ayudarte 🤝 ✨",
+      ].join("\n");
+      await ctx.runMutation(deps.internal.conversations.escalate, {
+        conversationId,
+        assignedUserId:
+          process.env.CHATBOT_AUTO_ASSIGN_ADVISOR_ID?.trim() || undefined,
+      });
+      await ctx.runMutation(deps.internal.messages.insertAssistantMessage, {
+        conversationId,
+        content: escMsg,
+        createdAt: tEsc,
+      });
+      await ctx.runAction(deps.internal.ycloud.sendWhatsAppMessage, {
+        to: args.phone,
+        text: escMsg,
+        wamid: args.wamid,
+      });
+      await ctx.runMutation(deps.internal.messages.insertSystemMessage, {
+        conversationId,
+        content:
+          "☀️ El cliente confirmó interés en un PASADÍA (plan de día). Coordinar disponibilidad (solo Villavicencio, mar-jue, 9am-5pm) y el valor. La IA quedó en pausa.",
+        createdAt: tEsc + 5,
+        metadata: {
+          kind: "inbox_escalation_alert",
+          escalationReason: "pasadia_request",
+        },
+      });
+      await ctx.runMutation(deps.internal.conversations.updateLastMessageAt, {
+        conversationId,
+      });
+      return;
+    }
+  }
 
   // ── Media en fases post-catálogo → escalar a humano ──────────────────────
   // En `contract` / `quote_shown` / `pet_rules_shown` / `pet_check` / `done`,
@@ -645,17 +861,31 @@ export async function processInboundMessageV2(
   // va a emitir como pet_rules_shown estructurado — creando una respuesta
   // duplicada. Por eso aislamos la(s) línea(s) de pregunta del burst antes
   // de consultar el RAG.
+  // RAG por CADA pregunta del burst. El cliente puede preguntar varias cosas
+  // a la vez ("hay algo adicional?" + "cuáles son los horarios?"); consultamos
+  // el RAG una vez por pregunta y combinamos los fragmentos distintos. Cap de
+  // 3 preguntas para acotar costo de embeddings + latencia.
   let faqContext: string | null = null;
-  const questionTextForRag = extractQuestionLines(textForTurn);
-  if (questionTextForRag && looksLikeQuestion(questionTextForRag)) {
-    try {
-      const ragResult = (await ctx.runAction(deps.api.knowledge.searchFaqForBot, {
-        query: questionTextForRag,
-      })) as { text?: string; title?: string; score?: number } | null;
-      const t = String(ragResult?.text ?? "").trim();
-      if (t.length > 0) faqContext = t;
-    } catch (err) {
-      console.error("inbound: searchFaqForBot fallo (degradado, sigue sin RAG):", err);
+  const questionLines = extractQuestionLinesArray(textForTurn);
+  if (questionLines.length > 0) {
+    const faqChunks: string[] = [];
+    for (const q of questionLines.slice(0, 3)) {
+      if (!looksLikeQuestion(q)) continue;
+      try {
+        const ragResult = (await ctx.runAction(deps.api.knowledge.searchFaqForBot, {
+          query: q,
+        })) as { text?: string; title?: string; score?: number } | null;
+        const t = String(ragResult?.text ?? "").trim();
+        // Evitar duplicados: dos preguntas distintas pueden matchear la misma FAQ.
+        if (t.length > 0 && !faqChunks.some((c) => c === t)) {
+          faqChunks.push(t);
+        }
+      } catch (err) {
+        console.error("inbound: searchFaqForBot fallo (degradado, sigue sin RAG):", err);
+      }
+    }
+    if (faqChunks.length > 0) {
+      faqContext = faqChunks.join("\n\n━━━━━━━━━━\n\n");
     }
   }
 
@@ -1149,7 +1379,9 @@ export async function processInboundMessageV2(
                 ? "🎉 Evento confirmado: cliente recibió el catálogo. Confirmar precio y condiciones del evento (logística + capacidad). La IA quedó en pausa."
                 : reason === "media_post_catalog"
                   ? "📎 Cliente envió archivo/foto en fase post-catálogo. Revisar (cédula, comprobante, doc). La IA quedó en pausa."
-                  : "ℹ️ Conversación pasada a asesor humano. La IA quedó en pausa.";
+                  : reason === "client_requested"
+                    ? "📣 El cliente pidió hablar con un asesor. Revisar conversación y contactar. La IA quedó en pausa."
+                    : "ℹ️ Conversación pasada a asesor humano. La IA quedó en pausa.";
     await ctx.runMutation(deps.internal.messages.insertSystemMessage, {
       conversationId,
       content: alertBody,

@@ -123,6 +123,158 @@ export function countCatalogNights(fechaEntrada: number, fechaSalida: number): n
   return Math.max(0, Math.round((fechaSalida - fechaEntrada) / 86_400_000));
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Resolver de referencias tipo "segundo puente de agosto" → fechas concretas
+// ─────────────────────────────────────────────────────────────────────────────
+
+const MONTH_NAMES_ES: Record<string, number> = {
+  enero: 1,
+  febrero: 2,
+  marzo: 3,
+  abril: 4,
+  mayo: 5,
+  junio: 6,
+  julio: 7,
+  agosto: 8,
+  septiembre: 9,
+  setiembre: 9,
+  octubre: 10,
+  noviembre: 11,
+  diciembre: 12,
+};
+
+/** "primer/segundo/tercer/cuarto/ultimo" → índice 1..4 (o -1 para último). */
+const ORDINAL_MAP: Record<string, number> = {
+  primer: 1,
+  primero: 1,
+  primera: 1,
+  "1": 1,
+  "1er": 1,
+  "1ro": 1,
+  "1ra": 1,
+  segundo: 2,
+  segunda: 2,
+  "2": 2,
+  "2do": 2,
+  "2da": 2,
+  tercer: 3,
+  tercero: 3,
+  tercera: 3,
+  "3": 3,
+  "3er": 3,
+  "3ro": 3,
+  "3ra": 3,
+  cuarto: 4,
+  cuarta: 4,
+  "4": 4,
+  "4to": 4,
+  "4ta": 4,
+  ultimo: -1,
+  ultima: -1,
+};
+
+/** Festivos del calendario que caen en un mes/año dado, en orden ascendente. */
+function holidaysInMonth(year: number, month: number): string[] {
+  const out: string[] = [];
+  for (const ymd of CO_PUBLIC_HOLIDAYS) {
+    const [y, m] = ymd.split("-").map((x) => parseInt(x, 10));
+    if (y === year && m === month) out.push(ymd);
+  }
+  return out.sort();
+}
+
+/**
+ * Dado un festivo (YMD), calcula el rango del PUENTE que genera:
+ *  - Festivo en lunes  → puente Sáb-Dom-Lun: entrada sábado, salida lunes (2 noches).
+ *  - Festivo en viernes → puente Vie-Sáb-Dom: entrada viernes, salida domingo (2 noches).
+ *  - Festivo en otro día → no genera puente estándar → null.
+ */
+function puenteRangeForHoliday(
+  ymd: string,
+): { checkIn: string; checkOut: string } | null {
+  const [y, m, d] = ymd.split("-").map((x) => parseInt(x, 10));
+  const holidayMs = bogotaWallClockNoon(y, m, d).getTime();
+  const weekday = bogotaWeekdayShort(holidayMs);
+  if (weekday === "Mon") {
+    const sat = new Date(holidayMs);
+    sat.setDate(sat.getDate() - 2);
+    return { checkIn: toYmdColombia(sat.getTime()), checkOut: ymd };
+  }
+  if (weekday === "Fri") {
+    const sun = new Date(holidayMs);
+    sun.setDate(sun.getDate() + 2);
+    return { checkIn: ymd, checkOut: toYmdColombia(sun.getTime()) };
+  }
+  return null;
+}
+
+/**
+ * Resuelve "el N-ésimo puente de [mes] [año]" a un rango de fechas concreto.
+ * Devuelve null si no hay tal puente (mes sin festivos que generen puente,
+ * u ordinal fuera de rango).
+ */
+export function resolvePuenteRangeForMonth(
+  year: number,
+  month: number,
+  ordinal: number,
+): { checkIn: string; checkOut: string } | null {
+  const holidays = holidaysInMonth(year, month);
+  const puentes: Array<{ checkIn: string; checkOut: string }> = [];
+  for (const h of holidays) {
+    const range = puenteRangeForHoliday(h);
+    if (range) puentes.push(range);
+  }
+  if (puentes.length === 0) return null;
+  const idx = ordinal === -1 ? puentes.length - 1 : ordinal - 1;
+  if (idx < 0 || idx >= puentes.length) return null;
+  return puentes[idx];
+}
+
+/**
+ * Detecta en el texto del cliente una referencia tipo "segundo puente de
+ * agosto" / "el primer puente de octubre" / "puente de junio" (sin ordinal →
+ * asume el primero) y la resuelve a fechas concretas usando el calendario.
+ *
+ * `nowMs`: timestamp actual (para decidir el año — si el mes pedido ya pasó
+ * este año, se asume el próximo).
+ *
+ * Devuelve `{ checkIn, checkOut }` en YMD, o null si no detecta nada o no
+ * hay puente.
+ */
+export function detectPuenteReference(
+  text: string,
+  nowMs: number,
+): { checkIn: string; checkOut: string } | null {
+  const t = String(text ?? "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/\p{M}/gu, "");
+  // "(ordinal)? puente (de|del)? (mes)"
+  const m = t.match(
+    /\b(primer[oa]?|segund[oa]|tercer[oa]?|cuart[oa]|ultim[oa]|1er|1ro|1ra|2do|2da|3er|3ro|3ra|4to|4ta|[1-4])?\s*puente\s+(?:de\s+|del\s+)?(enero|febrero|marzo|abril|mayo|junio|julio|agosto|septiembre|setiembre|octubre|noviembre|diciembre)\b/,
+  );
+  if (!m) return null;
+  const ordinalRaw = (m[1] ?? "primer").trim();
+  const monthRaw = m[2];
+  const ordinal = ORDINAL_MAP[ordinalRaw] ?? 1;
+  const month = MONTH_NAMES_ES[monthRaw];
+  if (!month) return null;
+
+  // Año: si el mes pedido ya pasó (o es el mes actual), asumir el próximo año.
+  const nowYmd = toYmdColombia(nowMs);
+  const [nowY, nowM] = nowYmd.split("-").map((x) => parseInt(x, 10));
+  let year = nowY;
+  if (month < nowM) year = nowY + 1;
+
+  let range = resolvePuenteRangeForMonth(year, month, ordinal);
+  // Si para el año calculado no hay calendario (o el puente ya pasó), probar
+  // el siguiente año.
+  if (!range) {
+    range = resolvePuenteRangeForMonth(year + 1, month, ordinal);
+  }
+  return range;
+}
+
 function isSaturdayCheckInSundayCheckOutBogota(
   fechaEntrada: number,
   fechaSalida: number,
@@ -198,26 +350,160 @@ export function shouldBlockCatalogForPuenteOneNightSatSun(
   return false;
 }
 
+const WEEKDAYS_ES = [
+  "domingo",
+  "lunes",
+  "martes",
+  "miércoles",
+  "jueves",
+  "viernes",
+  "sábado",
+];
+const MONTHS_LABEL_ES = [
+  "enero",
+  "febrero",
+  "marzo",
+  "abril",
+  "mayo",
+  "junio",
+  "julio",
+  "agosto",
+  "septiembre",
+  "octubre",
+  "noviembre",
+  "diciembre",
+];
+
+/** "2026-06-15" → "lunes 15 de junio" (día de la semana en calendario Bogotá). */
+function ymdToHumanLongEs(ymd: string): string {
+  const [y, m, d] = ymd.split("-").map((x) => parseInt(x, 10));
+  if (!y || !m || !d) return ymd;
+  const ms = bogotaWallClockNoon(y, m, d).getTime();
+  const wdIndex = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].indexOf(
+    bogotaWeekdayShort(ms),
+  );
+  const wd = wdIndex >= 0 ? WEEKDAYS_ES[wdIndex] : "";
+  const month = MONTHS_LABEL_ES[m - 1] ?? "";
+  return `${wd} ${d} de ${month}`.trim();
+}
+
 /**
- * Primer aviso (puente / 1 noche): copy comercial fijo.
- * `checkIn` / `checkOut` se mantienen en la firma por compatibilidad con llamadas existentes.
+ * Busca el festivo dentro de la ventana del puente — el conjunto
+ * `{checkIn-1, checkIn, checkOut, checkOut+1}` — para poder nombrarlo en los
+ * mensajes. Devuelve el YMD del festivo, o `null` si no encuentra ninguno
+ * (caso de festivo regional / mención explícita sin festivo del calendario).
  */
-export function buildPuenteShortNoticeEs(_checkIn: string, _checkOut: string): string {
+function findHolidayInPuenteWindow(
+  checkIn: string,
+  checkOut: string,
+): string | null {
+  const ONE_DAY_MS = 86_400_000;
+  const seen = new Set<string>();
+  for (const ymd of [checkIn, checkOut]) {
+    const [y, m, d] = ymd.split("-").map((x) => parseInt(x, 10));
+    if (!y || !m || !d) continue;
+    const base = bogotaWallClockNoon(y, m, d).getTime();
+    for (const cand of [
+      toYmdColombia(base - ONE_DAY_MS),
+      ymd,
+      toYmdColombia(base + ONE_DAY_MS),
+    ]) {
+      if (seen.has(cand)) continue;
+      seen.add(cand);
+      if (isColombiaPublicHolidayYmd(cand)) return cand;
+    }
+  }
+  return null;
+}
+
+/**
+ * Primer aviso (puente / 1 noche). Mensaje AUTOEXPLICATIVO: nombra la fecha
+ * festiva concreta y explica qué es un "puente" — así el cliente entiende de
+ * una sin tener que preguntar "¿cómo así que un puente festivo?".
+ *
+ * Antes el copy decía "corresponden a un fin de semana con puente festivo" de
+ * forma genérica; era confuso (un festivo en lunes NO es "fin de semana") y no
+ * decía cuál fecha era el festivo.
+ */
+export function buildPuenteShortNoticeEs(
+  checkIn: string,
+  checkOut: string,
+): string {
+  const holidayYmd = findHolidayInPuenteWindow(checkIn, checkOut);
+  const explanation = holidayYmd
+    ? `📅 El *${ymdToHumanLongEs(holidayYmd)}* es *festivo* en Colombia, así que esas fechas forman un *puente* (fin de semana largo de alta demanda).`
+    : "📅 Las fechas que elegiste caen en un *puente festivo* (fin de semana largo de alta demanda).";
   return [
-    "Las fechas que seleccionaste corresponden a un fin de semana con puente festivo, y para esas fechas manejamos una estadía mínima de 2 noches.",
+    explanation,
     "",
-    "Si deseas reservar solo una noche, con gusto podemos ofrecer disponibilidad en fines de semana sin puente festivo o entre semana ✨",
+    "Por eso, para fechas de puente manejamos una estadía *mínima de 2 noches*.",
+    "",
+    "Si prefieres *una sola noche*, con gusto te muestro opciones entre semana o en un fin de semana sin festivo ✨",
   ].join("\n");
 }
 
 /**
- * Seguimiento cuando el cliente insiste en 1 noche u otras fechas (mismo tema, otro redactado).
+ * Explicación cuando el cliente pregunta literalmente "¿cómo así que un puente
+ * festivo?" / "¿qué es eso?". Mismo fondo que el aviso corto pero redactado
+ * como respuesta a una duda (más conversacional).
  */
-export function buildPuenteFollowUpConversationEs(_checkIn: string, _checkOut: string): string {
+export function buildPuenteExplanationEs(
+  checkIn: string,
+  checkOut: string,
+): string {
+  const holidayYmd = findHolidayInPuenteWindow(checkIn, checkOut);
+  const dateLine = holidayYmd
+    ? `📅 El *${ymdToHumanLongEs(holidayYmd)}* es un *día festivo* en Colombia.`
+    : "📅 Las fechas que elegiste incluyen un *día festivo* en Colombia.";
+  return [
+    "¡Claro, te explico! 😊",
+    "",
+    dateLine,
+    "Cuando un festivo cae pegado al fin de semana se arma un *puente*: un fin de semana largo de 3 días con muchísima demanda de fincas.",
+    "",
+    "Por esa alta demanda, en fechas de puente pedimos una estadía *mínima de 2 noches*.",
+    "",
+    "Si te sirve *una sola noche*, te muestro opciones entre semana o en un fin de semana sin festivo ✨",
+  ].join("\n");
+}
+
+/**
+ * Seguimiento cuando el cliente insiste en 1 noche u otras fechas (mismo tema,
+ * otro redactado). Nombra el festivo concreto si lo encuentra en la ventana.
+ */
+export function buildPuenteFollowUpConversationEs(
+  checkIn: string,
+  checkOut: string,
+): string {
+  const holidayYmd = findHolidayInPuenteWindow(checkIn, checkOut);
+  const ref = holidayYmd
+    ? ` (el *${ymdToHumanLongEs(holidayYmd)}* es festivo)`
+    : "";
   return (
-    "Claro que sí 😊 Si deseas realizar una cotización por el mínimo de una noche, podrías contemplar entre semana o fines de semana; " +
-    "sin puente festivo nos reconfirmas por favor fecha de entrada y salida 📅"
+    `¡Claro que sí! 😊 Para una cotización de *una sola noche*${ref} te recomiendo fechas entre semana ` +
+    "o un fin de semana sin festivo. Cuéntame qué *fecha de entrada y salida* prefieres y te muestro las opciones 📅"
   );
+}
+
+/**
+ * Recordatorio CORTO de puente: se emite a partir del 2º turno con el bloqueo
+ * activo (el cliente ya vio el aviso completo y aún no extendió las fechas).
+ * Evita repetir el aviso largo pero MANTIENE el bloqueo duro — el FSM no
+ * progresa al catálogo hasta que las fechas sumen 2+ noches.
+ */
+export function buildPuenteShortReminderEs(
+  checkIn: string,
+  checkOut: string,
+): string {
+  const holidayYmd = findHolidayInPuenteWindow(checkIn, checkOut);
+  const ref = holidayYmd
+    ? `el *${ymdToHumanLongEs(holidayYmd)}* es festivo`
+    : "esas fechas son puente festivo";
+  return [
+    `Recuerda: ${ref}, y en *puente* manejamos una estadía *mínima de 2 noches*.`,
+    "",
+    "📅 Envíame una *fecha de salida* que sume al menos 2 noches y con gusto te comparto el catálogo 🙌",
+  ].join("\n");
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

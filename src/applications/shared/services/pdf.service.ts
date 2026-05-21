@@ -1,7 +1,43 @@
 import { Injectable, BadRequestException } from '@nestjs/common';
 import sharp from 'sharp';
 import * as path from 'path';
-import { promises as fs } from 'fs';
+import { promises as fs, constants as fsConstants } from 'fs';
+
+const PUPPETEER_LAUNCH_ARGS = [
+  '--no-sandbox',
+  '--disable-setuid-sandbox',
+  '--disable-dev-shm-usage',
+  '--disable-gpu',
+] as const;
+
+const SYSTEM_CHROMIUM_CANDIDATES = [
+  process.env.PUPPETEER_EXECUTABLE_PATH,
+  process.env.CHROME_BIN,
+  '/usr/bin/chromium-browser',
+  '/usr/bin/chromium',
+].filter((p): p is string => Boolean(p?.trim()));
+
+async function resolveChromiumExecutablePath(): Promise<string | undefined> {
+  for (const candidate of SYSTEM_CHROMIUM_CANDIDATES) {
+    try {
+      await fs.access(candidate, fsConstants.X_OK);
+      return candidate;
+    } catch {
+      // Try next path.
+    }
+  }
+  return undefined;
+}
+
+async function launchPuppeteerBrowser() {
+  const puppeteer = await import('puppeteer');
+  const executablePath = await resolveChromiumExecutablePath();
+  return puppeteer.launch({
+    headless: true,
+    args: [...PUPPETEER_LAUNCH_ARGS],
+    ...(executablePath ? { executablePath } : {}),
+  });
+}
 
 export type ReservationPaymentMethod =
   | 'bbva'
@@ -53,14 +89,16 @@ export class PdfService {
    * Convierte cualquier cadena HTML a PDF usando puppeteer.
    */
   async htmlToPdf(html: string): Promise<Buffer> {
-    const puppeteer = await import('puppeteer');
-    const browser = await puppeteer.launch({
-      headless: true,
-      args: ['--no-sandbox', '--disable-setuid-sandbox'],
-    });
+    const browser = await launchPuppeteerBrowser();
     try {
       const page = await browser.newPage();
-      await page.setContent(html, { waitUntil: 'networkidle0' });
+      page.setDefaultNavigationTimeout(60_000);
+      page.setDefaultTimeout(60_000);
+      // networkidle0 suele colgar con HTML de contrato (fuentes/CDN que no terminan).
+      await page.setContent(html, {
+        waitUntil: 'domcontentloaded',
+        timeout: 60_000,
+      });
       const pdfBytes = await page.pdf({
         format: 'A4',
         printBackground: true,
@@ -79,11 +117,7 @@ export class PdfService {
     data: ReservationConfirmationData,
   ): Promise<Uint8Array> {
     const html = await this.buildReservationConfirmationHtml(data);
-    const puppeteer = await import('puppeteer');
-    const browser = await puppeteer.launch({
-      headless: true,
-      args: ['--no-sandbox', '--disable-setuid-sandbox'],
-    });
+    const browser = await launchPuppeteerBrowser();
 
     try {
       const page = await browser.newPage();

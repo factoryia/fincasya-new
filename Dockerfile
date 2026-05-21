@@ -9,6 +9,7 @@ RUN bun install --frozen-lockfile
 COPY tsconfig.json tsconfig.build.json ./
 COPY src ./src
 COPY convex ./convex
+COPY assets/contracts ./assets/contracts
 
 # Generar convex/_generated SIEMPRE en build (necesario para runtime).
 # BuildKit secret: el deploy key no queda en capas de la imagen.
@@ -27,12 +28,26 @@ WORKDIR /app
 
 ENV NODE_ENV=production
 ENV PORT=3001
+# Usar Chromium del sistema (apk) en lugar del binario descargado por puppeteer.
+ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
+ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium-browser
+
+RUN apk add --no-cache \
+    chromium \
+    nss \
+    freetype \
+    harfbuzz \
+    ca-certificates \
+    ttf-freefont \
+    font-noto
 
 COPY package.json bun.lock* ./
 RUN bun install --frozen-lockfile --production
 
 COPY --from=builder /app/dist ./dist
 COPY --from=builder /app/convex/_generated ./convex/_generated
+COPY assets/contracts ./assets/contracts
+COPY assets/contracts ./assets/contracts
 
 EXPOSE 3001
 

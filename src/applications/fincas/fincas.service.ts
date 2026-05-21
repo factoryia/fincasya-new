@@ -149,6 +149,11 @@ import {
 } from './dto/global-pricing.dto';
 import { UpdateOwnerInfoDto } from './dto/owner-info.dto';
 import { GenerateContractDto } from './dto/generate-contract.dto';
+import { loadDefaultContractTemplateBytes } from './contract-default-template';
+import {
+  formatFincaFeaturesPlain,
+  parseContractSettingsPayload,
+} from './contract-template-values';
 import {
   DEFAULT_CONSULTANT_SYSTEM_PROMPT,
   PROMPT_INTERNAL_PAGE_ID,
@@ -1309,7 +1314,7 @@ Al confirmar tu pago, recibirás el *soporte oficial* junto con todos los detall
     options?: { previewOnly?: boolean },
   ) {
     console.log(
-      `[api] >>> generateContract CODE=v5-gap-plaininner propertyId=${propertyId} preview=${!!options?.previewOnly}`,
+      `[api] >>> generateContract CODE=v6-master-docx propertyId=${propertyId} preview=${!!options?.previewOnly}`,
     );
     try {
       const finca = await this.getById(propertyId);
@@ -1477,7 +1482,30 @@ Al confirmar tu pago, recibirás el *soporte oficial* junto con todos los detall
         'CARGO_SERVICIO': String(serviceStaffFee),
       };
 
-      // --- PREPARACIÓN DE VALORES PARA WORD/HTML ---
+      let contractSettingsPayload: unknown = null;
+      try {
+        contractSettingsPayload = await this.convexService.query(
+          'adminContractSettings:getGlobalPayload',
+          {},
+        );
+      } catch {
+        console.warn('[api] Ajustes globales del contrato no disponibles');
+      }
+      const { admin: contractAdmin, ownerOverrides } =
+        parseContractSettingsPayload(contractSettingsPayload);
+      const ownerOverride =
+        ownerOverrides[propertyId] ??
+        ownerOverrides[String(propertyId)] ??
+        {};
+      const caracteristicasPlain = formatFincaFeaturesPlain(
+        (finca as { features?: unknown[] }).features || [],
+      );
+      const nombrePropietario =
+        (dto.propertyOwnerName && String(dto.propertyOwnerName).trim()) ||
+        ownerOverride.nombreCompleto?.trim() ||
+        '';
+
+      // --- PREPARACIÓN DE VALORES PARA WORD/HTML (plantilla maestra única) ---
       const wordValues: Record<string, string> = {
         fechaGeneracion: valuesMapping[mappingKeys.date] ?? '',
         precioLetras: valuesMapping[mappingKeys.priceText] ?? '',
@@ -1519,9 +1547,43 @@ Al confirmar tu pago, recibirás el *soporte oficial* junto con todos los detall
         nombreFinca: finca.title || '',
         municipioFinca: finca.location || '',
         capacidadDePersonas: String(finca.capacity || 0),
-        característicasDeFinca: this.formatFincaFeatures(finca.features || []),
-        caracteristicasDeFinca: this.formatFincaFeatures(finca.features || []),
-        nombrePropietario: '', 
+        característicasDeFinca: caracteristicasPlain,
+        caracteristicasDeFinca: caracteristicasPlain,
+        nombrePropietario,
+        adminNombre: (contractAdmin.adminName ?? '').trim(),
+        adminCedula: (contractAdmin.adminCedula ?? '').trim(),
+        adminCiudad: (contractAdmin.adminCity ?? '').trim(),
+        capacidad: String(finca.capacity || 0),
+        aseofinal:
+          (dto.cleaningFeeLabel && String(dto.cleaningFeeLabel).trim()) ||
+          '$100.000',
+        personasextras:
+          (dto.extraPersonFeeLabel && String(dto.extraPersonFeeLabel).trim()) ||
+          '$50.000',
+        depositomascotas:
+          (dto.petDepositLabel && String(dto.petDepositLabel).trim()) ||
+          (petSurchargeRefundable > 0
+            ? new Intl.NumberFormat('es-CO', {
+                style: 'currency',
+                currency: 'COP',
+                minimumFractionDigits: 0,
+              }).format(petSurchargeRefundable)
+            : '$100.000'),
+        Depósitopordaños:
+          (dto.securityDepositLabel && String(dto.securityDepositLabel).trim()) ||
+          '$200.000',
+        depositopordanos:
+          (dto.securityDepositLabel && String(dto.securityDepositLabel).trim()) ||
+          '$200.000',
+        precioAseoFinal:
+          (dto.cleaningFeeLabel && String(dto.cleaningFeeLabel).trim()) ||
+          '$100.000',
+        precioPorPersonasExtras:
+          (dto.extraPersonFeeLabel && String(dto.extraPersonFeeLabel).trim()) ||
+          '$50.000',
+        precioPorMasota:
+          (dto.petDepositLabel && String(dto.petDepositLabel).trim()) ||
+          '$100.000',
       };
 
       // Agregar también los mapeos del PDF (con y sin corchetes) por si acaso
@@ -1535,29 +1597,17 @@ Al confirmar tu pago, recibirás el *soporte oficial* junto con todos los detall
         }
       }
 
-      let templateBytes: Buffer | null = null;
-      const templateUrl = finca.contractTemplateUrl?.trim();
-      if (templateUrl) {
-        let templateResponse;
-        try {
-          templateResponse = await axios.get(templateUrl, {
-            responseType: 'arraybuffer',
-            timeout: 120_000,
-            maxContentLength: 50 * 1024 * 1024,
-          });
-        } catch (err: unknown) {
-          const msg = err instanceof Error ? err.message : String(err);
-          throw new BadRequestException(
-            `No se pudo descargar la plantilla del contrato desde la URL configurada en la finca. ${msg}`,
-          );
-        }
-        if (templateResponse.status >= 400) {
-          throw new BadRequestException(
-            `La URL de la plantilla respondió HTTP ${templateResponse.status}. Revisa el archivo en la ficha de la finca.`,
-          );
-        }
-        templateBytes = normalizeDownloadedFile(templateResponse.data);
+      // Plantilla maestra única (formato QUINTA OLAYA): mismos estilos para todas las fincas.
+      let templateBytes: Buffer | null = await loadDefaultContractTemplateBytes();
+      if (!templateBytes) {
+        throw new BadRequestException(
+          'No se encontró la plantilla maestra del contrato (assets/contracts/default-contract-template.docx o docs/QUINTA OLAYA.docx).',
+        );
       }
+
+      console.log(
+        '[api] Plantilla Word maestra (formato QUINTA OLAYA) + datos de finca/cliente.',
+      );
 
       const sanitizedTitle = this.sanitizeFilename(finca.title || 'Finca');
       const contractNumSuffix = resolvedContractNumber
@@ -1576,7 +1626,7 @@ Al confirmar tu pago, recibirás el *soporte oficial* junto con todos los detall
 
         if (useCustomHtml) {
           console.log(
-            `[api] Sin plantilla en la finca: usando customHtml del frontend (${incomingCustomHtml.length} chars).`,
+            `[api] Sin plantilla Word: usando customHtml del frontend (${incomingCustomHtml.length} chars).`,
           );
           const fullHtml = await this.wrapContractFragmentHtml(
             incomingCustomHtml,
@@ -1585,15 +1635,9 @@ Al confirmar tu pago, recibirás el *soporte oficial* junto con todos los detall
           );
           finalBuffer = await this.pdfService.htmlToPdf(fullHtml);
         } else {
-          if (incomingCustomHtml.length > 400_000) {
-            console.warn(
-              `[api] customHtml descartado por tamaño (${incomingCustomHtml.length} chars). Cayendo a fallback.`,
-            );
-          } else {
-            console.log(
-              '[api] Sin plantilla en la finca: generando PDF desde HTML estándar (puppeteer).',
-            );
-          }
+          console.log(
+            '[api] Sin plantilla Word ni customHtml: PDF fallback HTML mínimo.',
+          );
           const fallbackHtml = this.buildContractFallbackHtml(
             wordValues,
             finca as { title?: string; location?: string },

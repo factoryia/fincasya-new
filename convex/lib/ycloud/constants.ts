@@ -15,7 +15,16 @@ export const FALLBACK_CATALOG_ID = "1560075992300705";
 export const MAX_CATALOG_PRODUCTS_PER_SEND = 12;
 
 /**
- * Espera antes de procesar un inbound: da tiempo a que el usuario mande 2+ burbujas seguidas.
- * Luego `inbound.ts` vuelve a comprobar que este mensaje siga siendo el último (y tras runBotTurn).
+ * Espera antes de procesar un inbound: da tiempo a que el usuario mande 2+
+ * burbujas seguidas. Luego `inbound.ts` vuelve a comprobar que este mensaje
+ * siga siendo el último (y tras runBotTurn).
+ *
+ * 7 s (antes 4 s): los clientes de WhatsApp escriben mensaje por mensaje y
+ * suelen tardar 5-10 s entre uno y otro mientras tipean. Con 4 s, un burst
+ * tipo "Hola" → (escribe 6 s) → "quiero una finca en Melgar" se partía en dos
+ * turnos y el bot respondía dos veces (welcome + missing fields repetido).
+ * Con 7 s la mayoría de bursts se juntan en un solo turno. El costo es que la
+ * respuesta a un mensaje único se demora ~7 s, lo cual es aceptable en
+ * WhatsApp (el cliente está acostumbrado a un "escribiendo…").
  */
-export const INBOUND_DEBOUNCE_MS = 4000;
+export const INBOUND_DEBOUNCE_MS = 7000;

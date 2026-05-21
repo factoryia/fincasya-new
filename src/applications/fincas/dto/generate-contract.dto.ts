@@ -123,4 +123,26 @@ export class GenerateContractDto {
   @IsOptional()
   @IsString()
   customHtml?: string;
+
+  /** Texto legal del propietario en el contrato (plantilla Word). */
+  @IsOptional()
+  @IsString()
+  propertyOwnerName?: string;
+
+  /** Montos/etiquetas para cláusulas (misma redacción que configuración admin). */
+  @IsOptional()
+  @IsString()
+  cleaningFeeLabel?: string;
+
+  @IsOptional()
+  @IsString()
+  securityDepositLabel?: string;
+
+  @IsOptional()
+  @IsString()
+  extraPersonFeeLabel?: string;
+
+  @IsOptional()
+  @IsString()
+  petDepositLabel?: string;
 }

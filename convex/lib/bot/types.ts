@@ -119,6 +119,14 @@ export interface ExtractedEntities {
    * no captura todas las variantes naturales de lenguaje.
    */
   confirmsCurrentStep?: "yes" | "no" | null;
+  /**
+   * Clasificación LLM de si el cliente pide EXPLÍCITAMENTE un asesor humano.
+   * `true` solo cuando es inequívoco ("hablar con un asesor", "este bot no me
+   * sirve", "pásame con alguien real"). `false`/omitido para mensajes que solo
+   * dan datos de la reserva (ej. "somos 13 personas" — el regex viejo
+   * escalaba por la palabra "persona", el LLM ahora lo entiende como cupo).
+   */
+  requestsHumanAgent?: boolean;
 }
 
 /** Qué acción debe ejecutar el orquestador después de generar el reply. */
@@ -148,7 +156,8 @@ export type BotAction =
         | "pets_exceed_limit"
         | "catalog_no_results"
         | "event_after_catalog"
-        | "media_post_catalog";
+        | "media_post_catalog"
+        | "client_requested";
     };
 
 /** Resultado que devuelve el orquestador por turno. */

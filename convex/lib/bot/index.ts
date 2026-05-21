@@ -31,6 +31,7 @@ import {
 import { petsExceedLimitMessage } from "./prompts";
 import { extractEntities } from "./extractor";
 import { recoverDatesFromUserHistory } from "./historyRecovery";
+import { detectPuenteReference } from "../colombiaPublicHolidays";
 import { transition } from "./transitions";
 import { generateReply } from "./replies";
 import { applyPetSelectionHeuristics } from "./petHeuristic";
@@ -263,6 +264,36 @@ export async function runBotTurn(input: BotTurnInput): Promise<BotTurnResult> {
     conversationHistory,
   );
 
+  // 1.3 Resolución de "puente festivo": si el cliente dijo algo como "segundo
+  // puente de agosto", el extractor LLM puede equivocarse e interpretar
+  // "segundo" como el DÍA 2 (ej. checkIn=2026-08-02). Aquí detectamos la
+  // referencia con el calendario REAL de festivos colombianos y sobre-
+  // escribimos checkIn/checkOut con las fechas correctas del puente
+  // (ej. "segundo puente de agosto 2026" → Sáb 15 → Lun 17). Determinístico.
+  const puenteRef = detectPuenteReference(messageText, Date.now());
+  if (puenteRef) {
+    extracted.checkIn = puenteRef.checkIn;
+    extracted.checkOut = puenteRef.checkOut;
+  }
+
+  // 1.4 Petición de asesor humano detectada por el LLM. El extractor clasifica
+  // `requestsHumanAgent` analizando la intención real — más confiable que la
+  // regex de `inbound.ts` (que es solo fast-path para casos obvios). Si el
+  // LLM lo marca, escalamos a humano de inmediato. Esto cubre casos con
+  // matices que la regex no captura, y EVITA falsos positivos (ej. "somos 13
+  // personas" — la regex vieja escalaba por la palabra "persona").
+  if (extracted.requestsHumanAgent === true) {
+    return {
+      replyText:
+        "Perfecto, te comunico con un asesor 🤝 Un agente te escribirá en breve para ayudarte ✨",
+      action: { type: "escalate_human", reason: "client_requested" },
+      nextPhase: currentPhase,
+      updatedEntities: currentEntities,
+      samePhaseTurnCount: currentSamePhaseTurnCount ?? 0,
+      phaseEnteredAt: currentPhaseEnteredAt ?? Date.now(),
+    };
+  }
+
   // 1.5 Detectar intención de "nueva cotización" cuando el cliente ya está
   // post-catálogo. Si aplica, hacemos un soft reset: borramos finca elegida +
   // mascotas + flags de bloqueo, y forzamos `effectivePhase = "collecting"` para
@@ -445,11 +476,28 @@ export async function runBotTurn(input: BotTurnInput): Promise<BotTurnResult> {
   // Se resetea a 0 cuando: (a) cambia la fase, (b) el cliente aportó datos
   // nuevos en este turno, o (c) hubo soft reset por "nueva cotización".
   // Solo incrementa cuando el cliente está realmente atascado.
+  //
+  // EXCEPCIÓN — bloqueos duros de fechas: mientras las fechas estén en un
+  // estado que IMPIDE enviar el catálogo, NADA cuenta como progreso aunque el
+  // cliente aporte cupo/grupo/etc. Cubre 3 casos:
+  //   • `datesIncoherent`  — fechas incoherentes (ej. "del 15 al 15").
+  //   • `catalogPuenteOneNight` — 1 noche sobre un puente festivo (mín. 2).
+  //   • `catalogSpecialSeason`  — temporada especial sin cumplir el mínimo.
+  // Sin esta excepción el cliente "progresaba" en otros campos, el contador se
+  // reseteaba cada turno y el anti-bucle nunca escalaba → el bot quedaba
+  // pidiendo lo mismo para siempre (o peor, el LLM alucinaba un happy-path).
+  // Con la excepción, el contador sube y tras 6 turnos atascado escala a un
+  // asesor humano que resuelve las fechas con el cliente.
   const phaseChanged = tr.nextPhase !== effectivePhase;
+  const dateHardBlock =
+    tr.datesIncoherent === true ||
+    tr.catalogPuenteOneNight === true ||
+    tr.catalogSpecialSeason != null;
   const madeProgress =
-    wantsNewQuote ||
-    autoRebroadcastCatalog ||
-    entitiesProgressed(currentEntities, updatedEntities);
+    !dateHardBlock &&
+    (wantsNewQuote ||
+      autoRebroadcastCatalog ||
+      entitiesProgressed(currentEntities, updatedEntities));
   const now = Date.now();
   const samePhaseTurnCount =
     phaseChanged || madeProgress ? 0 : (currentSamePhaseTurnCount ?? 0) + 1;

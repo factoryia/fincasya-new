@@ -732,6 +732,21 @@ export function missingFieldQuestion(
 }
 
 export function datesIncoherentMessage(entities: BotEntities): string {
+  // Caso especial: misma fecha de entrada y salida ("del 15 al 15"). NO es
+  // "salida antes de entrada" — el cliente puso el mismo día, normalmente
+  // porque le faltó la fecha de salida o piensa en un plan de un solo día.
+  // Decir "la salida es antes de la entrada" cuando son iguales confunde.
+  if (
+    entities.checkIn &&
+    entities.checkOut &&
+    entities.checkIn === entities.checkOut
+  ) {
+    return [
+      `Veo que pusiste el *mismo día* de entrada y de salida (${entities.checkIn}) 😅`,
+      "",
+      "Para una reserva de hospedaje necesito al menos *una noche*. ¿Me confirmas la *fecha de salida*? (o dime cuántas noches te quedarías) 🗓️",
+    ].join("\n");
+  }
   return `Parece que la fecha de salida (${entities.checkOut}) es antes de la de entrada (${entities.checkIn}) 😅 ¿Me confirmas las fechas correctas?`;
 }
 
