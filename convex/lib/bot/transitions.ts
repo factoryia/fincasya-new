@@ -15,6 +15,7 @@ import {
   bogotaWallClockNoon,
   shouldBlockCatalogForPuenteOneNightSatSun,
   shouldBlockCatalogForSpecialSeason,
+  toYmdColombia,
   type SpecialSeasonInfo,
 } from "../colombiaPublicHolidays";
 
@@ -25,6 +26,12 @@ export interface TransitionResult {
   missingField?: keyof BotEntities;
   /** true si las fechas son incoherentes (checkIn ≥ checkOut). */
   datesIncoherent?: boolean;
+  /**
+   * true si la fecha de ENTRADA ya pasó (es anterior a hoy en Colombia). El
+   * cliente dio fechas de días pasados → hay que pedirle fechas nuevas, no
+   * cotizar.
+   */
+  datesInPast?: boolean;
   /** 1 noche en fin de semana con puente (CO): pedir al menos 2 noches antes del catálogo. */
   catalogPuenteOneNight?: boolean;
   /**
@@ -173,10 +180,34 @@ function ymdToBogotaNoonMs(ymd: string): number {
   return bogotaWallClockNoon(y, m, d).getTime();
 }
 
+/**
+ * ¿La fecha `ymd` (YYYY-MM-DD) es ANTERIOR a hoy en zona horaria de Colombia?
+ * Compara solo el día calendario — comparar strings YMD es cronológicamente
+ * correcto. La fecha de HOY NO cuenta como pasada (se puede ingresar hoy).
+ */
+function isYmdInPastColombia(ymd: string): boolean {
+  const day = ymd.trim().slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) return false;
+  return day < toYmdColombia(Date.now());
+}
+
 function transitionCollecting(
   entities: BotEntities,
   incomingText: string,
 ): TransitionResult {
+  // Fechas en el PASADO = BLOQUEO DURO. Si la fecha de entrada que dio el
+  // cliente ya pasó (ej. hoy es 21/may y pidió "del 19 al 21 de mayo"), no
+  // tiene sentido pedir el resto de datos ni cotizar — hay que avisarle y
+  // pedirle fechas nuevas. Se evalúa ANTES de la coherencia porque basta con
+  // el checkIn (puede que el cliente aún no haya dado checkOut).
+  if (entities.checkIn && isYmdInPastColombia(entities.checkIn)) {
+    return {
+      nextPhase: "collecting",
+      action: { type: "reply_only" },
+      datesInPast: true,
+    };
+  }
+
   // Validar coherencia de fechas primero
   if (entities.checkIn && entities.checkOut && !areDatesCoherent(entities)) {
     return {

@@ -52,8 +52,8 @@ Municipios válidos (Colombia): ${MUNICIPALITIES_COL}
 
 Reglas estrictas:
 - Fechas: SIEMPRE en formato YYYY-MM-DD.
-  Si el cliente da solo días (ej "del 15 al 19"), asume mes actual ${new Date().toISOString().slice(5, 7)} y año ${new Date().getFullYear()}.
-  Si el día ya pasó este mes, asume mes siguiente.
+  Si el cliente da SOLO días, SIN nombrar el mes (ej "del 15 al 19"), asume mes actual ${new Date().toISOString().slice(5, 7)} y año ${new Date().getFullYear()}; y si esos días ya pasaron este mes, asume el mes siguiente.
+  Si el cliente SÍ nombra el mes (ej "del 19 al 21 de mayo", "para agosto"), usa EXACTAMENTE ese mes — AUNQUE los días ya hayan pasado. NO lo adelantes al mes siguiente. (Un filtro aparte detecta las fechas pasadas y le avisa al cliente; tu trabajo es solo extraer lo que el cliente dijo, tal cual.)
 - cupo: número entero. Niños desde 2 años cuentan.
   Si el cliente da "X adultos y Y niños" / "X mayores y Y menores" / "X grandes y Y chicos",
   **suma ambos** (cupo = X + Y), siempre que los menores tengan ≥2 años o no se mencione la edad.

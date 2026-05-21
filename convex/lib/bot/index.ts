@@ -596,6 +596,7 @@ export async function runBotTurn(input: BotTurnInput): Promise<BotTurnResult> {
   // estado que IMPIDE enviar el catálogo, NADA cuenta como progreso aunque el
   // cliente aporte cupo/grupo/etc. Cubre 3 casos:
   //   • `datesIncoherent`  — fechas incoherentes (ej. "del 15 al 15").
+  //   • `datesInPast`      — la fecha de entrada ya pasó (días anteriores a hoy).
   //   • `catalogPuenteOneNight` — 1 noche sobre un puente festivo (mín. 2).
   //   • `catalogSpecialSeason`  — temporada especial sin cumplir el mínimo.
   // Sin esta excepción el cliente "progresaba" en otros campos, el contador se
@@ -606,6 +607,7 @@ export async function runBotTurn(input: BotTurnInput): Promise<BotTurnResult> {
   const phaseChanged = tr.nextPhase !== effectivePhase;
   const dateHardBlock =
     tr.datesIncoherent === true ||
+    tr.datesInPast === true ||
     tr.catalogPuenteOneNight === true ||
     tr.catalogSpecialSeason != null;
   const madeProgress =

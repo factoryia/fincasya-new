@@ -755,6 +755,20 @@ export function datesIncoherentMessage(entities: BotEntities): string {
   return `Parece que la fecha de salida (${entities.checkOut}) es antes de la de entrada (${entities.checkIn}) 😅 ¿Me confirmas las fechas correctas?`;
 }
 
+/**
+ * Copy oficial para cuando el cliente da fechas que YA pasaron (fecha de
+ * entrada anterior a hoy). Texto provisto por el equipo de FincasYa — usar
+ * verbatim, sin interpolar las fechas viejas.
+ */
+export function datesInPastMessage(): string {
+  return [
+    "Claro 😊",
+    "Las fechas que mencionas ya son fechas pasadas, por lo que no es posible verificar disponibilidad para esos días.",
+    "",
+    "Por favor indícanos nuevas fechas de llegada y salida para ayudarte a revisar las opciones disponibles 🏡✨",
+  ].join("\n");
+}
+
 /** Texto breve ANTES de enviar el catálogo (sin repetir fechas, cupo ni municipio).
  *  Va seguido de las fichas reales de WhatsApp (catálogo interactivo), NO
  *  enumera ni inventa nombres de fincas: las tarjetas son la fuente de verdad. */

@@ -20,6 +20,7 @@ import {
   missingFieldsBundle,
   combinedQuestionForMissing,
   datesIncoherentMessage,
+  datesInPastMessage,
   preCatalogText,
   petCheckMessage,
   CONTRACT_REQUEST_MESSAGE,
@@ -356,6 +357,7 @@ export async function generateReply(
       tr.catalogPuenteOneNight === true ||
       tr.catalogSpecialSeason != null ||
       tr.datesIncoherent === true ||
+      tr.datesInPast === true ||
       tr.action.type === "send_catalog" ||
       // La transición avanzó más allá de welcome/collecting en el primer turno
       // (ej. el cliente nombró una finca puntual → va directo a pet_check).
@@ -662,6 +664,7 @@ async function generateReplyText(input: ReplyInput): Promise<string> {
       tr.catalogPuenteOneNight === true ||
       tr.catalogSpecialSeason != null ||
       tr.datesIncoherent === true ||
+      tr.datesInPast === true ||
       tr.action.type === "send_catalog" ||
       // La transición avanzó más allá de welcome/collecting en el primer turno
       // (ej. el cliente nombró una finca puntual → va directo a pet_check).
@@ -780,6 +783,9 @@ async function generateReplyText(input: ReplyInput): Promise<string> {
     // generarlo). Repetir la pregunta de fechas es correcto y necesario; el
     // anti-bucle de `index.ts` (con `madeProgress` bloqueado por fechas
     // incoherentes) escala a un asesor si el cliente nunca las corrige.
+    // Fechas en el pasado: bloqueo igual de duro que `datesIncoherent`. Va
+    // PRIMERO porque "esas fechas ya pasaron" es lo más útil para el cliente.
+    if (tr.datesInPast) return datesInPastMessage();
     if (tr.datesIncoherent) return datesIncoherentMessage(entities);
     const userSaysTheyAlreadyAnswered =
       /\b(ya te hab[ií]a dicho|ya te lo dije|ya te dije|eso ya te|pero si te dije|ya lo dije arriba)\b/i.test(
