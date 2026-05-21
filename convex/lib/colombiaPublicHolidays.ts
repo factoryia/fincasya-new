@@ -249,9 +249,12 @@ export function detectPuenteReference(
     .toLowerCase()
     .normalize("NFD")
     .replace(/\p{M}/gu, "");
-  // "(ordinal)? puente (de|del)? (mes)"
+  // "(ordinal)? puente (de|del)? (mes)" — acepta también las abreviaturas
+  // "pte" / "pt" que los clientes usan al escribir rápido por WhatsApp
+  // (ej. "segundo pt de agosto"). El \b a ambos lados de la abreviatura
+  // evita falsos positivos dentro de otra palabra (ej. "sept").
   const m = t.match(
-    /\b(primer[oa]?|segund[oa]|tercer[oa]?|cuart[oa]|ultim[oa]|1er|1ro|1ra|2do|2da|3er|3ro|3ra|4to|4ta|[1-4])?\s*puente\s+(?:de\s+|del\s+)?(enero|febrero|marzo|abril|mayo|junio|julio|agosto|septiembre|setiembre|octubre|noviembre|diciembre)\b/,
+    /\b(primer[oa]?|segund[oa]|tercer[oa]?|cuart[oa]|ultim[oa]|1er|1ro|1ra|2do|2da|3er|3ro|3ra|4to|4ta|[1-4])?\s*\b(?:puentes?|ptes?|pts?)\b\s+(?:de\s+|del\s+)?(enero|febrero|marzo|abril|mayo|junio|julio|agosto|septiembre|setiembre|octubre|noviembre|diciembre)\b/,
   );
   if (!m) return null;
   const ordinalRaw = (m[1] ?? "primer").trim();

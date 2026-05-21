@@ -1,23 +1,24 @@
 /**
  * Bot v2 — Extractor de entidades.
  *
- * Hace UNA llamada al LLM (gpt-4.1) para sacar entidades del mensaje del
+ * Hace UNA llamada al LLM (gpt-4.1-mini) para sacar entidades del mensaje del
  * cliente. No genera respuestas de usuario: solo extrae datos estructurados.
  *
  * Si el mensaje es un saludo puro o irrelevante, devuelve {} vacío.
  *
- * MODELO: se subió de `gpt-4.1-mini` a `gpt-4.1` (modelo más capaz) para que
- * interprete mejor mensajes ambiguos, typos y matices del cliente. NOTA: la
- * mayoría de bugs de "el bot no entendió" NO son del extractor — son lógica
- * determinística (regex de zonas, FSM, filtros del catálogo). Subir el modelo
- * ayuda con interpretación de lenguaje natural, pero no arregla bugs de código.
+ * MODELO: `gpt-4.1-mini`. Para una tarea de extracción a JSON con un prompt
+ * tan detallado, mini es de sobra capaz — y es rápido y barato. Se probó el
+ * modelo grande `gpt-4.1`, pero es más lento (más riesgo de timeout en la
+ * action de Convex) sin mejorar la extracción. NOTA: los bugs de "el bot no
+ * entendió" casi nunca son del extractor — son lógica determinística (regex
+ * de zonas, FSM, filtros del catálogo); subir el modelo no los arregla.
  */
 
 import { generateText } from "ai";
 import { openai } from "@ai-sdk/openai";
 import type { BotEntities, ExtractedEntities } from "./types";
 
-const MODEL = "gpt-4.1";
+const MODEL = "gpt-4.1-mini";
 
 /**
  * Convierte fechas con mes y año implícito.
@@ -208,7 +209,11 @@ export async function extractEntities(
     const jsonStr = text.trim().replace(/^```json\s*/i, "").replace(/```$/, "");
     const parsed = JSON.parse(jsonStr) as ExtractedEntities;
     return sanitizeExtracted(parsed);
-  } catch {
+  } catch (err) {
+    // Si OpenAI falla (timeout, 429, 5xx, sin cupo) devolvemos {} → el bot
+    // actúa como si el cliente no hubiera dado datos y los vuelve a pedir.
+    // Logueamos para poder diagnosticar (¿cuota de OpenAI? ¿outage?).
+    console.error("[extractor] generateText falló — devuelvo {}:", err);
     return {};
   }
 }

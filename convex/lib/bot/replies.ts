@@ -1075,7 +1075,10 @@ async function contextualLlmReply(
       return "Perdona, ¿puedes contarme un poco más? Quiero ayudarte sin pedirte lo mismo otra vez 🙏";
     }
     return out;
-  } catch {
+  } catch (err) {
+    // OpenAI falló (timeout, 429, 5xx, sin cupo). Logueamos para diagnosticar
+    // — si esto aparece seguido, revisar la cuenta de OpenAI (cuota/billing).
+    console.error("[contextualLlmReply] generateText falló — fallback técnico:", err);
     return "Perdona, tuve un problema técnico. ¿Puedes repetir tu mensaje? 🙏";
   }
 }

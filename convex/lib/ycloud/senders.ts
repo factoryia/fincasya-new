@@ -4,6 +4,12 @@ import { FALLBACK_CATALOG_ID, MAX_CATALOG_PRODUCTS_PER_SEND } from "./constants"
 export type CatalogOutboundSendRow = {
   productRetailerId: string;
   wamid?: string;
+  /**
+   * `false` si esta ficha NO se pudo enviar (ej. el producto no está en el
+   * catálogo Meta → error 131009). Se omite para no abortar el resto del
+   * envío; el orquestador no registra esa finca como enviada.
+   */
+  ok: boolean;
 };
 
 /** Extrae wamid del JSON de respuesta de sendDirectly (YCloud / WhatsApp). */
@@ -122,8 +128,40 @@ export async function sendCatalogToYcloud(args: {
     return { ok: res.ok, status: res.status, text };
   };
 
-  const parsedBodies: unknown[] = [];
+  // RESILIENCIA: una ficha que falle (ej. producto no registrado en el
+  // catálogo Meta → error 131009 "product not found") NO debe abortar el
+  // envío completo. Antes se lanzaba en el primer fallo → `processInbound-
+  // MessageV2` reventaba y el cliente solo recibía las fichas previas al
+  // error (y el catálogo nunca se registraba → la paginación "ver más"
+  // re-enviaba las mismas). Ahora cada ficha mala se OMITE (se loguea) y se
+  // sigue con el resto; `ok:false` marca las que no salieron.
+  const rows: CatalogOutboundSendRow[] = [];
+  const pushRow = (
+    productRetailerId: string,
+    resp: { ok: boolean; status: number; text: string },
+    indexLabel: string,
+  ): void => {
+    if (resp.ok) {
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(resp.text);
+      } catch {
+        parsed = { raw: resp.text };
+      }
+      rows.push({
+        productRetailerId,
+        wamid: wamidFromYcloudSendResponse(parsed),
+        ok: true,
+      });
+    } else {
+      console.error(
+        `[catalog] ficha ${indexLabel} (${productRetailerId}) falló — se omite: ${resp.status} ${resp.text.slice(0, 220)}`,
+      );
+      rows.push({ productRetailerId, ok: false });
+    }
+  };
 
+  // Ficha #1: incluye el contexto de reply + el retry de catálogo inválido.
   let r = await sendOne(ids[0], bodyForIndex(0), true);
   const invalidCatalog =
     !r.ok &&
@@ -133,28 +171,13 @@ export async function sendCatalogToYcloud(args: {
     catalogId = FALLBACK_CATALOG_ID;
     r = await sendOne(ids[0], bodyForIndex(0), true);
   }
-  if (!r.ok) throw new Error(`YCloud error ${r.status}: ${r.text}`);
-  try {
-    parsedBodies.push(JSON.parse(r.text));
-  } catch {
-    parsedBodies.push({ raw: r.text });
-  }
+  pushRow(ids[0], r, `1/${ids.length}`);
 
   for (let i = 1; i < ids.length; i++) {
     await new Promise((resolve) => setTimeout(resolve, BETWEEN_SENDS_MS));
     const r2 = await sendOne(ids[i], bodyForIndex(i), false);
-    if (!r2.ok) {
-      throw new Error(`YCloud error (ficha ${i + 1}/${ids.length}) ${r2.status}: ${r2.text}`);
-    }
-    try {
-      parsedBodies.push(JSON.parse(r2.text));
-    } catch {
-      parsedBodies.push({ raw: r2.text });
-    }
+    pushRow(ids[i], r2, `${i + 1}/${ids.length}`);
   }
 
-  return ids.map((productRetailerId, i) => ({
-    productRetailerId,
-    wamid: wamidFromYcloudSendResponse(parsedBodies[i]),
-  }));
+  return rows;
 }

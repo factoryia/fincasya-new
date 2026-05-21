@@ -1489,10 +1489,15 @@ export async function processInboundMessageV2(
         catalogId: catalogPayload.catalogId,
         wamid: args.wamid,
         conversationId,
-      })) as Array<{ productRetailerId: string; wamid?: string }>;
+      })) as Array<{ productRetailerId: string; wamid?: string; ok?: boolean }>;
 
       const tBase = Date.now();
       for (let i = 0; i < ids.length; i++) {
+        // Si la ficha NO se pudo enviar (producto ausente del catálogo Meta,
+        // etc.), `ok === false`: NO la registramos como mensaje de producto —
+        // si no, la paginación "ver más" creería que se envió y la excluiría
+        // (o peor, el cliente vería una finca que nunca recibió).
+        if (sendRows[i] && sendRows[i].ok === false) continue;
         const quote = lines[i]?.trim();
         const title = titles[i]?.trim() || ids[i];
         const body = quote && quote.length > 0 ? quote : `🏡 ${title}`;
