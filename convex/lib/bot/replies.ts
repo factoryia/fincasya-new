@@ -282,29 +282,21 @@ const PERSONAL_SERVICIO_GROUP_THRESHOLD = 10;
  * (ese copy formal es el de la FAQ, Escenario A, que responde cuando el
  * cliente pregunta explícitamente).
  *
- * Regla de negocio: si `cupo > 15`, el párrafo que sugiere contratar 2
- * personas de servicio se RESALTA (⚠️ + mención explícita del tamaño del
- * grupo) para darle prioridad visual, según el spec.
  */
-function buildPersonalServicioInfo(cupo: number): string {
-  const bigGroup = cupo > 15;
-  const dosPersonasLine = bigGroup
-    ? `• ⚠️ *Tu grupo es de ${cupo} personas:* para asegurar una atención excelente durante las ~8 horas de servicio, *te recomendamos contratar 2 personas de servicio* ✅.`
-    : "• 👥 *Grupos mayores a 15 personas:* sugerimos contratar 2 personas de servicio para garantizar una atención excelente ✅.";
+function buildPersonalServicioInfo(): string {
   return [
-    "💡 Un dato útil para tu estadía — *personal de servicio*:",
+    "💡 Un dato útil para tu estadía — Personal de servicio:",
     "",
-    "🤝 Podemos recomendarte personal de confianza que te colabore con la *cocina y el aseo* durante tu estadía.",
+    "🤝 Podemos recomendarte personal de confianza para apoyo en cocina y aseo durante tu hospedaje 🏡✨",
     "",
-    "• ⏰ *Duración:* la tarifa cubre una jornada de ~8 horas de servicio ⏳.",
-    "• 💰 *Precio:* desde $100.000 COP por día, según la temporada ☀️.",
-    "• 📋 *Condiciones:* los costos finales y las tareas específicas las coordinas directamente con la persona que te presentemos.",
+    "💰 Las tarifas van desde $100.000 COP por día, según la temporada ☀️",
+    "⏰ La jornada de servicio es aproximadamente de 8 horas.",
     "",
-    "⚠️ *Importante:*",
-    dosPersonasLine,
-    "• 🏠 En algunas fincas la contratación del personal de servicio es *obligatoria* por políticas de cuidado de la casa.",
+    "⚠️ Importante:",
+    "• 👥 Para grupos mayores a 15 personas, sugerimos contratar 2 personas de servicio ✅",
+    "• 🏠 En algunas fincas, este servicio es obligatorio según las políticas de la propiedad.",
     "",
-    "Si quieres que te contactemos con el personal para tu fecha, avísale a tu asesor para coordinarlo 👨‍💻✨",
+    "✨ Si deseas apoyo de personal de servicio durante tu estadía, avísanos y te ayudamos a coordinarlo.",
   ].join("\n");
 }
 
@@ -364,7 +356,10 @@ export async function generateReply(
       tr.catalogPuenteOneNight === true ||
       tr.catalogSpecialSeason != null ||
       tr.datesIncoherent === true ||
-      tr.action.type === "send_catalog");
+      tr.action.type === "send_catalog" ||
+      // La transición avanzó más allá de welcome/collecting en el primer turno
+      // (ej. el cliente nombró una finca puntual → va directo a pet_check).
+      (tr.nextPhase !== "welcome" && tr.nextPhase !== "collecting"));
   if (firstTurnHasContent) {
     const greeting = buildShortGreeting(input.contactName);
     // Si además el cliente hizo una pregunta clara en su primer mensaje
@@ -415,7 +410,7 @@ export async function generateReply(
   const personalServicioExtra =
     enteringQuoteShown &&
     (entities.cupo ?? 0) >= PERSONAL_SERVICIO_GROUP_THRESHOLD
-      ? buildPersonalServicioInfo(entities.cupo as number)
+      ? buildPersonalServicioInfo()
       : null;
 
   // Defensa anti-duplicado: si el FSM va a emitir el bloque `pet_rules_shown`
@@ -667,7 +662,10 @@ async function generateReplyText(input: ReplyInput): Promise<string> {
       tr.catalogPuenteOneNight === true ||
       tr.catalogSpecialSeason != null ||
       tr.datesIncoherent === true ||
-      tr.action.type === "send_catalog");
+      tr.action.type === "send_catalog" ||
+      // La transición avanzó más allá de welcome/collecting en el primer turno
+      // (ej. el cliente nombró una finca puntual → va directo a pet_check).
+      (tr.nextPhase !== "welcome" && tr.nextPhase !== "collecting"));
   if (firstTurnHasContent) {
     currentPhase = "collecting";
   }
@@ -762,7 +760,18 @@ async function generateReplyText(input: ReplyInput): Promise<string> {
   // Aquí ya no lo procesamos para no devolver un muro de texto compuesto.
 
   // ── Collecting: pregunta por campo faltante ───────────────────────────────
-  if (currentPhase === "collecting" || tr.nextPhase === "collecting") {
+  // Se EXCLUYE cuando la transición avanzó a una fase de reserva (pet_check /
+  // pet_rules_shown / quote_shown / contract) — eso pasa cuando el cliente
+  // nombró una finca puntual y se saltó el catálogo: en ese caso dejamos que
+  // los branches de esas fases (más abajo) emitan el mensaje correcto, en vez
+  // de caer al `preCatalogText` de este branch.
+  if (
+    (currentPhase === "collecting" || tr.nextPhase === "collecting") &&
+    tr.nextPhase !== "pet_check" &&
+    tr.nextPhase !== "pet_rules_shown" &&
+    tr.nextPhase !== "quote_shown" &&
+    tr.nextPhase !== "contract"
+  ) {
     // Fechas incoherentes = BLOQUEO duro. Devolvemos el texto DIRECTO (sin
     // `respond()`): si cayéramos al `fallback()` por anti-repetición (el
     // mensaje ya se envió un turno antes), el LLM IGNORA el problema de
@@ -896,7 +905,10 @@ async function generateReplyText(input: ReplyInput): Promise<string> {
   //      retornamos `petConfirmationMessage` aquí porque ese mensaje promete
   //      "Te envío el resumen" sin enviarlo realmente, y bloquea el avance
   //      al branch que sí muestra reglas/resumen.
-  if (currentPhase === "pet_check") {
+  // `tr.nextPhase === "pet_check"` cubre el caso "finca nombrada": el cliente
+  // nombró una finca puntual, la transición se saltó el catálogo y entra
+  // directo a pet_check desde welcome/collecting.
+  if (currentPhase === "pet_check" || tr.nextPhase === "pet_check") {
     if (entities.hasPets === undefined) {
       if (isGreetingOrVague) return fallback();
       return respond(petCheckMessage(propertyDisplayNameForPet(entities)));

@@ -807,6 +807,7 @@ export default defineSchema({
       cupo: v.optional(v.number()),
       isEvento: v.optional(v.boolean()),
       planType: v.optional(v.string()),
+      excludedRegions: v.optional(v.array(v.string())),
       selectedPropertyRetailerId: v.optional(v.string()),
       selectedPropertyName: v.optional(v.string()),
       catalogUserPickedReply: v.optional(v.boolean()),

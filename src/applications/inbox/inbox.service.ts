@@ -443,6 +443,14 @@ export class InboxService {
         const a = Math.round(Number(raw.aseoFinalCop));
         if (Number.isFinite(a) && a >= 0) raw.cleaningFee = String(a);
       }
+      if (raw.depositoGarantiaCop != null && raw.refundableDeposit == null) {
+        const d = Math.round(Number(raw.depositoGarantiaCop));
+        if (Number.isFinite(d) && d >= 0) raw.refundableDeposit = String(d);
+      }
+      if (raw.depositoMascotasCop != null && raw.petCount == null) {
+        const m = Math.round(Number(raw.depositoMascotasCop));
+        if (m === 100000) raw.petCount = 1;
+      }
       if (
         raw.subtotalAlojamientoCop != null &&
         !raw.nightlyPrice &&

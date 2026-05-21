@@ -145,4 +145,12 @@ export class GenerateContractDto {
   @IsOptional()
   @IsString()
   petDepositLabel?: string;
+
+  /** Depósito por daños / garantía (COP, esta reserva). */
+  @IsOptional()
+  refundableDeposit?: number;
+
+  /** Aseo final de la finca (COP, esta reserva). */
+  @IsOptional()
+  cleaningFee?: number;
 }

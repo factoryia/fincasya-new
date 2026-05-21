@@ -906,6 +906,71 @@ export const getPropertyByRetailerId = query({
 });
 
 /**
+ * Búsqueda difusa de una finca por NOMBRE. Se usa cuando el cliente nombra una
+ * finca puntual desde el inicio ("quiero reservar la finca Acacias
+ * Biocontainer") — el bot la resuelve y salta el catálogo, yendo directo al
+ * flujo de reserva de esa finca.
+ *
+ * Recorre las fincas vinculadas a un catálogo WhatsApp (activas + visibles) y
+ * devuelve la de mayor coincidencia. Score = fracción de tokens del query
+ * (palabras de ≥3 letras) que aparecen en el título normalizado. Umbral 0.5.
+ * Si nada lo supera, devuelve null (el bot escala a un asesor que la ubica).
+ */
+export const findPropertyByNameForBot = query({
+  args: { name: v.string() },
+  handler: async (ctx, args) => {
+    const norm = (s: string) =>
+      String(s ?? "")
+        .toLowerCase()
+        .normalize("NFD")
+        .replace(/\p{M}/gu, "")
+        .replace(/[^a-z0-9 ]/g, " ")
+        .replace(/\s+/g, " ")
+        .trim();
+    const qTokens = norm(args.name)
+      .split(" ")
+      .filter((t) => t.length >= 3);
+    if (qTokens.length === 0) return null;
+    const links = await ctx.db.query("propertyWhatsAppCatalog").collect();
+    let best: {
+      productRetailerId: string;
+      title: string;
+      location: string;
+      score: number;
+    } | null = null;
+    for (const link of links) {
+      const rid = String(link.productRetailerId || "").trim();
+      if (!rid) continue;
+      const property = await ctx.db.get(link.propertyId);
+      if (!property) continue;
+      if (property.active === false || property.visible === false) continue;
+      const titleNorm = norm(property.title ?? "");
+      if (!titleNorm) continue;
+      let hits = 0;
+      for (const tk of qTokens) {
+        if (titleNorm.includes(tk)) hits += 1;
+      }
+      const score = hits / qTokens.length;
+      if (score >= 0.5 && (!best || score > best.score)) {
+        best = {
+          productRetailerId: rid,
+          title: String(property.title ?? ""),
+          location: String(property.location ?? ""),
+          score,
+        };
+      }
+    }
+    return best
+      ? {
+          productRetailerId: best.productRetailerId,
+          title: best.title,
+          location: best.location,
+        }
+      : null;
+  },
+});
+
+/**
  * Diagnóstico: explica POR QUÉ una finca específica aparece o NO aparece en
  * el catálogo WhatsApp para una búsqueda dada. Util para debuggear casos como
  * "Villa Nativa no me sale en Villavicencio aunque la veo en la web".

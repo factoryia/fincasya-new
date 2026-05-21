@@ -51,6 +51,24 @@ function replaceByPlainInnerKey(
   return s;
 }
 
+/** Escapa texto para XML de Word; los saltos de línea se convierten en `<w:br/>`. */
+function escapeWordTemplateValue(rawVal: string): string {
+  let v = (rawVal ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+  if (v.includes('\n')) {
+    v = v
+      .replace(/\r\n/g, '\n')
+      .replace(
+        /\n/g,
+        '</w:t></w:r><w:br/><w:r><w:t xml:space="preserve">',
+      );
+  }
+  return v;
+}
+
 /**
  * Sustituye {key} / {{key}} en el XML de Word aunque Word haya partido el texto
  * o las llaves entre múltiples w:r / w:t (sin docxtemplater).
@@ -65,7 +83,6 @@ function applyWordTemplateReplacements(
   s = s.replace(/<w:softHyphen\/>/g, '');
   s = s.replace(/<w:noBreakHyphen\/>/g, '');
   s = s.replace(/<w:tab\/>/g, ' ');
-  s = s.replace(/<w:br\/>/g, ' ');
 
   // Entre letras, alrededor de `{{`/`}}` o entre clave y cierre: Word mete
   // espacios / &nbsp; / w:tab, no solo etiquetas (antes solo aceptábamos XML
@@ -80,11 +97,7 @@ function applyWordTemplateReplacements(
 
   for (const [key, rawVal] of entries) {
     if (!key.trim()) continue;
-    const val = rawVal
-      .replace(/&/g, '&amp;')
-      .replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;')
-      .replace(/"/g, '&quot;');
+    const val = escapeWordTemplateValue(rawVal);
     const keyPart = Array.from(key)
       .map((ch) => escapeRegExp(ch))
       .join(gap);
@@ -107,12 +120,7 @@ function applyWordTemplateReplacements(
   }
   for (const [key, rawVal] of entries) {
     if (!key.trim()) continue;
-    const val2 = (rawVal ?? '')
-      .replace(/&/g, '&amp;')
-      .replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;')
-      .replace(/"/g, '&quot;');
-    s = replaceByPlainInnerKey(s, key, val2);
+    s = replaceByPlainInnerKey(s, key, escapeWordTemplateValue(rawVal));
   }
   s = s.replace(/\{\{[^}]*\}\}/g, '');
   s = s.replace(/\{[A-Za-z0-9_\s\u00C0-\u024F.,()$-]+\}/g, '');
@@ -153,6 +161,7 @@ import { loadDefaultContractTemplateBytes } from './contract-default-template';
 import {
   formatFincaFeaturesPlain,
   parseContractSettingsPayload,
+  resolveContractMoneyLabel,
 } from './contract-template-values';
 import {
   DEFAULT_CONSULTANT_SYSTEM_PROMPT,
@@ -522,22 +531,14 @@ Al confirmar tu pago, recibirás el *soporte oficial* junto con todos los detall
   }
 
   /**
-   * Texto de características para el feed Meta: emojis del ícono + nombre (como en el admin).
+   * Características para el feed Meta/WhatsApp: lista numerada vertical (misma lógica que contrato).
    */
   private formatCatalogFeaturesBlock(
-    features: Array<{ name?: string; emoji?: string | null }> | undefined,
+    features: Array<{ name?: string; emoji?: string | null; quantity?: number }> | undefined,
   ): string {
-    if (!features?.length) return '';
-    const lines = features
-      .map((f) => {
-        const name = String(f.name ?? '').trim();
-        if (!name) return '';
-        const em = String(f.emoji ?? '').trim();
-        return em ? `${em} ${name}` : `• ${name}`;
-      })
-      .filter(Boolean);
-    if (!lines.length) return '';
-    return `\n\n${lines.join('\n')}`;
+    const plain = formatFincaFeaturesPlain(features ?? []);
+    if (!plain) return '';
+    return `\n\n${plain}`;
   }
 
   /**
@@ -1554,37 +1555,41 @@ Al confirmar tu pago, recibirás el *soporte oficial* junto con todos los detall
         adminCedula: (contractAdmin.adminCedula ?? '').trim(),
         adminCiudad: (contractAdmin.adminCity ?? '').trim(),
         capacidad: String(finca.capacity || 0),
-        aseofinal:
-          (dto.cleaningFeeLabel && String(dto.cleaningFeeLabel).trim()) ||
-          '$100.000',
-        personasextras:
-          (dto.extraPersonFeeLabel && String(dto.extraPersonFeeLabel).trim()) ||
-          '$50.000',
-        depositomascotas:
-          (dto.petDepositLabel && String(dto.petDepositLabel).trim()) ||
-          (petSurchargeRefundable > 0
-            ? new Intl.NumberFormat('es-CO', {
-                style: 'currency',
-                currency: 'COP',
-                minimumFractionDigits: 0,
-              }).format(petSurchargeRefundable)
-            : '$100.000'),
-        Depósitopordaños:
-          (dto.securityDepositLabel && String(dto.securityDepositLabel).trim()) ||
-          '$200.000',
-        depositopordanos:
-          (dto.securityDepositLabel && String(dto.securityDepositLabel).trim()) ||
-          '$200.000',
-        precioAseoFinal:
-          (dto.cleaningFeeLabel && String(dto.cleaningFeeLabel).trim()) ||
-          '$100.000',
-        precioPorPersonasExtras:
-          (dto.extraPersonFeeLabel && String(dto.extraPersonFeeLabel).trim()) ||
-          '$50.000',
-        precioPorMasota:
-          (dto.petDepositLabel && String(dto.petDepositLabel).trim()) ||
-          '$100.000',
       };
+
+      const cleaningFeeCop = Number(dto.cleaningFee) || 0;
+      const refundableDepositCop = Number(dto.refundableDeposit) || 0;
+      const aseoFinalLabel = resolveContractMoneyLabel(
+        cleaningFeeCop,
+        dto.cleaningFeeLabel,
+        contractAdmin.cleaningFee ?? '$100.000',
+      );
+      const depositoDanosLabel = resolveContractMoneyLabel(
+        refundableDepositCop,
+        dto.securityDepositLabel,
+        contractAdmin.securityDeposit ?? '$200.000',
+      );
+      const depositoMascotaLabel = resolveContractMoneyLabel(
+        petCount > 0 ? petSurchargeRefundable : 0,
+        dto.petDepositLabel,
+        contractAdmin.petDeposit ?? '$100.000',
+      );
+      const personasExtrasLabel =
+        (dto.extraPersonFeeLabel && String(dto.extraPersonFeeLabel).trim()) ||
+        contractAdmin.extraPersonFee ||
+        '$50.000';
+
+      Object.assign(wordValues, {
+        aseofinal: aseoFinalLabel,
+        personasextras: personasExtrasLabel,
+        depositomascotas: depositoMascotaLabel,
+        Depósitopordaños: depositoDanosLabel,
+        depositopordanos: depositoDanosLabel,
+        depositoGarantia: depositoDanosLabel,
+        precioAseoFinal: aseoFinalLabel,
+        precioPorPersonasExtras: personasExtrasLabel,
+        precioPorMasota: depositoMascotaLabel,
+      });
 
       // Agregar también los mapeos del PDF (con y sin corchetes) por si acaso
       for (const [k, v] of Object.entries(valuesMapping)) {

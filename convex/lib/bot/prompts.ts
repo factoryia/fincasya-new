@@ -707,7 +707,12 @@ export function missingFieldQuestion(
     case "checkIn":
       return "¿Qué fechas tienes en mente? Dime la fecha de *entrada* y *salida* 📅";
     case "checkOut":
-      return `Ya tengo tu fecha de entrada (${entities.checkIn}). ¿Y cuándo sería la salida? 📅`;
+      return [
+        `Ya tengo tu fecha de entrada (${entities.checkIn}) 📅`,
+        "",
+        "¿Te quedas a *dormir*? Cuéntame la *fecha de salida* (o cuántas noches).",
+        "Y si era un plan de *un solo día* sin pernoctar, también dímelo 🙌",
+      ].join("\n");
     case "cupo":
       return "¿Cuántas personas van en total? (niños de 2 años en adelante cuentan) 👨‍👩‍👧‍👦";
     case "planType":

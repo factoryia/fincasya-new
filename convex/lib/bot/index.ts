@@ -94,6 +94,20 @@ export interface BotTurnInput {
    * caía al fallback "No pude calcular el valor automático…".
    */
   lastCatalogRetailerIds?: string[];
+  /**
+   * Resuelve una finca por NOMBRE. Lo rellena `inbound.ts` con
+   * `whatsappCatalogs.findPropertyByNameForBot`. Se usa cuando el cliente
+   * nombra una finca puntual desde el inicio ("quiero la finca X") — si se
+   * resuelve, el bot salta el catálogo y va directo al flujo de reserva de
+   * esa finca.
+   */
+  resolvePropertyByName?: (
+    name: string,
+  ) => Promise<{
+    productRetailerId: string;
+    title: string;
+    location: string;
+  } | null>;
 }
 
 /** Si el cliente lleva más de N turnos consecutivos en la misma fase sin avanzar,
@@ -203,6 +217,47 @@ function userWantsMoreCatalogOptions(text: string): boolean {
     ) ||
     /\b(quiero\s+ver\s+m[aá]s|qu[ie]ero\s+m[aá]s|ver\s+otras?)\b/.test(t)
   );
+}
+
+/**
+ * ¿El ÚLTIMO mensaje del bot OFRECIÓ recomendar / mostrar más opciones o buscar
+ * en otra zona? (ej. "¿Quieres que te recomiende opciones en otros
+ * municipios?"). Se usa junto con una confirmación del cliente ("sí") para
+ * disparar el re-envío del catálogo: sin esto, el cliente decía "sí" y el bot
+ * respondía algo incoherente ("¿cuál finca de las que viste querés?") porque
+ * el FSM no sabía a qué pregunta del LLM le estaba diciendo que sí.
+ */
+function botOfferedMoreOptions(
+  history: Array<{ role: "user" | "assistant"; content: string }>,
+): boolean {
+  for (let i = history.length - 1; i >= 0; i--) {
+    if (history[i].role === "assistant") {
+      const c = String(history[i].content ?? "")
+        .toLowerCase()
+        .normalize("NFD")
+        .replace(/\p{M}/gu, "");
+      return /(recomend\w*\s+(te\s+)?opciones|recomiende\w*|otros?\s+municipios?|otra\s+zona|otras\s+zonas|en\s+otra\s+(zona|ciudad|parte)|ver\s+(mas|otras)|m[aá]s\s+opciones|otras\s+opciones|te\s+(muestro|recomiendo|env[ií]o)\s+(mas|otras)|buscar\s+en\s+otr)/.test(
+        c,
+      );
+    }
+  }
+  return false;
+}
+
+/** ¿Alguna línea del mensaje es una afirmación corta ("sí", "dale", "ok", "para sí")? */
+function isShortAffirmation(text: string): boolean {
+  return String(text ?? "")
+    .split(/\n+/)
+    .some((line) => {
+      const t = line
+        .trim()
+        .toLowerCase()
+        .normalize("NFD")
+        .replace(/\p{M}/gu, "");
+      return /^(s+i+p?|sip|dale|clar[oa]|ok+|okey|listo|de\s+una|por\s*favor|porfa|si\s+por\s*favor|para\s+si|de\s+acuerdo|bueno|vale|hagamoslo|obvio)[\s.!,]*$/.test(
+        t,
+      );
+    });
 }
 
 /**
@@ -324,6 +379,7 @@ export async function runBotTurn(input: BotTurnInput): Promise<BotTurnResult> {
     cupo: extracted.cupo,
     isEvento: extracted.isEvento,
     planType: extracted.planType,
+    excludedRegions: extracted.excludedRegions,
     selectedPropertyName: extracted.selectedPropertyName,
     hasPets: extracted.hasPets,
     petCount: extracted.petCount,
@@ -407,6 +463,56 @@ export async function runBotTurn(input: BotTurnInput): Promise<BotTurnResult> {
     updatedEntities = mergeEntities(updatedEntities, { selectedPropertyRetailerId: ridGuess });
   }
 
+  // 2.6 Finca nombrada por el cliente desde el inicio (ej. "quiero reservar la
+  // finca Acacias Biocontainer"). Si nombró una finca concreta y todavía no
+  // tenemos su `selectedPropertyRetailerId`, la resolvemos por nombre. Si se
+  // encuentra → seteamos retailerId + location → la transición salta el
+  // catálogo y va directo al flujo de reserva de esa finca (pet_check →
+  // resumen → contrato). Solo en fases tempranas (welcome/collecting) y si el
+  // nombre NO es vago ("esta"/"esa") ni hubo soft-reset.
+  let namedPropertyNotFound = false;
+  if (
+    !wantsNewQuote &&
+    !autoRebroadcastCatalog &&
+    (effectivePhase === "welcome" || effectivePhase === "collecting") &&
+    !(updatedEntities.selectedPropertyRetailerId ?? "").trim() &&
+    !!updatedEntities.selectedPropertyName?.trim() &&
+    !isVaguePropertyLabel(updatedEntities.selectedPropertyName) &&
+    typeof input.resolvePropertyByName === "function"
+  ) {
+    const resolved = await input.resolvePropertyByName(
+      updatedEntities.selectedPropertyName,
+    );
+    if (resolved) {
+      updatedEntities = mergeEntities(updatedEntities, {
+        selectedPropertyRetailerId: resolved.productRetailerId,
+        selectedPropertyName: resolved.title,
+        location: updatedEntities.location || resolved.location,
+      });
+    } else {
+      namedPropertyNotFound = true;
+    }
+  }
+
+  // 2.65 El cliente nombró una finca puntual pero NO la pudimos ubicar (nombre
+  // muy distinto / no está en catálogo). En vez de pedir municipio sin sentido
+  // (el cliente ya dijo qué finca quiere), escalamos a un asesor que la ubica.
+  if (namedPropertyNotFound) {
+    const fincaName = (updatedEntities.selectedPropertyName ?? "").trim();
+    return {
+      replyText: [
+        `Veo que te interesa la finca *${fincaName}* 🏡`,
+        "",
+        "Déjame conectarte con un asesor que la ubica y te confirma disponibilidad para tus fechas 🤝 ✨",
+      ].join("\n"),
+      action: { type: "escalate_human", reason: "client_requested" },
+      nextPhase: effectivePhase,
+      updatedEntities,
+      samePhaseTurnCount: currentSamePhaseTurnCount ?? 0,
+      phaseEnteredAt: currentPhaseEnteredAt ?? Date.now(),
+    };
+  }
+
   // Resolución de pick ambiguo: el cliente dijo "Quiero esta" sin más contexto
   // (selectedPropertyName quedó como "esta" / "esa" o vacío, y NO trae código
   // tipo "VLL#002" para que `inferRetailerIdFromCatalogTitle` lo resuelva).
@@ -448,10 +554,19 @@ export async function runBotTurn(input: BotTurnInput): Promise<BotTurnResult> {
   // No es soft-reset: mantenemos los filtros (location, dates, cupo, plan,
   // evento) y simplemente le pedimos al query la SIGUIENTE página de fincas.
   //
+  // TAMBIÉN dispara cuando el cliente solo dice "sí" Y el bot le acababa de
+  // ofrecer recomendar/mostrar más opciones ("¿quieres que te recomiende
+  // opciones en otros municipios?"). Sin esto, el "sí" caía al LLM y el bot
+  // respondía algo incoherente ("¿cuál finca de las que viste querés?").
+  //
   // Solo aplica cuando ya tenemos toda la data del catálogo (location +
   // checkIn + checkOut + cupo). Si falta algo, dejamos el flujo normal.
+  const clientConfirmedMoreOptions =
+    botOfferedMoreOptions(conversationHistory) &&
+    (extracted.confirmsCurrentStep === "yes" ||
+      isShortAffirmation(messageText));
   if (
-    userWantsMoreCatalogOptions(messageText) &&
+    (userWantsMoreCatalogOptions(messageText) || clientConfirmedMoreOptions) &&
     isPostCollectingPhase(currentPhase) &&
     updatedEntities.location &&
     updatedEntities.checkIn &&

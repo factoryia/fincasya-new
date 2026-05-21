@@ -24,6 +24,12 @@ INLINE_REPLACEMENTS = [
         "propiedad del señor: </w:t>",
         "propiedad del señor: {{nombrePropietario}}, </w:t>",
     ),
+    (" -------------------- ", " — "),
+    ("noventa mil pesos {{aseofinal}}", "{{aseofinal}}"),
+    (
+        "trescientos mil pesos {{Depósitopordaños}}",
+        "{{Depósitopordaños}}",
+    ),
 ]
 
 # Amenidades en varios w:t: primer nodo = placeholder, resto vacío.

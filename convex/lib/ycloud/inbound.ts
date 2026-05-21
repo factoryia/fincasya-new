@@ -6,6 +6,7 @@ import {
   inferRetailerIdFromCatalogTitle,
 } from "../bot/entities";
 import { INBOUND_DEBOUNCE_MS, MAX_CATALOG_PRODUCTS_PER_SEND } from "./constants";
+import { localFaqFallback } from "../faqSeed";
 
 async function isStillThisTailUserMessage(
   ctx: any,
@@ -107,7 +108,8 @@ function wantsExpandedSearch(text: string): boolean {
  * jueves, 9am-5pm) y el valor lo configura un asesor.
  *
  * Triggers: "pasadía", "pasar el día", "pasar un día", "plan de día",
- * "day pass", "solo por el día" (sin quedarse a dormir).
+ * "day pass", "solo por el día", "un solo día", "solamente un día" (el
+ * cliente quiere un único día, sin pernoctar).
  */
 function looksLikePasadia(text: string): boolean {
   const t = String(text ?? "")
@@ -120,7 +122,15 @@ function looksLikePasadia(text: string): boolean {
     /\bpasar\s+(el|un|los?)\s+d[ií]as?\b/.test(t) ||
     /\bplan\s+de\s+d[ií]a\b/.test(t) ||
     /\bday\s*pass\b/.test(t) ||
-    /\b(solo|nada\s+mas|unicamente)\s+(por\s+)?el\s+d[ií]a\b/.test(t)
+    /\b(solo|nada\s+mas|unicamente)\s+(por\s+)?el\s+d[ií]a\b/.test(t) ||
+    // "un solo día" / "solo un día" / "solamente un día" / "un día solamente":
+    // el cliente dice explícitamente que quiere UN único día (sin dormir) →
+    // es un plan de día. Lo enrutamos al flujo pasadía (que le aclara que es
+    // solo en Villavicencio y le ofrece la alternativa de hospedaje).
+    /\bun\s+solo\s+d[ií]a\b/.test(t) ||
+    /\bsolo\s+un\s+d[ií]a\b/.test(t) ||
+    /\bsolamente\s+un\s+d[ií]a\b/.test(t) ||
+    /\bun\s+d[ií]a\s+(solo|solamente|unicamente)\b/.test(t)
   );
 }
 
@@ -234,6 +244,21 @@ const REGIONS = {
     "tenjo",
     "cundinamarca",
   ],
+  COSTA: [
+    "cartagena",
+    "santa marta",
+    "barranquilla",
+    "islas del rosario",
+    "covenas",
+    "tolu",
+    "san bernardo",
+    "san andres",
+    "providencia",
+    "riohacha",
+    "palomino",
+    "costa",
+    "caribe",
+  ],
 };
 
 /**
@@ -245,21 +270,29 @@ const ZONE_EXCLUSIONS: Array<{
   excludeLocationKeywords: string[];
 }> = [
   {
-    // "no llanos", "no en los llanos", "no en el meta", "fuera del llano", etc.
+    // Cubre TODAS las formas de excluir los llanos:
+    //  - "no llanos", "no en los llanos", "que no sean los llanos"
+    //  - "todos MENOS los llanos", "MENOS llanos", "EXCEPTO los llanos"
+    //  - "SIN llanos", "FUERA del llano", "LEJOS del meta", "EVITA los llanos"
+    // "no" permite 0-3 palabras intermedias (atrapa el verbo: "no SEAN los
+    // llanos"). "menos/excepto/sin" van ESTRICTOS (solo artículo) para no
+    // falsear con comparativos ("menos CARO en los llanos" — ahí el cliente SÍ
+    // quiere llanos). "meta" estricto siempre (palabra común: "no es mi meta").
     triggerRegex:
-      /\b(no\s+(?:en\s+)?(?:los\s+|el\s+)?(?:llanos?|meta)|fuera\s+(?:de\s+)?(?:los\s+)?(?:llanos?|meta)|lejos\s+(?:de\s+)?(?:los\s+)?(?:llanos?|meta)|evita\s+(?:los\s+)?(?:llanos?|meta)|que\s+no\s+sea\s+(?:en\s+)?(?:los\s+)?(?:llanos?|meta))\b/i,
+      /\b(?:no\s+(?:\w+\s+){0,3}llanos?|(?:menos|excepto|sin)\s+(?:los\s+|el\s+)?llanos?|(?:no|menos|excepto|sin)\s+(?:el\s+)?meta|(?:fuera|lejos|aparte)\s+(?:de\s+)?(?:los\s+|el\s+)?(?:llanos?|meta)|evit[ae]\s+(?:los\s+|el\s+)?(?:llanos?|meta))\b/i,
     excludeLocationKeywords: REGIONS.LLANOS,
   },
   {
-    // "no en tolima", "fuera de tolima", "evita tolima".
+    // "no tolima", "todos menos tolima", "excepto tolima", "sin tolima",
+    // "fuera de tolima", "evita tolima".
     triggerRegex:
-      /\b(no\s+(?:en\s+)?tolima|fuera\s+(?:de\s+)?tolima|evita\s+tolima|que\s+no\s+sea\s+(?:en\s+)?tolima)\b/i,
+      /\b(?:no\s+(?:\w+\s+){0,3}tolima|(?:menos|excepto|sin)\s+(?:el\s+)?tolima|(?:fuera|lejos|aparte)\s+(?:de\s+)?tolima|evit[ae]\s+tolima)\b/i,
     excludeLocationKeywords: REGIONS.TOLIMA,
   },
   {
-    // "no en cundinamarca", etc.
+    // "no cundinamarca", "menos cundinamarca", "excepto cundinamarca", etc.
     triggerRegex:
-      /\b(no\s+(?:en\s+)?cundinamarca|fuera\s+(?:de\s+)?cundinamarca|evita\s+cundinamarca)\b/i,
+      /\b(?:no\s+(?:\w+\s+){0,3}cundinamarca|(?:menos|excepto|sin)\s+(?:la\s+)?cundinamarca|(?:fuera|lejos|aparte)\s+(?:de\s+)?cundinamarca|evit[ae]\s+cundinamarca)\b/i,
     excludeLocationKeywords: REGIONS.CUNDINAMARCA,
   },
 ];
@@ -317,6 +350,14 @@ const ZONE_INCLUSIONS: Array<{
     triggerRegex: /\b(?<!no\s)(?:en|por)\s+cundinamarca\b/i,
     restrictToLocationKeywords: REGIONS.CUNDINAMARCA,
   },
+  {
+    // "en la costa", "por la costa", "la costa caribe", o ciudades costeras
+    // (Cartagena, Santa Marta, Barranquilla, Islas del Rosario). Sin "no"
+    // antes (para no confundir con "no en la costa").
+    triggerRegex:
+      /\b(?<!no\s)(?:(?:en|por|hacia|para)\s+(?:la\s+)?costa(?:\s+caribe)?|costa\s+caribe|cartagena|santa\s+marta|barranquilla|islas?\s+del?\s+rosario)\b/i,
+    restrictToLocationKeywords: REGIONS.COSTA,
+  },
 ];
 function detectRestrictedZoneKeywords(text: string): string[] {
   const t = String(text ?? "")
@@ -344,7 +385,32 @@ function detectRestrictedZoneKeywords(text: string): string[] {
  *
  * Si NINGUNA línea parece pregunta, devuelve `[]`.
  */
+/**
+ * ¿El mensaje es el cliente ENTREGANDO sus datos del contrato? (nombre,
+ * cédula, correo, teléfono, dirección de residencia). Se detecta por la
+ * presencia de 2+ etiquetas de campo de contrato. Si lo es, NO se trata
+ * ninguna línea como pregunta — sin esto, la línea "Dirección de residencia:
+ * Villavicencio" matchea `direccion` en `shortAndFaqy` y el bot dispara la FAQ
+ * de ubicación de la finca en vez de procesar los datos del contrato.
+ */
+function looksLikeContractData(text: string): boolean {
+  const t = String(text ?? "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/\p{M}/gu, "");
+  let hits = 0;
+  if (/\bnombre\s+completo\b/.test(t)) hits += 1;
+  if (/\bcedula\b/.test(t)) hits += 1;
+  if (/\b(correo|e-?mail)\b/.test(t)) hits += 1;
+  if (/\b(telefono|celular|tel(?:efono)?\s+de\s+contacto)\b/.test(t)) hits += 1;
+  if (/\bdireccion\s+de\s+residencia\b|\bresidencia\b/.test(t)) hits += 1;
+  return hits >= 2;
+}
+
 function extractQuestionLinesArray(text: string): string[] {
+  // El cliente entregando sus datos del contrato NO es una pregunta — aunque
+  // alguna línea ("Dirección de residencia: …") tenga una keyword FAQ-y.
+  if (looksLikeContractData(text)) return [];
   const lines = String(text ?? "")
     .split(/\n+/)
     .map((l) => l.trim())
@@ -360,6 +426,16 @@ function looksLikeQuestion(text: string): boolean {
   if (t.includes("?") || t.includes("¿")) return true;
 
   const lower = t.toLowerCase().normalize("NFD").replace(/\p{M}/gu, "");
+
+  // FILTRO / preferencia, NO pregunta: "que no sea en los llanos", "que sea
+  // cerca a Bogotá", "que tenga piscina", "que quede cerca". El "que" aquí es
+  // conjunción ("[quiero] que sea…"), no el interrogativo "¿qué…?". Sin esta
+  // exclusión, "Que no sea en los llanos" matchea `que\b` en `startsAsQuestion`
+  // y dispara una FAQ irrelevante (ej. la de ubicación) — el cliente solo está
+  // dando un filtro de zona, que lo recoge `detectExcludedZoneKeywords`.
+  if (/^que\s+(no\s+)?(sea|este|tenga|quede|sirva|venga)n?\b/.test(lower)) {
+    return false;
+  }
 
   // ¿Empieza con palabra interrogativa o frase de petición de info?
   const startsAsQuestion =
@@ -412,10 +488,25 @@ function looksLikeQuestion(text: string): boolean {
     /^(no\s+gracias|as[ií]\s+esta\s+bien|nada\s+mas\s+gracias)\b/.test(lower);
   if (isRefusalStatement) return false;
 
+  // Mensaje que aporta DATOS de la reserva (rango de fechas y/o cupo): el
+  // cliente está dando información, NO preguntando. Sin esto, "del 15 al 17
+  // de junio para 10 personas y 1 perro, grupo familiar solo descanso"
+  // matchea `perro` en `shortAndFaqy` → el bot dispara la FAQ de personal de
+  // servicio / mascotas SIN que el cliente preguntara nada. Las preguntas
+  // reales (con "?" o que empiezan con palabra interrogativa "cuánto/cuál
+  // /qué…") ya se detectaron arriba, así que esto no las pisa.
+  const looksLikeReservationData =
+    /\bdel?\s+\d{1,2}\s+(?:al|a)\s+\d{1,2}\b/.test(lower) ||
+    /\b\d{1,2}\s+(?:al|a)\s+\d{1,2}\s+de\s+(?:enero|febrero|marzo|abril|mayo|junio|julio|agosto|septiembre|setiembre|octubre|noviembre|diciembre)\b/.test(
+      lower,
+    ) ||
+    /\b\d{1,3}\s*personas?\b/.test(lower);
+  if (looksLikeReservationData) return false;
+
   // Mensaje corto con términos FAQ inequívocos.
   const shortAndFaqy =
     t.length <= 140 &&
-    /\b(horario|horarios|check ?in|check ?out|hora\s+de\s+(entrada|salida|llegada|llegar)|mascota|mascotas|perr[oa]s?|gatos?|piscina|jacuzzi|bbq|raza|cancelaci[oó]n|cancelar|forma[s]?\s+de\s+pago|metodo[s]?\s+de\s+pago|c[oó]mo\s+pago|c[oó]mo\s+se\s+paga|pol[ií]tica|reglas?|personal\s+de\s+servicio|cocinera|empleada|servicio\s+dom[eé]stico|aseo|ubicaci[oó]n|direcci[oó]n|d[oó]nde\s+queda|d[oó]nde\s+esta|c[oó]mo\s+llego|early\s+check|late\s+check|entrada\s+anticipada|salida\s+tardia)\b/.test(
+    /\b(horario|horarios|check ?in|check ?out|hora\s+de\s+(entrada|salida|llegada|llegar|ingreso)|a\s+qu[eé]?\s+horas?\b|horas?\s+(de|del|es|son|para)\s+(la\s+|el\s+)?(entrada|salida|ingreso|llegada)|mascota|mascotas|perr[oa]s?|gatos?|piscina|jacuzzi|bbq|raza|cancelaci[oó]n|cancelar|forma[s]?\s+de\s+pago|metodo[s]?\s+de\s+pago|c[oó]mo\s+pago|c[oó]mo\s+se\s+paga|pol[ií]tica|reglas?|personal\s+de\s+servicio|cocinera|empleada|servicio\s+dom[eé]stico|aseo|ubicaci[oó]n|direcci[oó]n(?!\s+de\s+residencia)|d[oó]nde\s+queda|d[oó]nde\s+esta|c[oó]mo\s+llego|early\s+check|late\s+check|entrada\s+anticipada|salida\s+tardia|licor|cervezas?|alcohol|trago|alimentos?|llevar\s+(comida|bebidas?|mercado|trago)|botellas?\s+de\s+vidrio)\b/.test(
       lower,
     );
   if (shortAndFaqy) return true;
@@ -455,6 +546,14 @@ export async function processInboundMessageV2(
     internal: any;
     api: any;
     transcribeAudio: (url: string, prompt?: string) => Promise<string>;
+    /**
+     * Clasifica una imagen recibida en la fase de contrato vía modelo de
+     * visión. Devuelve "cedula" | "comprobante" | "otro", o `null` si no se
+     * pudo analizar (→ el llamador escala a un asesor como fallback seguro).
+     */
+    classifyImage?: (
+      url: string,
+    ) => Promise<"cedula" | "comprobante" | "otro" | null>;
     runBotTurn: (input: any) => Promise<any>;
   },
 ) {
@@ -581,6 +680,28 @@ export async function processInboundMessageV2(
   const currentSamePhaseTurnCount = session?.samePhaseTurnCount ?? 0;
   const currentPhaseEnteredAt = session?.phaseEnteredAt ?? Date.now();
   let currentEntities = session?.entities ?? {};
+
+  // Texto de TODOS los mensajes recientes del cliente (no solo el turno
+  // actual). Se usa para detectar filtros de zona que el cliente dijo turnos
+  // atrás (ej. "no llanos" al inicio, fechas/cupo en mensajes posteriores).
+  const recentUserText = recentForBurst
+    .filter((m) => m.sender === "user")
+    .map((m) => String(m.content ?? ""))
+    .join("\n");
+
+  // Si el cliente SOLO excluyó una zona ("que no sean los llanos") y aún no
+  // hay un municipio concreto, eso significa "no tengo preferencia puntual,
+  // solo esa exclusión" → `location = "RECOMENDADAS"`. Sin esto el FSM trata
+  // `location` como faltante y el bot se queda preguntando "¿a qué
+  // municipio?" en bucle, en vez de enviar el catálogo recomendado con la
+  // exclusión de zona aplicada. (Backup determinístico — el extractor LLM
+  // también lo marca, pero esto garantiza el comportamiento.)
+  if (
+    !String(currentEntities.location ?? "").trim() &&
+    detectExcludedZoneKeywords(recentUserText).length > 0
+  ) {
+    currentEntities = { ...currentEntities, location: "RECOMENDADAS" };
+  }
 
   // ── PASADÍA (plan de día, sin hospedaje) — flujo de 2 turnos ─────────────
   // El pasadía es un servicio aparte del hospedaje: SOLO Villavicencio, martes
@@ -733,6 +854,124 @@ export async function processInboundMessageV2(
     "done",
   ];
   if (isMediaMessage && phaseRequiresHumanForMedia.includes(currentPhase)) {
+    // ── Imagen en fase `contract` → analizar con VISIÓN ────────────────────
+    // El cliente debería estar enviando la foto de su cédula. En vez de
+    // adivinar ("gracias por el documento"), clasificamos la imagen con un
+    // modelo de visión: cédula → datos completos, escalar para generar el
+    // contrato; comprobante → escalar para verificar el pago; otra cosa →
+    // pedir que reenvíe la cédula (sin escalar). Si el análisis falla
+    // (`null`), cae al escalado genérico de abajo (fallback seguro).
+    if (
+      args.type === "image" &&
+      currentPhase === "contract" &&
+      args.mediaUrl &&
+      typeof deps.classifyImage === "function"
+    ) {
+      const kind = await deps.classifyImage(args.mediaUrl);
+      if (kind === "cedula") {
+        const tCed = Date.now();
+        const cedMsg = [
+          "¡Recibí la foto de tu *cédula*! 📄✅",
+          "",
+          "Con esto ya tengo todo para tu contrato. Te conecto con un asesor que lo genera y te lo envía para asegurar tu reserva 🤝 ✨",
+        ].join("\n");
+        await ctx.runMutation(deps.internal.conversations.escalate, {
+          conversationId,
+          assignedUserId:
+            process.env.CHATBOT_AUTO_ASSIGN_ADVISOR_ID?.trim() || undefined,
+        });
+        await ctx.runMutation(deps.internal.messages.insertAssistantMessage, {
+          conversationId,
+          content: cedMsg,
+          createdAt: tCed,
+        });
+        await ctx.runMutation(deps.internal.messages.insertSystemMessage, {
+          conversationId,
+          content:
+            "🪪 El cliente envió la FOTO DE LA CÉDULA. Datos del contrato completos → generar y enviar el contrato. La IA quedó en pausa.",
+          createdAt: tCed + 5,
+          metadata: {
+            kind: "inbox_escalation_alert",
+            escalationReason: "contract_cedula_received",
+            mediaUrl: args.mediaUrl ?? null,
+          },
+        });
+        await ctx.runAction(deps.internal.ycloud.sendWhatsAppMessage, {
+          to: args.phone,
+          text: cedMsg,
+          wamid: args.wamid,
+        });
+        await ctx.runMutation(deps.internal.conversations.updateLastMessageAt, {
+          conversationId,
+        });
+        return;
+      }
+      if (kind === "comprobante") {
+        const tCmp = Date.now();
+        const cmpMsg = [
+          "¡Recibí tu *comprobante de pago*! 💰",
+          "",
+          "Te conecto con un asesor para verificarlo y confirmarte los siguientes pasos 🤝 ✨",
+        ].join("\n");
+        await ctx.runMutation(deps.internal.conversations.escalate, {
+          conversationId,
+          assignedUserId:
+            process.env.CHATBOT_AUTO_ASSIGN_ADVISOR_ID?.trim() || undefined,
+        });
+        await ctx.runMutation(deps.internal.messages.insertAssistantMessage, {
+          conversationId,
+          content: cmpMsg,
+          createdAt: tCmp,
+        });
+        await ctx.runMutation(deps.internal.messages.insertSystemMessage, {
+          conversationId,
+          content:
+            "💰 El cliente envió un COMPROBANTE DE PAGO. Verificar el pago y continuar con la reserva. La IA quedó en pausa.",
+          createdAt: tCmp + 5,
+          metadata: {
+            kind: "inbox_escalation_alert",
+            escalationReason: "payment_receipt_received",
+            mediaUrl: args.mediaUrl ?? null,
+          },
+        });
+        await ctx.runAction(deps.internal.ycloud.sendWhatsAppMessage, {
+          to: args.phone,
+          text: cmpMsg,
+          wamid: args.wamid,
+        });
+        await ctx.runMutation(deps.internal.conversations.updateLastMessageAt, {
+          conversationId,
+        });
+        return;
+      }
+      if (kind === "otro") {
+        // No es cédula ni comprobante → pedir que reenvíe la cédula. NO se
+        // escala: el bot espera la imagen correcta (el cliente la reenvía y
+        // vuelve a pasar por este clasificador).
+        const tOtr = Date.now();
+        const otrMsg = [
+          "Mmm, esa imagen no parece tu cédula 🤔",
+          "",
+          "Para preparar tu contrato necesito una *foto clara del frente de tu cédula* 📄. ¿Me la reenvías, por favor?",
+        ].join("\n");
+        await ctx.runMutation(deps.internal.messages.insertAssistantMessage, {
+          conversationId,
+          content: otrMsg,
+          createdAt: tOtr,
+        });
+        await ctx.runAction(deps.internal.ycloud.sendWhatsAppMessage, {
+          to: args.phone,
+          text: otrMsg,
+          wamid: args.wamid,
+        });
+        await ctx.runMutation(deps.internal.conversations.updateLastMessageAt, {
+          conversationId,
+        });
+        return;
+      }
+      // kind === null → análisis falló → continúa al escalado genérico abajo.
+    }
+
     const tMedia = Date.now();
     await ctx.runMutation(deps.internal.conversations.escalate, {
       conversationId,
@@ -871,22 +1110,80 @@ export async function processInboundMessageV2(
     const faqChunks: string[] = [];
     for (const q of questionLines.slice(0, 3)) {
       if (!looksLikeQuestion(q)) continue;
+      let answer = "";
       try {
         const ragResult = (await ctx.runAction(deps.api.knowledge.searchFaqForBot, {
           query: q,
         })) as { text?: string; title?: string; score?: number } | null;
-        const t = String(ragResult?.text ?? "").trim();
-        // Evitar duplicados: dos preguntas distintas pueden matchear la misma FAQ.
-        if (t.length > 0 && !faqChunks.some((c) => c === t)) {
-          faqChunks.push(t);
-        }
+        answer = String(ragResult?.text ?? "").trim();
       } catch (err) {
         console.error("inbound: searchFaqForBot fallo (degradado, sigue sin RAG):", err);
+      }
+      // FALLBACK QUEMADO: si el RAG falló o no devolvió match, intentamos el
+      // matcher determinístico local (`localFaqFallback`) — usa los MISMOS
+      // copys oficiales de `faqSeed.ts`. Así el bot sigue respondiendo las
+      // preguntas frecuentes aunque la búsqueda semántica del RAG esté caída.
+      if (!answer) {
+        answer = (localFaqFallback(q) ?? "").trim();
+      }
+      // Evitar duplicados: dos preguntas distintas pueden matchear la misma FAQ.
+      if (answer.length > 0 && !faqChunks.some((c) => c === answer)) {
+        faqChunks.push(answer);
       }
     }
     if (faqChunks.length > 0) {
       faqContext = faqChunks.join("\n\n━━━━━━━━━━\n\n");
     }
+  }
+
+  // ── Pregunta sin respuesta en fase `contract` → escalar a un asesor ──────
+  // En `contract` el bot solo recolecta los datos del contrato. Si el cliente
+  // hace una pregunta que el RAG NO puede responder (ninguna FAQ matchea —
+  // ej. "¿puedo llevar licor?"), el flujo determinístico solo re-emite el
+  // recordatorio de datos e IGNORA la pregunta. En vez de eso escalamos a un
+  // asesor humano (que además maneja el contrato de todas formas): responde
+  // la duda y cierra la reserva. Si SÍ hay FAQ que responde (`faqContext`
+  // poblado), no escalamos — el RAG-bypass de `replies.ts` la contesta.
+  if (
+    currentPhase === "contract" &&
+    questionLines.length > 0 &&
+    !String(faqContext ?? "").trim()
+  ) {
+    const tCq = Date.now();
+    const cqMsg = [
+      "¡Buena pregunta! 🙌",
+      "",
+      "Te conecto con un asesor que te resuelve esa duda y te ayuda a finalizar tu reserva 🤝 ✨",
+    ].join("\n");
+    await ctx.runMutation(deps.internal.conversations.escalate, {
+      conversationId,
+      assignedUserId:
+        process.env.CHATBOT_AUTO_ASSIGN_ADVISOR_ID?.trim() || undefined,
+    });
+    await ctx.runMutation(deps.internal.messages.insertAssistantMessage, {
+      conversationId,
+      content: cqMsg,
+      createdAt: tCq,
+    });
+    await ctx.runAction(deps.internal.ycloud.sendWhatsAppMessage, {
+      to: args.phone,
+      text: cqMsg,
+      wamid: args.wamid,
+    });
+    await ctx.runMutation(deps.internal.messages.insertSystemMessage, {
+      conversationId,
+      content:
+        "❓ El cliente hizo una PREGUNTA en la fase de contrato que el bot no pudo responder (sin FAQ). Contestarle la duda y ayudar a cerrar la reserva. La IA quedó en pausa.",
+      createdAt: tCq + 5,
+      metadata: {
+        kind: "inbox_escalation_alert",
+        escalationReason: "contract_question",
+      },
+    });
+    await ctx.runMutation(deps.internal.conversations.updateLastMessageAt, {
+      conversationId,
+    });
+    return;
   }
 
   // Recuperar los retailerIds del último batch de catálogo enviado. Se usa en
@@ -915,6 +1212,18 @@ export async function processInboundMessageV2(
     faqContext,
     contactName: args.name,
     lastCatalogRetailerIds,
+    resolvePropertyByName: async (name: string) => {
+      const n = String(name ?? "").trim();
+      if (!n) return null;
+      return (await ctx.runQuery(
+        deps.api.whatsappCatalogs.findPropertyByNameForBot,
+        { name: n },
+      )) as {
+        productRetailerId: string;
+        title: string;
+        location: string;
+      } | null;
+    },
     fetchStayQuote: async (e: BotEntities) => {
       const rid =
         e.selectedPropertyRetailerId?.trim() ||
@@ -1060,18 +1369,50 @@ export async function processInboundMessageV2(
       }
     }
 
-    // Filtros geográficos: el cliente puede pedir inclusión ("cerca a
-    // Bogotá" → Cundinamarca; "en Tolima"; "en los llanos") o exclusión
-    // ("no en los llanos"; "fuera de Tolima"). Mapping en REGIONS.
-    const excludeLocationKeywords = detectExcludedZoneKeywords(textForTurn);
-    const restrictToLocationKeywords = detectRestrictedZoneKeywords(textForTurn);
+    // Filtros geográficos — ZONAS A EXCLUIR. Fuente PRIMARIA: el LLM extractor
+    // (`updatedEntities.excludedRegions`), que INTERPRETA la intención del
+    // cliente sin importar el fraseo ("no llanos", "todos menos el llano",
+    // "que no sea Villavicencio", "lejos de la costa"…). Persiste entre turnos
+    // porque vive en las entidades. Fuente SECUNDARIA (red de seguridad): la
+    // regex `detectExcludedZoneKeywords` sobre los mensajes recientes — por si
+    // el LLM no clasificó la zona. Se unen ambas.
+    const llmExcludedKeywords: string[] = [];
+    for (const region of (result.updatedEntities?.excludedRegions ??
+      []) as string[]) {
+      const kws = REGIONS[region as keyof typeof REGIONS];
+      if (kws) llmExcludedKeywords.push(...kws);
+    }
+    const excludeLocationKeywords = Array.from(
+      new Set([
+        ...llmExcludedKeywords,
+        ...detectExcludedZoneKeywords(recentUserText),
+      ]),
+    );
+    let restrictToLocationKeywords =
+      detectRestrictedZoneKeywords(recentUserText);
+
+    // Una zona EXCLUIDA no puede a la vez estar RESTRINGIDA (incluida). Esto
+    // pasa con frases como "no esté EN los llanos": `detectExcludedZoneKeywords`
+    // captura LLANOS (correcto), pero `detectRestrictedZoneKeywords` TAMBIÉN lo
+    // captura — la regex de inclusión matchea "en los llanos" y su lookbehind
+    // `(?<!no\s)` solo mira UNA palabra atrás, así que el "no" de "no esté en
+    // los llanos" no lo frena. Sin esta resta, el query recibe
+    // restrict=LLANOS + exclude=LLANOS → contradicción → catálogo VACÍO → el
+    // bot escala a un asesor sin razón (mientras que "que no SEAN los llanos",
+    // sin la palabra "en", sí funciona — de ahí la incoherencia reportada).
+    if (excludeLocationKeywords.length && restrictToLocationKeywords.length) {
+      const exclSet = new Set(excludeLocationKeywords);
+      restrictToLocationKeywords = restrictToLocationKeywords.filter(
+        (kw) => !exclSet.has(kw),
+      );
+    }
 
     // Modo "alrededores" / multi-zona: el cliente quiere ver opciones de
     // varios lugares cercanos (no un solo municipio específico). En ese caso
     // ampliamos el cap del catálogo de 12 → 25 para que vea más variedad de
     // zonas. El sort de favoritas-primero (en `whatsappCatalogs.ts`)
     // garantiza que las marcadas como favoritas salgan al inicio.
-    const expandedMode = wantsExpandedSearch(textForTurn);
+    const expandedMode = wantsExpandedSearch(recentUserText);
     const effectiveSendCap = expandedMode
       ? CATALOG_EXPANDED_LIMIT
       : MAX_CATALOG_PRODUCTS_PER_SEND;

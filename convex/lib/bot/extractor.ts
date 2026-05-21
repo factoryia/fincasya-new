@@ -1,17 +1,23 @@
 /**
  * Bot v2 — Extractor de entidades.
  *
- * Hace UNA llamada liviana al LLM (gpt-4.1-mini) para sacar entidades del mensaje
- * del cliente.  No genera respuestas de usuario: solo extrae datos estructurados.
+ * Hace UNA llamada al LLM (gpt-4.1) para sacar entidades del mensaje del
+ * cliente. No genera respuestas de usuario: solo extrae datos estructurados.
  *
  * Si el mensaje es un saludo puro o irrelevante, devuelve {} vacío.
+ *
+ * MODELO: se subió de `gpt-4.1-mini` a `gpt-4.1` (modelo más capaz) para que
+ * interprete mejor mensajes ambiguos, typos y matices del cliente. NOTA: la
+ * mayoría de bugs de "el bot no entendió" NO son del extractor — son lógica
+ * determinística (regex de zonas, FSM, filtros del catálogo). Subir el modelo
+ * ayuda con interpretación de lenguaje natural, pero no arregla bugs de código.
  */
 
 import { generateText } from "ai";
 import { openai } from "@ai-sdk/openai";
 import type { BotEntities, ExtractedEntities } from "./types";
 
-const MODEL = "gpt-4.1-mini";
+const MODEL = "gpt-4.1";
 
 /**
  * Convierte fechas con mes y año implícito.
@@ -73,6 +79,14 @@ Reglas estrictas:
     "restrpo", "restrepo" → "Restrepo"
   Reconoce el municipio aunque venga con preposición ("en melar", "para melgar",
   "voy a melgar"), en minúsculas, sin tildes o con typos de 1-2 letras.
+  ⚠️ TAMBIÉN extrae el municipio cuando el cliente PREGUNTA por disponibilidad
+  o pide ver opciones ahí — esas frases SÍ indican la zona deseada:
+    "¿tienes fincas en Santa Marta?" → location="Santa Marta"
+    "hay casas en Cartagena?" / "tienen algo en Melgar" → ese municipio
+    "ahora quiero ver fincas de Cartagena" / "muéstrame en Girardot" → ese municipio
+  Si el cliente nombra un municipio NUEVO (distinto al de antes), devuélvelo —
+  el bot regenerará el catálogo para esa zona. NO lo dejes vacío solo porque la
+  frase sea una pregunta.
   Devuelve "RECOMENDADAS" si el cliente expresa que NO tiene preferencia /
   no conoce / quiere que recomendemos / quiere ver varias zonas. Patrones:
   "no sé", "no se", "no tengo lugar", "no tengo idea", "no tengo preferencia", "no tengo en mente",
@@ -81,8 +95,23 @@ Reglas estrictas:
   "recomiéndame", "recomiéndeme", "que me recomiendes", "lo que sugieras", "lo que prefieras",
   **"alrededores"**, **"los alrededores"**, **"por los alrededores"**, **"cerca a Bogotá"**,
   **"cerca de Bogotá"**, **"alrededor de Bogotá"**, **"varias zonas"**, **"diferentes zonas"**,
-  **"opciones de diferentes lugares"**, **"varios sitios"**.
+  **"opciones de diferentes lugares"**, **"varios sitios"**,
+  **"la costa"**, **"en la costa"**, **"por la costa"**, **"la costa caribe"**, **"el caribe"**.
   Si dice cualquier variante de las anteriores → location="RECOMENDADAS".
+  (Una CIUDAD costera concreta — "Cartagena", "Santa Marta", "Barranquilla" —
+  SÍ es un municipio: devuélvela como location, NO como "RECOMENDADAS". Solo
+  "la costa" / "el caribe" genéricos van a "RECOMENDADAS".)
+
+  ⚠️ CRÍTICO — EXCLUSIÓN SIN MUNICIPIO: si el cliente SOLO dice qué zona NO
+  quiere (ej. "que no sean los llanos", "que no sea en el meta", "no en
+  Villavicencio", "no llanos", "fuera del Tolima", "todos MENOS los llanos",
+  "todas las zonas EXCEPTO el Tolima", "SIN los llanos") y NO menciona un
+  municipio específico al que SÍ quiera ir → eso significa que NO tiene una preferencia
+  puntual, solo una exclusión → devuelve location="RECOMENDADAS" y
+  wantsRecomendadas=true. NO dejes location vacío en ese caso (si lo dejas
+  vacío, el bot se queda preguntando por el municipio en bucle). La exclusión
+  de zona la aplica otro filtro aparte; tu trabajo aquí es marcar que el
+  cliente está listo para ver el catálogo recomendado.
 - wantsRecomendadas: true si encaja con cualquier patrón de los anteriores.
 - selectedPropertyName: nombre claro de una finca (título real). Si solo dice "esta", "esa", "quiero esta", etc., **omite** el campo (no inventes nombre).
 - hasPets: true/false si menciona mascotas/perros/gatos.
@@ -121,6 +150,22 @@ Reglas estrictas:
     da datos de la reserva (fechas, municipio, cupo, mascotas) o hace preguntas
     normales sobre fincas. Ante la duda → false.
   Omite el campo (no lo incluyas) si es false — solo ponlo cuando sea true.
+- excludedRegions: array de las MACRO-ZONAS que el cliente pide EVITAR / no
+  quiere. Valores EXACTOS permitidos: "LLANOS", "TOLIMA", "CUNDINAMARCA",
+  "COSTA". INTERPRETA LA INTENCIÓN — el cliente lo dice de mil formas y NO hay
+  que adivinar fraseos exactos; entiende el sentido:
+    "no los llanos", "todos menos el llano", "que no sea Villavicencio",
+    "nada del Meta", "el llano no", "menos Tolima", "evítame Cundinamarca",
+    "lejos de la costa", "que no me mandes Restrepo", "sin Acacías", etc.
+  Mapea la ciudad/zona mencionada a su MACRO-ZONA. Referencia:
+    LLANOS = Villavicencio, Restrepo, Acacías, Cumaral, Granada, San Martín,
+             Apiay, Puerto López, Guamal, depto. del Meta (los Llanos Orientales).
+    TOLIMA = Melgar, Carmen de Apicalá, Flandes, Honda, Ibagué, Lérida.
+    CUNDINAMARCA = Girardot, Anapoima, Tocaima, Tenjo, La Mesa, Nilo, Tabio, Villeta.
+    COSTA = Cartagena, Santa Marta, Barranquilla, Islas del Rosario, San Andrés (el Caribe).
+  Si el cliente excluye una CIUDAD suelta (ej. "Villavicencio no"), incluye su
+  macro-zona entera (LLANOS). Si NO pide evitar ninguna zona, OMITE el campo
+  (no devuelvas []).
 MEMORIA / TURNO ACTUAL:
 - NUNCA pongas cadenas vacías. Si un campo no cambia en este mensaje, **omítelo** del JSON (no uses "").
 - Si el mensaje actual solo aclara municipio, "no sé", "recomiéndame", etc., **no vuelvas a incluir** checkIn/checkOut salvo que el cliente **cambie** las fechas en este mensaje.
@@ -176,6 +221,28 @@ export async function extractEntities(
  * Esto evita que el FSM marque el contrato como "completo" con datos basura.
  */
 function sanitizeExtracted(p: ExtractedEntities): ExtractedEntities {
+  // Normalizar `excludedRegions`: el LLM puede devolver minúsculas, duplicados
+  // o valores fuera del set permitido. Dejamos solo LLANOS/TOLIMA/CUNDINAMARCA
+  // /COSTA en mayúsculas y sin repetir. Si queda vacío, OMITIMOS el campo (no
+  // lo ponemos como [] ni undefined → así `mergeEntities` conserva una
+  // exclusión previa si en este turno el cliente no la repitió).
+  if (Array.isArray(p.excludedRegions)) {
+    const VALID = new Set(["LLANOS", "TOLIMA", "CUNDINAMARCA", "COSTA"]);
+    const cleaned = Array.from(
+      new Set(
+        p.excludedRegions
+          .map((r) => String(r ?? "").trim().toUpperCase())
+          .filter((r) => VALID.has(r)),
+      ),
+    );
+    if (cleaned.length > 0) {
+      p = { ...p, excludedRegions: cleaned };
+    } else {
+      p = { ...p };
+      delete p.excludedRegions;
+    }
+  }
+
   if (!p.contractFields) return p;
 
   // ⚠️ El prompt del LLM dice "contractFields: objeto con name, cedula, email,

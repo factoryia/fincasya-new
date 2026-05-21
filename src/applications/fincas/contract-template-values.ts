@@ -49,22 +49,62 @@ export function parseContractSettingsPayload(payload: unknown): {
   return { admin, ownerOverrides };
 }
 
+/** Agrupa características por nombre y suma `quantity` (o 1 por fila). */
+export function aggregatePropertyFeatureCounts(
+  features: unknown[],
+): Array<{ name: string; count: number }> {
+  if (!features?.length) return [];
+
+  const counts = new Map<string, number>();
+  for (const f of features) {
+    const name = (
+      typeof f === 'string'
+        ? f
+        : (f as { name?: string; label?: string }).name ||
+          (f as { label?: string }).label ||
+          ''
+    )
+      .trim()
+      .toUpperCase();
+    if (!name) continue;
+    const qty =
+      f && typeof f === 'object' && (f as { quantity?: number }).quantity != null
+        ? Math.max(1, Number((f as { quantity?: number }).quantity) || 1)
+        : 1;
+    counts.set(name, (counts.get(name) ?? 0) + qty);
+  }
+
+  return Array.from(counts.entries()).map(([name, count]) => ({ name, count }));
+}
+
+/** Lista numerada vertical (Word / catálogo Meta): una línea por ítem. */
 export function formatFincaFeaturesPlain(features: unknown[]): string {
-  if (!features?.length) return '';
-  return features
-    .map((f) => {
-      if (typeof f === 'string') return f.trim();
-      if (f && typeof f === 'object') {
-        const row = f as { name?: string; label?: string; quantity?: number };
-        const name = (row.name || row.label || '').trim();
-        if (!name) return '';
-        const qty = row.quantity != null && row.quantity > 1 ? ` (${row.quantity})` : '';
-        return `${name}${qty}`;
-      }
-      return '';
+  const items = aggregatePropertyFeatureCounts(features);
+  if (!items.length) return '';
+
+  return items
+    .map(({ name, count }, i) => {
+      const suffix = count > 1 ? ` (x${count})` : '';
+      return `${i + 1}. ${name}${suffix}`;
     })
-    .filter(Boolean)
     .join('\n');
+}
+
+/** Etiqueta COP para cláusulas; evita "0" si el formulario viene vacío. */
+export function resolveContractMoneyLabel(
+  amountCop: number | undefined,
+  labelFromForm: string | undefined,
+  fallback: string,
+): string {
+  if (amountCop != null && Number.isFinite(amountCop) && amountCop > 0) {
+    return formatCopLabel(amountCop);
+  }
+  const label = (labelFromForm ?? '').trim();
+  const digits = label.replace(/\D/g, '');
+  if (label && digits.length > 0 && parseInt(digits, 10) > 0) {
+    return label;
+  }
+  return fallback;
 }
 
 export function formatCopLabel(amount: number): string {

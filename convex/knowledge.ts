@@ -18,6 +18,7 @@ import {
 } from '@convex-dev/rag';
 import { paginationOptsValidator } from 'convex/server';
 import { extractTextContent } from './lib/extractTextContent';
+import { FAQ_INITIAL_SEED } from './lib/faqSeed';
 import rag from './rag';
 import type { Id } from './_generated/dataModel';
 import { api, internal } from './_generated/api';
@@ -34,102 +35,11 @@ const DEFAULT_NAMESPACE = 'fincas';
  */
 export const FAQ_NAMESPACE = 'faq';
 
-/**
- * Semilla inicial de FAQs. Cada entrada se inserta con un `key` estable, así
- * que correr `seedFaqEntries` varias veces es idempotente (no duplica).
- *
- * Para añadir/modificar una FAQ:
- *   1) Edita esta lista (o mete el copy oficial en el dashboard Convex).
- *   2) Corre `bunx convex run knowledge:seedFaqEntries` para refrescar.
- *
- * Tip: usa `key` consistente — si cambias `text` pero mantienes `key`, el RAG
- * lo reemplaza limpiamente en lugar de crear un duplicado.
- */
-const FAQ_INITIAL_SEED: Array<{ key: string; title: string; text: string }> = [
-  {
-    key: 'faq:mascotas-politica',
-    title: 'Política y reglas de mascotas',
-    text: [
-      'Tus mascotas son bienvenidas en la mayoría de nuestras opciones de alojamiento. Algunas fincas no las permiten.',
-      '',
-      'Cargos por mascota:',
-      '- Depósito reembolsable: $100.000 por cada mascota.',
-      '- Tarifa de ingreso: $30.000 a partir de la 3ª mascota.',
-      '- Limpieza adicional: si viaja con 3 o más mascotas, $70.000 (cargo único de aseo).',
-      '',
-      'Recomendaciones importantes (qué pueden y qué NO pueden hacer):',
-      '- No ingresar las mascotas a la piscina.',
-      '- Evitar orina o pelaje en zonas interiores.',
-      '- No subirlas a muebles ni camas.',
-      '- Cuidar que no muerdan implementos de la casa.',
-      '- Recoger sus necesidades constantemente.',
-      '',
-      'El incumplimiento de estas recomendaciones puede generar descuentos en el depósito.',
-    ].join('\n'),
-  },
-  {
-    key: 'faq:reserva-abono',
-    title: 'Cómo se reserva: abono del 50%',
-    text: [
-      'Para asegurar la fecha, el cliente abona el 50% del valor total del alojamiento.',
-      'El 50% restante se paga según las condiciones del contrato.',
-      'Tras el abono se envía el contrato y el soporte oficial con la ubicación y detalles.',
-    ].join('\n'),
-  },
-  {
-    key: 'faq:rnt-respaldo',
-    title: 'RNT y respaldo legal',
-    text: [
-      'FincasYa.com cuenta con Registro Nacional de Turismo (RNT) 163658.',
-      'Toda reserva va con respaldo legal y contrato formal de arrendamiento.',
-    ].join('\n'),
-  },
-  {
-    key: 'faq:ubicacion-exacta',
-    title: 'Ubicación exacta de la finca',
-    text: [
-      '¡Hola! 🗺️ Entendemos perfectamente que quieras saber cómo llegar.',
-      '',
-      'Por políticas de seguridad y privacidad de nuestras propiedades, las ubicaciones exactas y direcciones se comparten exclusivamente a través del documento de confirmación de reserva, una vez que esta quede asegurada.',
-      '',
-      '📍 Antes de eso, con gusto te podemos indicar el sector, la zona de referencia o el municipio donde se encuentra la finca (por ejemplo, si es en la vía a Restrepo, Acacías, etc.) para que calcules tu tiempo de viaje.',
-      '',
-      '💬 ¿Deseas proceder con tu reserva? ¡En cuanto se confirme, recibirás la ubicación exacta junto con las indicaciones de llegada! 👨‍💻✨',
-    ].join('\n'),
-  },
-  {
-    key: 'faq:personal-servicio',
-    title: 'Personal de servicio (cocina y aseo)',
-    text: [
-      '¡Claro que sí! Con gusto te comparto la información sobre el personal de servicio para tu estadía:',
-      '',
-      '🤝 Personal de Apoyo Recomendado. Podemos recomendarte personal de confianza para que te colabore con la cocina y el aseo durante tu estadía.',
-      '',
-      '• ⏰ Duración: La tarifa cubre una jornada de aproximadamente 8 horas de servicio ⏳.',
-      '• 💰 Precios: Oscilan desde los $100.000 COP por día, dependiendo de la temporada ☀️.',
-      '• 📋 Condiciones: Los costos finales y las tareas específicas los coordinas y fijas directamente con la persona que te presentemos.',
-      '',
-      '⚠️ Información importante:',
-      '• 👥 Grupos mayores a 15 personas: para garantizar una atención excelente durante esas 8 horas, sugerimos contratar a 2 personas de servicio ✅.',
-      '• 🏠 Políticas de la propiedad: en algunas fincas la contratación del personal de servicio es obligatoria por políticas de cuidado de la casa.',
-      '',
-      'Si deseas que te contactemos con el personal para tu fecha seleccionada, ¡avísale a nuestro asesor para coordinarlo! 👨‍💻✨',
-    ].join('\n'),
-  },
-  {
-    key: 'faq:horarios-flexibles',
-    title: 'Horarios flexibles: entrada anticipada y salida tardía',
-    text: [
-      '¡Con gusto! Te comparto nuestras políticas de horarios para las reservas de hospedaje:',
-      '',
-      '🚪 Llegar más temprano (Early Check-in): Lo más temprano que puedes ingresar a la propiedad el día de tu llegada es a las 9:00 a.m. ☀️ (Esto nos permite asegurar que la finca esté impecable y lista para ti).',
-      '',
-      '🏡 Salir más tarde (Late Check-out): Nuestra hora estándar de salida se establece para entregar la propiedad a tiempo. Si deseas extender tu estadía el último día y salir más tarde, puedes solicitarlo, pero ten en cuenta que esto tendrá un costo adicional.',
-      '',
-      '💬 ¿Deseas programar un horario especial? Confírmale al asesor qué hora de entrada y salida te gustaría para verificar la disponibilidad de la finca y calcular el valor de las horas adicionales. 👨‍💻✨',
-    ].join('\n'),
-  },
-];
+// La semilla de FAQs (`FAQ_INITIAL_SEED`) vive en `./lib/faqSeed` — fuente
+// única de verdad. `knowledge.ts` la siembra en el RAG; `inbound.ts` la usa
+// como fallback determinístico (`localFaqFallback`) si el RAG falla.
+// Para añadir/modificar una FAQ: edita `./lib/faqSeed.ts` y corre
+// `bunx convex run knowledge:seedFaqEntries`.
 
 function guessMimeType(filename: string, bytes: ArrayBuffer): string {
   return (

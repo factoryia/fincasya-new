@@ -7,6 +7,7 @@ import {
 } from "./_generated/server";
 import { internal, api } from "./_generated/api";
 import { transcribeAudio } from "./lib/transcription";
+import { classifyContractImage } from "./lib/imageClassifier";
 import { sendCatalogToYcloud, sendTextToYcloud } from "./lib/ycloud/senders";
 import { getOrCreateConversationForContact } from "./lib/ycloud/session";
 import { processInboundMessageV2 } from "./lib/ycloud/inbound";
@@ -252,6 +253,7 @@ export const processInboundMessage = internalAction({
       internal,
       api,
       transcribeAudio,
+      classifyImage: classifyContractImage,
       runBotTurn,
     });
   },

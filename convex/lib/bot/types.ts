@@ -28,6 +28,15 @@ export interface BotEntities {
   cupo?: number;              // personas (niños 2+ cuentan)
   isEvento?: boolean;         // true=evento, false=descanso (undefined=no confirmado)
   planType?: string;          // "familia" | "amigos" | "pareja" | "empresa" | "otro"
+  /**
+   * Macro-zonas que el cliente pidió EVITAR. Las clasifica el LLM extractor
+   * interpretando la intención (cualquier fraseo: "no llanos", "todos menos
+   * el llano", "que no sea Villavicencio", "lejos de la costa"…). Valores:
+   * "LLANOS" | "TOLIMA" | "CUNDINAMARCA" | "COSTA". El catálogo filtra fuera
+   * los municipios de estas zonas (`REGIONS` en `inbound.ts`). Persiste entre
+   * turnos (el cliente lo dice una vez y aplica a toda la búsqueda).
+   */
+  excludedRegions?: string[];
   selectedPropertyRetailerId?: string;
   selectedPropertyName?: string;
   /** Cliente eligió una ficha del catálogo (ej. "quiero esta") aunque no haya nombre/retailer en texto. */
@@ -108,6 +117,8 @@ export interface ExtractedEntities {
   eventLogistics?: "basic" | "extra";
   contractFields?: Partial<Pick<BotEntities, "contractName"|"contractCedula"|"contractEmail"|"contractPhone"|"contractAddress">>;
   wantsRecomendadas?: boolean;     // dijo "no sé", "recomiéndame", etc.
+  /** Macro-zonas que el cliente pide EVITAR (ver `BotEntities.excludedRegions`). */
+  excludedRegions?: string[];
   /**
    * Clasificación LLM de si el mensaje confirma/niega la última pregunta del bot.
    * "yes" → cliente confirmó (incluye typos: "si pro favor", combos "claro dale",

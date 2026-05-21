@@ -240,6 +240,47 @@ function transitionCollecting(
     }
   }
 
+  // ── Finca puntual ya resuelta ────────────────────────────────────────────
+  // El cliente nombró una finca concreta ("quiero la finca X") y `index.ts`
+  // ya la resolvió a un `selectedPropertyRetailerId`. Saltamos el catálogo:
+  // vamos directo al flujo de reserva de esa finca. Solo necesitamos fechas
+  // (coherentes) + cupo para cotizar; planType / isEvento / municipio no
+  // hacen falta cuando la finca ya está elegida. Los bloqueos de fechas
+  // (incoherentes / puente / temporada) ya se evaluaron arriba.
+  if ((entities.selectedPropertyRetailerId ?? "").trim()) {
+    if (!entities.checkIn) {
+      return {
+        nextPhase: "collecting",
+        action: { type: "reply_only" },
+        missingField: "checkIn",
+      };
+    }
+    if (!entities.checkOut) {
+      return {
+        nextPhase: "collecting",
+        action: { type: "reply_only" },
+        missingField: "checkOut",
+      };
+    }
+    if (entities.cupo === undefined || entities.cupo <= 0) {
+      return {
+        nextPhase: "collecting",
+        action: { type: "reply_only" },
+        missingField: "cupo",
+      };
+    }
+    // Finca + fechas + cupo OK → flujo de reserva (igual que catalog_sent +
+    // finca elegida): según el estado de mascotas vamos a pet_rules_shown /
+    // quote_shown / pet_check.
+    if (entities.hasPets === true && (entities.petCount ?? 0) > 0) {
+      return { nextPhase: "pet_rules_shown", action: { type: "reply_only" } };
+    }
+    if (entities.hasPets === false) {
+      return { nextPhase: "quote_shown", action: { type: "reply_only" } };
+    }
+    return { nextPhase: "pet_check", action: { type: "reply_only" } };
+  }
+
   const missing = firstMissingCatalogField(entities);
   if (missing) {
     return {
