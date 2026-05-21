@@ -79,7 +79,17 @@ jobs:
           script: |
             set -e
             cd ~/apps/backend
+            echo "=== Disco antes de limpieza ==="
+            df -h / /var/lib/docker 2>/dev/null || df -h
+            # Liberar capas viejas antes del pull (evita "no space left on device").
+            docker compose down --remove-orphans 2>/dev/null || true
+            docker system prune -af 2>/dev/null || true
+            docker builder prune -af 2>/dev/null || true
+            echo "=== Disco después de limpieza ==="
+            df -h / /var/lib/docker 2>/dev/null || df -h
             echo "${{ secrets.GHCR_TOKEN }}" | docker login ghcr.io -u "${{ secrets.GHCR_USERNAME }}" --password-stdin
             docker compose pull
             docker compose up -d --force-recreate
             docker image prune -f
+            echo "=== Disco final ==="
+            df -h / /var/lib/docker 2>/dev/null || df -h

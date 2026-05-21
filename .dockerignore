@@ -14,3 +14,7 @@ coverage
 postman
 scripts
 test
+docs
+FincasYaWeb
+*.docx
+!assets/contracts/*.docx

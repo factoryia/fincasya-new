@@ -47,7 +47,9 @@ RUN bun install --frozen-lockfile --production
 COPY --from=builder /app/dist ./dist
 COPY --from=builder /app/convex/_generated ./convex/_generated
 COPY assets/contracts ./assets/contracts
-COPY assets/contracts ./assets/contracts
+
+# Menos peso en disco: sin Chromium embebido de puppeteer ni tooling de types en runtime.
+RUN rm -rf /root/.cache/puppeteer node_modules/typescript node_modules/@types 2>/dev/null || true
 
 EXPOSE 3001
 
