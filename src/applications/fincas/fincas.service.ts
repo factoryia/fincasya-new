@@ -767,6 +767,7 @@ Al confirmar tu pago, recibirás el *soporte oficial* junto con todos los detall
         typeof rest.description === 'string' ? rest.description : '',
         rest.depositoDanosReembolsable,
         rest.manillaCondominio,
+        rest.depositoAseo,
       );
 
       const propertyId = await this.convexService.mutation(
@@ -830,13 +831,15 @@ Al confirmar tu pago, recibirás el *soporte oficial* junto con todos los detall
       const shouldSyncDescription =
         updateData.description !== undefined ||
         updateData.depositoDanosReembolsable !== undefined ||
-        updateData.manillaCondominio !== undefined;
+        updateData.manillaCondominio !== undefined ||
+        updateData.depositoAseo !== undefined;
 
       if (shouldSyncDescription) {
         const needsCurrent =
           updateData.description === undefined ||
           updateData.depositoDanosReembolsable === undefined ||
-          updateData.manillaCondominio === undefined;
+          updateData.manillaCondominio === undefined ||
+          updateData.depositoAseo === undefined;
         const current = needsCurrent ? await this.getById(id) : null;
 
         updateData.description = mergeDepositIntoPropertyDescription(
@@ -845,6 +848,7 @@ Al confirmar tu pago, recibirás el *soporte oficial* junto con todos los detall
             current?.depositoDanosReembolsable,
           (updateData.manillaCondominio as number | undefined) ??
             current?.manillaCondominio,
+          (updateData.depositoAseo as number | undefined) ?? current?.depositoAseo,
         );
       }
 

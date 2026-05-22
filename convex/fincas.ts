@@ -1606,6 +1606,7 @@ export const create = mutation({
     serviceStaffPrice: v.optional(v.number()),
     depositoDanosReembolsable: v.optional(v.number()),
     manillaCondominio: v.optional(v.number()),
+    depositoAseo: v.optional(v.number()),
     catalogFilterTags: v.optional(v.array(v.string())),
     marketplaceForSale: v.optional(v.boolean()),
     salePriceCop: v.optional(v.number()),
@@ -1665,6 +1666,9 @@ export const create = mutation({
         : {}),
       ...(args.manillaCondominio !== undefined
         ? { manillaCondominio: args.manillaCondominio }
+        : {}),
+      ...(args.depositoAseo !== undefined
+        ? { depositoAseo: args.depositoAseo }
         : {}),
       ...(args.catalogFilterTags !== undefined
         ? { catalogFilterTags: args.catalogFilterTags }
@@ -1833,6 +1837,7 @@ export const update = mutation({
     serviceStaffPrice: v.optional(v.number()),
     depositoDanosReembolsable: v.optional(v.number()),
     manillaCondominio: v.optional(v.number()),
+    depositoAseo: v.optional(v.number()),
     catalogFilterTags: v.optional(v.array(v.string())),
     marketplaceForSale: v.optional(v.boolean()),
     salePriceCop: v.optional(v.number()),

@@ -284,6 +284,13 @@ export class CreateFincaDto {
   @Transform(({ value }) => toNumber(value))
   manillaCondominio?: number;
 
+  /** Auxilio de aseo final (COP), cobro único por estadía. */
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  @Transform(({ value }) => toNumber(value))
+  depositoAseo?: number;
+
   @IsOptional()
   @IsNumber()
   @Min(0)

@@ -122,6 +122,11 @@ export default defineSchema({
      * conjunto cerrado / condominio.
      */
     manillaCondominio: v.optional(v.number()),
+    /**
+     * Auxilio de aseo final (COP), cobro único por estadía. Se incluye en la
+     * descripción, chat y precarga de contratos.
+     */
+    depositoAseo: v.optional(v.number()),
     createdAt: v.number(),
     updatedAt: v.number(),
   })

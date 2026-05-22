@@ -3,10 +3,12 @@ export const DEPOSIT_BLOCK_HEADING = '💰 Costos adicionales de la estadía:';
 const LEGACY_DEPOSIT_LINE =
   /^\s*[•\-]?\s*Depósito por daños \(reembolsable\):.*$/gim;
 const LEGACY_MANILLA_LINE = /^\s*[•\-]?\s*Manilla condominio:.*$/gim;
+const LEGACY_ASEO_LINE = /^\s*[•\-]?\s*Auxilio de aseo:.*$/gim;
 
 const AUTO_DEPOSIT_BULLET =
   /^\s*[•\-]\s*Depósito por daños \(reembolsable\):/i;
 const AUTO_MANILLA_BULLET = /^\s*[•\-]\s*Manilla condominio:/i;
+const AUTO_ASEO_BULLET = /^\s*[•\-]\s*Auxilio de aseo:/i;
 
 function isManagedDepositHeadingLine(line: string): boolean {
   const t = line.trim();
@@ -14,7 +16,11 @@ function isManagedDepositHeadingLine(line: string): boolean {
 }
 
 function isManagedDepositBulletLine(line: string): boolean {
-  return AUTO_DEPOSIT_BULLET.test(line) || AUTO_MANILLA_BULLET.test(line);
+  return (
+    AUTO_DEPOSIT_BULLET.test(line) ||
+    AUTO_MANILLA_BULLET.test(line) ||
+    AUTO_ASEO_BULLET.test(line)
+  );
 }
 
 function isBulletLine(line: string): boolean {
@@ -71,6 +77,7 @@ export function stripDepositBlockFromDescription(text: string): string {
   result = result
     .replace(LEGACY_DEPOSIT_LINE, '')
     .replace(LEGACY_MANILLA_LINE, '')
+    .replace(LEGACY_ASEO_LINE, '')
     .replace(/\n{3,}/g, '\n\n')
     .trimEnd();
 
@@ -84,13 +91,16 @@ function formatCopLine(amount: number): string {
 export function buildDepositDescriptionBlock(
   depositoDanosReembolsable?: number,
   manillaCondominio?: number,
+  depositoAseo?: number,
   extraBullets: string[] = [],
 ): string {
   const deposito = Math.max(0, Number(depositoDanosReembolsable) || 0);
   const manilla = Math.max(0, Number(manillaCondominio) || 0);
+  const aseo = Math.max(0, Number(depositoAseo) || 0);
   const custom = extraBullets.filter((line) => line.trim().length > 0);
 
-  if (deposito === 0 && manilla === 0 && custom.length === 0) return '';
+  if (deposito === 0 && manilla === 0 && aseo === 0 && custom.length === 0)
+    return '';
 
   const lines = [DEPOSIT_BLOCK_HEADING];
   if (deposito > 0) {
@@ -100,6 +110,9 @@ export function buildDepositDescriptionBlock(
   }
   if (manilla > 0) {
     lines.push(`• Manilla condominio: ${formatCopLine(manilla)}`);
+  }
+  if (aseo > 0) {
+    lines.push(`• Auxilio de aseo: ${formatCopLine(aseo)}`);
   }
   for (const line of custom) {
     lines.push(line);
@@ -112,6 +125,7 @@ export function mergeDepositIntoPropertyDescription(
   description: string | undefined,
   depositoDanosReembolsable?: number,
   manillaCondominio?: number,
+  depositoAseo?: number,
 ): string {
   const rawLines = (description ?? '').replace(/\r\n?/g, '\n').split('\n');
   const { out, customBullets } = splitCostSectionFromLines(rawLines);
@@ -120,12 +134,14 @@ export function mergeDepositIntoPropertyDescription(
   base = base
     .replace(LEGACY_DEPOSIT_LINE, '')
     .replace(LEGACY_MANILLA_LINE, '')
+    .replace(LEGACY_ASEO_LINE, '')
     .replace(/\n{3,}/g, '\n\n')
     .trimEnd();
 
   const block = buildDepositDescriptionBlock(
     depositoDanosReembolsable,
     manillaCondominio,
+    depositoAseo,
     customBullets,
   );
   if (!block) return base;
@@ -134,6 +150,7 @@ export function mergeDepositIntoPropertyDescription(
     const managedOnly = buildDepositDescriptionBlock(
       depositoDanosReembolsable,
       manillaCondominio,
+      depositoAseo,
       [],
     );
     const bullets = managedOnly
