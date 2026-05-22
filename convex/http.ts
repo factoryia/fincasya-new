@@ -750,4 +750,38 @@ http.route({
   }),
 });
 
+/** Contador de visitas del sitio público (dashboard admin). */
+http.route({
+  path: '/api/analytics/page-view',
+  method: 'POST',
+  handler: httpAction(async (ctx, request) => {
+    const denied = requireYCloudApiKey(request);
+    if (denied) return denied;
+
+    let body: { path?: string } = {};
+    try {
+      body = (await request.json()) as typeof body;
+    } catch {
+      body = {};
+    }
+
+    await ctx.runMutation(internal.siteAnalytics.recordPageView, {
+      path: body.path?.trim() || undefined,
+    });
+    return jsonResponse({ ok: true }, 200);
+  }),
+});
+
+http.route({
+  path: '/api/analytics/stats',
+  method: 'GET',
+  handler: httpAction(async (ctx, request) => {
+    const denied = requireYCloudApiKey(request);
+    if (denied) return denied;
+
+    const stats = await ctx.runQuery(internal.siteAnalytics.getDashboardStats, {});
+    return jsonResponse(stats, 200);
+  }),
+});
+
 export default http;

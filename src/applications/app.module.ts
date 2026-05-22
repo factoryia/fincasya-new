@@ -17,6 +17,7 @@ import { InternalPagesModule } from './internal-pages/internal-pages.module';
 import { AccountingManagersModule } from './accounting-managers/accounting-managers.module';
 import { RolesModule } from './roles/roles.module';
 import { WebChatModule } from './web-chat/web-chat.module';
+import { AnalyticsModule } from './analytics/analytics.module';
 import { ScheduleModule } from '@nestjs/schedule';
 
 @Module({
@@ -40,6 +41,7 @@ import { ScheduleModule } from '@nestjs/schedule';
     AccountingManagersModule,
     RolesModule,
     WebChatModule,
+    AnalyticsModule,
   ],
 
   controllers: [],

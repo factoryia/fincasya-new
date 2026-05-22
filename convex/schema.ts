@@ -833,6 +833,13 @@ export default defineSchema({
     .index('by_conversation', ['conversationId'])
     .index('by_phone', ['phone']),
 
+  /** Contador de vistas del sitio público (dashboard admin). */
+  siteAnalytics: defineTable({
+    metricKey: v.string(),
+    count: v.number(),
+    updatedAt: v.number(),
+  }).index('by_metricKey', ['metricKey']),
+
   // Permisos por rol
   rolePermissions: defineTable({
     role: v.string(),
