@@ -55,7 +55,6 @@ export const recordPageView = internalMutation({
   handler: async (ctx, args) => {
     void args.path;
     const currentMonth = monthKey();
-    await incrementMetric(ctx, 'total');
     await incrementMetric(ctx, `month:${currentMonth}`);
     return { ok: true };
   },
@@ -66,7 +65,6 @@ export const getDashboardStats = internalQuery({
   handler: async (ctx) => {
     const currentMonth = monthKey();
     const previousMonth = prevMonthKey();
-    const totalViews = await getMetricCount(ctx, 'total');
     const monthViews = await getMetricCount(ctx, `month:${currentMonth}`);
     const prevMonthViews = await getMetricCount(ctx, `month:${previousMonth}`);
 
@@ -78,7 +76,6 @@ export const getDashboardStats = internalQuery({
           : 0;
 
     return {
-      totalViews,
       monthViews,
       prevMonthViews,
       monthGrowth,
