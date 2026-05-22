@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  Body,
   Controller,
   Get,
   MaxFileSizeValidator,
@@ -15,6 +16,7 @@ import { FileInterceptor } from '@nestjs/platform-express';
 import { memoryStorage } from 'multer';
 import type { Request } from 'express';
 import { KnowledgeService } from './knowledge.service';
+import { ConvexSiteProxyService } from '../shared/services/convex-site-proxy.service';
 
 // Convex Node actions limit args to 5 MiB; base64 ~+33% → max ~4 MB binario
 const MAX_FILE_SIZE = 4 * 1024 * 1024; // 4 MB
@@ -47,7 +49,64 @@ class AllowedMimeValidator extends FileValidator<Record<string, any>> {
 
 @Controller('knowledge')
 export class KnowledgeController {
-  constructor(private readonly knowledgeService: KnowledgeService) {}
+  constructor(
+    private readonly knowledgeService: KnowledgeService,
+    private readonly convexProxy: ConvexSiteProxyService,
+  ) {}
+
+  /** Proxea a Convex (rewrite de Next en prod). */
+  @Get('list')
+  async listForAdmin(
+    @Query('namespace') namespace?: string,
+    @Query('category') category?: string,
+    @Query('cursor') cursor?: string,
+    @Query('limit') limit?: string,
+  ) {
+    const qs = new URLSearchParams();
+    if (namespace) qs.set('namespace', namespace);
+    if (category) qs.set('category', category);
+    if (cursor) qs.set('cursor', cursor);
+    if (limit) qs.set('limit', limit);
+    const q = qs.toString();
+    return this.convexProxy.forwardJson(
+      'GET',
+      `/api/knowledge/list${q ? `?${q}` : ''}`,
+    );
+  }
+
+  @Get('entry')
+  async entryForAdmin(
+    @Query('namespace') namespace: string,
+    @Query('entryId') entryId: string,
+  ) {
+    const qs = new URLSearchParams({
+      namespace: namespace ?? 'fincas',
+      entryId: entryId ?? '',
+    });
+    return this.convexProxy.forwardJson(
+      'GET',
+      `/api/knowledge/entry?${qs.toString()}`,
+    );
+  }
+
+  @Get('job')
+  async jobStatus(@Query('jobId') jobId: string) {
+    const qs = new URLSearchParams({ jobId: jobId ?? '' });
+    return this.convexProxy.forwardJson(
+      'GET',
+      `/api/knowledge/job?${qs.toString()}`,
+    );
+  }
+
+  @Post('text')
+  async addText(@Body() body: Record<string, unknown>) {
+    return this.convexProxy.forwardJson('POST', '/api/knowledge/text', body);
+  }
+
+  @Post('delete')
+  async deleteEntry(@Body() body: Record<string, unknown>) {
+    return this.convexProxy.forwardJson('POST', '/api/knowledge/delete', body);
+  }
 
   /**
    * Subir un archivo al RAG (base de conocimiento vectorizada).

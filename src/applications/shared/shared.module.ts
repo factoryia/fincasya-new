@@ -5,10 +5,12 @@ import { GoogleCalendarService } from './services/google-calendar.service';
 import { BrevoEmailService } from './services/brevo-email.service';
 
 import { PdfService } from './services/pdf.service';
+import { ConvexSiteProxyService } from './services/convex-site-proxy.service';
 
 @Module({
   providers: [
     ConvexService,
+    ConvexSiteProxyService,
     S3Service,
     GoogleCalendarService,
     BrevoEmailService,
@@ -16,6 +18,7 @@ import { PdfService } from './services/pdf.service';
   ],
   exports: [
     ConvexService,
+    ConvexSiteProxyService,
     S3Service,
     GoogleCalendarService,
     BrevoEmailService,
