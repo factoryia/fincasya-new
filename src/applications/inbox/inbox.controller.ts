@@ -70,6 +70,7 @@ export class InboxController {
     @Query('tagsAny') tagsAnyRaw?: string,
     @Query('lastMessageFrom') lastMessageFromRaw?: string,
     @Query('lastMessageTo') lastMessageToRaw?: string,
+    @Query('channel') channel?: 'whatsapp' | 'web',
     @Query('limit') limit?: string,
   ) {
     const limitNum = limit ? parseInt(limit, 10) : undefined;
@@ -107,6 +108,7 @@ export class InboxController {
       tagsAny: tagsAny && tagsAny.length > 0 ? tagsAny : undefined,
       lastMessageFrom: Number.isFinite(lastMessageFrom) ? lastMessageFrom : undefined,
       lastMessageTo: Number.isFinite(lastMessageTo) ? lastMessageTo : undefined,
+      channel: channel === 'whatsapp' || channel === 'web' ? channel : undefined,
       limit: limitNum,
     });
   }

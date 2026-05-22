@@ -1,6 +1,10 @@
 import { SESSION_ACTIVE_TTL_MS, SESSION_REACTIVATE_TTL_MS } from "./constants";
 
-export async function getOrCreateConversationForContact(ctx: any, contactId: string) {
+export async function getOrCreateConversationForContact(
+  ctx: any,
+  contactId: string,
+  channel: "whatsapp" | "web" = "whatsapp",
+) {
   const now = Date.now();
   const all = await ctx.db
     .query("conversations")
@@ -8,7 +12,37 @@ export async function getOrCreateConversationForContact(ctx: any, contactId: str
     .order("desc")
     .collect();
 
-  const active = all.find((c: any) => c.status === "ai" || c.status === "human");
+  // Chat web: un solo hilo por visitante (mismo contactId). Evita 2–3 conversaciones
+  // si llegan mensajes en paralelo o el usuario reabre el widget.
+  if (channel === "web") {
+    const webConvs = all.filter((c: any) => c.channel === "web");
+    const latest = webConvs[0];
+    if (latest) {
+      if (latest.status === "resolved") {
+        await ctx.db.patch(latest._id, {
+          status: "ai",
+          operationalState: "pending_data",
+          lastMessageAt: now,
+        });
+        return {
+          conversationId: latest._id,
+          isNew: false,
+          isReactivated: true,
+        };
+      }
+      return {
+        conversationId: latest._id,
+        isNew: false,
+        isReactivated: false,
+      };
+    }
+  }
+
+  const active = all.find(
+    (c: any) =>
+      (c.status === "ai" || c.status === "human") &&
+      (channel === "web" ? c.channel === "web" : true),
+  );
   if (active) {
     const activeTs = Number(active.lastMessageAt ?? active.createdAt ?? 0);
     if (activeTs > 0 && now - activeTs < SESSION_ACTIVE_TTL_MS) {
@@ -17,7 +51,9 @@ export async function getOrCreateConversationForContact(ctx: any, contactId: str
     await ctx.db.patch(active._id, { status: "resolved" });
   }
 
-  const latestResolved = all.find((c: any) => c.status === "resolved");
+  const latestResolved = all.find((c: any) =>
+    channel === "web" ? c.channel === "web" && c.status === "resolved" : c.status === "resolved",
+  );
   if (latestResolved) {
     const resolvedTs = Number(latestResolved.lastMessageAt ?? latestResolved.createdAt ?? 0);
     if (resolvedTs > 0 && now - resolvedTs < SESSION_REACTIVATE_TTL_MS) {
@@ -31,7 +67,7 @@ export async function getOrCreateConversationForContact(ctx: any, contactId: str
 
   const conversationId = await ctx.db.insert("conversations", {
     contactId,
-    channel: "whatsapp",
+    channel,
     status: "ai",
     operationalState: "pending_data",
     lastMessageAt: now,

@@ -26,18 +26,42 @@ export const recordProcessedEvent = internalMutation({
   },
 });
 
+function displayNameForContact(phone: string, name: string): string {
+  if (phone.startsWith("web:")) {
+    const sid = phone.slice(4).trim();
+    const short =
+      sid.length > 10 ? `${sid.slice(0, 8)}…` : sid || "web";
+    return `Chat web · ${short}`;
+  }
+  return (name || phone).trim() || phone;
+}
+
 export const getOrCreateContact = internalMutation({
   args: { phone: v.string(), name: v.string() },
   handler: async (ctx, args) => {
+    const displayName = displayNameForContact(args.phone, args.name);
     const existing = await ctx.db
       .query("contacts")
       .withIndex("by_phone", (q) => q.eq("phone", args.phone))
       .unique();
-    if (existing) return existing._id;
     const now = Date.now();
+    if (existing) {
+      if (
+        args.phone.startsWith("web:") &&
+        (existing.name === "Visitante web" ||
+          existing.name === args.name ||
+          !String(existing.name ?? "").includes("Chat web"))
+      ) {
+        await ctx.db.patch(existing._id, {
+          name: displayName,
+          updatedAt: now,
+        });
+      }
+      return existing._id;
+    }
     return ctx.db.insert("contacts", {
       phone: args.phone,
-      name: args.name || args.phone,
+      name: displayName,
       crmType: "lead",
       createdAt: now,
       updatedAt: now,
@@ -46,8 +70,16 @@ export const getOrCreateContact = internalMutation({
 });
 
 export const getOrCreateConversation = internalMutation({
-  args: { contactId: v.id("contacts") },
-  handler: async (ctx, args) => getOrCreateConversationForContact(ctx, args.contactId),
+  args: {
+    contactId: v.id("contacts"),
+    channel: v.optional(v.union(v.literal("whatsapp"), v.literal("web"))),
+  },
+  handler: async (ctx, args) =>
+    getOrCreateConversationForContact(
+      ctx,
+      args.contactId,
+      args.channel ?? "whatsapp",
+    ),
 });
 
 export const markOutboundAsHuman = internalMutation({

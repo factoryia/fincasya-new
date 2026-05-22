@@ -679,4 +679,75 @@ http.route({
   }),
 });
 
+/** Chat flotante del sitio público (proxeado desde Next.js con X-API-Key). */
+http.route({
+  path: '/api/web-chat/messages',
+  method: 'GET',
+  handler: httpAction(async (ctx, request) => {
+    const denied = requireYCloudApiKey(request);
+    if (denied) return denied;
+
+    const url = new URL(request.url);
+    const sessionId = url.searchParams.get('sessionId')?.trim() ?? '';
+    const sinceRaw = url.searchParams.get('since');
+    const since =
+      sinceRaw != null && sinceRaw !== ''
+        ? Number(sinceRaw)
+        : undefined;
+    const limitRaw = parseInt(url.searchParams.get('limit') ?? '80', 10);
+
+    if (!sessionId || sessionId.length < 8) {
+      return jsonResponse({ error: '`sessionId` requerido (mín. 8 caracteres)' }, 400);
+    }
+
+    const result = await ctx.runQuery(internal.webChat.listMessagesForSession, {
+      sessionId,
+      since: Number.isFinite(since) ? since : undefined,
+      limit: Number.isFinite(limitRaw) ? limitRaw : 80,
+    });
+
+    return jsonResponse(result, 200);
+  }),
+});
+
+http.route({
+  path: '/api/web-chat/send',
+  method: 'POST',
+  handler: httpAction(async (ctx, request) => {
+    const denied = requireYCloudApiKey(request);
+    if (denied) return denied;
+
+    let body: { sessionId?: string; text?: string; displayName?: string };
+    try {
+      body = (await request.json()) as typeof body;
+    } catch {
+      return jsonResponse({ error: 'Body JSON inválido' }, 400);
+    }
+
+    const sessionId = String(body?.sessionId ?? '').trim();
+    const text = String(body?.text ?? '').trim();
+    const displayName = body?.displayName?.trim() || undefined;
+
+    if (!sessionId || sessionId.length < 8) {
+      return jsonResponse({ error: '`sessionId` requerido' }, 400);
+    }
+    if (!text) {
+      return jsonResponse({ error: '`text` requerido' }, 400);
+    }
+
+    try {
+      await ctx.runAction(internal.webChat.processWebInboundMessage, {
+        sessionId,
+        text,
+        displayName,
+      });
+      return jsonResponse({ ok: true }, 200);
+    } catch (err) {
+      const message =
+        err instanceof Error ? err.message : 'Error al procesar mensaje';
+      return jsonResponse({ error: message }, 400);
+    }
+  }),
+});
+
 export default http;

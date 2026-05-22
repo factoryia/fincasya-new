@@ -508,7 +508,7 @@ export default defineSchema({
 
   conversations: defineTable({
     contactId: v.id('contacts'),
-    channel: v.union(v.literal('whatsapp')),
+    channel: v.union(v.literal('whatsapp'), v.literal('web')),
     /** ai = responde la IA; human = solo humano; resolved = cerrada */
     status: v.union(v.literal('ai'), v.literal('human'), v.literal('resolved')),
     /**

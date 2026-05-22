@@ -5,11 +5,12 @@ import {
   Param,
   Patch,
   Post,
+  UploadedFile,
   UploadedFiles,
   UseGuards,
   UseInterceptors,
 } from '@nestjs/common';
-import { FilesInterceptor } from '@nestjs/platform-express';
+import { FileInterceptor, FilesInterceptor } from '@nestjs/platform-express';
 import { memoryStorage } from 'multer';
 import { InternalPagesService } from './internal-pages.service';
 import { ConvexAuthGuard } from '../shared/guards/convex-auth.guard';
@@ -40,6 +41,18 @@ export class InternalPagesController {
   )
   async uploadImages(@UploadedFiles() files: Express.Multer.File[]) {
     return await this.internalPagesService.uploadImages(files);
+  }
+
+  @Post('video')
+  @UseGuards(ConvexAuthGuard, AdminGuard)
+  @UseInterceptors(
+    FileInterceptor('video', {
+      storage: memoryStorage(),
+      limits: { fileSize: 150 * 1024 * 1024 },
+    }),
+  )
+  async uploadVideo(@UploadedFile() file: Express.Multer.File) {
+    return await this.internalPagesService.uploadVideo(file);
   }
 }
 

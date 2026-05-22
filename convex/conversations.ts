@@ -458,6 +458,8 @@ export const list = query({
     lastMessageFrom: v.optional(v.number()),
     /** Último mensaje (o createdAt si no hay): timestamp <= */
     lastMessageTo: v.optional(v.number()),
+    /** Canal: whatsapp | web */
+    channel: v.optional(v.union(v.literal("whatsapp"), v.literal("web"))),
     limit: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
@@ -468,6 +470,10 @@ export const list = query({
           .withIndex("by_status", (q) => q.eq("status", args.status!))
           .collect()
       : await ctx.db.query("conversations").collect();
+
+    if (args.channel) {
+      convs = convs.filter((c) => c.channel === args.channel);
+    }
 
     if (args.attended !== undefined) {
       convs = convs.filter((c) => (c.attended ?? false) === args.attended);

@@ -6,7 +6,11 @@ import {
   inferRetailerIdFromCatalogTitle,
 } from "../bot/entities";
 import { INBOUND_DEBOUNCE_MS, MAX_CATALOG_PRODUCTS_PER_SEND } from "./constants";
-import { localFaqFallback } from "../faqSeed";
+import {
+  getFaqTextByKey,
+  localFaqFallback,
+  localFaqMatchesForText,
+} from "../faqSeed";
 
 async function isStillThisTailUserMessage(
   ctx: any,
@@ -439,7 +443,7 @@ function looksLikeQuestion(text: string): boolean {
 
   // ¿Empieza con palabra interrogativa o frase de petición de info?
   const startsAsQuestion =
-    /^(que\b|cual\b|cuales\b|cuando\b|donde\b|como\b|cuanto\b|cuanta\b|cuantos\b|cuantas\b|puedo\b|se puede\b|me regala|me regalas|me dices|me dice|me confirma|me explica|me explican|me cuent|sabes\b|saben\b|tienen\b|tiene\b|aceptan\b|acepta\b|permiten\b|permite\b|hay\b|incluye\b|incluyen\b|conoce|conoces|necesito saber|quisiera saber|una consulta|una pregunta)\b/.test(
+    /^(que\b|cual\b|cuales\b|cuando\b|donde\b|como\b|cuanto\b|cuanta\b|cuantos\b|cuantas\b|puedo\b|se puede\b|me regala|me regalas|me dices|me dice|me confirma|me explica|me explican|me cuent|sabes\b|saben\b|tienen\b|tiene\b|aceptan\b|acepta\b|permiten\b|permite\b|hay\b|incluye\b|incluyen\b|conoce|conoces|necesito saber|quisiera saber|quiero saber|una consulta|una pregunta)\b/.test(
       lower,
     );
   if (startsAsQuestion) return true;
@@ -555,8 +559,57 @@ export async function processInboundMessageV2(
       url: string,
     ) => Promise<"cedula" | "comprobante" | "otro" | null>;
     runBotTurn: (input: any) => Promise<any>;
+    /** Envío de texto al cliente (WhatsApp). En canal web es no-op. */
+    deliverText?: (payload: {
+      to: string;
+      text: string;
+      wamid?: string;
+    }) => Promise<void>;
+    /** Envío de fichas de catálogo (WhatsApp). En canal web solo persiste en BD. */
+    deliverCatalog?: (payload: {
+      to: string;
+      productRetailerIds: string[];
+      productQuoteLines?: string[];
+      bodyText?: string;
+      catalogId?: string;
+      wamid?: string;
+      conversationId: Id<"conversations">;
+    }) => Promise<
+      Array<{ productRetailerId: string; wamid?: string; ok?: boolean }>
+    >;
+    channel?: "whatsapp" | "web";
   },
 ) {
+  const deliverText =
+    deps.deliverText ??
+    (async (payload: { to: string; text: string; wamid?: string }) => {
+      await ctx.runAction(deps.internal.ycloud.sendWhatsAppMessage, payload);
+    });
+  const deliverCatalog =
+    deps.deliverCatalog ??
+    (async (payload: {
+      to: string;
+      productRetailerIds: string[];
+      productQuoteLines?: string[];
+      bodyText?: string;
+      catalogId?: string;
+      wamid?: string;
+      conversationId: Id<"conversations">;
+    }) =>
+      (await ctx.runAction(deps.internal.ycloud.sendWhatsAppCatalogList, {
+        to: payload.to,
+        productRetailerIds: payload.productRetailerIds,
+        productQuoteLines: payload.productQuoteLines,
+        bodyText: payload.bodyText,
+        catalogId: payload.catalogId,
+        wamid: payload.wamid,
+        conversationId: payload.conversationId,
+      })) as Array<{
+        productRetailerId: string;
+        wamid?: string;
+        ok?: boolean;
+      }>);
+
   const rawText = String(args.text ?? "").trim();
   if (/^(status|presence)\s*:\s*active$/i.test(rawText)) return;
 
@@ -566,7 +619,7 @@ export async function processInboundMessageV2(
   );
   const { conversationId } = await ctx.runMutation(
     deps.internal.ycloud.getOrCreateConversation,
-    { contactId },
+    { contactId, channel: deps.channel ?? "whatsapp" },
   );
 
   let finalContent = args.text;
@@ -581,13 +634,17 @@ export async function processInboundMessageV2(
 
   const now = Date.now();
   const replyToWamid = String(args.replyToWamid ?? "").trim();
+  const inboundWamid = String(args.wamid ?? "").trim();
+  const userMsgMetadata: Record<string, string> = {};
+  if (inboundWamid.length > 6) userMsgMetadata.wamid = inboundWamid;
+  if (replyToWamid) userMsgMetadata.replyToWamid = replyToWamid;
   const insertedMsgId = await ctx.runMutation(deps.internal.messages.insertUserMessage, {
     conversationId,
     content: finalContent,
     createdAt: now,
     type: args.type,
     mediaUrl: args.mediaUrl,
-    metadata: replyToWamid ? { replyToWamid } : undefined,
+    metadata: Object.keys(userMsgMetadata).length ? userMsgMetadata : undefined,
   });
 
   await new Promise((r) => setTimeout(r, INBOUND_DEBOUNCE_MS));
@@ -666,7 +723,7 @@ export async function processInboundMessageV2(
         escalationReason: looksLikeComplaint ? "client_complaint" : "client_requested",
       },
     });
-    await ctx.runAction(deps.internal.ycloud.sendWhatsAppMessage, {
+    await deliverText( {
       to: args.phone,
       text: handoffMsg,
       wamid: args.wamid,
@@ -749,7 +806,7 @@ export async function processInboundMessageV2(
       content: pasadiaMsg,
       createdAt: tPas,
     });
-    await ctx.runAction(deps.internal.ycloud.sendWhatsAppMessage, {
+    await deliverText( {
       to: args.phone,
       text: pasadiaMsg,
       wamid: args.wamid,
@@ -786,7 +843,7 @@ export async function processInboundMessageV2(
         content: declMsg,
         createdAt: tDecl,
       });
-      await ctx.runAction(deps.internal.ycloud.sendWhatsAppMessage, {
+      await deliverText( {
         to: args.phone,
         text: declMsg,
         wamid: args.wamid,
@@ -814,7 +871,7 @@ export async function processInboundMessageV2(
         content: escMsg,
         createdAt: tEsc,
       });
-      await ctx.runAction(deps.internal.ycloud.sendWhatsAppMessage, {
+      await deliverText( {
         to: args.phone,
         text: escMsg,
         wamid: args.wamid,
@@ -896,7 +953,7 @@ export async function processInboundMessageV2(
             mediaUrl: args.mediaUrl ?? null,
           },
         });
-        await ctx.runAction(deps.internal.ycloud.sendWhatsAppMessage, {
+        await deliverText( {
           to: args.phone,
           text: cedMsg,
           wamid: args.wamid,
@@ -934,7 +991,7 @@ export async function processInboundMessageV2(
             mediaUrl: args.mediaUrl ?? null,
           },
         });
-        await ctx.runAction(deps.internal.ycloud.sendWhatsAppMessage, {
+        await deliverText( {
           to: args.phone,
           text: cmpMsg,
           wamid: args.wamid,
@@ -959,7 +1016,7 @@ export async function processInboundMessageV2(
           content: otrMsg,
           createdAt: tOtr,
         });
-        await ctx.runAction(deps.internal.ycloud.sendWhatsAppMessage, {
+        await deliverText( {
           to: args.phone,
           text: otrMsg,
           wamid: args.wamid,
@@ -984,6 +1041,8 @@ export async function processInboundMessageV2(
       conversationId,
       content: mediaHandoffMsg,
       createdAt: tMedia,
+      metadata:
+        inboundWamid.length > 6 ? { replyToWamid: inboundWamid } : undefined,
     });
     await ctx.runMutation(deps.internal.messages.insertSystemMessage, {
       conversationId,
@@ -998,7 +1057,7 @@ export async function processInboundMessageV2(
         mediaUrl: args.mediaUrl ?? null,
       },
     });
-    await ctx.runAction(deps.internal.ycloud.sendWhatsAppMessage, {
+    await deliverText( {
       to: args.phone,
       text: mediaHandoffMsg,
       wamid: args.wamid,
@@ -1106,8 +1165,16 @@ export async function processInboundMessageV2(
   // 3 preguntas para acotar costo de embeddings + latencia.
   let faqContext: string | null = null;
   const questionLines = extractQuestionLinesArray(textForTurn);
-  if (questionLines.length > 0) {
-    const faqChunks: string[] = [];
+  const multiFaqKeys = localFaqMatchesForText(textForTurn);
+  const faqChunks: string[] = [];
+
+  // Varios temas en un solo mensaje ("¿perros? ¿puedo llevar comida?") → todas las FAQs.
+  if (multiFaqKeys.length >= 2 && questionLines.length > 0) {
+    for (const key of multiFaqKeys.slice(0, 4)) {
+      const answer = (getFaqTextByKey(key) ?? "").trim();
+      if (answer.length > 0 && !faqChunks.includes(answer)) faqChunks.push(answer);
+    }
+  } else if (questionLines.length > 0) {
     for (const q of questionLines.slice(0, 3)) {
       if (!looksLikeQuestion(q)) continue;
       let answer = "";
@@ -1119,21 +1186,24 @@ export async function processInboundMessageV2(
       } catch (err) {
         console.error("inbound: searchFaqForBot fallo (degradado, sigue sin RAG):", err);
       }
-      // FALLBACK QUEMADO: si el RAG falló o no devolvió match, intentamos el
-      // matcher determinístico local (`localFaqFallback`) — usa los MISMOS
-      // copys oficiales de `faqSeed.ts`. Así el bot sigue respondiendo las
-      // preguntas frecuentes aunque la búsqueda semántica del RAG esté caída.
       if (!answer) {
         answer = (localFaqFallback(q) ?? "").trim();
       }
-      // Evitar duplicados: dos preguntas distintas pueden matchear la misma FAQ.
       if (answer.length > 0 && !faqChunks.some((c) => c === answer)) {
         faqChunks.push(answer);
       }
     }
-    if (faqChunks.length > 0) {
-      faqContext = faqChunks.join("\n\n━━━━━━━━━━\n\n");
+    // Si el RAG solo devolvió una FAQ pero el texto menciona otro tema, añadirlo.
+    if (multiFaqKeys.length >= 2) {
+      for (const key of multiFaqKeys) {
+        const answer = (getFaqTextByKey(key) ?? "").trim();
+        if (answer.length > 0 && !faqChunks.includes(answer)) faqChunks.push(answer);
+      }
     }
+  }
+
+  if (faqChunks.length > 0) {
+    faqContext = faqChunks.join("\n\n━━━━━━━━━━\n\n");
   }
 
   // ── Pregunta sin respuesta en fase `contract` → escalar a un asesor ──────
@@ -1165,7 +1235,7 @@ export async function processInboundMessageV2(
       content: cqMsg,
       createdAt: tCq,
     });
-    await ctx.runAction(deps.internal.ycloud.sendWhatsAppMessage, {
+    await deliverText( {
       to: args.phone,
       text: cqMsg,
       wamid: args.wamid,
@@ -1296,12 +1366,14 @@ export async function processInboundMessageV2(
   const deferReplyForCatalog = action.type === "send_catalog";
 
   if (result.replyText && !deferReplyForCatalog) {
+    const replyWamid = String(args.wamid ?? "").trim();
     await ctx.runMutation(deps.internal.messages.insertAssistantMessage, {
       conversationId,
       content: result.replyText,
       createdAt: Date.now(),
+      metadata: replyWamid.length > 6 ? { replyToWamid: replyWamid } : undefined,
     });
-    await ctx.runAction(deps.internal.ycloud.sendWhatsAppMessage, {
+    await deliverText( {
       to: args.phone,
       text: result.replyText,
       wamid: args.wamid,
@@ -1328,7 +1400,7 @@ export async function processInboundMessageV2(
         content: text,
         createdAt: Date.now(),
       });
-      await ctx.runAction(deps.internal.ycloud.sendWhatsAppMessage, {
+      await deliverText( {
         to: args.phone,
         text,
       });
@@ -1456,7 +1528,7 @@ export async function processInboundMessageV2(
           content: result.replyText,
           createdAt: Date.now(),
         });
-        await ctx.runAction(deps.internal.ycloud.sendWhatsAppMessage, {
+        await deliverText( {
           to: args.phone,
           text: result.replyText,
           wamid: args.wamid,
@@ -1471,7 +1543,7 @@ export async function processInboundMessageV2(
           content: text,
           createdAt: Date.now(),
         });
-        await ctx.runAction(deps.internal.ycloud.sendWhatsAppMessage, {
+        await deliverText( {
           to: args.phone,
           text,
         });
@@ -1481,7 +1553,7 @@ export async function processInboundMessageV2(
       const ids = catalogPayload.productRetailerIds.slice(0, cap);
       const lines = (catalogPayload.productQuoteLines ?? []).slice(0, cap);
       const titles = (catalogPayload.productTitles ?? []).slice(0, cap);
-      const sendRows = (await ctx.runAction(deps.internal.ycloud.sendWhatsAppCatalogList, {
+      const sendRows = await deliverCatalog({
         to: args.phone,
         productRetailerIds: ids,
         productQuoteLines: lines.length ? lines : undefined,
@@ -1489,7 +1561,7 @@ export async function processInboundMessageV2(
         catalogId: catalogPayload.catalogId,
         wamid: args.wamid,
         conversationId,
-      })) as Array<{ productRetailerId: string; wamid?: string; ok?: boolean }>;
+      });
 
       const tBase = Date.now();
       for (let i = 0; i < ids.length; i++) {
@@ -1502,15 +1574,38 @@ export async function processInboundMessageV2(
         const title = titles[i]?.trim() || ids[i];
         const body = quote && quote.length > 0 ? quote : `🏡 ${title}`;
         const wamidOut = sendRows[i]?.wamid;
+        const metadata: Record<string, unknown> = {
+          productRetailerId: ids[i],
+          wamid: wamidOut,
+          productTitle: title,
+        };
+        if (deps.channel === "web") {
+          try {
+            const prop = (await ctx.runQuery(
+              deps.api.whatsappCatalogs.getPropertyByRetailerId,
+              { productRetailerId: ids[i] },
+            )) as {
+              imageUrl?: string;
+              slug?: string;
+              propertyId?: string;
+              propertyName?: string;
+              location?: string;
+            } | null;
+            if (prop?.imageUrl?.trim()) metadata.imageUrl = prop.imageUrl.trim();
+            if (prop?.slug?.trim()) metadata.slug = prop.slug.trim();
+            if (prop?.propertyId) metadata.propertyId = prop.propertyId;
+            if (prop?.propertyName?.trim())
+              metadata.propertyName = prop.propertyName.trim();
+            if (prop?.location?.trim()) metadata.location = prop.location.trim();
+          } catch (err) {
+            console.error("inbound: getPropertyByRetailerId (web catalog UI):", err);
+          }
+        }
         await ctx.runMutation(deps.internal.messages.insertAssistantMessageWithMedia, {
           conversationId,
           content: body,
           type: "product",
-          metadata: {
-            productRetailerId: ids[i],
-            wamid: wamidOut,
-            productTitle: title,
-          },
+          metadata,
           createdAt: tBase + i * 25,
         });
       }
@@ -1532,7 +1627,7 @@ export async function processInboundMessageV2(
           content: closeMsg,
           createdAt: tClose,
         });
-        await ctx.runAction(deps.internal.ycloud.sendWhatsAppMessage, {
+        await deliverText( {
           to: args.phone,
           text: closeMsg,
         });
@@ -1597,7 +1692,7 @@ export async function processInboundMessageV2(
             content: eventQuestionsMsg,
             createdAt: tEvent,
           });
-          await ctx.runAction(deps.internal.ycloud.sendWhatsAppMessage, {
+          await deliverText( {
             to: args.phone,
             text: eventQuestionsMsg,
           });
@@ -1633,7 +1728,7 @@ export async function processInboundMessageV2(
               eventLogistics: logistics,
             },
           });
-          await ctx.runAction(deps.internal.ycloud.sendWhatsAppMessage, {
+          await deliverText( {
             to: args.phone,
             text: eventHandoffMsg,
           });
@@ -1653,7 +1748,7 @@ export async function processInboundMessageV2(
             content: basicEventAckMsg,
             createdAt: tEvent,
           });
-          await ctx.runAction(deps.internal.ycloud.sendWhatsAppMessage, {
+          await deliverText( {
             to: args.phone,
             text: basicEventAckMsg,
           });
@@ -1695,7 +1790,7 @@ export async function processInboundMessageV2(
           requestedIsEvento: action.isEvento,
         },
       });
-      await ctx.runAction(deps.internal.ycloud.sendWhatsAppMessage, {
+      await deliverText( {
         to: args.phone,
         text: noResultsMsg,
       });

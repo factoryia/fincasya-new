@@ -146,7 +146,7 @@ const FAQ_FALLBACK_RULES: Array<{ key: string; pattern: RegExp }> = [
   {
     key: 'faq:alimentos-bebidas',
     pattern:
-      /\b(licor|cervezas?|alcohol|trago|alimentos?|llevar\s+(comida|bebidas?|mercado|trago|licor)|botellas?\s+de\s+vidrio)\b/,
+      /\b(licor|cervezas?|alcohol|trago|viejas?|bebidas?|alimentos?|llevar\s+(comida|bebidas?|mercado|trago|licor)|botellas?\s+de\s+vidrio)\b/,
   },
   {
     key: 'faq:precio-por-persona',
@@ -184,17 +184,26 @@ const FAQ_FALLBACK_RULES: Array<{ key: string; pattern: RegExp }> = [
   },
 ];
 
-export function localFaqFallback(question: string): string | null {
-  const t = String(question ?? '')
+export function getFaqTextByKey(key: string): string | null {
+  return FAQ_INITIAL_SEED.find((e) => e.key === key)?.text ?? null;
+}
+
+/** Detecta varios temas FAQ en un mismo mensaje (ej. perros + alimentos). */
+export function localFaqMatchesForText(text: string): string[] {
+  const t = String(text ?? "")
     .toLowerCase()
-    .normalize('NFD')
-    .replace(/\p{M}/gu, '');
-  if (t.length < 3) return null;
+    .normalize("NFD")
+    .replace(/\p{M}/gu, "");
+  if (t.length < 3) return [];
+  const keys: string[] = [];
   for (const rule of FAQ_FALLBACK_RULES) {
-    if (rule.pattern.test(t)) {
-      const entry = FAQ_INITIAL_SEED.find((e) => e.key === rule.key);
-      if (entry) return entry.text;
-    }
+    if (rule.pattern.test(t) && !keys.includes(rule.key)) keys.push(rule.key);
   }
-  return null;
+  return keys;
+}
+
+export function localFaqFallback(question: string): string | null {
+  const keys = localFaqMatchesForText(question);
+  if (keys.length === 0) return null;
+  return getFaqTextByKey(keys[0]);
 }
