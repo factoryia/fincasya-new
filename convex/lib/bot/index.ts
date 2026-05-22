@@ -430,8 +430,21 @@ export async function runBotTurn(input: BotTurnInput): Promise<BotTurnResult> {
   // Distinto de `wantsNewQuote` (que sí borra todos los filtros porque el
   // cliente pide empezar de cero). Aquí solo descartamos la finca elegida y
   // las mascotas porque ya no encajan con el nuevo cupo/fechas/etc.
+  //
+  // EXCEPCIÓN — si el cliente envió datos de contrato en este turno (nombre,
+  // cédula, email, teléfono o dirección), NO disparamos el rebroadcast aunque
+  // el extractor haya "detectado" una location en el mismo mensaje (p.ej. la
+  // ciudad que aparece en la dirección del cliente). El flujo de contrato tiene
+  // prioridad absoluta sobre el re-envío del catálogo.
+  const contractFieldsInThisTurn = !!(
+    extracted.contractFields &&
+    Object.values(extracted.contractFields).some(
+      (v) => typeof v === "string" && v.trim().length > 0,
+    )
+  );
   const autoRebroadcastCatalog =
     !wantsNewQuote &&
+    !contractFieldsInThisTurn &&
     isPostCollectingPhase(currentPhase) &&
     catalogFiltersChanged(currentEntities, updatedEntities);
   if (autoRebroadcastCatalog) {

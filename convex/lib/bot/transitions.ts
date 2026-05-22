@@ -181,14 +181,14 @@ function ymdToBogotaNoonMs(ymd: string): number {
 }
 
 /**
- * ¿La fecha `ymd` (YYYY-MM-DD) es ANTERIOR a hoy en zona horaria de Colombia?
- * Compara solo el día calendario — comparar strings YMD es cronológicamente
- * correcto. La fecha de HOY NO cuenta como pasada (se puede ingresar hoy).
+ * ¿La fecha `ymd` (YYYY-MM-DD) es HOY O ANTERIOR en zona horaria de Colombia?
+ * El check-in debe ser mínimo mañana — no se permite reservar con entrada el
+ * mismo día en que se hace la consulta.
  */
 function isYmdInPastColombia(ymd: string): boolean {
   const day = ymd.trim().slice(0, 10);
   if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) return false;
-  return day < toYmdColombia(Date.now());
+  return day <= toYmdColombia(Date.now());
 }
 
 function transitionCollecting(

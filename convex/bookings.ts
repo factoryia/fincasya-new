@@ -41,9 +41,10 @@ function assertBookingDatesAreFuture(args: {
   const today = todayColombia();
   const diaEntrada = calendarDateColombia(args.fechaEntrada);
   const diaSalida = calendarDateColombia(salidaEfectiva);
-  if (diaEntrada < today) {
+  // No se permite check-in hoy ni en pasado — mínimo mañana.
+  if (diaEntrada <= today) {
     throw new Error(
-      'La fecha de entrada no puede ser anterior a hoy (hora Colombia).',
+      'La fecha de entrada debe ser a partir de mañana (no se acepta ingreso el mismo día, hora Colombia).',
     );
   }
   if (diaSalida < today) {

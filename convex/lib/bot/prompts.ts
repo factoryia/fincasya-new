@@ -756,14 +756,13 @@ export function datesIncoherentMessage(entities: BotEntities): string {
 }
 
 /**
- * Copy oficial para cuando el cliente da fechas que YA pasaron (fecha de
- * entrada anterior a hoy). Texto provisto por el equipo de FincasYa — usar
- * verbatim, sin interpolar las fechas viejas.
+ * Copy oficial para cuando el cliente da una fecha de entrada que ya pasó O
+ * es hoy mismo (no se acepta check-in el mismo día). Usar verbatim.
  */
 export function datesInPastMessage(): string {
   return [
     "Claro 😊",
-    "Las fechas que mencionas ya son fechas pasadas, por lo que no es posible verificar disponibilidad para esos días.",
+    "Las fechas que mencionas no están disponibles para reservar — la llegada debe ser *a partir de mañana* (no aceptamos ingresos el mismo día ni fechas pasadas).",
     "",
     "Por favor indícanos nuevas fechas de llegada y salida para ayudarte a revisar las opciones disponibles 🏡✨",
   ].join("\n");

@@ -71,7 +71,13 @@ Reglas estrictas:
              "empresa" si dice empresarial/corporativo/equipo de trabajo. NO rellenes planType solo porque dijo "van 10" o un número.
 - location: nombre del municipio colombiano, CORREGIDO Y NORMALIZADO. El cliente
   escribe rápido y con errores — DEBES interpretar y devolver el nombre real
-  del municipio, no el texto literal. Ejemplos de corrección de typos:
+  del municipio, no el texto literal.
+  ⚠️ MUY IMPORTANTE — NO extraigas location si el mensaje contiene datos
+  personales del contrato (nombre + cédula/documento + email/teléfono). En ese
+  contexto la ciudad que aparece es la DIRECCIÓN del cliente, no el municipio
+  de la finca. Ejemplo: "Camilo Riveros 111123211 ca@hotmail.com 3102001100
+  villavicencio" → contractFields con esos datos, location OMITIDO.
+  Ejemplos de corrección de typos:
     "melar", "mlgar", "melgr", "melgaar" → "Melgar"
     "viavicencio", "villaviciencio", "vilavicencio", "villavi" → "Villavicencio"
     "jirardot", "girardó", "girardot" → "Girardot"
