@@ -1,16 +1,54 @@
-const DEPOSIT_BLOCK_HEADING = '💰 Costos adicionales de la estadía:';
+export const DEPOSIT_BLOCK_HEADING = '💰 Costos adicionales de la estadía:';
 
 const LEGACY_DEPOSIT_LINE =
   /^\s*[•\-]?\s*Depósito por daños \(reembolsable\):.*$/gim;
 const LEGACY_MANILLA_LINE = /^\s*[•\-]?\s*Manilla condominio:.*$/gim;
 
-export function stripDepositBlockFromDescription(text: string): string {
-  let result = (text ?? '').replace(/\r\n?/g, '\n').trimEnd();
+const AUTO_DEPOSIT_BULLET =
+  /^\s*[•\-]\s*Depósito por daños \(reembolsable\):/i;
+const AUTO_MANILLA_BULLET = /^\s*[•\-]\s*Manilla condominio:/i;
 
-  const markerIdx = result.indexOf(DEPOSIT_BLOCK_HEADING);
-  if (markerIdx !== -1) {
-    result = result.slice(0, markerIdx).trimEnd();
+function isManagedDepositHeadingLine(line: string): boolean {
+  const t = line.trim();
+  return t === DEPOSIT_BLOCK_HEADING || t.startsWith(DEPOSIT_BLOCK_HEADING);
+}
+
+function isManagedDepositBulletLine(line: string): boolean {
+  return AUTO_DEPOSIT_BULLET.test(line) || AUTO_MANILLA_BULLET.test(line);
+}
+
+function stripManagedDepositBlockLines(text: string): string {
+  const lines = text.replace(/\r\n?/g, '\n').split('\n');
+  const out: string[] = [];
+  let i = 0;
+
+  while (i < lines.length) {
+    if (!isManagedDepositHeadingLine(lines[i])) {
+      out.push(lines[i]);
+      i += 1;
+      continue;
+    }
+
+    let j = i + 1;
+    while (j < lines.length && isManagedDepositBulletLine(lines[j])) {
+      j += 1;
+    }
+
+    if (j > i + 1) {
+      i = j;
+      while (i < lines.length && lines[i].trim() === '') i += 1;
+      continue;
+    }
+
+    out.push(lines[i]);
+    i += 1;
   }
+
+  return out.join('\n');
+}
+
+export function stripDepositBlockFromDescription(text: string): string {
+  let result = stripManagedDepositBlockLines(text ?? '');
 
   result = result
     .replace(LEGACY_DEPOSIT_LINE, '')
@@ -57,5 +95,14 @@ export function mergeDepositIntoPropertyDescription(
     depositoDanosReembolsable,
     manillaCondominio,
   );
+  if (!block) return base;
+
+  if (base.includes(DEPOSIT_BLOCK_HEADING)) {
+    const bullets = block
+      .replace(`\n\n${DEPOSIT_BLOCK_HEADING}\n`, '\n')
+      .trim();
+    return bullets ? `${base}\n${bullets}` : base;
+  }
+
   return base + block;
 }
