@@ -341,6 +341,7 @@ export class InboxService {
     const result = await this.convexService.action('inbox:sendMessage', {
       conversationId,
       phone,
+      channel: conv.channel === 'web' ? 'web' : 'whatsapp',
       type,
       text: text?.trim() || undefined,
       metadata,

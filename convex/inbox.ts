@@ -1,6 +1,46 @@
 import { v } from "convex/values";
-import { action } from "./_generated/server";
+import { action, type ActionCtx } from "./_generated/server";
 import { api, internal } from "./_generated/api";
+
+async function resolveRetailerIdForSlug(
+  ctx: ActionCtx,
+  slug: string,
+): Promise<string | undefined> {
+  const catalog = await ctx.runQuery(api.whatsappCatalogs.getDefault, {});
+  if (!catalog) return undefined;
+  const property = await ctx.runQuery(api.fincas.getBySlug, { slug });
+  if (!property) return undefined;
+  const entries = await ctx.runQuery(
+    api.propertyWhatsAppCatalog.getProductRetailerIdsForProperties,
+    { catalogId: catalog._id, propertyIds: [property._id] },
+  );
+  return entries[0]?.productRetailerId ?? (property._id as string);
+}
+
+async function enrichWebProductMetadata(
+  ctx: ActionCtx,
+  metadata: Record<string, unknown>,
+  productRetailerId: string,
+) {
+  try {
+    const prop = (await ctx.runQuery(api.whatsappCatalogs.getPropertyByRetailerId, {
+      productRetailerId,
+    })) as {
+      imageUrl?: string;
+      slug?: string;
+      propertyId?: string;
+      propertyName?: string;
+      location?: string;
+    } | null;
+    if (prop?.imageUrl?.trim()) metadata.imageUrl = prop.imageUrl.trim();
+    if (prop?.slug?.trim()) metadata.slug = prop.slug.trim();
+    if (prop?.propertyId) metadata.propertyId = prop.propertyId;
+    if (prop?.propertyName?.trim()) metadata.propertyName = prop.propertyName.trim();
+    if (prop?.location?.trim()) metadata.location = prop.location.trim();
+  } catch (err) {
+    console.error("inbox: getPropertyByRetailerId (web):", err);
+  }
+}
 
 /**
  * Enviar mensaje a WhatsApp vía YCloud desde el inbox (dashboard).
@@ -25,10 +65,110 @@ export const sendMessage = action({
     mediaUrlForStorage: v.optional(v.string()),
     filename: v.optional(v.string()),
     metadata: v.optional(v.any()),
+    channel: v.optional(v.union(v.literal("whatsapp"), v.literal("web"))),
     /** Convex user._id del asesor que envía el mensaje (trazabilidad). */
     sentByUserId: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
+    const channel =
+      args.channel ?? (args.phone.trim().toLowerCase().startsWith("web:") ? "web" : "whatsapp");
+    const now = Date.now();
+    const caption = args.text ?? "";
+
+    const recordAssistantMessage = async (
+      content: string,
+      extra?: {
+        type?: "image" | "audio" | "document" | "text" | "video" | "product";
+        mediaUrl?: string;
+        metadata?: unknown;
+      },
+    ) => {
+      if (extra?.type && extra.type !== "text") {
+        await ctx.runMutation(internal.messages.insertAssistantMessageWithMedia, {
+          conversationId: args.conversationId,
+          content,
+          type: extra.type,
+          mediaUrl: extra.mediaUrl,
+          metadata: extra.metadata,
+          createdAt: now,
+          sentByUserId: args.sentByUserId,
+        });
+      } else {
+        await ctx.runMutation(internal.messages.insertAssistantMessage, {
+          conversationId: args.conversationId,
+          content,
+          createdAt: now,
+          sentByUserId: args.sentByUserId,
+        });
+      }
+      await ctx.runMutation(internal.conversations.updateLastMessageAt, {
+        conversationId: args.conversationId,
+      });
+      if (args.sentByUserId) {
+        await ctx.runMutation(internal.conversationAudit.recordEvent, {
+          conversationId: args.conversationId,
+          eventType: "message_sent",
+          userId: args.sentByUserId,
+        });
+      }
+    };
+
+    if (channel === "web") {
+      if (args.type === "text") {
+        if (!args.text?.trim()) throw new Error("Texto requerido para tipo text");
+        await recordAssistantMessage(args.text);
+        return { ok: true };
+      }
+
+      if (args.type === "product") {
+        const metadata = { ...(args.metadata ?? {}) } as Record<string, unknown>;
+        let bodyText = args.text || "Aquí tienes estas opciones:";
+
+        if (metadata?.product) {
+          const finca = metadata.product as { title?: string; slug?: string };
+          bodyText = args.text || `Aquí tienes ${finca.title ?? "esta finca"} 🏡`;
+          const retailerId = finca.slug
+            ? await resolveRetailerIdForSlug(ctx, finca.slug)
+            : undefined;
+          if (retailerId) {
+            metadata.productRetailerId = retailerId;
+            await enrichWebProductMetadata(ctx, metadata, retailerId);
+          }
+        } else if (Array.isArray(metadata?.catalog)) {
+          const catalogItems = metadata.catalog as Array<{ slug?: string; title?: string }>;
+          const enriched = [];
+          for (const item of catalogItems) {
+            if (!item.slug) continue;
+            const retailerId = await resolveRetailerIdForSlug(ctx, item.slug);
+            if (!retailerId) continue;
+            const itemMeta: Record<string, unknown> = {
+              productRetailerId: retailerId,
+              productTitle: item.title,
+            };
+            await enrichWebProductMetadata(ctx, itemMeta, retailerId);
+            enriched.push(itemMeta);
+          }
+          if (enriched.length > 0) metadata.catalogItems = enriched;
+        }
+
+        await recordAssistantMessage(bodyText, {
+          type: "product",
+          metadata,
+        });
+        return { ok: true };
+      }
+
+      if (!args.mediaUrl?.trim()) {
+        throw new Error("mediaUrl requerido para tipo image/audio/document");
+      }
+      await recordAssistantMessage(caption, {
+        type: args.type as "image" | "audio" | "document",
+        mediaUrl: args.mediaUrlForStorage ?? args.mediaUrl,
+        metadata: args.metadata,
+      });
+      return { ok: true };
+    }
+
     const apiKey = process.env.YCLOUD_API_KEY;
     const wabaNumber = process.env.YCLOUD_WABA_NUMBER;
     if (!apiKey || !wabaNumber) {
@@ -36,9 +176,6 @@ export const sendMessage = action({
         "YCLOUD_API_KEY y YCLOUD_WABA_NUMBER deben estar configurados en Convex"
       );
     }
-
-    const now = Date.now();
-    const caption = args.text ?? "";
 
     if (args.type === "text") {
       if (!args.text?.trim()) throw new Error("Texto requerido para tipo text");
