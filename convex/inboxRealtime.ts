@@ -12,21 +12,50 @@
 import { v } from 'convex/values';
 import { query, type QueryCtx } from './_generated/server';
 
-type AllowedRole = 'admin' | 'assistant' | 'vendedor';
-const ALLOWED_ROLES: AllowedRole[] = ['admin', 'assistant', 'vendedor'];
+type AllowedRole =
+  | 'admin'
+  | 'vendedor'
+  | 'asesor_limitado'
+  | 'contabilidad';
+const ALLOWED_ROLES: AllowedRole[] = [
+  'admin',
+  'vendedor',
+  'asesor_limitado',
+  'contabilidad',
+];
 
 async function requireInboxUser(ctx: QueryCtx) {
   const identity = await ctx.auth.getUserIdentity();
   if (!identity) throw new Error('NOT_AUTHENTICATED');
 
-  const user = await ctx.db
+  // Better Auth puede guardar el id en `userId` (campo opcional) o usar
+  // el `_id` de Convex. Probamos ambos + fallback por email.
+  let user = await ctx.db
     .query('user')
     .withIndex('userId', (q) => q.eq('userId', identity.subject))
     .first();
 
+  if (!user) {
+    try {
+      const byId = await ctx.db.get(identity.subject as any);
+      if (byId && 'email' in byId) user = byId as any;
+    } catch {
+      /* not a valid id */
+    }
+  }
+
+  if (!user && identity.email) {
+    user = await ctx.db
+      .query('user')
+      .withIndex('email_name', (q) => q.eq('email', identity.email as string))
+      .first();
+  }
+
   const role = (user as { role?: string } | null)?.role ?? 'user';
   if (!ALLOWED_ROLES.includes(role as AllowedRole)) {
-    throw new Error('FORBIDDEN');
+    throw new Error(
+      `FORBIDDEN: role="${role}" email="${identity.email ?? '?'}" subject="${identity.subject}"`,
+    );
   }
   return { identity, user, role };
 }
