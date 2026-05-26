@@ -1,6 +1,51 @@
 import { v } from "convex/values";
 import { internalMutation, query } from "./_generated/server";
 
+const whatsappStatusValidator = v.union(
+  v.literal("failed"),
+  v.literal("accepted"),
+  v.literal("sent"),
+  v.literal("delivered"),
+  v.literal("read"),
+);
+
+const WHATSAPP_STATUS_RANK: Record<string, number> = {
+  failed: 0,
+  accepted: 1,
+  sent: 2,
+  delivered: 3,
+  read: 4,
+};
+
+function resolveOutboundWamid(
+  explicit?: string,
+  metadata?: unknown,
+): string | undefined {
+  const fromArg = explicit?.trim();
+  if (fromArg && fromArg.length > 6) return fromArg;
+  if (metadata && typeof metadata === "object") {
+    const w = (metadata as { wamid?: unknown }).wamid;
+    if (typeof w === "string" && w.trim().length > 6) return w.trim();
+  }
+  return undefined;
+}
+
+function normalizeWhatsappStatus(
+  raw?: string,
+): "failed" | "accepted" | "sent" | "delivered" | "read" | undefined {
+  const s = String(raw ?? "").toLowerCase();
+  if (
+    s === "failed" ||
+    s === "accepted" ||
+    s === "sent" ||
+    s === "delivered" ||
+    s === "read"
+  ) {
+    return s;
+  }
+  return undefined;
+}
+
 export const insertUserMessage = internalMutation({
   args: {
     conversationId: v.id("conversations"),
@@ -72,8 +117,12 @@ export const insertAssistantMessage = internalMutation({
     createdAt: v.number(),
     sentByUserId: v.optional(v.string()),
     metadata: v.optional(v.any()),
+    wamid: v.optional(v.string()),
+    whatsappStatus: v.optional(whatsappStatusValidator),
   },
   handler: async (ctx, args) => {
+    const wamid = resolveOutboundWamid(args.wamid, args.metadata);
+    const whatsappStatus = normalizeWhatsappStatus(args.whatsappStatus);
     await ctx.db.insert("messages", {
       conversationId: args.conversationId,
       sender: "assistant",
@@ -81,6 +130,8 @@ export const insertAssistantMessage = internalMutation({
       createdAt: args.createdAt,
       sentByUserId: args.sentByUserId,
       ...(args.metadata != null ? { metadata: args.metadata } : {}),
+      ...(wamid ? { wamid } : {}),
+      ...(whatsappStatus ? { whatsappStatus } : {}),
     });
   },
 });
@@ -104,8 +155,12 @@ export const insertAssistantMessageWithMedia = internalMutation({
     metadata: v.optional(v.any()),
     createdAt: v.number(),
     sentByUserId: v.optional(v.string()),
+    wamid: v.optional(v.string()),
+    whatsappStatus: v.optional(whatsappStatusValidator),
   },
   handler: async (ctx, args) => {
+    const wamid = resolveOutboundWamid(args.wamid, args.metadata);
+    const whatsappStatus = normalizeWhatsappStatus(args.whatsappStatus);
     await ctx.db.insert("messages", {
       conversationId: args.conversationId,
       sender: "assistant",
@@ -115,7 +170,32 @@ export const insertAssistantMessageWithMedia = internalMutation({
       metadata: args.metadata,
       createdAt: args.createdAt,
       sentByUserId: args.sentByUserId,
+      ...(wamid ? { wamid } : {}),
+      ...(whatsappStatus ? { whatsappStatus } : {}),
     });
+  },
+});
+
+/** Actualiza estado de entrega/lectura cuando YCloud envía `whatsapp.message.updated`. */
+export const updateWhatsappStatusByWamid = internalMutation({
+  args: {
+    wamid: v.string(),
+    status: whatsappStatusValidator,
+  },
+  handler: async (ctx, args) => {
+    const w = args.wamid.trim();
+    if (w.length < 6) return { updated: false as const };
+    const msg = await ctx.db
+      .query("messages")
+      .withIndex("by_wamid", (q) => q.eq("wamid", w))
+      .first();
+    if (!msg) return { updated: false as const };
+    const cur = msg.whatsappStatus;
+    const curRank = cur ? (WHATSAPP_STATUS_RANK[cur] ?? -1) : -1;
+    const newRank = WHATSAPP_STATUS_RANK[args.status] ?? 0;
+    if (newRank <= curRank) return { updated: false as const };
+    await ctx.db.patch(msg._id, { whatsappStatus: args.status });
+    return { updated: true as const };
   },
 });
 

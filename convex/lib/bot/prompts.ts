@@ -6,7 +6,7 @@
  * Nada de esto vive en la BD ni es editable desde el frontend.
  */
 
-import type { BotEntities, BotPhase } from "./types";
+import type { BotEntities, BotPhase, ConversationTagFlags } from "./types";
 import { countNights, normalizePlanType } from "./entities";
 
 /**
@@ -330,7 +330,7 @@ REGLAS ANTI-INVENCIÓN (CRÍTICAS):
 - NO prometas servicios (jacuzzi, BBQ, internet, transporte, parqueadero, etc.) si no aparecen explícitamente en este contexto.
 - NO inventes capacidad, número de habitaciones, baños, ni cualquier detalle de la finca que no esté listado abajo.
 - NO listes ni numeres fincas usando nombres genéricos como "Finca A", "Finca B", "Opción 1", "Opción 2", etc. Las fichas reales del catálogo viajan por WhatsApp como tarjetas interactivas — el cliente las ve aparte. JAMÁS escribas una lista enumerada de fincas en texto.
-- Si el cliente pregunta algo cuya respuesta NO está en este contexto, responde literalmente: "Déjame confirmarlo con un asesor para no darte un dato incorrecto." y luego retoma el siguiente paso del proceso.
+- Si el cliente pregunta algo cuya respuesta NO está en este contexto, responde literalmente: "Déjame confirmarlo con un asesor para darte el dato correcto, un momento por favor 🤝" y NADA más. El sistema se encarga de pasar la conversación al asesor automáticamente; NO sigas con el flujo después de esa frase, porque la conversación queda en humano y agregar más texto confunde al cliente.
 - NO reenvíes bloques largos que ya enviamos en mensajes anteriores. Si el cliente solo saluda o no responde el dato pedido, reformula brevemente la pregunta puntual del dato que falta — máximo 2 líneas.
 - NO digas "un momento", "déjame revisar", "te respondo en breve", "voy a procesar". El bot solo responde cuando el cliente escribe; si dices que harás algo después, el cliente queda esperando.
 - NO prometas enviar nada (catálogo, contrato, fotos) más tarde. Si lo necesitas ahora, pídelo en el mismo mensaje.
@@ -454,6 +454,12 @@ export interface ContextSystemPromptOpts {
    * modelo "crea saber".
    */
   ragContext?: string | null;
+  /**
+   * Etiquetas de negocio activas en el contacto. Cuando vienen, el system
+   * prompt añade una sección "ETIQUETAS ACTIVAS" con instrucciones de tono
+   * (VIP → personalizado, complicado → cauteloso, recurrente → como conocido).
+   */
+  tagFlags?: ConversationTagFlags;
 }
 
 /**
@@ -506,6 +512,36 @@ export function buildContextSystemPrompt(
       "INFO VERIFICADA DESDE LA BASE DE CONOCIMIENTO (RAG) — RESPONDER usando estos fragmentos cuando el cliente pregunte sobre estos temas. NO inventar más allá de lo que dice aquí:",
       opts.ragContext.trim(),
     );
+  }
+
+  // ETIQUETAS ACTIVAS DEL CONTACTO — ajustan tono / paciencia / presión de
+  // cierre. Las etiquetas que implican handoff duro (cliente-grosero,
+  // propietario, reserva-activa) ya las gestionó `inbound.ts`, por eso aquí
+  // no aparecen.
+  if (opts.tagFlags) {
+    const tagLines: string[] = [];
+    if (opts.tagFlags.isVip) {
+      tagLines.push(
+        "- *Cliente IMPORTANTE o ESPECIAL* → trátalo con prioridad: tono cálido y personalizado, evita frases genéricas, sé proactivo, dale el mejor servicio. Si ya tiene datos confirmados, no se los pidas otra vez.",
+      );
+    }
+    if (opts.tagFlags.isDifficult) {
+      tagLines.push(
+        "- *Cliente COMPLICADO* → tono cauteloso. NO presiones el cierre. Deja más espacio entre preguntas, evita asumir respuestas, sé MUY explícito en confirmaciones (\"¿confirmamos X?\") antes de avanzar.",
+      );
+    }
+    if (opts.tagFlags.isReturning) {
+      tagLines.push(
+        "- *Cliente RECURRENTE* → ya nos conoce. Salúdalo como conocido (\"¡Hola otra vez!\"); NO repitas información que ya te dieron en sesiones previas; si ya tienes contexto (finca, fechas) menciona que lo retomas desde ahí; ve directo al grano sin reexplicar nada.",
+      );
+    }
+    if (tagLines.length > 0) {
+      sections.push(
+        "",
+        "ETIQUETAS ACTIVAS DEL CONTACTO — AJUSTA TU COMPORTAMIENTO:",
+        tagLines.join("\n"),
+      );
+    }
   }
 
   sections.push(

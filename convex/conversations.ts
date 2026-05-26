@@ -97,6 +97,146 @@ export const escalate = internalMutation({
 });
 
 /**
+ * Añade UN tag a la conversación de forma idempotente (no duplica). Helper
+ * para que `inbound.ts` pueda etiquetar conversaciones desde escalaciones
+ * duras (emergencia, propietario) sin reimplementar la lógica de merge.
+ */
+export const addConversationTag = internalMutation({
+  args: {
+    conversationId: v.id("conversations"),
+    tag: v.string(),
+  },
+  handler: async (ctx, args) => {
+    const conv = await ctx.db.get(args.conversationId);
+    if (!conv) return;
+    const existing = Array.isArray(conv.tags) ? conv.tags : [];
+    const clean = args.tag.trim();
+    if (!clean || existing.includes(clean)) return;
+    await ctx.db.patch(args.conversationId, {
+      tags: [...existing, clean].slice(0, 25),
+    });
+  },
+});
+
+/**
+ * ALERTA BLANDA — añade tag + priority + system message a la conversación
+ * SIN apagar el bot (≠ `escalate`, que sí setea `status='human'`).
+ *
+ * Patrón usado por las detecciones de oportunidad/caso especial donde la IA
+ * PUEDE seguir conversando pero un asesor DEBE entrar pronto:
+ *   - Estadías largas (3+ noches) → oportunidad comercial prioritaria.
+ *   - Intención de cierre / pago → preparar humano para cerrar.
+ *   - Cliente recurrente que vuelve → asesor con contexto previo.
+ *
+ * Idempotente vía `botSessions.firedAlerts` (mismo `alertReason` no se vuelve
+ * a disparar en la misma sesión).
+ */
+export const flagPriorityAlert = internalMutation({
+  args: {
+    conversationId: v.id("conversations"),
+    /** Identificador estable del tipo de alerta (idempotencia + telemetría). */
+    alertReason: v.string(),
+    /** Prioridad para el inbox. */
+    priority: v.union(
+      v.literal("urgent"),
+      v.literal("medium"),
+      v.literal("low"),
+    ),
+    /** Etiqueta visible para el asesor (se añade al array `tags`). */
+    tag: v.string(),
+    /** Opcional — cambia el estado operativo del embudo. */
+    operationalState: v.optional(operationalStateValidator),
+    /** Texto del mensaje de sistema que ve el asesor en el inbox. */
+    inboxMessage: v.string(),
+  },
+  handler: async (ctx, args) => {
+    // 1) Idempotencia: ya disparada en esta sesión → no-op.
+    const session = await ctx.db
+      .query("botSessions")
+      .withIndex("by_conversation", (q) =>
+        q.eq("conversationId", args.conversationId),
+      )
+      .first();
+    const fired = session?.firedAlerts ?? [];
+    if (fired.includes(args.alertReason)) return { fired: false };
+
+    // 2) Patch conversación: tag + priority (+ operationalState si aplica).
+    const conv = await ctx.db.get(args.conversationId);
+    if (!conv) return { fired: false };
+    const existingTags = Array.isArray(conv.tags) ? conv.tags : [];
+    const cleanTag = args.tag.trim();
+    const tags =
+      cleanTag.length > 0 && !existingTags.includes(cleanTag)
+        ? [...existingTags, cleanTag].slice(0, 25)
+        : existingTags;
+
+    // Solo subimos prioridad si la actual es más baja (no rebajamos urgent → medium).
+    const PRIORITY_RANK: Record<string, number> = {
+      low: 1,
+      medium: 2,
+      urgent: 3,
+      resolved: 0,
+    };
+    const currentRank = PRIORITY_RANK[conv.priority ?? "low"] ?? 1;
+    const newRank = PRIORITY_RANK[args.priority] ?? 1;
+    const finalPriority =
+      newRank > currentRank ? args.priority : conv.priority;
+
+    await ctx.db.patch(args.conversationId, {
+      tags,
+      ...(finalPriority ? { priority: finalPriority } : {}),
+      ...(args.operationalState
+        ? { operationalState: args.operationalState }
+        : {}),
+    });
+
+    // 3) System message visible solo en inbox (no se envía a WhatsApp).
+    const now = Date.now();
+    await ctx.db.insert("messages", {
+      conversationId: args.conversationId,
+      sender: "system",
+      content: args.inboxMessage,
+      type: "text",
+      createdAt: now,
+      metadata: {
+        kind: "inbox_priority_alert",
+        alertReason: args.alertReason,
+        priority: args.priority,
+        tag: cleanTag,
+      },
+    });
+    await ctx.db.patch(args.conversationId, { lastMessageAt: now });
+
+    // 4) Marcar disparada (sesión existe ya casi siempre; si no, la creamos
+    //    vacía con firedAlerts para que la próxima vez sea no-op).
+    if (session) {
+      await ctx.db.patch(session._id, {
+        firedAlerts: [...fired, args.alertReason],
+        updatedAt: now,
+      });
+    } else {
+      // Caso poco común: alerta antes de que el bot cree la sesión.
+      const contactPhone =
+        typeof (conv as { phone?: string }).phone === "string"
+          ? ((conv as { phone?: string }).phone as string)
+          : "";
+      await ctx.db.insert("botSessions", {
+        conversationId: args.conversationId,
+        phone: contactPhone,
+        phase: "welcome",
+        entities: {},
+        turnCount: 0,
+        firedAlerts: [args.alertReason],
+        createdAt: now,
+        updatedAt: now,
+      });
+    }
+
+    return { fired: true };
+  },
+});
+
+/**
  * Pasar a modo IA: la IA vuelve a responder automáticamente.
  */
 export const setToAi = internalMutation({
@@ -250,7 +390,10 @@ export const markAsAttended = mutation({
 export const markInboxRead = mutation({
   args: { conversationId: v.id("conversations") },
   handler: async (ctx, args) => {
-    await ctx.db.patch(args.conversationId, { inboxUnreadCount: 0 });
+    await ctx.db.patch(args.conversationId, {
+      inboxUnreadCount: 0,
+      inboxLastReadAt: Date.now(),
+    });
   },
 });
 
@@ -472,7 +615,18 @@ export const list = query({
       : await ctx.db.query("conversations").collect();
 
     if (args.channel) {
-      convs = convs.filter((c) => c.channel === args.channel);
+      const matched: typeof convs = [];
+      for (const c of convs) {
+        let effective: "whatsapp" | "web";
+        if (c.channel === "web" || c.channel === "whatsapp") {
+          effective = c.channel;
+        } else {
+          const contact = await ctx.db.get(c.contactId);
+          effective = contact?.phone?.startsWith("web:") ? "web" : "whatsapp";
+        }
+        if (effective === args.channel) matched.push(c);
+      }
+      convs = matched;
     }
 
     if (args.attended !== undefined) {

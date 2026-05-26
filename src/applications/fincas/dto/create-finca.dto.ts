@@ -191,6 +191,19 @@ export class CreateFincaDto {
   )
   reservable?: boolean;
 
+  /**
+   * Si true, la finca puede enviarse en catálogos del bot Meta/WhatsApp.
+   * Si false, sigue en la web solo como consulta (sin reserva en línea). Por defecto true.
+   */
+  @IsOptional()
+  @IsBoolean()
+  @Transform(({ value }) =>
+    value === undefined || value === null
+      ? true
+      : value === true || value === 'true' || value === 1,
+  )
+  visibleInWhatsAppCatalog?: boolean;
+
   @IsOptional()
   @IsBoolean()
   @Transform(({ value }) =>

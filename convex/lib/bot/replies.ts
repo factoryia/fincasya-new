@@ -10,7 +10,12 @@
 
 import { generateText, type CoreMessage } from "ai";
 import { openai } from "@ai-sdk/openai";
-import type { BotPhase, BotEntities, StayQuoteTotals } from "./types";
+import type {
+  BotPhase,
+  BotEntities,
+  ConversationTagFlags,
+  StayQuoteTotals,
+} from "./types";
 import { formatCop, petCostBreakdown } from "./entities";
 import { isPureGreeting, type TransitionResult } from "./transitions";
 import {
@@ -160,6 +165,13 @@ export interface ReplyInput {
   stayQuoteTotals?: StayQuoteTotals | null;
   /** Turnos consecutivos en la misma fase (incluyendo el que viene). Para anti-bucles. */
   samePhaseTurnCount?: number;
+  /**
+   * Flags derivados de etiquetas de negocio. Se inyectan en
+   * `buildContextSystemPrompt` para que el LLM ajuste tono (VIP / complicado
+   * / recurrente). Las etiquetas de handoff duro ya se gestionaron en
+   * `inbound.ts` antes de llegar aquí.
+   */
+  tagFlags?: ConversationTagFlags;
   /**
    * Fragmentos relevantes del RAG de FAQs (`searchFaqForBot`). Si vienen,
    * el `contextualLlmReply` los inyecta en el system prompt para que el
@@ -338,6 +350,7 @@ export async function generateReply(
           stayQuoteBlock,
           samePhaseTurnCount: input.samePhaseTurnCount,
           faqContext: input.faqContext,
+          tagFlags: input.tagFlags,
         },
       );
       return { reply: single };
@@ -679,6 +692,7 @@ async function generateReplyText(input: ReplyInput): Promise<string> {
       stayQuoteBlock,
       samePhaseTurnCount,
       faqContext,
+      tagFlags: input.tagFlags,
     });
 
   // Si el static candidate ya se envió en los últimos turnos → ir directo al LLM.
@@ -1016,7 +1030,13 @@ async function generateReplyText(input: ReplyInput): Promise<string> {
       entities,
       conversationHistory,
       incomingText,
-      { stayQuoteBlock, samePhaseTurnCount, contractMode: true, faqContext },
+      {
+        stayQuoteBlock,
+        samePhaseTurnCount,
+        contractMode: true,
+        faqContext,
+        tagFlags: input.tagFlags,
+      },
     );
   }
 
@@ -1043,6 +1063,7 @@ async function contextualLlmReply(
     samePhaseTurnCount?: number;
     contractMode?: boolean;
     faqContext?: string | null;
+    tagFlags?: ConversationTagFlags;
   } = {},
 ): Promise<string> {
   // Anti-bucle suave: si el cliente lleva varios turnos atascado SIN APORTAR DATOS,
@@ -1058,6 +1079,7 @@ async function contextualLlmReply(
     stayQuoteBlock: opts.stayQuoteBlock,
     samePhaseTurnCount: opts.samePhaseTurnCount,
     ragContext: opts.faqContext,
+    tagFlags: opts.tagFlags,
   });
 
   const system = opts.contractMode

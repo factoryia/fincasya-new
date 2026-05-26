@@ -270,6 +270,7 @@ export const list = query({
             active: property.active ?? true,
             visible: property.visible ?? true,
             reservable: property.reservable ?? true,
+            visibleInWhatsAppCatalog: property.visibleInWhatsAppCatalog ?? true,
             images: sortedImages.map((img) => img.url),
             features: enrichedFeatures,
             featuredIcons: property.featuredIcons ?? [],
@@ -1183,6 +1184,7 @@ export const searchAvailableByLocationAndDates = query({
       (p) =>
         p.active !== false &&
         p.visible !== false &&
+        p.visibleInWhatsAppCatalog !== false &&
         p.location.toLowerCase().includes(locLower) &&
         !excludeSet.has(p._id),
     );
@@ -1297,6 +1299,7 @@ export const searchAvailableByDates = query({
       (p) =>
         p.active !== false &&
         p.visible !== false &&
+        p.visibleInWhatsAppCatalog !== false &&
         !excludeSet.has(p._id),
     );
 
@@ -1592,6 +1595,7 @@ export const create = mutation({
     active: v.optional(v.boolean()),
     visible: v.optional(v.boolean()),
     reservable: v.optional(v.boolean()),
+    visibleInWhatsAppCatalog: v.optional(v.boolean()),
     isFavorite: v.optional(v.boolean()),
     priceOriginal: v.optional(v.number()),
     featuredIcons: v.optional(v.array(v.id('iconography'))),
@@ -1648,6 +1652,7 @@ export const create = mutation({
       active: args.active ?? true,
       visible: args.visible ?? true,
       reservable: args.reservable ?? true,
+      visibleInWhatsAppCatalog: args.visibleInWhatsAppCatalog ?? true,
       isFavorite: args.isFavorite ?? false,
       contractTemplateUrl: args.contractTemplateUrl,
       priceOriginal: args.priceOriginal,
@@ -1809,6 +1814,7 @@ export const update = mutation({
     active: v.optional(v.boolean()),
     visible: v.optional(v.boolean()),
     reservable: v.optional(v.boolean()),
+    visibleInWhatsAppCatalog: v.optional(v.boolean()),
     isFavorite: v.optional(v.boolean()),
     priceOriginal: v.optional(v.number()),
     features: v.optional(

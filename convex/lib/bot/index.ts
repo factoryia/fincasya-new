@@ -20,6 +20,7 @@ import type {
   BotEntities,
   BotPhase,
   BotTurnResult,
+  ConversationTagFlags,
   StayQuoteResult,
   StayQuoteTotals,
 } from "./types";
@@ -108,6 +109,14 @@ export interface BotTurnInput {
     title: string;
     location: string;
   } | null>;
+  /**
+   * Flags derivados de las etiquetas activas de la conversación. El LLM las
+   * usa para ajustar tono (VIP → más personalizado, complicado → más
+   * cauteloso, recurrente → saluda como conocido, sin repetir). Las
+   * etiquetas que implican handoff duro (`cliente-grosero`, `propietario`,
+   * `reserva-activa`) ya las maneja `inbound.ts` antes de llamar al bot.
+   */
+  tagFlags?: ConversationTagFlags;
 }
 
 /** Si el cliente lleva más de N turnos consecutivos en la misma fase sin avanzar,
@@ -763,6 +772,7 @@ export async function runBotTurn(input: BotTurnInput): Promise<BotTurnResult> {
     samePhaseTurnCount,
     faqContext,
     contactName,
+    tagFlags: input.tagFlags,
   });
 
   // 4.5 Si en este turno se emitió el aviso de puente festivo O el aviso de

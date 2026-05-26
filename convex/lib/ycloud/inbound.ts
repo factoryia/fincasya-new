@@ -3,6 +3,7 @@ import type { BotEntities } from "../bot/types";
 import {
   capacityCeilForCupo,
   capacityCeilRelaxedForCupo,
+  countNights,
   inferRetailerIdFromCatalogTitle,
 } from "../bot/entities";
 import { INBOUND_DEBOUNCE_MS, MAX_CATALOG_PRODUCTS_PER_SEND } from "./constants";
@@ -11,6 +12,11 @@ import {
   localFaqFallback,
   localFaqMatchesForText,
 } from "../faqSeed";
+import {
+  AFTER_HOURS_NOTICE,
+  clientFlaggedUrgent,
+  isWithinBusinessHours,
+} from "../businessHours";
 
 async function isStillThisTailUserMessage(
   ctx: any,
@@ -424,6 +430,82 @@ function extractQuestionLinesArray(text: string): string[] {
   return lines.filter((l) => looksLikeQuestion(l));
 }
 
+/**
+ * Frases del bot que PROMETEN pasar al cliente con un asesor. La IA, cuando
+ * no sabe una respuesta o ante frustración, naturalmente dice "te conecto con
+ * un asesor" / "déjame confirmarlo con un asesor" / "un asesor te contacta en
+ * breve" — pero si el FSM no devolvió la acción `escalate_human`, el sistema
+ * antes seguía con el bot encendido y el cliente esperaba a un asesor que
+ * NUNCA llegaba (bug reportado por Adriana: *"el bot avisa que va a pasar a
+ * humano pero no lo hace"*). Estas regex DETECTAN la promesa para que el
+ * post-procesado en `processInboundMessageV2` honre lo dicho y escale de
+ * oficio (ver `escalationReason: "bot_promised_handoff"`).
+ *
+ * Las paths que ya escalan correctamente (wantsHuman, pasadia, cedula,
+ * payment, catalog_no_results, etc.) hacen `return` antes de llegar al
+ * post-procesado, así que NO hay riesgo de doble escalación aunque sus
+ * mensajes también matcheen.
+ */
+const HANDOFF_REGEXES: RegExp[] = [
+  // "te conecto/paso/comunico (con) asesor/agente/humano/equipo"
+  /\bte\s+(?:conecto|paso|comunico|conectare|pasare|comunicare)\s+(?:con\s+)?(?:un|el|nuestro)?\s*(?:asesor|agente|humano|equipo)\b/i,
+  // "dejame / voy a / te  confirmar(lo|la) con (un) asesor"
+  /\b(?:dejame|voy\s+a|te)\s+confirma\w*\s+con\s+(?:un|el|nuestro)?\s*asesor\b/i,
+  // "un asesor/agente (humano) te <verbo conjugado>"
+  /\bun[oa]?\s+(?:asesor|agente)\s+(?:humano\s+)?te\s+(?:va\s+a\s+|puede\s+|podria\s+)?(?:responde\w*|contacta\w*|ayuda\w*|escrib\w*|atend\w*|atiend\w*|llama\w*|comunicar\w*|verifica\w*|confirma\w*|gestion\w*)\b/i,
+  // "voy a conectarte/pasarte/comunicarte/escalar..."
+  /\bvoy\s+a\s+(?:conectarte|pasarte|comunicarte|escalar\w*)\b/i,
+  // "me comunico con (un) asesor"
+  /\bme\s+comunico\s+con\s+(?:un|el)?\s*asesor\b/i,
+  // "escalar a/con (un) asesor"
+  /\bescalar\s+(?:a|con)\s+(?:un\s+)?asesor\b/i,
+];
+
+function botPromisedHandoff(text: string): boolean {
+  if (!text) return false;
+  const t = text.toLowerCase().normalize("NFD").replace(/\p{M}/gu, "");
+  return HANDOFF_REGEXES.some((re) => re.test(t));
+}
+
+/**
+ * Si la env `URGENT_ALERTS_WEBHOOK_URL` está configurada, dispara un POST
+ * HTTP con el payload de la alerta urgente. Diseñado para conectarse a Slack
+ * incoming webhook, n8n, Zapier o cualquier endpoint que acepte JSON.
+ *
+ * Errores se loguean pero **NO** interrumpen el flujo — el webhook es
+ * best-effort: la escalación al inbox ya quedó hecha, esto es el ping al
+ * canal externo. Sin la env configurada simplemente no hace nada.
+ */
+async function fireUrgentWebhookIfConfigured(payload: {
+  alertReason: string;
+  conversationId: string;
+  contactPhone: string;
+  contactName?: string | null;
+  lastMessage: string;
+  team?: "ventas" | "operaciones" | "administracion" | "atencion-cliente";
+  extra?: Record<string, unknown>;
+}): Promise<void> {
+  const url = process.env.URGENT_ALERTS_WEBHOOK_URL?.trim();
+  if (!url) return;
+  try {
+    await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        ...payload,
+        priority: "urgent",
+        firedAt: Date.now(),
+        source: "fincasya-bot",
+      }),
+    });
+  } catch (err) {
+    console.error(
+      "[urgent-webhook] fallo (la escalación a inbox sí quedó):",
+      err,
+    );
+  }
+}
+
 function looksLikeQuestion(text: string): boolean {
   const t = String(text ?? "").trim();
   if (t.length < 4 || t.length > 250) return false;
@@ -659,6 +741,160 @@ export async function processInboundMessageV2(
   if (!latestMsg || String(latestMsg._id) !== String(insertedMsgId)) return;
   if (conv.status !== "ai") return;
 
+  // ───────────────────────────────────────────────────────────────────────
+  // PRIORIDAD MÁXIMA: cliente con RESERVA VIGENTE o POR VENIR.
+  //
+  // Si el teléfono del contacto coincide con un booking activo o futuro
+  // (status ∈ {PENDING, PENDING_PAYMENT, CONFIRMED, PAID} **y**
+  // fechaSalida ≥ hoy), su caso es OPERATIVO: preguntas sobre su estadía,
+  // llegada, problemas, modificaciones. NO debe pasar por el flujo de
+  // cotización del bot — escalamos DE INMEDIATO con contexto para que el
+  // asesor lo atienda con prioridad. Si tiene varias reservas, devolvemos la
+  // más cercana en fechas (la relevante para esta atención).
+  // ───────────────────────────────────────────────────────────────────────
+  const activeBooking = (await ctx.runQuery(
+    deps.internal.bookings.findActiveOrUpcomingByGuestPhone,
+    { phone: args.phone },
+  )) as null | {
+    _id: string;
+    reference?: string;
+    fechaEntrada: number;
+    fechaSalida: number;
+    status: string;
+    propertyId: string;
+  };
+  if (activeBooking) {
+    const t0 = Date.now();
+    await ctx.runMutation(deps.internal.conversations.escalate, {
+      conversationId,
+      assignedUserId:
+        process.env.CHATBOT_AUTO_ASSIGN_ADVISOR_ID?.trim() || undefined,
+    });
+    const handoffMsg =
+      "¡Hola! 👋 Veo que ya tienes una reserva con nosotros. Te conecto con un asesor para atenderte con prioridad — un agente te escribe en breve 🤝✨";
+    await ctx.runMutation(deps.internal.messages.insertAssistantMessage, {
+      conversationId,
+      content: handoffMsg,
+      createdAt: t0,
+    });
+    const fmtDate = (ms: number) => new Date(ms).toISOString().slice(0, 10);
+    const refLabel =
+      activeBooking.reference && activeBooking.reference.length > 0
+        ? `#${activeBooking.reference}`
+        : `#${String(activeBooking._id).slice(-8)}`;
+    await ctx.runMutation(deps.internal.messages.insertSystemMessage, {
+      conversationId,
+      content: `🏡 Cliente con reserva vigente o por venir: ${refLabel} · ${fmtDate(activeBooking.fechaEntrada)} → ${fmtDate(activeBooking.fechaSalida)} · ${activeBooking.status}. Escalación automática para atención operativa. La IA quedó en pausa.`,
+      createdAt: t0 + 5,
+      metadata: {
+        kind: "inbox_escalation_alert",
+        escalationReason: "client_has_active_booking",
+        bookingId: activeBooking._id,
+        bookingStatus: activeBooking.status,
+      },
+    });
+    await deliverText({
+      to: args.phone,
+      text: handoffMsg,
+      wamid: args.wamid,
+    });
+    await ctx.runMutation(deps.internal.conversations.updateLastMessageAt, {
+      conversationId,
+    });
+    await fireUrgentWebhookIfConfigured({
+      alertReason: "client_has_active_booking",
+      conversationId: String(conversationId),
+      contactPhone: args.phone,
+      contactName: args.name,
+      lastMessage: String(latestMsg.content ?? "").slice(0, 500),
+      team: "operaciones",
+      extra: {
+        bookingId: activeBooking._id,
+        bookingStatus: activeBooking.status,
+        bookingReference: activeBooking.reference,
+      },
+    });
+    return;
+  }
+
+  // ─── SCREENING DE ETIQUETAS PERSISTENTES ──────────────────────────────
+  // Algunas etiquetas que el equipo (o el bot) puede haber dejado sobre la
+  // conversación implican HANDOFF DURO inmediato — el bot no debe responder:
+  //   - `cliente-grosero`: previene volver a engañar / re-escalar al cliente.
+  //   - `propietario`: tag administrativo, dirigir al equipo administrativo.
+  //   - `reserva-activa`: caso operativo confirmado por el equipo aunque la
+  //     query de booking no lo haya pillado (datos desincronizados).
+  // El resto de etiquetas se traducen a `tagFlags` para que el LLM ajuste
+  // tono / paciencia / presión de cierre.
+  const convTags = Array.isArray(conv.tags) ? conv.tags : [];
+  const HARD_ESCALATE_TAGS = [
+    "cliente-grosero",
+    "propietario",
+    "reserva-activa",
+  ];
+  const hardEscalateTag = HARD_ESCALATE_TAGS.find((t) => convTags.includes(t));
+  if (hardEscalateTag) {
+    const t0 = Date.now();
+    const priority = hardEscalateTag === "cliente-grosero" ? "urgent" : "medium";
+    await ctx.runMutation(deps.internal.conversations.escalate, {
+      conversationId,
+      operationalState: "requires_advisor" as const,
+      priority: priority as "urgent" | "medium",
+      assignedUserId:
+        process.env.CHATBOT_AUTO_ASSIGN_ADVISOR_ID?.trim() || undefined,
+    });
+    const handoffMsg =
+      hardEscalateTag === "cliente-grosero"
+        ? "Te conecto con un asesor para atenderte personalmente. Un agente te escribe en breve 🤝"
+        : hardEscalateTag === "propietario"
+          ? "¡Hola! 👋 Te conecto con el equipo administrativo para atenderte — un asesor te escribe en breve 🤝"
+          : "¡Hola! 👋 Veo que ya tienes una reserva con nosotros. Te conecto con un asesor para atenderte con prioridad 🤝";
+    await ctx.runMutation(deps.internal.messages.insertAssistantMessage, {
+      conversationId,
+      content: handoffMsg,
+      createdAt: t0,
+    });
+    await ctx.runMutation(deps.internal.messages.insertSystemMessage, {
+      conversationId,
+      content: `🏷️ Conversación etiquetada como "${hardEscalateTag}" — handoff automático al equipo correspondiente. La IA quedó en pausa.`,
+      createdAt: t0 + 5,
+      metadata: {
+        kind: "inbox_escalation_alert",
+        escalationReason: `tag_${hardEscalateTag.replace(/-/g, "_")}`,
+      },
+    });
+    await deliverText({
+      to: args.phone,
+      text: handoffMsg,
+      wamid: args.wamid,
+    });
+    await ctx.runMutation(deps.internal.conversations.updateLastMessageAt, {
+      conversationId,
+    });
+    if (priority === "urgent") {
+      await fireUrgentWebhookIfConfigured({
+        alertReason: `tag_${hardEscalateTag.replace(/-/g, "_")}`,
+        conversationId: String(conversationId),
+        contactPhone: args.phone,
+        contactName: args.name,
+        lastMessage: String(latestMsg.content ?? "").slice(0, 500),
+        team:
+          hardEscalateTag === "cliente-grosero"
+            ? "atencion-cliente"
+            : "operaciones",
+      });
+    }
+    return;
+  }
+
+  const tagFlags = {
+    isVip:
+      convTags.includes("cliente-importante") ||
+      convTags.includes("cliente-especial"),
+    isDifficult: convTags.includes("cliente-complicado"),
+    isReturning: convTags.includes("cliente-recurrente"),
+  };
+
   const recentForBurst = (await ctx.runQuery(deps.api.messages.listRecent, {
     conversationId,
     limit: 30,
@@ -670,6 +906,190 @@ export async function processInboundMessageV2(
     .toLowerCase()
     .normalize("NFD")
     .replace(/\p{M}/gu, "");
+
+  // ═══════════════════════════════════════════════════════════════════════
+  // CLASIFICADOR MULTIFUNCIONAL — el WhatsApp NO es solo comercial. Antes de
+  // pasar al flujo de cotización, detectamos en orden de prioridad:
+  //   (1) Emergencia → escalación DURA inmediata (24/7, bypassa todo).
+  //   (2) Propietario → escalación DURA a equipo administrativo.
+  //   (3) Cliente recurrente → ALERTA BLANDA (el bot sigue, asesor entra).
+  //   (4) Intención de cierre/pago → ALERTA BLANDA urgente.
+  // Las features 5-6 (estancia activa + problemas en estadía) están cubiertas
+  // por el bloque "RESERVA VIGENTE" más arriba: cualquier mensaje de cliente
+  // con booking activo/futuro ya escala automáticamente.
+  // ═══════════════════════════════════════════════════════════════════════
+
+  // ─── (1) EMERGENCIA ────────────────────────────────────────────────────
+  // Regex determinístico (NO dependemos del LLM para algo crítico). Las
+  // emergencias se atienden incluso fuera de horario laboral.
+  // OJO: "ladron" SUELTO falseaba con nombres de finca u otros contextos
+  // ("¿está disponible la finca el ladrón?"). Exigimos verbo de acción antes
+  // (hay/entró/vimos/vinieron un ladrón) y dejamos "me/nos robaron" como
+  // captura genérica de robo. "se está quemando" capturado aparte.
+  const isEmergency =
+    /\b(emergencia|accidente|me\s+robaron|nos\s+robaron|(?:hay|entr[oó]|vimos|vinieron|estan?\s+entrando)\s+(?:un\s+|unos\s+|varios\s+|los\s+)?ladron\w*|asalto|atraco|herid[oa]|sangr\w+|ambulancia|policia|incendio|fuego|se\s+est[aá]\s+quemando|me\s+desmay\w*|infarto|convuls\w+|amenaza|amenazan|me\s+amenaz\w*|ayuda\s+urgente|necesito\s+ayuda\s+ya|secuestr\w+|me\s+atacaron)\b/.test(
+      lowerText,
+    );
+  if (isEmergency) {
+    const t0 = Date.now();
+    await ctx.runMutation(deps.internal.conversations.escalate, {
+      conversationId,
+      operationalState: "requires_advisor" as const,
+      priority: "urgent" as const,
+      assignedUserId:
+        process.env.CHATBOT_AUTO_ASSIGN_ADVISOR_ID?.trim() || undefined,
+    });
+    const handoffMsg =
+      "Recibí tu mensaje y ya alertamos a nuestro equipo de operaciones para atenderte de inmediato 🚨\n\nSi es una emergencia *médica o de seguridad*, por favor llama también al *123* (línea única nacional). Un asesor te contacta por aquí en minutos.";
+    await ctx.runMutation(deps.internal.messages.insertAssistantMessage, {
+      conversationId,
+      content: handoffMsg,
+      createdAt: t0,
+    });
+    await ctx.runMutation(deps.internal.messages.insertSystemMessage, {
+      conversationId,
+      content:
+        "🚨🚨🚨 EMERGENCIA detectada en el mensaje del cliente. PRIORIDAD CRÍTICA — contactar de inmediato. La IA quedó en pausa.",
+      createdAt: t0 + 5,
+      metadata: {
+        kind: "inbox_escalation_alert",
+        escalationReason: "emergency",
+      },
+    });
+    await ctx.runMutation(deps.internal.conversations.addConversationTag, {
+      conversationId,
+      tag: "emergencia",
+    });
+    await deliverText({
+      to: args.phone,
+      text: handoffMsg,
+      wamid: args.wamid,
+    });
+    await ctx.runMutation(deps.internal.conversations.updateLastMessageAt, {
+      conversationId,
+    });
+    await fireUrgentWebhookIfConfigured({
+      alertReason: "emergency",
+      conversationId: String(conversationId),
+      contactPhone: args.phone,
+      contactName: args.name,
+      lastMessage: textForTurn.slice(0, 500),
+      team: "operaciones",
+    });
+    return;
+  }
+
+  // ─── (2) PROPIETARIO ──────────────────────────────────────────────────
+  // Auto-declaración del propietario. El lookup por phone contra `users`
+  // está pendiente (requiere `users.phone` indexado — flag 🟡 del roadmap);
+  // por ahora cubrimos por keywords inequívocos.
+  const isOwner =
+    /\b(soy\s+(el\s+|la\s+)?(due[nñ][oa]|propietari[oa])|administr[oa]\s+(la|mi|esta)\s+finca|mi\s+finca\s+(de|en|que\s+est[áa])|hablo\s+como\s+propietari[oa]|escrib[oe]\s+como\s+propietari[oa])\b/.test(
+      lowerText,
+    );
+  if (isOwner) {
+    const t0 = Date.now();
+    await ctx.runMutation(deps.internal.conversations.escalate, {
+      conversationId,
+      operationalState: "requires_advisor" as const,
+      priority: "medium" as const,
+      assignedUserId:
+        process.env.CHATBOT_AUTO_ASSIGN_ADVISOR_ID?.trim() || undefined,
+    });
+    const handoffMsg =
+      "¡Hola! 👋 Veo que escribes como propietario. Te conecto con el equipo administrativo para atenderte directamente — un asesor te escribe en breve 🤝";
+    await ctx.runMutation(deps.internal.messages.insertAssistantMessage, {
+      conversationId,
+      content: handoffMsg,
+      createdAt: t0,
+    });
+    await ctx.runMutation(deps.internal.messages.insertSystemMessage, {
+      conversationId,
+      content:
+        "🏠 PROPIETARIO detectado por autodeclaración. Enrutar al equipo administrativo. La IA quedó en pausa.",
+      createdAt: t0 + 5,
+      metadata: {
+        kind: "inbox_escalation_alert",
+        escalationReason: "owner_inquiry",
+      },
+    });
+    await ctx.runMutation(deps.internal.conversations.addConversationTag, {
+      conversationId,
+      tag: "propietario",
+    });
+    await deliverText({
+      to: args.phone,
+      text: handoffMsg,
+      wamid: args.wamid,
+    });
+    await ctx.runMutation(deps.internal.conversations.updateLastMessageAt, {
+      conversationId,
+    });
+    return;
+  }
+
+  // ─── (3) CLIENTE RECURRENTE ──────────────────────────────────────────
+  // ¿El teléfono ya tuvo una sesión de bot que llegó a fase comercial
+  // (catálogo enviado / cotización / contrato)? → alerta blanda para que
+  // un asesor entre con el contexto previo. El bot sigue conversando.
+  const previousSession = (await ctx.runQuery(
+    deps.internal.botSessions.findRecentCommercialByPhone,
+    { phone: args.phone, excludingConversationId: conversationId },
+  )) as null | {
+    _id: string;
+    phase: string;
+    entities: Record<string, unknown>;
+    updatedAt: number;
+  };
+  if (previousSession) {
+    const e = previousSession.entities as {
+      location?: string;
+      checkIn?: string;
+      checkOut?: string;
+      cupo?: number;
+      selectedPropertyName?: string;
+    };
+    const ctxBits: string[] = [];
+    if (e.selectedPropertyName) ctxBits.push(`finca=${e.selectedPropertyName}`);
+    if (e.location) ctxBits.push(`zona=${e.location}`);
+    if (e.checkIn && e.checkOut)
+      ctxBits.push(`fechas=${e.checkIn}→${e.checkOut}`);
+    if (e.cupo) ctxBits.push(`cupo=${e.cupo}`);
+    const ctxLine = ctxBits.length > 0 ? ctxBits.join(" · ") : "sin detalles guardados";
+    await ctx.runMutation(deps.internal.conversations.flagPriorityAlert, {
+      conversationId,
+      alertReason: "returning_close",
+      priority: "medium" as const,
+      tag: "cliente-recurrente",
+      inboxMessage: `↩️ Cliente RECURRENTE — ya tuvo una conversación previa con el bot (fase: ${previousSession.phase}). Contexto previo: ${ctxLine}. Considera retomar desde ahí en lugar de empezar de cero.`,
+    });
+  }
+
+  // ─── (4) INTENCIÓN DE CIERRE / PAGO ──────────────────────────────────
+  // Frases inequívocas de "quiero reservar/pagar/cerrar ahora". El bot sigue
+  // pero un asesor debe entrar pronto para cerrar la venta sin fricciones.
+  const isClosingIntent =
+    /\b(quiero\s+(reservar|pagar|cerrar|concretar|separar|asegurar)|c[oó]mo\s+(hago\s+)?(para\s+)?(reservar|pagar|abonar|cancelar|consignar)|c[oó]mo\s+(pago|abono|consigno|reservo)|d[oó]nde\s+(pago|consigno|abono)|me\s+interesa\s+(esta|esa|definitivamente|mucho)|definitivamente\s+(la\s+)?quiero|quiero\s+esta|quiero\s+esa|ya\s+(cotic[eé]|cotizamos|hab[ií]a\s+cotizado)\s+(y\s+)?(quiero|deseo)?\s*(concretar|reservar|cerrar|pagar)|todav[ií]a\s+(esta|sigue)\s+disponible|sigue\s+disponible|aun\s+(esta|sigue)\s+disponible|por\s+(donde|d[oó]nde)\s+(te\s+)?(pago|consigno|abono))\b/.test(
+      lowerText,
+    );
+  if (isClosingIntent) {
+    await ctx.runMutation(deps.internal.conversations.flagPriorityAlert, {
+      conversationId,
+      alertReason: "closing_intent",
+      priority: "urgent" as const,
+      tag: "intencion-cierre",
+      operationalState: "ready_to_book" as const,
+      inboxMessage: `💰 INTENCIÓN DE CIERRE detectada — el cliente expresó intención clara de reservar/pagar. Prioridad alta para cerrar la venta sin fricciones. Frase detonante: "${textForTurn.slice(0, 200)}"`,
+    });
+    await fireUrgentWebhookIfConfigured({
+      alertReason: "closing_intent",
+      conversationId: String(conversationId),
+      contactPhone: args.phone,
+      contactName: args.name,
+      lastMessage: textForTurn.slice(0, 500),
+      team: "ventas",
+    });
+  }
 
   // PQRS / queja / reclamo / problema operativo: NO es flujo de venta — escalar
   // con mensaje empático específico (no el genérico de reserva).
@@ -729,6 +1149,14 @@ export async function processInboundMessageV2(
       wamid: args.wamid,
     });
     await ctx.runMutation(deps.internal.conversations.updateLastMessageAt, { conversationId });
+    await fireUrgentWebhookIfConfigured({
+      alertReason: looksLikeComplaint ? "client_complaint" : "client_requested",
+      conversationId: String(conversationId),
+      contactPhone: args.phone,
+      contactName: args.name,
+      lastMessage: textForTurn.slice(0, 500),
+      team: looksLikeComplaint ? "atencion-cliente" : "ventas",
+    });
     return;
   }
 
@@ -1282,6 +1710,7 @@ export async function processInboundMessageV2(
     faqContext,
     contactName: args.name,
     lastCatalogRetailerIds,
+    tagFlags,
     resolvePropertyByName: async (name: string) => {
       const n = String(name ?? "").trim();
       if (!n) return null;
@@ -1364,6 +1793,113 @@ export async function processInboundMessageV2(
   // y vamos directo al mensaje de escalada — así evitamos la incoherencia
   // "te comparto opciones... no tengo opciones".
   const deferReplyForCatalog = action.type === "send_catalog";
+
+  // ─── ESTADÍA LARGA (3+ noches) — alerta blanda ─────────────────────────
+  // Si las fechas resueltas en este turno cubren 3 noches o más, marcamos
+  // la conversación como OPORTUNIDAD PRIORITARIA. El bot sigue cualificando
+  // normal; el asesor entra antes para acompañar el cierre de mayor valor.
+  // Cubre los 4 ejemplos del story (3 noches, viernes→lunes = 3 noches,
+  // 4 noches, "varios días" si las fechas concretas lo confirman).
+  {
+    const ci = (result.updatedEntities as { checkIn?: string }).checkIn;
+    const co = (result.updatedEntities as { checkOut?: string }).checkOut;
+    if (typeof ci === "string" && typeof co === "string") {
+      const nights = countNights(ci, co);
+      if (nights >= 3) {
+        await ctx.runMutation(
+          deps.internal.conversations.flagPriorityAlert,
+          {
+            conversationId,
+            alertReason: "long_stay_3plus",
+            priority: "medium" as const,
+            tag: "oportunidad-prioritaria",
+            inboxMessage: `🏖️ ESTADÍA LARGA detectada — ${nights} noches (${ci} → ${co}). Oportunidad comercial prioritaria; el bot sigue cualificando pero un asesor debería entrar pronto para cerrar.`,
+          },
+        );
+      }
+    }
+  }
+
+  // ─── AUTO-ETIQUETADO DE LEAD ─────────────────────────────────────────
+  // Cuando el bot ya tiene contexto comercial significativo (finca elegida
+  // + cupo), enriquece el nombre del contacto en el inbox con la etiqueta
+  // del deal — así de un vistazo el equipo sabe quién es quién:
+  //   "Camilo R"  →  "Camilo R · Quinta Montebello · 15pax · 07-08→10-08"
+  // También sube `crmType` a 'lead' (sin degradar 'client' si ya cerró).
+  // La mutación es idempotente: si el dealLabel no cambió, no-op.
+  {
+    const e = result.updatedEntities as {
+      selectedPropertyName?: string;
+      cupo?: number;
+      checkIn?: string;
+      checkOut?: string;
+    };
+    if (
+      typeof e.selectedPropertyName === "string" &&
+      e.selectedPropertyName.trim().length > 0 &&
+      typeof e.cupo === "number" &&
+      e.cupo > 0
+    ) {
+      const parts: string[] = [
+        e.selectedPropertyName.trim(),
+        `${e.cupo}pax`,
+      ];
+      if (e.checkIn && e.checkOut) {
+        const fmtMmDd = (ymd: string) => ymd.slice(5); // "MM-DD"
+        parts.push(`${fmtMmDd(e.checkIn)}→${fmtMmDd(e.checkOut)}`);
+      }
+      const dealLabel = parts.join(" · ");
+      await ctx.runMutation(deps.internal.contacts.setLeadDealLabel, {
+        contactId: conv.contactId,
+        dealLabel,
+      });
+    }
+  }
+
+  // ─── FUERA DE HORARIO — acuse al cliente ───────────────────────────────
+  // Si el cliente escribe fuera del horario laboral configurado, anexamos
+  // un aviso al primer reply. Solo se anexa UNA vez por conversación
+  // (idempotencia vía `markAlertFired`). Emergencias y escalaciones duras
+  // bypassan (ya tienen su propio mensaje y se atienden 24/7).
+  if (
+    result.replyText &&
+    action.type !== "escalate_human" &&
+    !isWithinBusinessHours(Date.now())
+  ) {
+    const alreadyNotified = (await ctx.runMutation(
+      deps.internal.botSessions.markAlertFired,
+      {
+        conversationId,
+        phone: args.phone,
+        alertReason: "after_hours_notice",
+      },
+    )) as boolean;
+    if (alreadyNotified) {
+      result.replyText = String(result.replyText) + AFTER_HOURS_NOTICE;
+      // Si el cliente además marcó URGENTE en el mensaje, alerta blanda
+      // para que un on-call vea el caso aunque sea fuera de horario.
+      if (clientFlaggedUrgent(textForTurn)) {
+        await ctx.runMutation(
+          deps.internal.conversations.flagPriorityAlert,
+          {
+            conversationId,
+            alertReason: "urgent_after_hours",
+            priority: "urgent" as const,
+            tag: "urgente-fuera-horario",
+            inboxMessage: `⏰⚡ Cliente marcó URGENTE fuera de horario laboral. Mensaje: "${textForTurn.slice(0, 200)}". Considerar atención on-call.`,
+          },
+        );
+        await fireUrgentWebhookIfConfigured({
+          alertReason: "urgent_after_hours",
+          conversationId: String(conversationId),
+          contactPhone: args.phone,
+          contactName: args.name,
+          lastMessage: textForTurn.slice(0, 500),
+          team: "operaciones",
+        });
+      }
+    }
+  }
 
   if (result.replyText && !deferReplyForCatalog) {
     const replyWamid = String(args.wamid ?? "").trim();
@@ -1607,6 +2143,8 @@ export async function processInboundMessageV2(
           type: "product",
           metadata,
           createdAt: tBase + i * 25,
+          wamid: wamidOut,
+          whatsappStatus: wamidOut ? "sent" : undefined,
         });
       }
 
@@ -1830,6 +2368,40 @@ export async function processInboundMessageV2(
       metadata: {
         kind: "inbox_escalation_alert",
         escalationReason: reason ?? "generic",
+      },
+    });
+  }
+
+  // POST-PROCESADO de escalación implícita: la IA, cuando no sabe una
+  // respuesta o ante frustración, naturalmente cae a frases tipo "te conecto
+  // con un asesor" / "déjame confirmarlo con un asesor" / "un asesor te
+  // contacta en breve". Si el FSM NO devolvió `escalate_human` (la mayoría de
+  // los casos donde la IA hace esto vía `contextualLlmReply`), antes el
+  // sistema seguía con el bot y el cliente quedaba esperando un asesor que
+  // NUNCA llegaba (bug reportado por Adriana). Ahora honramos la promesa:
+  // si el reply menciona handoff y el FSM no escaló, escalamos de oficio.
+  //
+  // Las rutas que YA escalan (wantsHuman, pasadia, cedula, payment,
+  // catalog_no_results, contract_question, event_after_catalog, etc.) hacen
+  // `return` antes de llegar acá, así que NO se duplica la escalación.
+  if (
+    action.type !== "escalate_human" &&
+    result.replyText &&
+    botPromisedHandoff(result.replyText)
+  ) {
+    await ctx.runMutation(deps.internal.conversations.escalate, {
+      conversationId,
+      assignedUserId:
+        process.env.CHATBOT_AUTO_ASSIGN_ADVISOR_ID?.trim() || undefined,
+    });
+    await ctx.runMutation(deps.internal.messages.insertSystemMessage, {
+      conversationId,
+      content:
+        "🤖→👤 La IA prometió pasar al cliente con un asesor en su respuesta. Escalación automática para honrar la promesa — revisar conversación y contactar. La IA quedó en pausa.",
+      createdAt: Date.now(),
+      metadata: {
+        kind: "inbox_escalation_alert",
+        escalationReason: "bot_promised_handoff",
       },
     });
   }

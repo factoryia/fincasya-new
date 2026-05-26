@@ -63,7 +63,22 @@ export async function sendTextToYcloud(args: {
   });
   const textRes = await res.text();
   if (!res.ok) throw new Error(`YCloud error ${res.status}: ${textRes}`);
-  return JSON.parse(textRes);
+  const parsed = textRes ? JSON.parse(textRes) : {};
+  const wamid = wamidFromYcloudSendResponse(parsed);
+  const rawStatus = ((): unknown => {
+    if (typeof parsed !== "object" || !parsed) return undefined;
+    const o = parsed as Record<string, unknown>;
+    if (typeof o.status === "string") return o.status;
+    const nested = o.whatsappMessage;
+    if (nested && typeof nested === "object") {
+      const s = (nested as Record<string, unknown>).status;
+      if (typeof s === "string") return s;
+    }
+    return undefined;
+  })();
+  const status =
+    typeof rawStatus === "string" ? rawStatus.toLowerCase() : undefined;
+  return { wamid, status };
 }
 
 const SEND_DIRECTLY = "https://api.ycloud.com/v2/whatsapp/messages/sendDirectly";

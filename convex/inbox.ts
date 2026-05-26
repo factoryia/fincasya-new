@@ -1,6 +1,7 @@
 import { v } from "convex/values";
 import { action, type ActionCtx } from "./_generated/server";
 import { api, internal } from "./_generated/api";
+import { wamidFromYcloudSendResponse } from "./lib/ycloud/senders";
 
 async function resolveRetailerIdForSlug(
   ctx: ActionCtx,
@@ -81,8 +82,20 @@ export const sendMessage = action({
         type?: "image" | "audio" | "document" | "text" | "video" | "product";
         mediaUrl?: string;
         metadata?: unknown;
+        wamid?: string;
+        whatsappStatus?: string;
       },
     ) => {
+      const outbound = {
+        wamid: extra?.wamid,
+        whatsappStatus: extra?.whatsappStatus as
+          | "failed"
+          | "accepted"
+          | "sent"
+          | "delivered"
+          | "read"
+          | undefined,
+      };
       if (extra?.type && extra.type !== "text") {
         await ctx.runMutation(internal.messages.insertAssistantMessageWithMedia, {
           conversationId: args.conversationId,
@@ -92,6 +105,7 @@ export const sendMessage = action({
           metadata: extra.metadata,
           createdAt: now,
           sentByUserId: args.sentByUserId,
+          ...outbound,
         });
       } else {
         await ctx.runMutation(internal.messages.insertAssistantMessage, {
@@ -99,6 +113,7 @@ export const sendMessage = action({
           content,
           createdAt: now,
           sentByUserId: args.sentByUserId,
+          ...outbound,
         });
       }
       await ctx.runMutation(internal.conversations.updateLastMessageAt, {
@@ -179,16 +194,18 @@ export const sendMessage = action({
 
     if (args.type === "text") {
       if (!args.text?.trim()) throw new Error("Texto requerido para tipo text");
-      await ctx.runAction(internal.ycloud.sendWhatsAppMessage, {
+      const sendResult = (await ctx.runAction(internal.ycloud.sendWhatsAppMessage, {
         to: args.phone,
         text: args.text,
         sendDirectly: true,
-      });
+      })) as { wamid?: string; status?: string };
       await ctx.runMutation(internal.messages.insertAssistantMessage, {
         conversationId: args.conversationId,
         content: args.text,
         createdAt: now,
         sentByUserId: args.sentByUserId,
+        wamid: sendResult?.wamid,
+        whatsappStatus: (sendResult?.status as "sent" | undefined) ?? "sent",
       });
       await ctx.runMutation(internal.conversations.updateLastMessageAt, {
         conversationId: args.conversationId,
@@ -328,6 +345,11 @@ export const sendMessage = action({
     if (status && !["accepted", "sent", "delivered"].includes(String(status).toLowerCase())) {
       throw new Error(`YCloud no envió: status=${status}`);
     }
+    const outboundWamid = wamidFromYcloudSendResponse(resJson);
+    const initialStatus =
+      status && ["accepted", "sent", "delivered", "read"].includes(String(status).toLowerCase())
+        ? String(status).toLowerCase()
+        : "sent";
 
     await ctx.runMutation(internal.messages.insertAssistantMessageWithMedia, {
       conversationId: args.conversationId,
@@ -337,7 +359,10 @@ export const sendMessage = action({
       metadata: args.metadata,
       createdAt: now,
       sentByUserId: args.sentByUserId,
+      wamid: outboundWamid,
+      whatsappStatus: initialStatus as "sent" | "delivered" | "read" | "accepted",
     });
+
     await ctx.runMutation(internal.conversations.updateLastMessageAt, {
       conversationId: args.conversationId,
     });

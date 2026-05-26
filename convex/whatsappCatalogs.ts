@@ -754,7 +754,13 @@ export const getPayloadByLocationForN8n = query({
     const candidates: LinkProp[] = [];
     for (const link of links) {
       const p = await ctx.db.get(link.propertyId);
-      if (!p || p.active === false || p.visible === false) continue;
+      if (
+        !p ||
+        p.active === false ||
+        p.visible === false ||
+        p.visibleInWhatsAppCatalog === false
+      )
+        continue;
       const id = String(link.productRetailerId || "").trim();
       if (!id) continue;
       if (excludeSet.has(id)) continue;
@@ -943,7 +949,12 @@ export const findPropertyByNameForBot = query({
       if (!rid) continue;
       const property = await ctx.db.get(link.propertyId);
       if (!property) continue;
-      if (property.active === false || property.visible === false) continue;
+      if (
+        property.active === false ||
+        property.visible === false ||
+        property.visibleInWhatsAppCatalog === false
+      )
+        continue;
       const titleNorm = norm(property.title ?? "");
       if (!titleNorm) continue;
       let hits = 0;
@@ -1143,6 +1154,20 @@ export const diagnoseCatalogFincaVisibility = query({
         detail: `visible=${property.visible ?? "(unset, OK)"}`,
       });
     }
+    if (property.visibleInWhatsAppCatalog === false) {
+      steps.push({
+        step: "flag-whatsapp-catalog",
+        verdict: "fail",
+        detail:
+          "property.visibleInWhatsAppCatalog === false → excluida del catálogo del bot.",
+      });
+    } else {
+      steps.push({
+        step: "flag-whatsapp-catalog",
+        verdict: "pass",
+        detail: `visibleInWhatsAppCatalog=${property.visibleInWhatsAppCatalog ?? "(unset, OK)"}`,
+      });
+    }
 
     // 4. Filtro de ubicación (loc en property.location).
     const propLocLower = String(property.location ?? "").toLowerCase();
@@ -1211,6 +1236,7 @@ export const diagnoseCatalogFincaVisibility = query({
         allowsEventsContent: property.allowsEventsContent,
         active: property.active,
         visible: property.visible,
+        visibleInWhatsAppCatalog: property.visibleInWhatsAppCatalog,
         // Campos que aparecen en el resumen del bot. Si están en 0 o null,
         // NO se muestran en la cotización.
         priceBase: property.priceBase,

@@ -21,6 +21,95 @@ export const getByConversation = internalQuery({
   },
 });
 
+/**
+ * ¿Este teléfono ya tuvo una sesión de bot que llegó a la fase comercial
+ * (catálogo enviado / mascotas / cotización / contrato)? Indica que es un
+ * CLIENTE RECURRENTE que retoma — el bot debería tratarlo así (no empezar
+ * de cero) y un asesor debe atenderlo con contexto.
+ *
+ * Reglas:
+ * - Match por phone exacto (los teléfonos en `botSessions` son E.164 ya
+ *   normalizados al crear la sesión, así que comparación directa).
+ * - Excluye la conversación actual (`excludingConversationId`) para que esta
+ *   sesión NO se cuente a sí misma como "anterior".
+ * - Solo cuenta sesiones cuya `phase` indique progreso real (no welcome).
+ * - Devuelve la más reciente (por `updatedAt`) si hay match.
+ *
+ * Devuelve `null` si no hay historial relevante.
+ */
+export const findRecentCommercialByPhone = internalQuery({
+  args: {
+    phone: v.string(),
+    excludingConversationId: v.id("conversations"),
+  },
+  handler: async (ctx, { phone, excludingConversationId }) => {
+    const COMMERCIAL_PHASES = new Set([
+      "collecting",
+      "catalog_sent",
+      "property_selected",
+      "pet_check",
+      "pet_rules_shown",
+      "quote_shown",
+      "contract",
+      "done",
+    ]);
+    const rows = await ctx.db
+      .query("botSessions")
+      .withIndex("by_phone", (q) => q.eq("phone", phone))
+      .collect();
+    const candidates = rows.filter(
+      (s) =>
+        s.conversationId !== excludingConversationId &&
+        COMMERCIAL_PHASES.has(s.phase),
+    );
+    if (candidates.length === 0) return null;
+    candidates.sort((a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0));
+    return candidates[0];
+  },
+});
+
+/**
+ * Marca alertas como YA disparadas en la sesión (idempotencia para
+ * `flagPriorityAlert`). Si la sesión no existe todavía, se crea vacía.
+ */
+export const markAlertFired = internalMutation({
+  args: {
+    conversationId: v.id("conversations"),
+    phone: v.string(),
+    alertReason: v.string(),
+  },
+  handler: async (ctx, args) => {
+    const existing = await ctx.db
+      .query("botSessions")
+      .withIndex("by_conversation", (q) =>
+        q.eq("conversationId", args.conversationId),
+      )
+      .first();
+    const now = Date.now();
+    if (existing) {
+      const fired = new Set(existing.firedAlerts ?? []);
+      if (fired.has(args.alertReason)) return false;
+      fired.add(args.alertReason);
+      await ctx.db.patch(existing._id, {
+        firedAlerts: Array.from(fired),
+        updatedAt: now,
+      });
+      return true;
+    }
+    await ctx.db.insert("botSessions", {
+      conversationId: args.conversationId,
+      phone: args.phone,
+      phase: "welcome",
+      entities: {},
+      turnCount: 0,
+      firedAlerts: [args.alertReason],
+      createdAt: now,
+      updatedAt: now,
+    });
+    return true;
+  },
+});
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Mutation: upsert (crear o actualizar)
 // ─────────────────────────────────────────────────────────────────────────────

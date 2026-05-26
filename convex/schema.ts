@@ -83,6 +83,11 @@ export default defineSchema({
     active: v.optional(v.boolean()),
     /** Si true, se puede reservar desde la página web. */
     reservable: v.optional(v.boolean()),
+    /**
+     * Si false, la finca no se incluye cuando el bot envía catálogos por Meta/WhatsApp.
+     * Sigue visible en la web pero solo como ficha informativa (sin reserva en línea).
+     */
+    visibleInWhatsAppCatalog: v.optional(v.boolean()),
     /** Si true, aparece en /marketplace (fincas en venta) y el detalle ofrece contacto por WhatsApp. */
     marketplaceForSale: v.optional(v.boolean()),
     /** Valor de venta de referencia en COP (marketplace). */
@@ -478,6 +483,20 @@ export default defineSchema({
     /** Lead: en seguimiento. Cliente: ya con reserva o relación comercial. */
     crmType: v.optional(v.union(v.literal('lead'), v.literal('client'))),
     lastReservationAt: v.optional(v.number()),
+    /**
+     * Nombre BASE del contacto (el original del perfil de WhatsApp / panel).
+     * Se preserva cuando `name` se enriquece con el contexto del deal en
+     * curso. Si está vacío, el name no se ha enriquecido todavía.
+     */
+    baseName: v.optional(v.string()),
+    /**
+     * Etiqueta de deal pegada al nombre cuando el bot ya tiene contexto
+     * comercial significativo: finca elegida + cupo (+ fechas). Ej.:
+     * "Quinta Montebello · 15pax · 07-08→10-08". El inbox lo muestra así:
+     * `name = baseName + " · " + dealLabel`. Cuando se cierra el deal se
+     * limpia y `crmType` pasa a 'client'.
+     */
+    dealLabel: v.optional(v.string()),
     createdAt: v.number(),
     updatedAt: v.optional(v.number()),
   })
@@ -566,6 +585,8 @@ export default defineSchema({
      * cada mensaje `user`; se pone a 0 al abrir/marcar leído).
      */
     inboxUnreadCount: v.optional(v.number()),
+    /** Última vez que un asesor abrió/marcó leída la conversación en inbox. */
+    inboxLastReadAt: v.optional(v.number()),
   })
     .index('by_contact', ['contactId'])
     .index('by_status', ['status'])
@@ -601,7 +622,24 @@ export default defineSchema({
     createdAt: v.number(),
     /** Convex user._id del asesor que envió el mensaje manualmente (trazabilidad). */
     sentByUserId: v.optional(v.string()),
-  }).index('by_conversation', ['conversationId', 'createdAt']),
+    /** wamid de WhatsApp (mensajes salientes) para actualizar estado vía webhook. */
+    wamid: v.optional(v.string()),
+    /**
+     * Estado de entrega/lectura en WhatsApp (solo mensajes `assistant` enviados por WA).
+     * Orden: accepted → sent → delivered → read.
+     */
+    whatsappStatus: v.optional(
+      v.union(
+        v.literal('failed'),
+        v.literal('accepted'),
+        v.literal('sent'),
+        v.literal('delivered'),
+        v.literal('read'),
+      ),
+    ),
+  })
+    .index('by_conversation', ['conversationId', 'createdAt'])
+    .index('by_wamid', ['wamid']),
 
   /** Plantillas rápidas configurables por intención para respuestas del inbox/IA. */
   quickReplyTemplates: defineTable({
@@ -832,6 +870,13 @@ export default defineSchema({
     phaseEnteredAt: v.optional(v.number()),
     /** Turnos consecutivos en la misma fase sin avanzar. */
     samePhaseTurnCount: v.optional(v.number()),
+    /**
+     * Alertas (`alertReason`) que YA se dispararon en esta sesión. Garantiza
+     * idempotencia de `flagPriorityAlert`: la misma alerta no se vuelve a
+     * lanzar aunque el cliente vuelva a hacer match (ej. mismo cliente con
+     * estadía larga turno tras turno → alerta sola UNA vez).
+     */
+    firedAlerts: v.optional(v.array(v.string())),
     createdAt: v.number(),
     updatedAt: v.number(),
   })

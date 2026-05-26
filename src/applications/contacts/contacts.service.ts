@@ -34,4 +34,15 @@ export class ContactsService {
       throw new BadRequestException(error.message);
     }
   }
+
+  async setTags(id: string, tags: string[]) {
+    try {
+      return await this.convexService.mutation('contacts:setTagsForContact', {
+        contactId: id,
+        tags: Array.isArray(tags) ? tags : [],
+      });
+    } catch (error) {
+      throw new BadRequestException(error.message);
+    }
+  }
 }

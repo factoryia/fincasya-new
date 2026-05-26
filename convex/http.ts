@@ -201,6 +201,30 @@ http.route({
       });
     }
 
+    // Estado de entrega/lectura (palomitas estilo WhatsApp en inbox).
+    const statusEvt = body as {
+      type?: string;
+      whatsappMessage?: { wamid?: string; id?: string; status?: string };
+    };
+    if (statusEvt.type === 'whatsapp.message.updated' && statusEvt.whatsappMessage) {
+      const wm = statusEvt.whatsappMessage;
+      const wamid = (wm.wamid ?? wm.id ?? '').trim();
+      const rawStatus = String(wm.status ?? '').toLowerCase();
+      if (
+        wamid.length > 6 &&
+        (rawStatus === 'failed' ||
+          rawStatus === 'accepted' ||
+          rawStatus === 'sent' ||
+          rawStatus === 'delivered' ||
+          rawStatus === 'read')
+      ) {
+        await ctx.runMutation(internal.messages.updateWhatsappStatusByWamid, {
+          wamid,
+          status: rawStatus,
+        });
+      }
+    }
+
     return new Response(
       JSON.stringify({
         ok: true,

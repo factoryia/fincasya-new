@@ -1,4 +1,4 @@
-import { Controller, Get, Query, Param, UseGuards } from '@nestjs/common';
+import { Controller, Get, Patch, Query, Param, Body, UseGuards } from '@nestjs/common';
 import { ContactsService } from './contacts.service';
 import { ConvexAuthGuard } from '../shared/guards/convex-auth.guard';
 import { AdminGuard } from '../shared/guards/admin.guard';
@@ -22,5 +22,10 @@ export class ContactsController {
   @Get(':id/history')
   async getWithHistory(@Param('id') id: string) {
     return this.contactsService.getWithHistory(id);
+  }
+
+  @Patch(':id/tags')
+  async setTags(@Param('id') id: string, @Body() body: { tags?: string[] }) {
+    return this.contactsService.setTags(id, body?.tags ?? []);
   }
 }

@@ -356,6 +356,16 @@ export const bulkLinkActivePropertiesToWhatsAppCatalogs = mutation({
         });
         continue;
       }
+      if (property.visibleInWhatsAppCatalog === false) {
+        report.skippedInvisible++;
+        report.details.push({
+          propertyId: String(id),
+          title,
+          location,
+          action: "skip-invisible",
+        });
+        continue;
+      }
 
       const locLower = location.toLowerCase();
       let matchingCatalog =

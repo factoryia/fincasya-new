@@ -171,6 +171,26 @@ export type BotAction =
         | "client_requested";
     };
 
+/**
+ * Etiquetas de NEGOCIO activas en la conversación, traducidas a flags que
+ * el system prompt del LLM puede usar para ajustar tono y comportamiento.
+ *
+ * Las etiquetas en sí son strings libres en `conversations.tags`. Las
+ * predefinidas (`cliente-importante`, `cliente-especial`, `cliente-complicado`,
+ * `cliente-recurrente`) las mapeamos a estas flags. Las que implican handoff
+ * inmediato (`cliente-grosero`, `propietario`, `reserva-activa`) NO viajan
+ * en este objeto — `inbound.ts` ya escaló la conversación antes de llegar
+ * al bot, así que el LLM ni se ejecuta.
+ */
+export interface ConversationTagFlags {
+  /** `cliente-importante` o `cliente-especial`. */
+  isVip?: boolean;
+  /** `cliente-complicado`. */
+  isDifficult?: boolean;
+  /** `cliente-recurrente` (auto-set por `findRecentCommercialByPhone`). */
+  isReturning?: boolean;
+}
+
 /** Resultado que devuelve el orquestador por turno. */
 export interface BotTurnResult {
   /** Primer mensaje a enviar. Para WhatsApp es lo único cuando hay un solo mensaje. */

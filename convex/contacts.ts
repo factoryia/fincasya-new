@@ -1,5 +1,101 @@
 import { v } from "convex/values";
-import { mutation, query } from "./_generated/server";
+import type { Id } from "./_generated/dataModel";
+import { mutation, query, internalMutation, type QueryCtx } from "./_generated/server";
+
+const MAX_CONVERSATION_TAGS = 25;
+const MAX_TAG_LENGTH = 64;
+
+function normalizeConversationTags(raw: string[]): string[] {
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const t of raw) {
+    const s = t.trim().slice(0, MAX_TAG_LENGTH);
+    if (!s) continue;
+    const key = s.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(s);
+    if (out.length >= MAX_CONVERSATION_TAGS) break;
+  }
+  return out;
+}
+
+async function enrichContactWithInbox(
+  ctx: QueryCtx,
+  contact: { _id: Id<"contacts">; [key: string]: unknown },
+) {
+  const conversations = await ctx.db
+    .query("conversations")
+    .withIndex("by_contact", (q) => q.eq("contactId", contact._id))
+    .collect();
+
+  const tagSet = new Set<string>();
+  let primaryConversationId: Id<"conversations"> | null = null;
+  let maxLast = -1;
+
+  for (const conv of conversations) {
+    for (const t of conv.tags ?? []) {
+      const s = String(t).trim();
+      if (s) tagSet.add(s);
+    }
+    const lm = conv.lastMessageAt ?? conv.createdAt ?? 0;
+    if (lm > maxLast) {
+      maxLast = lm;
+      primaryConversationId = conv._id;
+    }
+  }
+
+  return {
+    ...contact,
+    tags: Array.from(tagSet),
+    primaryConversationId,
+    hasConversation: conversations.length > 0,
+  };
+}
+
+/**
+ * Auto-etiqueta el contacto con el contexto del deal cuando el bot ya tiene
+ * suficiente info comercial (finca elegida + cupo, opcionalmente fechas).
+ *
+ *  Resultado en el inbox:  `Camilo R · Quinta Montebello · 15pax · 07-08→10-08`
+ *
+ * Reglas:
+ * - Preserva el nombre ORIGINAL (perfil de WhatsApp / panel) en `baseName`
+ *   la primera vez que se etiqueta — para no perderlo cuando enriquecemos
+ *   `name`.
+ * - Idempotente: si el `dealLabel` propuesto es idéntico al actual, no-op.
+ * - NO degrada `crmType='client'` a `'lead'` (cuando el cliente ya reservó,
+ *   queda como `client` aunque el bot vuelva a recoger info).
+ */
+export const setLeadDealLabel = internalMutation({
+  args: {
+    contactId: v.id("contacts"),
+    dealLabel: v.string(),
+  },
+  handler: async (ctx, args) => {
+    const contact = await ctx.db.get(args.contactId);
+    if (!contact) return { updated: false };
+
+    const newLabel = args.dealLabel.trim();
+    if (!newLabel) return { updated: false };
+    if (contact.dealLabel === newLabel) return { updated: false };
+
+    const baseName =
+      contact.baseName && contact.baseName.length > 0
+        ? contact.baseName
+        : contact.name;
+
+    await ctx.db.patch(args.contactId, {
+      baseName,
+      dealLabel: newLabel,
+      name: `${baseName} · ${newLabel}`,
+      // Solo subimos a 'lead' si no es ya 'client' (cliente ya cerró).
+      ...(contact.crmType === "client" ? {} : { crmType: "lead" as const }),
+      updatedAt: Date.now(),
+    });
+    return { updated: true };
+  },
+});
 
 export const getById = query({
   args: { contactId: v.id("contacts") },
@@ -67,10 +163,40 @@ export const list = query({
         (c.cedula && c.cedula.includes(searchLower)) ||
         (c.email && c.email.toLowerCase().includes(searchLower))
       );
-      return filtered.slice(0, limit);
+      const slice = filtered.slice(0, limit);
+      return Promise.all(slice.map((c) => enrichContactWithInbox(ctx, c)));
     }
 
-    return allContacts.slice(0, limit);
+    const slice = allContacts.slice(0, limit);
+    return Promise.all(slice.map((c) => enrichContactWithInbox(ctx, c)));
+  },
+});
+
+/** Sincroniza etiquetas en todas las conversaciones del contacto (inbox). */
+export const setTagsForContact = mutation({
+  args: {
+    contactId: v.id("contacts"),
+    tags: v.array(v.string()),
+  },
+  handler: async (ctx, args) => {
+    const contact = await ctx.db.get(args.contactId);
+    if (!contact) throw new Error("Contacto no encontrado");
+
+    const conversations = await ctx.db
+      .query("conversations")
+      .withIndex("by_contact", (q) => q.eq("contactId", args.contactId))
+      .collect();
+
+    if (conversations.length === 0) {
+      throw new Error("Este contacto no tiene conversaciones en el inbox");
+    }
+
+    const next = normalizeConversationTags(args.tags);
+    for (const conv of conversations) {
+      await ctx.db.patch(conv._id, { tags: next });
+    }
+
+    return { tags: next, updatedConversations: conversations.length };
   },
 });
 

@@ -1,5 +1,5 @@
 import { v } from 'convex/values';
-import { query, mutation } from './_generated/server';
+import { query, mutation, internalQuery } from './_generated/server';
 import { api, internal } from './_generated/api';
 import type { Doc } from './_generated/dataModel';
 import { normalizeContractLookupQueryConvex } from './lib/contractLookup';
@@ -947,5 +947,62 @@ export const getByContractNumber = query({
     if (!match) return null;
 
     return await enrich(match);
+  },
+});
+
+/**
+ * ¿Este teléfono tiene una reserva VIGENTE o POR VENIR?
+ *
+ * Lo usa el bot (`processInboundMessageV2`) para que, cuando un cliente con
+ * reserva activa o futura escriba, escale DE INMEDIATO a un asesor — su caso
+ * es OPERATIVO (preguntas sobre la estadía, llegada, problemas), no
+ * comercial. No debe pasar por el flujo de cotización del bot.
+ *
+ * Reglas:
+ * - Match por `celular` normalizado a los ÚLTIMOS 10 DÍGITOS (cel móvil
+ *   colombiano son 10 dígitos; así toleramos +57, espacios, paréntesis,
+ *   guiones, sin importar el formato con que se guardó el booking).
+ * - "Vigente o por venir" = status ∉ {CANCELLED, COMPLETED} **Y**
+ *   fechaSalida ≥ ahora.
+ * - Si hay varias coincidencias, devuelve la de `fechaEntrada` MÁS CERCANA
+ *   a hoy (la más relevante para la atención).
+ * - Devuelve `null` si no hay match (el bot sigue su flujo comercial normal).
+ *
+ * Performance: 4 queries indexadas (`by_status` para cada estado activo),
+ * cada una filtra `fechaSalida >= now` antes de leer documentos. Aunque haya
+ * miles de bookings históricos, solo se escanean los actualmente "vivos".
+ */
+export const findActiveOrUpcomingByGuestPhone = internalQuery({
+  args: { phone: v.string() },
+  handler: async (ctx, { phone }) => {
+    const target = phone.replace(/\D/g, '').slice(-10);
+    if (target.length < 7) return null;
+    const now = Date.now();
+
+    const ACTIVE_STATUSES = [
+      'PENDING',
+      'PENDING_PAYMENT',
+      'CONFIRMED',
+      'PAID',
+    ] as const;
+
+    const matches: Doc<'bookings'>[] = [];
+    for (const status of ACTIVE_STATUSES) {
+      const rows = await ctx.db
+        .query('bookings')
+        .withIndex('by_status', (q) => q.eq('status', status))
+        .filter((q) => q.gte(q.field('fechaSalida'), now))
+        .collect();
+      for (const r of rows) {
+        const c = String(r.celular ?? '').replace(/\D/g, '').slice(-10);
+        if (c.length >= 7 && c === target) matches.push(r);
+      }
+    }
+    if (matches.length === 0) return null;
+    matches.sort(
+      (a, b) =>
+        Math.abs(a.fechaEntrada - now) - Math.abs(b.fechaEntrada - now),
+    );
+    return matches[0];
   },
 });

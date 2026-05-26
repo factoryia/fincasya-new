@@ -41,7 +41,7 @@ export async function getOrCreateConversationForContact(
   const active = all.find(
     (c: any) =>
       (c.status === "ai" || c.status === "human") &&
-      (channel === "web" ? c.channel === "web" : true),
+      c.channel === channel,
   );
   if (active) {
     const activeTs = Number(active.lastMessageAt ?? active.createdAt ?? 0);
@@ -51,8 +51,8 @@ export async function getOrCreateConversationForContact(
     await ctx.db.patch(active._id, { status: "resolved" });
   }
 
-  const latestResolved = all.find((c: any) =>
-    channel === "web" ? c.channel === "web" && c.status === "resolved" : c.status === "resolved",
+  const latestResolved = all.find(
+    (c: any) => c.channel === channel && c.status === "resolved",
   );
   if (latestResolved) {
     const resolvedTs = Number(latestResolved.lastMessageAt ?? latestResolved.createdAt ?? 0);
