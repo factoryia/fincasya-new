@@ -11,6 +11,7 @@
  */
 import { v } from 'convex/values';
 import { query, type QueryCtx } from './_generated/server';
+import { components } from './_generated/api';
 
 type AllowedRole =
   | 'admin'
@@ -28,33 +29,18 @@ async function requireInboxUser(ctx: QueryCtx) {
   const identity = await ctx.auth.getUserIdentity();
   if (!identity) throw new Error('NOT_AUTHENTICATED');
 
-  // Better Auth puede guardar el id en `userId` (campo opcional) o usar
-  // el `_id` de Convex. Probamos ambos + fallback por email.
-  let user = await ctx.db
-    .query('user')
-    .withIndex('userId', (q) => q.eq('userId', identity.subject))
-    .first();
+  // Lookup directo en el componente Better Auth por `_id == identity.subject`.
+  // No usamos `safeGetAuthUser` porque depende de `identity.sessionId` que
+  // no siempre está presente en el JWT de Convex.
+  const user = (await ctx.runQuery(components.betterAuth.adapter.findOne, {
+    model: 'user',
+    where: [{ field: '_id', value: identity.subject }],
+  } as any)) as { _id?: string; email?: string; role?: string } | null;
 
-  if (!user) {
-    try {
-      const byId = await ctx.db.get(identity.subject as any);
-      if (byId && 'email' in byId) user = byId as any;
-    } catch {
-      /* not a valid id */
-    }
-  }
-
-  if (!user && identity.email) {
-    user = await ctx.db
-      .query('user')
-      .withIndex('email_name', (q) => q.eq('email', identity.email as string))
-      .first();
-  }
-
-  const role = (user as { role?: string } | null)?.role ?? 'user';
+  const role = user?.role ?? 'user';
   if (!ALLOWED_ROLES.includes(role as AllowedRole)) {
     throw new Error(
-      `FORBIDDEN: role="${role}" email="${identity.email ?? '?'}" subject="${identity.subject}"`,
+      `FORBIDDEN: role="${role}" email="${user?.email ?? identity.email ?? '?'}" subject="${identity.subject}" hasUser=${!!user}`,
     );
   }
   return { identity, user, role };
