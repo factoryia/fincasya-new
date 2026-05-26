@@ -186,4 +186,19 @@ export class AuthController {
       return res.status(401).json({ message: error.message });
     }
   }
+
+  /**
+   * Devuelve el JWT de Convex (cookie `better-auth.convex_jwt`) para clientes
+   * que no pueden leer cookies (React Native). El móvil llama a este endpoint
+   * después del login y pasa el token a ConvexReactClient.setAuth().
+   */
+  @Get('convex-token')
+  convexToken(@Req() req: Request, @Res() res: Response) {
+    const cookies = req.headers.cookie || '';
+    const match = cookies.match(/better-auth\.convex_jwt=([^;]+)/);
+    if (!match) {
+      return res.status(401).json({ token: null });
+    }
+    return res.json({ token: decodeURIComponent(match[1]) });
+  }
 }
