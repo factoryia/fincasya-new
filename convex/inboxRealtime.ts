@@ -68,7 +68,7 @@ export const listConversations = query({
 
     // Filtro por no-leídos
     if (args.unreadOnly) {
-      convs = convs.filter((c) => (c.unreadCount ?? 0) > 0);
+      convs = convs.filter((c) => (c.inboxUnreadCount ?? 0) > 0);
     }
 
     // Vendedor solo ve sus conversaciones asignadas
@@ -90,8 +90,10 @@ export const listConversations = query({
     const out = [] as Array<Record<string, unknown>>;
     for (const c of sliced) {
       const contact = await ctx.db.get(c.contactId);
+      const { inboxUnreadCount, ...rest } = c;
       out.push({
-        ...c,
+        ...rest,
+        unreadCount: inboxUnreadCount ?? 0,
         contact: {
           name: (contact as { name?: string } | null)?.name ?? '',
           phone: (contact as { phone?: string } | null)?.phone ?? '',
