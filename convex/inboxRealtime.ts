@@ -101,13 +101,33 @@ export const listConversations = query({
 
     const sliced = convs.slice(0, limit);
 
-    // Enriquecer con el contacto (nombre, teléfono)
+    // Enriquecer con el contacto y el último mensaje real (preview)
     const out = [] as Array<Record<string, unknown>>;
     for (const c of sliced) {
       const contact = await ctx.db.get(c.contactId);
       const { inboxUnreadCount, ...rest } = c;
+
+      // Si la conversación no trae lastMessagePreview, lo derivamos del
+      // último mensaje real en la tabla `messages`.
+      let preview = (c as { lastMessagePreview?: string }).lastMessagePreview;
+      if (!preview) {
+        const lastMsg = await ctx.db
+          .query('messages')
+          .withIndex('by_conversation', (q) => q.eq('conversationId', c._id))
+          .order('desc')
+          .first();
+        if (lastMsg) {
+          const content =
+            (lastMsg as { content?: string; text?: string }).content ??
+            (lastMsg as { text?: string }).text ??
+            '';
+          preview = content.length > 80 ? content.slice(0, 80) + '…' : content;
+        }
+      }
+
       out.push({
         ...rest,
+        lastMessagePreview: preview ?? '',
         unreadCount: inboxUnreadCount ?? 0,
         contact: {
           name: (contact as { name?: string } | null)?.name ?? '',

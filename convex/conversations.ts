@@ -693,9 +693,10 @@ export const list = query({
             c.operationalState as OperationalState | undefined
           ),
           assignedUser,
-          contact: contact
-            ? { phone: contact.phone, name: contact.name }
-            : null,
+          contact: {
+            phone: contact?.phone ?? "",
+            name: contact?.name ?? "",
+          },
         };
       })
     );
