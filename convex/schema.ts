@@ -900,4 +900,20 @@ export default defineSchema({
   })
     .index('by_role', ['role'])
     .index('by_role_module', ['role', 'module']),
+
+  /**
+   * Tokens de push notifications de la app móvil. Un usuario puede tener
+   * varios (un dispositivo por instalación).
+   */
+  pushTokens: defineTable({
+    /** Better Auth user id (identity.subject) */
+    userId: v.string(),
+    /** ExponentPushToken[...] */
+    token: v.string(),
+    platform: v.optional(v.union(v.literal('ios'), v.literal('android'))),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index('by_user', ['userId'])
+    .index('by_token', ['token']),
 });

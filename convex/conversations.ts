@@ -375,6 +375,25 @@ export const escalateToHuman = mutation({
       attended: false,
       operationalState: "requires_advisor",
     });
+
+    // Push al staff
+    try {
+      const conv = await ctx.db.get(args.conversationId);
+      const contact = conv ? await ctx.db.get(conv.contactId) : null;
+      const name =
+        (contact as { name?: string } | null)?.name ??
+        (contact as { phone?: string } | null)?.phone ??
+        "Cliente";
+      const actor = (await ctx.auth.getUserIdentity())?.subject;
+      await ctx.scheduler.runAfter(0, internal.push.notifyInboxStaff, {
+        title: "Requiere asesor humano",
+        body: `${name} necesita atención`,
+        data: { type: "escalated", conversationId: args.conversationId },
+        excludeUserId: actor,
+      });
+    } catch (e) {
+      console.warn("[push] escalate notify failed", e);
+    }
   },
 });
 

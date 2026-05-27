@@ -104,13 +104,21 @@ export function isWithinBusinessHours(nowMs: number): boolean {
  * Texto de acuse para anexar al final del primer reply del bot cuando el
  * cliente escribe fuera de horario y NO es una emergencia. La idea es que el
  * cliente sepa que su mensaje fue recibido y cuándo esperar atención.
+ *
+ * ⚠️ EVITA frases del tipo "un asesor te <verbo>" / "te conecto con asesor" /
+ * "déjame confirmarlo con asesor" — porque el post-procesado de
+ * `botPromisedHandoff` en `inbound.ts` interpreta esas como promesas de
+ * handoff explícito y escala la conversación a humano. Eso convertía este
+ * aviso (que es solo informativo) en un escalado de oficio. Por eso usamos
+ * 1ª persona del plural ("te respondemos", "te atendemos") sin nombrar al
+ * asesor como sujeto de la acción.
  */
 export const AFTER_HOURS_NOTICE = [
   "",
   "",
-  "📅 *Estamos fuera del horario laboral.* Atendemos nuevas conversaciones de *Lunes a Sábado, 8:00 AM a 6:00 PM* (hora Colombia). Recibí tu mensaje y un asesor te responde apenas iniciemos.",
+  "📅 *Estamos fuera del horario laboral.* Atendemos nuevas conversaciones de *Lunes a Sábado, 8:00 AM a 6:00 PM* (hora Colombia). Recibimos tu mensaje y te respondemos apenas iniciemos el día 🤝",
   "",
-  "⚡ Si tu caso es *urgente*, escribe la palabra *URGENTE* y un asesor on-call te contacta lo antes posible.",
+  "⚡ Si tu caso es *urgente*, escribe la palabra *URGENTE* y activamos atención on-call para contactarte lo antes posible.",
 ].join("\n");
 
 /**

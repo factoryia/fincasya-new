@@ -140,7 +140,37 @@ export const listConversations = query({
 });
 
 /**
+ * Lista asesores (admin / vendedor / asesor_limitado) para los filtros de
+ * asignación en el inbox. Devuelve solo los campos necesarios.
+ */
+export const listAssignees = query({
+  args: {},
+  handler: async (ctx) => {
+    await requireInboxUser(ctx);
+    const all = (await ctx.runQuery(components.betterAuth.adapter.findMany, {
+      model: 'user',
+      paginationOpts: { numItems: 200, cursor: null },
+    } as any)) as { page: Array<{ _id: string; email?: string; name?: string; role?: string }> };
+    return (all.page ?? [])
+      .filter((u) =>
+        ['admin', 'vendedor', 'asesor_limitado'].includes(u.role ?? ''),
+      )
+      .map((u) => ({
+        _id: u._id,
+        name: u.name ?? '',
+        email: u.email ?? '',
+        role: u.role ?? '',
+      }));
+  },
+});
+
+/**
  * Lista mensajes de una conversación (orden cronológico ascendente).
+ *
+ * ENRIQUECIMIENTO: si un mensaje tiene `metadata.productRetailerId` pero le
+ * faltan los campos de display (propertyName, imageUrl, etc.), resolvemos la
+ * finca en la DB y completamos la metadata antes de devolverla. Esto deja
+ * al móvil renderizar tarjetas de catálogo bonitas sin queries extra.
  */
 export const listMessages = query({
   args: {
@@ -159,6 +189,72 @@ export const listMessages = query({
       .order('desc')
       .take(limit);
 
-    return list.reverse();
+    const ordered = list.reverse();
+
+    // Cargar todos los links de catalog → property una sola vez
+    const links = await ctx.db.query('propertyWhatsAppCatalog').collect();
+    const byRetailer = new Map<string, string>(); // retailerId → propertyId
+    for (const l of links) {
+      const rid = String(l.productRetailerId ?? '').trim();
+      if (rid) byRetailer.set(rid, l.propertyId as string);
+    }
+
+    // Resolver propiedades de forma batched, sin duplicar lookups
+    const propCache = new Map<string, any>();
+    async function getPropMeta(retailerId: string | undefined) {
+      if (!retailerId) return null;
+      const rid = String(retailerId).trim();
+      if (!rid) return null;
+      if (propCache.has(rid)) return propCache.get(rid);
+
+      const propertyId = byRetailer.get(rid);
+      if (!propertyId) {
+        propCache.set(rid, null);
+        return null;
+      }
+      const property = (await ctx.db.get(propertyId as any)) as any;
+      if (!property) {
+        propCache.set(rid, null);
+        return null;
+      }
+      const images = await ctx.db
+        .query('propertyImages')
+        .withIndex('by_property', (q) => q.eq('propertyId', propertyId as any))
+        .collect();
+      const firstImg = images.sort((a, b) => (a.order ?? 0) - (b.order ?? 0))[0];
+      const enriched = {
+        propertyName: property.title ?? '',
+        location: property.location ?? '',
+        propertyId: propertyId,
+        slug: (property.slug ?? property.code ?? '').toString().trim(),
+        imageUrl: firstImg?.url ?? '',
+        pricePerNight:
+          typeof property.priceBase === 'number' ? property.priceBase : 0,
+      };
+      propCache.set(rid, enriched);
+      return enriched;
+    }
+
+    // Enriquecer cada mensaje que tenga retailerId pero no tenga nombre/imagen
+    const out: any[] = [];
+    for (const m of ordered) {
+      const meta = (m.metadata ?? {}) as Record<string, unknown>;
+      const retailerId =
+        (meta.productRetailerId as string | undefined) ??
+        (meta.retailerId as string | undefined);
+      const hasFull = !!meta.propertyName && !!meta.imageUrl;
+      if (retailerId && !hasFull) {
+        const enriched = await getPropMeta(retailerId);
+        if (enriched) {
+          out.push({
+            ...m,
+            metadata: { ...meta, ...enriched },
+          });
+          continue;
+        }
+      }
+      out.push(m);
+    }
+    return out;
   },
 });

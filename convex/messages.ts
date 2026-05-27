@@ -1,5 +1,6 @@
 import { v } from "convex/values";
 import { internalMutation, query } from "./_generated/server";
+import { internal } from "./_generated/api";
 
 const whatsappStatusValidator = v.union(
   v.literal("failed"),
@@ -80,6 +81,26 @@ export const insertUserMessage = internalMutation({
       lastMessageAt: args.createdAt,
       inboxUnreadCount: prevUnread + 1,
     });
+
+    // Push notification a todo el staff (excepto al actor, que aquí no hay).
+    try {
+      const contact = conv ? await ctx.db.get(conv.contactId) : null;
+      const senderName =
+        (contact as { name?: string } | null)?.name ??
+        (contact as { phone?: string } | null)?.phone ??
+        "Cliente";
+      const preview =
+        args.content.length > 100
+          ? args.content.slice(0, 100) + "…"
+          : args.content;
+      await ctx.scheduler.runAfter(0, internal.push.notifyInboxStaff, {
+        title: senderName,
+        body: preview,
+        data: { type: "new_message", conversationId: args.conversationId },
+      });
+    } catch (e) {
+      console.warn("[push] schedule failed", e);
+    }
     return messageId;
   },
 });

@@ -43,8 +43,12 @@ export const findRecentCommercialByPhone = internalQuery({
     excludingConversationId: v.id("conversations"),
   },
   handler: async (ctx, { phone, excludingConversationId }) => {
+    // OJO: `collecting` (la fase "el bot pidió datos") NO cuenta como
+    // "cliente recurrente" porque sucede en CUALQUIER conversación apenas el
+    // cliente saluda — quedaba marcando como recurrente a cualquiera que
+    // hubiera escrito una vez antes, incluso si solo dijo "hola" y se fue.
+    // Solo contamos a partir de `catalog_sent` (el bot mandó fincas reales).
     const COMMERCIAL_PHASES = new Set([
-      "collecting",
       "catalog_sent",
       "property_selected",
       "pet_check",
@@ -53,6 +57,12 @@ export const findRecentCommercialByPhone = internalQuery({
       "contract",
       "done",
     ]);
+    // VENTANA DE RECENCIA: solo cuentan sesiones de los últimos 90 días.
+    // Si alguien cotizó hace 2 años y vuelve, NO es "retomando un cierre" —
+    // ya es una conversación nueva. Sin este filtro las pruebas viejas
+    // generaban falsos positivos de "cliente recurrente" para siempre.
+    const RECENCY_MS = 90 * 24 * 60 * 60 * 1000;
+    const minUpdatedAt = Date.now() - RECENCY_MS;
     const rows = await ctx.db
       .query("botSessions")
       .withIndex("by_phone", (q) => q.eq("phone", phone))
@@ -60,7 +70,8 @@ export const findRecentCommercialByPhone = internalQuery({
     const candidates = rows.filter(
       (s) =>
         s.conversationId !== excludingConversationId &&
-        COMMERCIAL_PHASES.has(s.phase),
+        COMMERCIAL_PHASES.has(s.phase) &&
+        (s.updatedAt ?? 0) >= minUpdatedAt,
     );
     if (candidates.length === 0) return null;
     candidates.sort((a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0));

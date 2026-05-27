@@ -129,6 +129,34 @@ export const FAQ_INITIAL_SEED: Array<{
       '✅ Te recomendamos llevarlas en lata o envases plásticos para evitar inconvenientes durante el ingreso.',
     ].join('\n'),
   },
+  {
+    key: 'faq:proceso-pago',
+    title: 'Proceso de reserva y medios de pago',
+    text: [
+      '👨🏻‍💻 *Proceso de reserva en FincasYa.com*',
+      '',
+      '📃 *Contrato y respaldo legal*',
+      'Te enviamos el contrato de arrendamiento junto con nuestra documentación legal, para que verifiques nuestra legitimidad antes de pagar.',
+      '',
+      '💳 *Formas de pago*',
+      'Puedes reservar con cualquiera de estos medios:',
+      '• Davivienda',
+      '• BBVA',
+      '• Nequi',
+      '• Bancolombia',
+      '• PSE / Tarjeta de crédito',
+      '• Llaves',
+      '',
+      '💰 *Condiciones de reserva*',
+      'La mayoría de reservas se confirman con el *50%* del valor del alquiler.',
+      'El saldo restante lo cancelas al recibir la finca a satisfacción.',
+      '',
+      '📄 *Confirmación y ubicación*',
+      'Una vez validemos tu pago, te enviamos el documento oficial de confirmación de reserva y la ubicación exacta de la finca.',
+      '',
+      'En FincasYa.com tienes siempre un proceso claro, seguro y con respaldo ®️',
+    ].join('\n'),
+  },
 ];
 
 /**
@@ -167,6 +195,15 @@ const FAQ_FALLBACK_RULES: Array<{ key: string; pattern: RegExp }> = [
     key: 'faq:ubicacion-exacta',
     pattern:
       /\b(ubicacion|direccion\s+(de\s+la\s+finca|exacta|del\s+(lugar|sitio))|donde\s+queda|donde\s+esta\s+(la\s+)?finca|como\s+llego|waze|google\s+maps|\bmapa\b)\b/,
+  },
+  {
+    // OJO: va ANTES de `faq:reserva-abono` porque "como puedo pagar" /
+    // "donde pago" / "formas de pago" son preguntas sobre MEDIOS de pago
+    // (cuentas, bancos), no sobre el % de anticipo. Si va después, la regla
+    // del abono se las queda porque ambas comparten términos como "pagar".
+    key: 'faq:proceso-pago',
+    pattern:
+      /\b(como\s+(?:puedo\s+|podemos\s+)?(?:pago|pagar|paga\w+|consigno|consignar|transferir|deposit\w+|cancel(?:o|ar))|donde\s+(?:puedo\s+|podemos\s+)?(?:pago|pagar|consigno|consignar|transferir|deposit\w+|cancel(?:o|ar))|formas?\s+de\s+pag\w+|metodos?\s+de\s+pag\w+|medios?\s+de\s+pag\w+|proceso\s+de\s+pag\w+|por\s+(?:donde|que\s+banco|cual\s+banco)\s+(?:pago|pagar|consigno|transferir|deposit\w+)|que\s+(?:banco|cuenta|cuentas|medios?|formas?)\s+(?:tienen|manejan|aceptan|reciben|usan)|aceptan\s+(?:tarjeta|nequi|pse|bancolombia|davivienda|bbva)|nequi|bancolombia|davivienda|\bbbva\b|\bpse\b|tarjeta\s+de\s+credito)\b/,
   },
   {
     key: 'faq:reserva-abono',

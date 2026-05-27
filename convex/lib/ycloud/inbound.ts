@@ -592,7 +592,7 @@ function looksLikeQuestion(text: string): boolean {
   // Mensaje corto con términos FAQ inequívocos.
   const shortAndFaqy =
     t.length <= 140 &&
-    /\b(horario|horarios|check ?in|check ?out|hora\s+de\s+(entrada|salida|llegada|llegar|ingreso)|a\s+qu[eé]?\s+horas?\b|horas?\s+(de|del|es|son|para)\s+(la\s+|el\s+)?(entrada|salida|ingreso|llegada)|mascota|mascotas|perr[oa]s?|gatos?|piscina|jacuzzi|bbq|raza|cancelaci[oó]n|cancelar|forma[s]?\s+de\s+pago|metodo[s]?\s+de\s+pago|c[oó]mo\s+pago|c[oó]mo\s+se\s+paga|pol[ií]tica|reglas?|personal\s+de\s+servicio|cocinera|empleada|servicio\s+dom[eé]stico|aseo|ubicaci[oó]n|direcci[oó]n(?!\s+de\s+residencia)|d[oó]nde\s+queda|d[oó]nde\s+esta|c[oó]mo\s+llego|early\s+check|late\s+check|entrada\s+anticipada|salida\s+tardia|licor|cervezas?|alcohol|trago|alimentos?|llevar\s+(comida|bebidas?|mercado|trago)|botellas?\s+de\s+vidrio)\b/.test(
+    /\b(horario|horarios|check ?in|check ?out|hora\s+de\s+(entrada|salida|llegada|llegar|ingreso)|a\s+qu[eé]?\s+horas?\b|horas?\s+(de|del|es|son|para)\s+(la\s+|el\s+)?(entrada|salida|ingreso|llegada)|mascota|mascotas|perr[oa]s?|gatos?|piscina|jacuzzi|bbq|raza|cancelaci[oó]n|cancelar|forma[s]?\s+de\s+pago|metodo[s]?\s+de\s+pago|medio[s]?\s+de\s+pago|proceso\s+de\s+pago|c[oó]mo\s+(?:puedo\s+|podemos\s+)?(?:pago|pagar|paga\w+|consigno|consignar|transferir|deposit\w+|cancel(?:o|ar))|d[oó]nde\s+(?:puedo\s+|podemos\s+)?(?:pago|pagar|consigno|consignar|transferir|deposit\w+)|c[oó]mo\s+se\s+paga|aceptan\s+(?:tarjeta|nequi|pse|bancolombia|davivienda|bbva)|nequi|bancolombia|davivienda|\bbbva\b|\bpse\b|que\s+(?:banco|cuenta|cuentas|medios?|formas?)\s+(?:tienen|manejan|aceptan|reciben|usan)|pol[ií]tica|reglas?|personal\s+de\s+servicio|cocinera|empleada|servicio\s+dom[eé]stico|aseo|ubicaci[oó]n|direcci[oó]n(?!\s+de\s+residencia)|d[oó]nde\s+queda|d[oó]nde\s+esta|c[oó]mo\s+llego|early\s+check|late\s+check|entrada\s+anticipada|salida\s+tardia|licor|cervezas?|alcohol|trago|alimentos?|llevar\s+(comida|bebidas?|mercado|trago)|botellas?\s+de\s+vidrio)\b/.test(
       lower,
     );
   if (shortAndFaqy) return true;
@@ -1041,6 +1041,10 @@ export async function processInboundMessageV2(
     entities: Record<string, unknown>;
     updatedAt: number;
   };
+  // SAFETY: solo dispara la alerta si la sesión previa tiene info comercial
+  // real (al menos finca elegida O fechas confirmadas). Sin esto un session
+  // huérfano en `catalog_sent` SIN datos generaba "Cliente RECURRENTE — sin
+  // detalles guardados", inútil para el asesor.
   if (previousSession) {
     const e = previousSession.entities as {
       location?: string;
@@ -1049,20 +1053,34 @@ export async function processInboundMessageV2(
       cupo?: number;
       selectedPropertyName?: string;
     };
-    const ctxBits: string[] = [];
-    if (e.selectedPropertyName) ctxBits.push(`finca=${e.selectedPropertyName}`);
-    if (e.location) ctxBits.push(`zona=${e.location}`);
-    if (e.checkIn && e.checkOut)
-      ctxBits.push(`fechas=${e.checkIn}→${e.checkOut}`);
-    if (e.cupo) ctxBits.push(`cupo=${e.cupo}`);
-    const ctxLine = ctxBits.length > 0 ? ctxBits.join(" · ") : "sin detalles guardados";
-    await ctx.runMutation(deps.internal.conversations.flagPriorityAlert, {
-      conversationId,
-      alertReason: "returning_close",
-      priority: "medium" as const,
-      tag: "cliente-recurrente",
-      inboxMessage: `↩️ Cliente RECURRENTE — ya tuvo una conversación previa con el bot (fase: ${previousSession.phase}). Contexto previo: ${ctxLine}. Considera retomar desde ahí en lugar de empezar de cero.`,
-    });
+    const hasMeaningfulContext =
+      !!e.selectedPropertyName ||
+      (!!e.checkIn && !!e.checkOut) ||
+      !!e.location;
+    if (hasMeaningfulContext) {
+      const ctxBits: string[] = [];
+      if (e.selectedPropertyName)
+        ctxBits.push(`finca=${e.selectedPropertyName}`);
+      if (e.location) ctxBits.push(`zona=${e.location}`);
+      if (e.checkIn && e.checkOut)
+        ctxBits.push(`fechas=${e.checkIn}→${e.checkOut}`);
+      if (e.cupo) ctxBits.push(`cupo=${e.cupo}`);
+      // Fecha de la sesión previa — formato dd/mm/yyyy para que el asesor
+      // sepa si fue de "ayer" o "hace 2 meses". Ventana global ya está
+      // acotada a 90 días por `findRecentCommercialByPhone`.
+      const prevDate = new Date(previousSession.updatedAt);
+      const dd = String(prevDate.getDate()).padStart(2, "0");
+      const mm = String(prevDate.getMonth() + 1).padStart(2, "0");
+      const yyyy = prevDate.getFullYear();
+      const dateLabel = `${dd}/${mm}/${yyyy}`;
+      await ctx.runMutation(deps.internal.conversations.flagPriorityAlert, {
+        conversationId,
+        alertReason: "returning_close",
+        priority: "medium" as const,
+        tag: "cliente-recurrente",
+        inboxMessage: `↩️ Cliente RECURRENTE — sesión previa del ${dateLabel} (fase: ${previousSession.phase}). Contexto guardado: ${ctxBits.join(" · ")}. Considera retomar desde ahí en lugar de empezar de cero.`,
+      });
+    }
   }
 
   // ─── (4) INTENCIÓN DE CIERRE / PAGO ──────────────────────────────────

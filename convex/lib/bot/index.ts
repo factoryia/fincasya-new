@@ -381,8 +381,25 @@ export async function runBotTurn(input: BotTurnInput): Promise<BotTurnResult> {
     };
   }
 
+  // BELT-AND-SUSPENDERS contra cambio espurio de zona por "pointing":
+  // si ya hay catálogo enviado y el mensaje del cliente apunta a una finca
+  // específica del catálogo ("la de Girardot 2", "la primera", "esa de
+  // Melgar"), NO debemos tratar la ciudad mencionada como filtro nuevo —
+  // disparaba `autoRebroadcastCatalog` y re-enviaba el catálogo filtrado en
+  // vez de responder con info de la finca apuntada. El prompt del extractor
+  // ya pide ignorar location en estos casos, pero por si el LLM falla
+  // limpiamos `extracted.location` aquí antes del merge.
+  const POINTING_REGEX =
+    /\b(la|el|esa|ese|esta|este)\s+(?:de|del|en|que)\s+\w+|\b(la|el)\s+(primera|segunda|tercera|cuarta|quinta|sexta|septima|octava|novena|decima|primer|segundo|tercer|cuart[oa]|ultim[oa]|antepenultim[oa])\b|\b(la|el|esa|ese|esta|este)\s+\d{1,2}\b/i;
+  const isPointingPick =
+    isPostCollectingPhase(currentPhase) &&
+    POINTING_REGEX.test(messageText) &&
+    extracted.location !== undefined &&
+    !extracted.wantsRecomendadas;
+  const safeExtractedLocation = isPointingPick ? undefined : extracted.location;
+
   let updatedEntities = mergeEntities(baseEntities, {
-    location: extracted.location ?? (extracted.wantsRecomendadas ? "RECOMENDADAS" : undefined),
+    location: safeExtractedLocation ?? (extracted.wantsRecomendadas ? "RECOMENDADAS" : undefined),
     checkIn: extracted.checkIn,
     checkOut: extracted.checkOut,
     cupo: extracted.cupo,

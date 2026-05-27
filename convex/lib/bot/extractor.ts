@@ -94,6 +94,18 @@ Reglas estrictas:
   Si el cliente nombra un municipio NUEVO (distinto al de antes), devuélvelo —
   el bot regenerará el catálogo para esa zona. NO lo dejes vacío solo porque la
   frase sea una pregunta.
+
+  ⚠️ EXCEPCIÓN — "LA DE X" / "LA N" son FRASES DE PICK, NO de filtro de zona:
+  cuando el cliente APUNTA a una finca específica que YA vio en el catálogo
+  enviado, usa frases tipo:
+    "la de Girardot 2" / "la de Melgar" / "esa de Anapoima" / "la primera"
+    "la segunda" / "la tercera" / "la 3" / "la última" / "la del precio bajo"
+    "esa que mostraste de X" / "la que está en X" / "dame info de la de X"
+  En esos casos NO setees "location" (no es cambio de zona, ya estaba en el
+  catálogo) NI setees "selectedPropertyName" (no es un nombre claro, es una
+  referencia posicional). Deja "location" como está y devuelve el resto de
+  campos como normalmente. El sistema responde con info de las opciones de
+  esa ciudad (o pide más precisión) SIN re-disparar el catálogo.
   Devuelve "RECOMENDADAS" si el cliente expresa que NO tiene preferencia /
   no conoce / quiere que recomendemos / quiere ver varias zonas. Patrones:
   "no sé", "no se", "no tengo lugar", "no tengo idea", "no tengo preferencia", "no tengo en mente",

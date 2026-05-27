@@ -74,6 +74,22 @@ function parseProductRetailerIdFromMessage(text: string): string | undefined {
 
 function inferPetsFromSpanish(raw: string): Partial<Pick<BotEntities, "hasPets" | "petCount">> {
   const t = raw.toLowerCase().normalize("NFD").replace(/\p{M}/gu, "");
+  // CASO #1 — mensaje COMPLETO es una clara negación ("No", "No.", "Nope",
+  // "Para nada", "Ninguna"). La función solo se llama en fases pet_check /
+  // property_selected (ver `applyPetSelectionHeuristics`), donde la última
+  // pregunta del bot fue "¿vas a llevar mascotas?" — así que un "No" suelto
+  // significa inequívocamente "no llevo". Sin este caso el "No" se quedaba
+  // como `hasPets=undefined` y el FSM volvía a preguntar (el LLM, viendo
+  // la historia, decía "sin mascotas" pero el FSM aún pedía confirmación →
+  // contradicción en el mismo mensaje).
+  if (
+    /^\s*(no|nop|nope|negativo|para\s+nada|nada\s+de\s+eso|claro\s+que\s+no|ninguna|ningun[oa])\s*[.!,]?\s*$/.test(
+      t,
+    )
+  ) {
+    return { hasPets: false };
+  }
+  // CASO #2 — frases explícitas con keywords de mascota.
   if (
     /\b(sin\s+mascotas?|no\s+llevo|no\s+voy\s+a\s+llevar|no\s+vamos?\s+con\s+mascotas?|no\s+tengo\s+mascotas?)\b/.test(
       t,
