@@ -2075,16 +2075,46 @@ export async function processInboundMessageV2(
     } | null;
 
     if (catalogPayload?.productRetailerIds?.length) {
+      // ─── HONESTIDAD CUANDO LA QUERY HIZO FALLBACK A OTRA ZONA ──────────
+      // Si el cliente pidió una ciudad concreta (ej. "Pereira") y la query
+      // no encontró NINGUNA finca con ese nombre en los títulos devueltos,
+      // significa que están viendo fincas de OTRAS zonas como fallback. En
+      // ese caso NO mandamos el genérico "Te comparto las opciones
+      // disponibles" — eso es deshonesto, parece que sí teníamos en su
+      // ciudad. Mejor reconocer y proponer alternativas cercanas.
+      //
+      // Caso "RECOMENDADAS" (cliente no especificó zona) NO entra acá.
+      const normLoc = (s: string) =>
+        s.toLowerCase().normalize("NFD").replace(/\p{M}/gu, "");
+      const titlesForLocCheck = catalogPayload.productTitles ?? [];
+      const requestedLocNorm = normLoc(action.location);
+      const isRecomendadas = action.location === "RECOMENDADAS";
+      const someMatchRequested =
+        isRecomendadas ||
+        titlesForLocCheck.some((t) => normLoc(t).includes(requestedLocNorm));
+      const isFallbackOnly =
+        !someMatchRequested && titlesForLocCheck.length > 0;
+      const preCatalogText = isFallbackOnly
+        ? [
+            `Por el momento no tengo fincas disponibles en *${action.location}* para esas fechas 😔`,
+            "",
+            "Pero te comparto algunas opciones cercanas que podrían interesarte 🏡✨",
+            "",
+            "💰 Cada tarjeta muestra el valor *por noche* en temporada actual.",
+            "👉 Cuéntame *cuál te llama la atención* y te ayudo con la reserva 🤝",
+          ].join("\n")
+        : result.replyText;
+
       // Hay fichas → ahora SÍ enviamos el pre-catálogo diferido + extras + fichas.
-      if (result.replyText) {
+      if (preCatalogText) {
         await ctx.runMutation(deps.internal.messages.insertAssistantMessage, {
           conversationId,
-          content: result.replyText,
+          content: preCatalogText,
           createdAt: Date.now(),
         });
         await deliverText( {
           to: args.phone,
-          text: result.replyText,
+          text: preCatalogText,
           wamid: args.wamid,
         });
       }
