@@ -1198,6 +1198,58 @@ export class InboxService {
     return generic?.[1] || '';
   }
 
+  /**
+   * Envía al cliente el link de autorrelleno de contrato por WhatsApp.
+   * El asesor llama a este método desde el panel.
+   */
+  async sendContractFillLink(
+    conversationId: string,
+    opts?: {
+      propertyTitle?: string;
+      propertyLocation?: string;
+      fechaEntrada?: string;
+      fechaSalida?: string;
+      cupo?: number;
+      precioTotal?: number;
+      sentByUserId?: string;
+    },
+  ): Promise<{ ok: boolean; token: string; link: string }> {
+    const conv = await this.convexService.query('conversations:getById', { conversationId });
+    if (!conv) throw new NotFoundException('Conversacion no encontrada');
+    const contact = await this.convexService.query('contacts:getById', {
+      contactId: (conv as { contactId: string }).contactId,
+    });
+    if (!contact) throw new NotFoundException('Contacto no encontrado');
+
+    const phone = this.normalizePhoneE164((contact as { phone: string }).phone);
+    const channel =
+      (conv as { channel?: string }).channel === 'web' ? 'web' : 'whatsapp';
+
+    const prepared = (await this.convexService.action(
+      'contractFillTokensAction:prepareContractFillLink',
+      { conversationId, ...opts },
+    )) as { ok: boolean; token: string; link: string };
+
+    const text = [
+      '✨ Para agilizar tu reserva, te compartimos el siguiente link para ingresar tus datos personales:',
+      '',
+      `👉 ${prepared.link}`,
+      '',
+      'Es un link único y seguro (expira en 48 horas). Apenas lo completes, tu asesor continuará el proceso contigo 🤝',
+    ].join('\n');
+
+    await this.convexService.action('inbox:sendMessage', {
+      conversationId,
+      phone,
+      channel,
+      type: 'text',
+      text,
+      sentByUserId: opts?.sentByUserId,
+    });
+
+    return prepared;
+  }
+
   private normalizePhoneE164(phone: string): string {
     let p = (phone || '').replace(/\D/g, '');
     if (p.startsWith('57') && p.length <= 12) {

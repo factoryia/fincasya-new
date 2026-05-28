@@ -808,4 +808,126 @@ http.route({
   }),
 });
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Endpoints públicos para el formulario de autorrelleno de contrato.
+// No requieren X-API-Key (el cliente final los accede directamente).
+// La seguridad viene del token UUID de un solo uso con TTL 48 h.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** GET /api/contract-fill/:token → devuelve datos del deal para precargar el form. */
+http.route({
+  pathPrefix: '/api/contract-fill/',
+  method: 'GET',
+  handler: httpAction(async (ctx, request) => {
+    const url = new URL(request.url);
+    const token = url.pathname.replace('/api/contract-fill/', '').trim();
+
+    if (!token || token.length < 8) {
+      return jsonResponse({ error: 'Token inválido' }, 400);
+    }
+
+    const row = await ctx.runQuery(internal.contractFillTokens.getByToken, { token });
+
+    if (!row) return jsonResponse({ error: 'Link no encontrado' }, 404);
+    if (row.status === 'filled') return jsonResponse({ error: 'already_filled', message: 'Este link ya fue utilizado.' }, 409);
+    if (row.status === 'expired' || row.expiresAt < Date.now()) {
+      return jsonResponse({ error: 'expired', message: 'Este link ha expirado. Solicita uno nuevo al asesor.' }, 410);
+    }
+
+    return jsonResponse({
+      ok: true,
+      deal: {
+        propertyTitle: row.propertyTitle ?? null,
+        propertyLocation: row.propertyLocation ?? null,
+        fechaEntrada: row.fechaEntrada ?? null,
+        fechaSalida: row.fechaSalida ?? null,
+        cupo: row.cupo ?? null,
+        precioTotal: row.precioTotal ?? null,
+      },
+    }, 200, {
+      'Access-Control-Allow-Origin': '*',
+    });
+  }),
+});
+
+/** POST /api/contract-fill/:token → recibe los datos del cliente y notifica al asesor. */
+http.route({
+  pathPrefix: '/api/contract-fill/',
+  method: 'POST',
+  handler: httpAction(async (ctx, request) => {
+    const url = new URL(request.url);
+    const token = url.pathname.replace('/api/contract-fill/', '').trim();
+
+    if (!token || token.length < 8) {
+      return jsonResponse({ error: 'Token inválido' }, 400);
+    }
+
+    let body: {
+      nombre?: string;
+      cedula?: string;
+      email?: string;
+      telefono?: string;
+      direccion?: string;
+      ciudad?: string;
+    };
+    try {
+      body = (await request.json()) as typeof body;
+    } catch {
+      return jsonResponse({ error: 'Body JSON inválido' }, 400);
+    }
+
+    const nombre = String(body?.nombre ?? '').trim();
+    const cedula = String(body?.cedula ?? '').trim();
+    const email = String(body?.email ?? '').trim();
+    const telefono = String(body?.telefono ?? '').trim();
+    const direccion = String(body?.direccion ?? '').trim();
+    const ciudad = body?.ciudad?.trim() || undefined;
+
+    if (!nombre || !cedula || !email || !telefono || !direccion) {
+      return jsonResponse(
+        { error: 'Todos los campos son requeridos: nombre, cedula, email, telefono, direccion' },
+        400,
+      );
+    }
+
+    const result = await ctx.runAction(
+      internal.contractFillTokensAction.processFillSubmit,
+      { token, nombre, cedula, email, telefono, direccion, ciudad },
+    );
+
+    if (!result.ok) {
+      const statusMap: Record<string, number> = {
+        not_found: 404,
+        already_filled: 409,
+        expired: 410,
+      };
+      const reason = (result as { reason?: string }).reason ?? 'error';
+      return jsonResponse({ error: reason }, statusMap[reason] ?? 400, {
+        'Access-Control-Allow-Origin': '*',
+      });
+    }
+
+    return jsonResponse({ ok: true, message: '¡Datos recibidos! Tu asesor los revisará muy pronto.' }, 200, {
+      'Access-Control-Allow-Origin': '*',
+    });
+  }),
+});
+
+/** OPTIONS preflight para CORS (permite que FincasYaWeb llame desde el browser). */
+http.route({
+  pathPrefix: '/api/contract-fill/',
+  method: 'OPTIONS',
+  handler: httpAction(async () => {
+    return new Response(null, {
+      status: 204,
+      headers: {
+        'Access-Control-Allow-Origin': '*',
+        'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+        'Access-Control-Allow-Headers': 'Content-Type',
+        'Access-Control-Max-Age': '86400',
+      },
+    });
+  }),
+});
+
 export default http;

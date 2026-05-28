@@ -26,14 +26,27 @@ export const recordProcessedEvent = internalMutation({
   },
 });
 
+function isGenericWebContactName(name: string): boolean {
+  const n = name.trim();
+  return (
+    !n ||
+    n === "Visitante web" ||
+    n === "Visitante" ||
+    n.startsWith("Chat web ·")
+  );
+}
+
 function displayNameForContact(phone: string, name: string): string {
+  const trimmed = (name || "").trim();
   if (phone.startsWith("web:")) {
+    if (trimmed && !isGenericWebContactName(trimmed)) {
+      return trimmed;
+    }
     const sid = phone.slice(4).trim();
-    const short =
-      sid.length > 10 ? `${sid.slice(0, 8)}…` : sid || "web";
+    const short = sid.length > 10 ? `${sid.slice(0, 8)}…` : sid || "web";
     return `Chat web · ${short}`;
   }
-  return (name || phone).trim() || phone;
+  return trimmed || phone;
 }
 
 export const getOrCreateContact = internalMutation({
@@ -46,16 +59,18 @@ export const getOrCreateContact = internalMutation({
       .unique();
     const now = Date.now();
     if (existing) {
-      if (
-        args.phone.startsWith("web:") &&
-        (existing.name === "Visitante web" ||
-          existing.name === args.name ||
-          !String(existing.name ?? "").includes("Chat web"))
-      ) {
-        await ctx.db.patch(existing._id, {
-          name: displayName,
-          updatedAt: now,
-        });
+      if (args.phone.startsWith("web:")) {
+        const current = String(existing.name ?? "");
+        const nextIsReal = !isGenericWebContactName(displayName);
+        if (
+          nextIsReal &&
+          (isGenericWebContactName(current) || current !== displayName)
+        ) {
+          await ctx.db.patch(existing._id, {
+            name: displayName,
+            updatedAt: now,
+          });
+        }
       }
       return existing._id;
     }

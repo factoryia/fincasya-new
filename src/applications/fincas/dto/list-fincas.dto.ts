@@ -69,4 +69,14 @@ export class ListFincasDto {
   @IsOptional()
   @IsString()
   search?: string;
+
+  /** Filtro de disponibilidad: fecha de entrada en formato ISO (YYYY-MM-DD). */
+  @IsOptional()
+  @IsString()
+  fechaEntrada?: string;
+
+  /** Filtro de disponibilidad: fecha de salida en formato ISO (YYYY-MM-DD). */
+  @IsOptional()
+  @IsString()
+  fechaSalida?: string;
 }

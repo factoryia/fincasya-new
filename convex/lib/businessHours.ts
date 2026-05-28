@@ -116,9 +116,16 @@ export function isWithinBusinessHours(nowMs: number): boolean {
 export const AFTER_HOURS_NOTICE = [
   "",
   "",
-  "📅 *Estamos fuera del horario laboral.* Atendemos nuevas conversaciones de *Lunes a Sábado, 8:00 AM a 6:00 PM* (hora Colombia). Recibimos tu mensaje y te respondemos apenas iniciemos el día 🤝",
+  "📅 Nuestro horario de atención es de Lunes a Viernes, de 7:00 AM a 5:00 PM, y Sábados de 7:00 AM a 3:00 PM (hora Colombia).",
   "",
-  "⚡ Si tu caso es *urgente*, escribe la palabra *URGENTE* y activamos atención on-call para contactarte lo antes posible.",
+  "Si nos escribes fuera de este horario, tu mensaje seguirá siendo recibido con normalidad 🙌",
+  "Puedes continuar enviando la información de tu viaje o reserva para ir avanzando en el proceso.",
+  "",
+  "✨ Apenas iniciemos atención, uno de nuestros asesores continuará contigo para:",
+  "📝 Gestionar la reserva",
+  "💳 Compartir contrato y opciones de pago",
+  "",
+  "⚡ Si tu caso es urgente, escribe la palabra URGENTE y un asesor on-call te contactará lo antes posible.",
 ].join("\n");
 
 /**

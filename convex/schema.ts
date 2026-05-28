@@ -916,4 +916,45 @@ export default defineSchema({
   })
     .index('by_user', ['userId'])
     .index('by_token', ['token']),
+
+  /**
+   * Tokens de autorrelleno de contrato: el asesor genera el link, el cliente
+   * entra y llena sus datos sin necesidad de escribirlos por WhatsApp turno a
+   * turno. Token UUID único, expira en 48 h.
+   */
+  contractFillTokens: defineTable({
+    /** Token UUID aleatorio que va en la URL pública. */
+    token: v.string(),
+    conversationId: v.id('conversations'),
+    /** Datos del deal precargados en el form (para mostrarle al cliente). */
+    propertyTitle: v.optional(v.string()),
+    propertyLocation: v.optional(v.string()),
+    fechaEntrada: v.optional(v.string()),
+    fechaSalida: v.optional(v.string()),
+    cupo: v.optional(v.number()),
+    precioTotal: v.optional(v.number()),
+    /** Unix ms de expiración (default 48 h). */
+    expiresAt: v.number(),
+    /** pending = esperando al cliente; filled = datos recibidos; expired = fuera de tiempo. */
+    status: v.union(
+      v.literal('pending'),
+      v.literal('filled'),
+      v.literal('expired'),
+    ),
+    /** Datos enviados por el cliente cuando status = filled. */
+    filledData: v.optional(
+      v.object({
+        nombre: v.string(),
+        cedula: v.string(),
+        email: v.string(),
+        telefono: v.string(),
+        direccion: v.string(),
+        ciudad: v.optional(v.string()),
+        filledAt: v.number(),
+      }),
+    ),
+    createdAt: v.number(),
+  })
+    .index('by_token', ['token'])
+    .index('by_conversation', ['conversationId']),
 });

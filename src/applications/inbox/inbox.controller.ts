@@ -463,6 +463,28 @@ export class InboxController {
     return this.inboxService.setConversationTags(conversationId, tags);
   }
 
+  /**
+   * Envía al cliente el link de autorrelleno de contrato por WhatsApp.
+   * POST /api/inbox/:conversationId/send-contract-fill-link
+   * Body opcional: { propertyTitle, propertyLocation, fechaEntrada, fechaSalida, cupo, precioTotal }
+   */
+  @Post(':conversationId/send-contract-fill-link')
+  async sendContractFillLink(
+    @Param('conversationId') conversationId: string,
+    @Body()
+    body?: {
+      propertyTitle?: string;
+      propertyLocation?: string;
+      fechaEntrada?: string;
+      fechaSalida?: string;
+      cupo?: number;
+      precioTotal?: number;
+      sentByUserId?: string;
+    },
+  ) {
+    return this.inboxService.sendContractFillLink(conversationId, body ?? {});
+  }
+
   private inferTypeFromFile(file: Express.Multer.File): 'image' | 'audio' | 'document' {
     const mime = (file.mimetype || '').toLowerCase();
     if (mime.startsWith('image/')) return 'image';

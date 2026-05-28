@@ -97,7 +97,13 @@ export const processWebInboundMessage = internalAction({
     }
 
     const phone = webPhone(sessionId);
-    const name = (args.displayName ?? "").trim() || "Visitante web";
+    const name = (args.displayName ?? "").trim();
+    if (name.length < 2) {
+      throw new Error("Indica tu nombre para iniciar el chat (mínimo 2 caracteres).");
+    }
+    if (/^visitante(\s+web)?$/i.test(name)) {
+      throw new Error("Indica tu nombre real para una atención personalizada.");
+    }
     const { runBotTurn } = await import("./lib/bot/index");
 
     await processInboundMessageV2(

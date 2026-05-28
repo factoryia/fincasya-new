@@ -271,13 +271,12 @@ Al confirmar tu pago, recibirás el *soporte oficial* junto con todos los detall
 
   async list(listDto: ListFincasDto) {
     try {
-      // Si hay un tÃ©rmino de bÃºsqueda, usamos la query de bÃºsqueda de Convex
+      // Si hay un término de búsqueda, usamos la query de búsqueda de Convex
       if (listDto.search) {
         const results = await this.convexService.query('fincas:search', {
           query: listDto.search,
           limit: listDto.limit || 50,
         });
-        // Normalizar la respuesta para que coincida con el formato paginado del frontend
         return {
           properties: results,
           hasMore: false,
@@ -285,9 +284,43 @@ Al confirmar tu pago, recibirás el *soporte oficial* junto con todos los detall
         };
       }
 
+      // Si hay fechas, usar searchAvailableByDates para filtrar disponibilidad
+      if (listDto.fechaEntrada && listDto.fechaSalida) {
+        const entradaMs = new Date(listDto.fechaEntrada).getTime();
+        const salidaMs = new Date(listDto.fechaSalida).getTime();
+        if (!isNaN(entradaMs) && !isNaN(salidaMs) && salidaMs > entradaMs) {
+          const results = await this.convexService.query(
+            'fincas:searchAvailableByDates',
+            {
+              fechaEntrada: entradaMs,
+              fechaSalida: salidaMs,
+              limit: listDto.limit || 50,
+              ...(listDto.minCapacity != null
+                ? { minCapacity: listDto.minCapacity }
+                : {}),
+            },
+          );
+          // Filtrar por location si se especifica
+          const filtered =
+            listDto.location
+              ? results.filter((p: any) =>
+                  p.location
+                    ?.toLowerCase()
+                    .includes(listDto.location!.toLowerCase()),
+                )
+              : results;
+          return {
+            properties: filtered,
+            hasMore: false,
+            total: filtered.length,
+          };
+        }
+      }
+
       // Filtrar propiedades undefined para evitar errores en Convex
+      const { fechaEntrada: _fe, fechaSalida: _fs, ...rest } = listDto;
       const args = Object.fromEntries(
-        Object.entries(listDto).filter(
+        Object.entries(rest).filter(
           ([_, value]) => value !== undefined && value !== null && value !== '',
         ),
       );
