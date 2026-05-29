@@ -502,18 +502,29 @@ export async function runBotTurn(input: BotTurnInput): Promise<BotTurnResult> {
     updatedEntities = mergeEntities(updatedEntities, { selectedPropertyRetailerId: ridGuess });
   }
 
-  // 2.6 Finca nombrada por el cliente desde el inicio (ej. "quiero reservar la
-  // finca Acacias Biocontainer"). Si nombró una finca concreta y todavía no
-  // tenemos su `selectedPropertyRetailerId`, la resolvemos por nombre. Si se
-  // encuentra → seteamos retailerId + location → la transición salta el
-  // catálogo y va directo al flujo de reserva de esa finca (pet_check →
-  // resumen → contrato). Solo en fases tempranas (welcome/collecting) y si el
-  // nombre NO es vago ("esta"/"esa") ni hubo soft-reset.
+  // 2.6 Finca nombrada por el cliente (ej. "quiero reservar la finca Acacias
+  // Biocontainer", "quiero ver la VILLAVICENCIO CASA HORIZON LUXURY"). Si
+  // nombró una finca concreta y todavía no tenemos su
+  // `selectedPropertyRetailerId`, la resolvemos por nombre contra el catálogo
+  // del bot (`findPropertyByNameForBot`, que SOLO devuelve fincas activas,
+  // visibles y con `visibleInWhatsAppCatalog ≠ false`). Si se encuentra →
+  // seteamos retailerId + location → la transición salta el catálogo y va
+  // directo al flujo de reserva. Si NO se encuentra → `namedPropertyNotFound`
+  // → escalamos (no avanzamos con un nombre fantasma).
+  //
+  // CRÍTICO (fix 2026-05-21): corre en CUALQUIER fase salvo contract/done —
+  // antes solo welcome/collecting, así que si la sesión venía de otra fase
+  // (ej. heredada de ayer) el bot aceptaba el `selectedPropertyName` CRUDO sin
+  // validar → un cliente podía "reservar" una finca con el Catálogo Meta
+  // (WhatsApp) DESACTIVADO (`visibleInWhatsAppCatalog=false`) solo nombrándola.
+  // Ahora esa finca no resuelve → escala a un asesor. El guard
+  // `!selectedPropertyRetailerId` evita re-resolver cuando ya hay finca elegida.
   let namedPropertyNotFound = false;
   if (
     !wantsNewQuote &&
     !autoRebroadcastCatalog &&
-    (effectivePhase === "welcome" || effectivePhase === "collecting") &&
+    effectivePhase !== "contract" &&
+    effectivePhase !== "done" &&
     !(updatedEntities.selectedPropertyRetailerId ?? "").trim() &&
     !!updatedEntities.selectedPropertyName?.trim() &&
     !isVaguePropertyLabel(updatedEntities.selectedPropertyName) &&
