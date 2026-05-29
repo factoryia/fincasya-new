@@ -117,33 +117,43 @@ export class AdminController {
     );
   }
 
+  /**
+   * Crea un link público de contrato. Proxea a Convex HTTP porque en producción
+   * `/api/*` cae en NestJS (no en los route handlers de Next.js).
+   */
+  @Post('contract-link')
+  async createContractLink(@Body() body: Record<string, unknown>) {
+    return this.proxyConvexAdminJson('/api/admin/contract-link', 'POST', body);
+  }
+
   private async proxyConvexAdminJson(
     path: string,
-    method: 'GET' | 'PUT',
+    method: 'GET' | 'PUT' | 'POST',
     body?: Record<string, unknown>,
   ) {
     const baseUrl = (
       process.env.CONVEX_SITE_URL || 'https://adventurous-octopus-651.convex.site'
     ).replace(/\/$/, '');
+    // Fallback alineado con el lado de Next.js (`FincasYaWeb/lib/convex-admin.ts`)
+    // para que funcione aunque la env no esté definida en el servidor.
     const apiKey =
       process.env.CONVEX_ADMIN_API_KEY?.trim() ||
       process.env.YCLOUD_API_KEY?.trim() ||
-      '';
+      '1d968d083e0576de40173bb2c854a4f3';
     if (!apiKey) {
       return {
         error:
           'Falta CONVEX_ADMIN_API_KEY o YCLOUD_API_KEY en el servidor NestJS',
       };
     }
+    const sendsBody = method === 'PUT' || method === 'POST';
     const res = await fetch(`${baseUrl}${path}`, {
       method,
       headers: {
         'X-API-Key': apiKey,
-        ...(method === 'PUT' ? { 'Content-Type': 'application/json' } : {}),
+        ...(sendsBody ? { 'Content-Type': 'application/json' } : {}),
       },
-      ...(method === 'PUT' && body != null
-        ? { body: JSON.stringify(body) }
-        : {}),
+      ...(sendsBody && body != null ? { body: JSON.stringify(body) } : {}),
     });
     const text = await res.text();
     let payload: unknown = text;

@@ -499,6 +499,19 @@ export const getPayloadByLocationForN8n = query({
     const locLower = args.location.trim().toLowerCase();
     // Sentinel especial: "RECOMENDADAS" → fincas favoritas (isFavorite=true) sin filtro de municipio.
     const isRecomendadas = locLower === "recomendadas";
+    // TAG DE CERCANÍA: una finca marcada en el panel como "Cerca a <Municipio>"
+    // (tag `cerca-a-<slug>`, ej. `cerca-a-melgar`) se incluye cuando el cliente
+    // pide ESE municipio, aunque su `location` sea otra. Ej.: una finca en
+    // Girardot con tag `cerca-a-melgar` aparece al buscar "Melgar". El slug
+    // normaliza tildes y espacios → guiones ("carmen de apicalá" →
+    // "carmen-de-apicala" → tag `cerca-a-carmen-de-apicala`).
+    const locSlug = locLower
+      .normalize("NFD")
+      .replace(/\p{M}/gu, "")
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "");
+    const nearbyTag =
+      isRecomendadas || !locSlug ? null : `cerca-a-${locSlug}`;
     if (!locLower) {
       return {
         catalogId: "",
@@ -563,8 +576,18 @@ export const getPayloadByLocationForN8n = query({
       keep: (p: any) => boolean;
     };
 
-    const matchesLocation = (p: any) =>
-      isRecomendadas ? true : p.location.toLowerCase().includes(locLower);
+    const matchesLocation = (p: any) => {
+      if (isRecomendadas) return true;
+      if (String(p.location ?? "").toLowerCase().includes(locLower)) return true;
+      // Finca de OTRO municipio pero marcada "cerca a <el municipio pedido>".
+      if (nearbyTag && Array.isArray(p.catalogFilterTags)) {
+        const tags = p.catalogFilterTags.map((t: unknown) =>
+          String(t ?? "").toLowerCase(),
+        );
+        if (tags.includes(nearbyTag)) return true;
+      }
+      return false;
+    };
     /**
      * Filtro de capacidad:
      *   - `min` se compara contra `effectivePeopleCount` (capacity para descanso,
@@ -851,6 +874,25 @@ export const getPayloadByLocationForN8n = query({
     // solo favoritas → no-favoritas (sin sort por distancia porque no
     // tenemos referencia).
     candidates.sort((a, b) => {
+      // Tier 0: cuando se busca por municipio, las del municipio EXACTO van
+      // antes que las "cerca a <municipio>" (incluidas por el tag de
+      // cercanía). Así un cliente que pide Melgar ve primero Melgar y luego
+      // las cercanas (Girardot, etc.). En RECOMENDADAS no aplica (todas pasan
+      // por matchesLocation=true), así que el tier queda constante = sin efecto.
+      if (!isRecomendadas && locLower) {
+        const aExact = String(a.property.location ?? "")
+          .toLowerCase()
+          .includes(locLower)
+          ? 0
+          : 1;
+        const bExact = String(b.property.location ?? "")
+          .toLowerCase()
+          .includes(locLower)
+          ? 0
+          : 1;
+        if (aExact !== bExact) return aExact - bExact;
+      }
+
       // Tier 1: favoritas primero
       const aFav = a.property.isFavorite === true ? 0 : 1;
       const bFav = b.property.isFavorite === true ? 0 : 1;
