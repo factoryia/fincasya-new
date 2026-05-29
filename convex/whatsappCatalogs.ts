@@ -472,6 +472,27 @@ export const getPayloadByLocationForN8n = query({
      * sujeto a las demás reglas — `matchesLocation` y excluyentes).
      */
     restrictToLocationKeywords: v.optional(v.array(v.string())),
+    /**
+     * Filtro por CATEGORÍA / COLECCIÓN (las "pestañas" del home: Destinos de
+     * Playa, Luxury, Eje Cafetero, Eventos, etc.). Es un AND adicional sobre
+     * location/capacity, con semántica OR INTERNA: la finca pasa si matchea
+     * CUALQUIERA de los sub-criterios provistos. Diseño HÍBRIDO porque los
+     * `catalogFilterTags` están poco poblados — así "playa" trae fincas con
+     * ese tag O fincas en municipios costeros, aunque no estén tageadas.
+     *   - `filterTags`: `property.catalogFilterTags` incluye alguno.
+     *   - `locationKeywords`: `property.location` contiene alguno.
+     *   - `categories`: `property.category` está en la lista (ej. LUJO/PREMIUM).
+     *   - `requireEventsCapable`: `property.allowsEventsContent === true`.
+     * Si el objeto no viene, NO se filtra por categoría.
+     */
+    categoryMatch: v.optional(
+      v.object({
+        filterTags: v.optional(v.array(v.string())),
+        locationKeywords: v.optional(v.array(v.string())),
+        categories: v.optional(v.array(v.string())),
+        requireEventsCapable: v.optional(v.boolean()),
+      }),
+    ),
   },
   handler: async (ctx, args) => {
     const cap = Math.min(Math.max(args.limit ?? 30, 1), 30);
@@ -750,6 +771,48 @@ export const getPayloadByLocationForN8n = query({
       return restrictToLocationKeywordsLower.some((kw) => propLocLower.includes(kw));
     };
 
+    // Filtro por CATEGORÍA / COLECCIÓN (Destinos de Playa, Luxury, Eje
+    // Cafetero, Eventos…). Híbrido: pasa si matchea CUALQUIER sub-criterio
+    // (tag OR location OR category OR events-capable). Si no se pasó
+    // `categoryMatch`, no filtra.
+    const cm = args.categoryMatch;
+    const cmTagsLower = (cm?.filterTags ?? [])
+      .map((t) => normalizeLoc(String(t ?? "").trim()))
+      .filter(Boolean);
+    const cmLocLower = (cm?.locationKeywords ?? [])
+      .map((k) => normalizeLoc(String(k ?? "").trim()))
+      .filter(Boolean);
+    const cmCatsUpper = (cm?.categories ?? [])
+      .map((c) => String(c ?? "").trim().toUpperCase())
+      .filter(Boolean);
+    const cmRequireEvents = cm?.requireEventsCapable === true;
+    const hasCategoryFilter =
+      cmTagsLower.length > 0 ||
+      cmLocLower.length > 0 ||
+      cmCatsUpper.length > 0 ||
+      cmRequireEvents;
+    const matchesCategory = (p: any): boolean => {
+      if (!hasCategoryFilter) return true;
+      // OR entre sub-criterios provistos.
+      if (cmTagsLower.length > 0) {
+        const propTags = Array.isArray(p.catalogFilterTags)
+          ? p.catalogFilterTags.map((t: unknown) => normalizeLoc(String(t ?? "")))
+          : [];
+        if (propTags.some((t: string) => cmTagsLower.includes(t))) return true;
+      }
+      if (cmLocLower.length > 0) {
+        const propLocLower = normalizeLoc(String(p.location ?? ""));
+        if (propLocLower && cmLocLower.some((kw) => propLocLower.includes(kw)))
+          return true;
+      }
+      if (cmCatsUpper.length > 0) {
+        const propCat = String(p.category ?? "").toUpperCase();
+        if (propCat && cmCatsUpper.includes(propCat)) return true;
+      }
+      if (cmRequireEvents && p.allowsEventsContent === true) return true;
+      return false;
+    };
+
     // Materializa links con propiedad ya cargada (evita re-leer entre pasadas).
     const candidates: LinkProp[] = [];
     for (const link of links) {
@@ -766,6 +829,7 @@ export const getPayloadByLocationForN8n = query({
       if (excludeSet.has(id)) continue;
       if (matchesExcludedLocation(p)) continue;
       if (!matchesRestrictedLocation(p)) continue;
+      if (!matchesCategory(p)) continue;
       candidates.push({ link, property: p, retailerId: id });
     }
 

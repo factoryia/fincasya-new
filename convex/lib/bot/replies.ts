@@ -173,6 +173,11 @@ export interface ReplyInput {
    */
   tagFlags?: ConversationTagFlags;
   /**
+   * Canal de la conversación. En `web` el saludo es "asistente virtual de
+   * FincasYa"; en `whatsapp`, "Hernán". Default = whatsapp.
+   */
+  channel?: "whatsapp" | "web";
+  /**
    * Fragmentos relevantes del RAG de FAQs (`searchFaqForBot`). Si vienen,
    * el `contextualLlmReply` los inyecta en el system prompt para que el
    * modelo responda con datos verificados (mascotas, horarios, pagos, etc.).
@@ -351,6 +356,7 @@ export async function generateReply(
           samePhaseTurnCount: input.samePhaseTurnCount,
           faqContext: input.faqContext,
           tagFlags: input.tagFlags,
+          channel: input.channel,
         },
       );
       return { reply: single };
@@ -376,7 +382,7 @@ export async function generateReply(
       // (ej. el cliente nombró una finca puntual → va directo a pet_check).
       (tr.nextPhase !== "welcome" && tr.nextPhase !== "collecting"));
   if (firstTurnHasContent) {
-    const greeting = buildShortGreeting(input.contactName);
+    const greeting = buildShortGreeting(input.contactName, input.channel);
     // Si además el cliente hizo una pregunta clara en su primer mensaje
     // (`faqContext` poblado por el RAG), la respondemos como PRIMERA burbuja
     // (con el saludo corto) y dejamos los datos faltantes como segunda. Sin
@@ -693,6 +699,7 @@ async function generateReplyText(input: ReplyInput): Promise<string> {
       samePhaseTurnCount,
       faqContext,
       tagFlags: input.tagFlags,
+      channel: input.channel,
     });
 
   // Si el static candidate ya se envió en los últimos turnos → ir directo al LLM.
@@ -765,7 +772,7 @@ async function generateReplyText(input: ReplyInput): Promise<string> {
     // así que aunque el texto personalizado difiera en los primeros 50 chars
     // el chequeo `wasJustSent` no genera falso positivo aquí (welcome solo
     // se emite una vez por sesión normalmente).
-    return respond(buildWelcomeMessage(input.contactName));
+    return respond(buildWelcomeMessage(input.contactName, input.channel));
   }
 
   // NOTA: el paso `quote_shown → contract` cae al branch `contract` más abajo
@@ -1036,6 +1043,7 @@ async function generateReplyText(input: ReplyInput): Promise<string> {
         contractMode: true,
         faqContext,
         tagFlags: input.tagFlags,
+        channel: input.channel,
       },
     );
   }
@@ -1064,6 +1072,7 @@ async function contextualLlmReply(
     contractMode?: boolean;
     faqContext?: string | null;
     tagFlags?: ConversationTagFlags;
+    channel?: "whatsapp" | "web";
   } = {},
 ): Promise<string> {
   // Anti-bucle suave: si el cliente lleva varios turnos atascado SIN APORTAR DATOS,
@@ -1080,6 +1089,7 @@ async function contextualLlmReply(
     samePhaseTurnCount: opts.samePhaseTurnCount,
     ragContext: opts.faqContext,
     tagFlags: opts.tagFlags,
+    channel: opts.channel,
   });
 
   const system = opts.contractMode

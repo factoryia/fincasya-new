@@ -275,6 +275,21 @@ Idioma: español colombiano.
 Nunca inventes precios ni información técnica que no tengas en el contexto.
 `.trim();
 
+/** Identidad para el WIDGET WEB: el bot es "asistente virtual de FincasYa",
+ *  NO "Hernán" (que es la persona/marca del canal de WhatsApp). */
+export const IDENTITY_WEB = `
+Eres el asistente virtual de FincasYa.com — plataforma de alquiler de fincas y casas campestres en Colombia.
+NO te presentes con un nombre de persona (no eres "Hernán"); eres el asistente virtual del sitio.
+Tono: amable, cálido, profesional. Nunca robótico. Usa emojis con moderación.
+Idioma: español colombiano.
+Nunca inventes precios ni información técnica que no tengas en el contexto.
+`.trim();
+
+/** Devuelve la identidad correcta según el canal. */
+export function identityForChannel(channel?: "whatsapp" | "web"): string {
+  return channel === "web" ? IDENTITY_WEB : IDENTITY;
+}
+
 export const GLOBAL_RULES = `
 REGLAS GLOBALES:
 - Sé breve. Máximo 3-4 líneas por respuesta salvo que el cliente pida detalles.
@@ -460,6 +475,8 @@ export interface ContextSystemPromptOpts {
    * (VIP → personalizado, complicado → cauteloso, recurrente → como conocido).
    */
   tagFlags?: ConversationTagFlags;
+  /** Canal: en `web` la identidad es "asistente virtual" (no "Hernán"). */
+  channel?: "whatsapp" | "web";
 }
 
 /**
@@ -477,7 +494,7 @@ export function buildContextSystemPrompt(
   const stuck = (opts.samePhaseTurnCount ?? 0) >= 2;
 
   const sections: string[] = [
-    IDENTITY,
+    identityForChannel(opts.channel),
     "",
     GLOBAL_RULES,
     "",
@@ -697,11 +714,22 @@ export function firstNameForGreeting(rawName?: string | null): string | null {
  * Mantenemos `WELCOME_MESSAGE` (sin nombre) como alias para el chequeo de
  * anti-repetición y para call sites legacy.
  */
-export function buildWelcomeMessage(contactName?: string | null): string {
+export function buildWelcomeMessage(
+  contactName?: string | null,
+  channel?: "whatsapp" | "web",
+): string {
   const first = firstNameForGreeting(contactName);
-  const opener = first
-    ? `¡Hola ${first}! Es un gusto saludarte. Te escribe Hernán de FincasYa.com 🏡✨`
-    : `¡Hola! Es un gusto saludarte. Te escribe Hernán de FincasYa.com 🏡✨`;
+  // En el WIDGET WEB el bot se presenta como "asistente virtual de FincasYa"
+  // (no como "Hernán", que es la persona/marca del canal de WhatsApp). El
+  // cliente del widget sabe que está chateando con un bot del sitio.
+  const isWeb = channel === "web";
+  const opener = isWeb
+    ? first
+      ? `¡Hola ${first}! 👋 Soy tu *asistente virtual de FincasYa* 🏡✨`
+      : `¡Hola! 👋 Soy tu *asistente virtual de FincasYa* 🏡✨`
+    : first
+      ? `¡Hola ${first}! Es un gusto saludarte. Te escribe Hernán de FincasYa.com 🏡✨`
+      : `¡Hola! Es un gusto saludarte. Te escribe Hernán de FincasYa.com 🏡✨`;
   return `${opener}
 
 Tenemos opciones espectaculares de fincas listas para ti 🤩 y quiero ayudarte a encontrar la ideal según tu plan.
@@ -725,8 +753,16 @@ export const WELCOME_MESSAGE = buildWelcomeMessage();
  * Saludo corto que se prepende al "first turn has content" (cuando el cliente
  * dio datos útiles en su primer mensaje y saltamos el welcome largo).
  */
-export function buildShortGreeting(contactName?: string | null): string {
+export function buildShortGreeting(
+  contactName?: string | null,
+  channel?: "whatsapp" | "web",
+): string {
   const first = firstNameForGreeting(contactName);
+  if (channel === "web") {
+    return first
+      ? `👋 ¡Hola ${first}! Soy tu *asistente virtual de FincasYa*.`
+      : `👋 ¡Hola! Soy tu *asistente virtual de FincasYa*.`;
+  }
   return first
     ? `🙋‍♂️ ¡Hola ${first}! Te saluda *Hernán* de FincasYa.com.`
     : `🙋‍♂️ ¡Hola! Te saluda *Hernán* de FincasYa.com.`;

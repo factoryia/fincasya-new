@@ -383,6 +383,99 @@ function detectRestrictedZoneKeywords(text: string): string[] {
   return Array.from(out);
 }
 
+/** Keywords de ubicación del Eje Cafetero (para la colección homónima). */
+const EJE_CAFETERO_KEYWORDS = [
+  "pereira", "armenia", "manizales", "salento", "montenegro", "quimbaya",
+  "calarca", "filandia", "circasia", "chinchina", "santa rosa de cabal",
+  "marsella", "eje cafetero", "quindio", "risaralda", "caldas",
+];
+
+/**
+ * COLECCIONES / CATEGORÍAS del catálogo (las "pestañas" del home: Destinos de
+ * Playa, Luxury, Eje Cafetero…). A diferencia de los municipios (que ya se
+ * filtran por `location`), estas categorías NO se pueden expresar solo con
+ * ubicación, así que se mapean a un `categoryMatch` HÍBRIDO (tag + ubicación +
+ * atributo) que el query aplica con semántica OR. Diseño híbrido porque los
+ * `catalogFilterTags` están poco poblados — así "playa" trae fincas con el tag
+ * O fincas en municipios costeros, aunque no estén tageadas.
+ *
+ * NOTA: "cerca a Bogotá" / "en Tolima" / "en la costa" / etc. ya los maneja
+ * `ZONE_INCLUSIONS` (restrict por ubicación) — no se duplican aquí.
+ */
+type CategoryMatch = {
+  filterTags?: string[];
+  locationKeywords?: string[];
+  categories?: string[];
+  requireEventsCapable?: boolean;
+};
+const CATEGORY_COLLECTIONS: Array<{
+  triggerRegex: RegExp;
+  label: string;
+  categoryMatch: CategoryMatch;
+}> = [
+  {
+    // "destinos de playa", "fincas de playa", "en la playa", "frente al mar"
+    triggerRegex:
+      /\b(destinos?\s+de\s+playa|fincas?\s+(?:de|en|con)\s+playa|de\s+playa|en\s+la\s+playa|frente\s+al\s+mar|cerca\s+(?:a|al|del)\s+mar|con\s+playa)\b/i,
+    label: "Destinos de Playa",
+    categoryMatch: {
+      filterTags: ["playa", "santa-marta"],
+      locationKeywords: REGIONS.COSTA,
+    },
+  },
+  {
+    // "de lujo", "lujosas", "luxury", "alta gama", "exclusivas", "premium"
+    triggerRegex:
+      /\b(de\s+lujo|lujos[ao]s?|luxury|alta\s+gama|exclusiv[ao]s?|premium|gama\s+alta)\b/i,
+    label: "Fincas de Lujo",
+    categoryMatch: {
+      filterTags: ["luxury"],
+      categories: ["LUJO", "PREMIUM"],
+    },
+  },
+  {
+    // "eje cafetero", "zona cafetera", "region cafetera"
+    triggerRegex:
+      /\b(eje\s+cafetero|zona\s+cafetera|region\s+cafetera|paisaje\s+cafetero)\b/i,
+    label: "Eje Cafetero",
+    categoryMatch: {
+      filterTags: ["eje-cafetero"],
+      locationKeywords: EJE_CAFETERO_KEYWORDS,
+    },
+  },
+  {
+    // "finca para eventos", "salón de eventos", "para celebraciones grandes"
+    // (trigger explícito para no chocar con el flujo `isEvento` normal).
+    triggerRegex:
+      /\b(fincas?\s+para\s+eventos?|salon\s+de\s+eventos?|finca\s+de\s+eventos?|para\s+(?:hacer\s+)?(?:un\s+)?evento\s+grande|para\s+celebraciones?\s+grandes?)\b/i,
+    label: "Fincas para Eventos",
+    categoryMatch: {
+      filterTags: ["eventos"],
+      requireEventsCapable: true,
+    },
+  },
+];
+
+/**
+ * Detecta si el cliente pidió una COLECCIÓN/categoría (playa, lujo, eje
+ * cafetero, eventos). Devuelve el `categoryMatch` + label, o null. Si matchea
+ * más de una, gana la primera en orden (las más específicas van primero).
+ */
+function detectCategoryCollection(
+  text: string,
+): { label: string; categoryMatch: CategoryMatch } | null {
+  const t = String(text ?? "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/\p{M}/gu, "");
+  for (const c of CATEGORY_COLLECTIONS) {
+    if (c.triggerRegex.test(t)) {
+      return { label: c.label, categoryMatch: c.categoryMatch };
+    }
+  }
+  return null;
+}
+
 /**
  * Aísla las líneas del burst que parecen contener UNA PREGUNTA. Devuelve un
  * ARRAY: cada elemento es una pregunta separada. El cliente suele mezclar
@@ -1729,6 +1822,7 @@ export async function processInboundMessageV2(
     contactName: args.name,
     lastCatalogRetailerIds,
     tagFlags,
+    channel: deps.channel ?? "whatsapp",
     resolvePropertyByName: async (name: string) => {
       const n = String(name ?? "").trim();
       if (!n) return null;
@@ -2072,6 +2166,12 @@ export async function processInboundMessageV2(
       ? CATALOG_EXPANDED_LIMIT
       : MAX_CATALOG_PRODUCTS_PER_SEND;
 
+    // COLECCIÓN/CATEGORÍA pedida por el cliente (playa, lujo, eje cafetero…).
+    // Se detecta sobre todo el texto reciente del cliente. Si matchea, se pasa
+    // como `categoryMatch` al query (filtro híbrido tag+ubicación+atributo) y
+    // se ajusta el texto pre-catálogo para nombrar la colección.
+    const categoryCollection = detectCategoryCollection(recentUserText);
+
     const catalogPayload = (await ctx.runQuery(
       deps.api.whatsappCatalogs.getPayloadByLocationForN8n,
       {
@@ -2091,6 +2191,11 @@ export async function processInboundMessageV2(
         excludeRetailerIds,
         excludeLocationKeywords,
         restrictToLocationKeywords,
+        // Filtro por colección/categoría (playa, lujo, eje cafetero…) si el
+        // cliente la pidió. AND adicional con location/capacity; OR interno.
+        ...(categoryCollection
+          ? { categoryMatch: categoryCollection.categoryMatch }
+          : {}),
         // En modo expandido pedimos hasta 25 candidates al query (cap interno
         // de la query es 30); en modo normal usamos el default (30 también
         // pero el send se corta a 12).
@@ -2132,7 +2237,14 @@ export async function processInboundMessageV2(
             "💰 Cada tarjeta muestra el valor *por noche* en temporada actual.",
             "👉 Cuéntame *cuál te llama la atención* y te ayudo con la reserva 🤝",
           ].join("\n")
-        : result.replyText;
+        : categoryCollection
+          ? [
+              `✨ Te comparto nuestras opciones de *${categoryCollection.label}* 🏡`,
+              "",
+              "💰 Cada tarjeta muestra el valor *por noche* en temporada actual.",
+              "👉 Cuéntame *cuál te llama la atención* y te ayudo con la reserva 🤝",
+            ].join("\n")
+          : result.replyText;
 
       // Hay fichas → ahora SÍ enviamos el pre-catálogo diferido + extras + fichas.
       if (preCatalogText) {

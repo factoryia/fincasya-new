@@ -121,6 +121,17 @@ Reglas estrictas:
   SÍ es un municipio: devuélvela como location, NO como "RECOMENDADAS". Solo
   "la costa" / "el caribe" genéricos van a "RECOMENDADAS".)
 
+  COLECCIONES / CATEGORÍAS (no son un municipio): si el cliente pide una
+  CATEGORÍA del catálogo sin nombrar un municipio concreto → también
+  location="RECOMENDADAS" (otro filtro aparte aplica la categoría). Patrones:
+  **"de playa"**, **"destinos de playa"**, **"fincas de playa"**, **"frente al mar"**,
+  **"de lujo"**, **"lujosas"**, **"luxury"**, **"premium"**, **"exclusivas"**,
+  **"eje cafetero"**, **"zona cafetera"**, **"fincas para eventos"**, **"salón de eventos"**.
+  PERO si el cliente combina la categoría CON un municipio ("fincas de lujo en
+  Melgar", "playa en Santa Marta") → devuelve el MUNICIPIO como location (el
+  filtro de categoría se aplica encima). Solo va a "RECOMENDADAS" cuando la
+  categoría es la ÚNICA pista de zona.
+
   ⚠️ CRÍTICO — EXCLUSIÓN SIN MUNICIPIO: si el cliente SOLO dice qué zona NO
   quiere (ej. "que no sean los llanos", "que no sea en el meta", "no en
   Villavicencio", "no llanos", "fuera del Tolima", "todos MENOS los llanos",

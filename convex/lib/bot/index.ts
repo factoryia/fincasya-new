@@ -117,6 +117,12 @@ export interface BotTurnInput {
    * `reserva-activa`) ya las maneja `inbound.ts` antes de llamar al bot.
    */
   tagFlags?: ConversationTagFlags;
+  /**
+   * Canal de la conversación. En `web` (widget del sitio) el bot se presenta
+   * como "asistente virtual de FincasYa"; en `whatsapp` como "Hernán". Si no
+   * viene, se asume whatsapp (comportamiento histórico).
+   */
+  channel?: "whatsapp" | "web";
 }
 
 /** Si el cliente lleva más de N turnos consecutivos en la misma fase sin avanzar,
@@ -801,6 +807,7 @@ export async function runBotTurn(input: BotTurnInput): Promise<BotTurnResult> {
     faqContext,
     contactName,
     tagFlags: input.tagFlags,
+    channel: input.channel,
   });
 
   // 4.5 Si en este turno se emitió el aviso de puente festivo O el aviso de
