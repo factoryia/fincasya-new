@@ -8,7 +8,7 @@ import { internal } from './_generated/api';
 type CreateTokenResult = { token: string; isNew: boolean };
 type FillTokenResult =
   | { ok: false; reason: 'not_found' | 'already_filled' | 'expired' }
-  | { ok: true; conversationId: Id<'conversations'> };
+  | { ok: true; conversationId?: Id<'conversations'>; source?: 'inbox' | 'admin' };
 type SendContractFillLinkResult = { ok: true; token: string; link: string };
 type ProcessFillSubmitResult =
   | { ok: false; reason: 'not_found' | 'already_filled' | 'expired' }
@@ -54,6 +54,30 @@ export const prepareContractFillLink = action({
   },
 });
 
+/** Crea link de contrato desde el módulo admin (borrador completo sin datos del cliente). */
+export const prepareAdminContractLink = internalAction({
+  args: {
+    contractDraftJson: v.string(),
+    contractSettingsJson: v.string(),
+    propertyMetaJson: v.string(),
+    propertyTitle: v.optional(v.string()),
+    propertyLocation: v.optional(v.string()),
+    fechaEntrada: v.optional(v.string()),
+    fechaSalida: v.optional(v.string()),
+    cupo: v.optional(v.number()),
+    precioTotal: v.optional(v.number()),
+  },
+  handler: async (ctx, args): Promise<SendContractFillLinkResult> => {
+    const { token } = (await ctx.runMutation(
+      internal.contractFillTokens.createAdminToken,
+      args,
+    )) as CreateTokenResult;
+
+    const link = `${contractFillPublicBaseUrl()}/contrato/${token}`;
+    return { ok: true, token, link };
+  },
+});
+
 /**
  * Acción invocada por el HTTP endpoint POST /api/contract-fill/:token (Convex http.ts)
  * después de recibir los datos del cliente. Guarda los datos y notifica al asesor.
@@ -81,21 +105,23 @@ export const processFillSubmit = internalAction({
 
     if (!result.ok) return result;
 
-    // Notifica al asesor en el inbox con los datos listos
-    const summary = [
-      `📋 *Datos de contrato completados por el cliente*`,
-      `👤 ${args.nombre} · CC ${args.cedula}`,
-      `📧 ${args.email} · 📱 ${args.telefono}`,
-      `🏠 ${args.direccion}${args.ciudad ? `, ${args.ciudad}` : ''}`,
-      ``,
-      `✅ Datos listos para generar el contrato desde el panel.`,
-    ].join('\n');
+    if (result.conversationId) {
+      // Notifica al asesor en el inbox con los datos listos
+      const summary = [
+        `📋 *Datos de contrato completados por el cliente*`,
+        `👤 ${args.nombre} · CC ${args.cedula}`,
+        `📧 ${args.email} · 📱 ${args.telefono}`,
+        `🏠 ${args.direccion}${args.ciudad ? `, ${args.ciudad}` : ''}`,
+        ``,
+        `✅ Datos listos para generar el contrato desde el panel.`,
+      ].join('\n');
 
-    await ctx.runMutation(internal.messages.insertSystemMessage, {
-      conversationId: result.conversationId,
-      content: summary,
-      createdAt: Date.now(),
-    });
+      await ctx.runMutation(internal.messages.insertSystemMessage, {
+        conversationId: result.conversationId,
+        content: summary,
+        createdAt: Date.now(),
+      });
+    }
 
     return { ok: true };
   },

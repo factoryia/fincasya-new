@@ -94,6 +94,24 @@ export class BookingsController {
     }
   }
 
+  @Get('contract-codes')
+  @UseGuards(ConvexAuthGuard, AdminGuard)
+  async listContractCodes(
+    @Query('propertyId') propertyId?: string,
+    @Query('search') search?: string,
+    @Query('limit') limit?: string,
+    @Query('page') page?: string,
+  ) {
+    const parsedLimit = limit ? parseInt(limit, 10) : undefined;
+    const parsedPage = page ? parseInt(page, 10) : undefined;
+    return this.bookingsSyncService.listContractCodes({
+      propertyId: propertyId?.trim() || undefined,
+      search: search?.trim() || undefined,
+      limit: Number.isFinite(parsedLimit) ? parsedLimit : undefined,
+      page: Number.isFinite(parsedPage) ? parsedPage : undefined,
+    });
+  }
+
   @Post('check-availability')
   @UseGuards(ConvexAuthGuard, AdminGuard)
   async checkAvailability(

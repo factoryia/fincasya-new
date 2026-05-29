@@ -47,6 +47,7 @@ export const createToken = internalMutation({
     await ctx.db.insert('contractFillTokens', {
       token,
       conversationId: args.conversationId,
+      source: 'inbox',
       propertyTitle: args.propertyTitle,
       propertyLocation: args.propertyLocation,
       fechaEntrada: args.fechaEntrada,
@@ -110,6 +111,52 @@ export const fillToken = internalMutation({
       },
     });
 
-    return { ok: true, conversationId: row.conversationId };
+    return {
+      ok: true,
+      conversationId: row.conversationId,
+      source: row.source ?? 'inbox',
+    };
+  },
+});
+
+/** Crea un link de contrato standalone desde el panel admin (sin conversación). */
+export const createAdminToken = internalMutation({
+  args: {
+    contractDraftJson: v.string(),
+    contractSettingsJson: v.string(),
+    propertyMetaJson: v.string(),
+    propertyTitle: v.optional(v.string()),
+    propertyLocation: v.optional(v.string()),
+    fechaEntrada: v.optional(v.string()),
+    fechaSalida: v.optional(v.string()),
+    cupo: v.optional(v.number()),
+    precioTotal: v.optional(v.number()),
+  },
+  handler: async (ctx, args) => {
+    const now = Date.now();
+    const rawBytes = new Uint8Array(18);
+    crypto.getRandomValues(rawBytes);
+    const token = Array.from(rawBytes)
+      .map((b) => b.toString(16).padStart(2, '0'))
+      .join('');
+
+    await ctx.db.insert('contractFillTokens', {
+      token,
+      source: 'admin',
+      contractDraftJson: args.contractDraftJson,
+      contractSettingsJson: args.contractSettingsJson,
+      propertyMetaJson: args.propertyMetaJson,
+      propertyTitle: args.propertyTitle,
+      propertyLocation: args.propertyLocation,
+      fechaEntrada: args.fechaEntrada,
+      fechaSalida: args.fechaSalida,
+      cupo: args.cupo,
+      precioTotal: args.precioTotal,
+      expiresAt: now + TTL_MS,
+      status: 'pending',
+      createdAt: now,
+    });
+
+    return { token };
   },
 });

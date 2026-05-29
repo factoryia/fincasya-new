@@ -836,6 +836,7 @@ http.route({
 
     return jsonResponse({
       ok: true,
+      source: row.source ?? 'inbox',
       deal: {
         propertyTitle: row.propertyTitle ?? null,
         propertyLocation: row.propertyLocation ?? null,
@@ -910,6 +911,103 @@ http.route({
     return jsonResponse({ ok: true, message: '¡Datos recibidos! Tu asesor los revisará muy pronto.' }, 200, {
       'Access-Control-Allow-Origin': '*',
     });
+  }),
+});
+
+/** POST /api/admin/contract-link — crea link de contrato desde el panel admin. */
+http.route({
+  path: '/api/admin/contract-link',
+  method: 'POST',
+  handler: httpAction(async (ctx, request) => {
+    const denied = requireYCloudApiKey(request);
+    if (denied) return denied;
+
+    let body: {
+      contractDraftJson?: string;
+      contractSettingsJson?: string;
+      propertyMetaJson?: string;
+      propertyTitle?: string;
+      propertyLocation?: string;
+      fechaEntrada?: string;
+      fechaSalida?: string;
+      cupo?: number;
+      precioTotal?: number;
+    };
+    try {
+      body = (await request.json()) as typeof body;
+    } catch {
+      return jsonResponse({ error: 'Body JSON inválido' }, 400);
+    }
+
+    if (
+      !body?.contractDraftJson?.trim() ||
+      !body?.contractSettingsJson?.trim() ||
+      !body?.propertyMetaJson?.trim()
+    ) {
+      return jsonResponse(
+        { error: 'Faltan contractDraftJson, contractSettingsJson o propertyMetaJson' },
+        400,
+      );
+    }
+
+    const result = await ctx.runAction(
+      internal.contractFillTokensAction.prepareAdminContractLink,
+      {
+        contractDraftJson: body.contractDraftJson,
+        contractSettingsJson: body.contractSettingsJson,
+        propertyMetaJson: body.propertyMetaJson,
+        propertyTitle: body.propertyTitle,
+        propertyLocation: body.propertyLocation,
+        fechaEntrada: body.fechaEntrada,
+        fechaSalida: body.fechaSalida,
+        cupo: body.cupo,
+        precioTotal: body.precioTotal,
+      },
+    );
+
+    return jsonResponse(result, 200);
+  }),
+});
+
+/** GET /api/admin/contract-link/:token — datos completos del borrador (solo servidor). */
+http.route({
+  pathPrefix: '/api/admin/contract-link/',
+  method: 'GET',
+  handler: httpAction(async (ctx, request) => {
+    const denied = requireYCloudApiKey(request);
+    if (denied) return denied;
+
+    const url = new URL(request.url);
+    const token = url.pathname.replace('/api/admin/contract-link/', '').trim();
+    if (!token || token.length < 8) {
+      return jsonResponse({ error: 'Token inválido' }, 400);
+    }
+
+    const row = await ctx.runQuery(internal.contractFillTokens.getByToken, { token });
+    if (!row) return jsonResponse({ error: 'Link no encontrado' }, 404);
+    if (row.status === 'expired' || row.expiresAt < Date.now()) {
+      return jsonResponse({ error: 'expired' }, 410);
+    }
+
+    return jsonResponse({
+      ok: true,
+      token: row.token,
+      status: row.status,
+      source: row.source ?? 'inbox',
+      expiresAt: row.expiresAt,
+      deal: {
+        propertyTitle: row.propertyTitle ?? null,
+        propertyLocation: row.propertyLocation ?? null,
+        fechaEntrada: row.fechaEntrada ?? null,
+        fechaSalida: row.fechaSalida ?? null,
+        cupo: row.cupo ?? null,
+        precioTotal: row.precioTotal ?? null,
+      },
+      contractDraftJson: row.contractDraftJson ?? null,
+      contractSettingsJson: row.contractSettingsJson ?? null,
+      propertyMetaJson: row.propertyMetaJson ?? null,
+      filledData: row.filledData ?? null,
+    }, 200);
   }),
 });
 

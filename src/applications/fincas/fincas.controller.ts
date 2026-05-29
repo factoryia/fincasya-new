@@ -38,6 +38,7 @@ import { GenerateContractDto } from './dto/generate-contract.dto';
 import { ConvexAuthGuard } from '../shared/guards/convex-auth.guard';
 import { AdminGuard } from '../shared/guards/admin.guard';
 import { OwnerOrAdminGuard } from '../shared/guards/owner-or-admin.guard';
+import { COLOMBIA_DEPARTMENTS } from '../shared/constants/colombia-departments';
 import type { Request, Response } from 'express';
 
 @Controller('fincas')
@@ -69,6 +70,12 @@ export class FincasController {
   @Get('slug/:slug')
   async getBySlug(@Param('slug') slug: string) {
     return this.fincasService.getBySlug(slug);
+  }
+
+  /** Catálogo de los 32 departamentos de Colombia (código + etiqueta). */
+  @Get('departments')
+  listDepartments() {
+    return COLOMBIA_DEPARTMENTS;
   }
 
   @Get('code/:code')

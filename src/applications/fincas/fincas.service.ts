@@ -148,6 +148,7 @@ import { InboxService } from '../inbox/inbox.service';
 import { CreateFincaDto } from './dto/create-finca.dto';
 import { UpdateFincaDto } from './dto/update-finca.dto';
 import { mergeDepositIntoPropertyDescription } from './property-description-deposits';
+import { getDepartmentLabel } from '../shared/constants/colombia-departments';
 import { ListFincasDto } from './dto/list-fincas.dto';
 import { PdfService, ReservationConfirmationData } from '../shared/services/pdf.service';
 import { parseExcelToFincas } from './excel-parser';
@@ -432,21 +433,25 @@ Al confirmar tu pago, recibirás el *soporte oficial* junto con todos los detall
         limit: 1000,
       }));
       const properties = data?.properties || [];
-      const rows = properties.map((p: any) => {
-        const department = this.getDepartmentFromLocation(p.location);
-        return {
-        _id: p._id,
-        title: p.title,
-        code: p.code,
-        image: p.images?.[0] || p.image || null,
-        location: p.location,
-        department,
-        allowsPets: p.allowsPets,
-        serviceStaffAvailable: p.serviceStaffAvailable,
-        serviceStaffPrice: p.serviceStaffPrice,
-        serviceStaffMandatory: p.serviceStaffMandatory,
-        };
-      });
+      const rows: any[] = [];
+      for (const p of properties) {
+        const departments = this.getPropertyDepartments(p);
+        for (const department of departments) {
+          rows.push({
+            _id: p._id,
+            title: p.title,
+            code: p.code,
+            image: p.images?.[0] || p.image || null,
+            location: p.location,
+            department,
+            departamentos: p.departamentos,
+            allowsPets: p.allowsPets,
+            serviceStaffAvailable: p.serviceStaffAvailable,
+            serviceStaffPrice: p.serviceStaffPrice,
+            serviceStaffMandatory: p.serviceStaffMandatory,
+          });
+        }
+      }
 
       return rows.sort((a: any, b: any) => {
         const d = String(a.department || '').localeCompare(
@@ -497,6 +502,16 @@ Al confirmar tu pago, recibirás el *soporte oficial* junto con todos los detall
       lines.push('');
     }
     return lines.join('\n').trim();
+  }
+
+  private getPropertyDepartments(p: {
+    departamentos?: string[];
+    location?: unknown;
+  }): string[] {
+    if (Array.isArray(p.departamentos) && p.departamentos.length > 0) {
+      return p.departamentos.map((code) => getDepartmentLabel(code));
+    }
+    return [this.getDepartmentFromLocation(p.location)];
   }
 
   private getDepartmentFromLocation(location: unknown): string {

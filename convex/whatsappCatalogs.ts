@@ -922,6 +922,36 @@ export const getPropertyByRetailerId = query({
  * (palabras de ≥3 letras) que aparecen en el título normalizado. Umbral 0.5.
  * Si nada lo supera, devuelve null (el bot escala a un asesor que la ubica).
  */
+/**
+ * Tokens GENÉRICOS que NO distinguen una finca de otra: tipos de propiedad,
+ * calificadores comerciales, ciudades/zonas y relleno. Si el matcher contara
+ * estos, "casa luxury" o "villa premium" matchearía decenas de fincas y
+ * devolvería una al azar (bug real: pedir "VILLAVICENCIO CASA HORIZON LUXURY"
+ * resolvía a "MELGAR CASA DAVINCI LUXURY" porque comparten "casa"+"luxury").
+ * El matcher exige coincidencia en al menos un token DISTINTIVO (el nombre
+ * propio de la finca: "horizon", "barbosa", "davinci", "biocontainer", etc.).
+ */
+const GENERIC_FINCA_NAME_TOKENS = new Set<string>([
+  // tipos de propiedad
+  "casa", "casas", "finca", "fincas", "villa", "villas", "quinta", "quintas",
+  "apto", "aptos", "apartamento", "apartamentos", "hacienda", "cabana",
+  "cabanas", "glamping", "condominio", "yate", "isla", "chalet", "privada",
+  "privadas", "casona",
+  // calificadores comerciales
+  "luxury", "luxe", "premium", "lujo", "confort", "gold", "queen", "king",
+  "deluxe", "standard", "estandar", "economica", "resort", "house", "homes",
+  "home", "suite", "suites",
+  // ciudades / zonas (la ubicación NO distingue la finca por sí sola)
+  "villavicencio", "melgar", "girardot", "anapoima", "restrepo", "acacias",
+  "cumaral", "tolima", "cundinamarca", "llanos", "costa", "caribe", "cartagena",
+  "santa", "marta", "barranquilla", "bogota", "apulo", "villeta", "nocaima",
+  "tocaima", "viota", "nilo", "ricaurte", "guataqui", "carmen", "apicala",
+  "flandes", "honda", "ibague", "lerida", "guajira", "pereira",
+  // relleno
+  "la", "el", "los", "las", "de", "del", "en", "pax", "para", "una", "uno",
+  "con", "por", "que",
+]);
+
 export const findPropertyByNameForBot = query({
   args: { name: v.string() },
   handler: async (ctx, args) => {
@@ -933,10 +963,20 @@ export const findPropertyByNameForBot = query({
         .replace(/[^a-z0-9 ]/g, " ")
         .replace(/\s+/g, " ")
         .trim();
-    const qTokens = norm(args.name)
+    const allTokens = norm(args.name)
       .split(" ")
-      .filter((t) => t.length >= 3);
-    if (qTokens.length === 0) return null;
+      .filter((t) => t.length >= 3 && !/^\d+$/.test(t));
+    if (allTokens.length === 0) return null;
+
+    // Tokens DISTINTIVOS = los que no son genéricos (tipo/ciudad/calificador).
+    // Son los que de verdad identifican la finca. Si la query NO tiene ninguno
+    // (ej. "casa luxury"), es ambigua → devolvemos null para que el bot pida
+    // más precisión o escale, en vez de adivinar una finca al azar.
+    const distinctiveTokens = allTokens.filter(
+      (t) => !GENERIC_FINCA_NAME_TOKENS.has(t),
+    );
+    if (distinctiveTokens.length === 0) return null;
+
     const links = await ctx.db.query("propertyWhatsAppCatalog").collect();
     let best: {
       productRetailerId: string;
@@ -957,11 +997,16 @@ export const findPropertyByNameForBot = query({
         continue;
       const titleNorm = norm(property.title ?? "");
       if (!titleNorm) continue;
-      let hits = 0;
-      for (const tk of qTokens) {
-        if (titleNorm.includes(tk)) hits += 1;
+      // Contamos SOLO hits de tokens distintivos. Exigimos ≥1 distintivo Y
+      // que cubran ≥50% de los distintivos pedidos. Así "horizon" (1 token)
+      // exige match exacto de "horizon"; "villa barbosa premium" exige
+      // "barbosa".
+      let distinctiveHits = 0;
+      for (const tk of distinctiveTokens) {
+        if (titleNorm.includes(tk)) distinctiveHits += 1;
       }
-      const score = hits / qTokens.length;
+      if (distinctiveHits === 0) continue;
+      const score = distinctiveHits / distinctiveTokens.length;
       if (score >= 0.5 && (!best || score > best.score)) {
         best = {
           productRetailerId: rid,

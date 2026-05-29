@@ -1,5 +1,6 @@
 import { v } from 'convex/values';
 import { catalogPeopleCountForFilter } from './lib/propertyCatalogCapacity';
+import { normalizeDepartamentos } from './lib/colombiaDepartments';
 import { query, mutation } from './_generated/server';
 import { internal } from './_generated/api';
 
@@ -1516,6 +1517,7 @@ export const create = mutation({
     title: v.string(),
     description: v.string(),
     location: v.string(),
+    departamentos: v.optional(v.array(v.string())),
     capacity: v.number(),
     lat: v.number(),
     lng: v.number(),
@@ -1634,6 +1636,9 @@ export const create = mutation({
       title: args.title,
       description: args.description,
       location: args.location,
+      ...(args.departamentos !== undefined
+        ? { departamentos: normalizeDepartamentos(args.departamentos) }
+        : {}),
       capacity: args.capacity,
       lat: args.lat,
       lng: args.lng,
@@ -1768,6 +1773,7 @@ export const update = mutation({
     title: v.optional(v.string()),
     description: v.optional(v.string()),
     location: v.optional(v.string()),
+    departamentos: v.optional(v.array(v.string())),
     capacity: v.optional(v.number()),
     lat: v.optional(v.number()),
     lng: v.optional(v.number()),
@@ -1880,6 +1886,10 @@ export const update = mutation({
 
     if (!property) {
       throw new Error('Propiedad no encontrada');
+    }
+
+    if (updates.departamentos !== undefined) {
+      updates.departamentos = normalizeDepartamentos(updates.departamentos);
     }
 
     await ctx.db.patch(id, {

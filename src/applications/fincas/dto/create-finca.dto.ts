@@ -10,8 +10,12 @@ import {
   ValidateIf,
   ValidateNested,
   ArrayUnique,
+  IsIn,
 } from 'class-validator';
 import { Type, Transform, plainToInstance } from 'class-transformer';
+import {
+  COLOMBIA_DEPARTMENT_CODES,
+} from '../../shared/constants/colombia-departments';
 
 export enum PropertyType {
   FINCA = 'FINCA',
@@ -97,6 +101,35 @@ export class CreateFincaDto {
   @IsString()
   @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))
   location: string;
+
+  /** Departamentos de Colombia donde se ubica o comercializa la finca. */
+  @IsOptional()
+  @Transform(({ value }) => {
+    if (value === undefined || value === null) return undefined;
+    let arr: unknown;
+    if (typeof value === 'string') {
+      try {
+        arr = value.trim() === '' ? [] : JSON.parse(value);
+      } catch {
+        arr = value.split(',').map((x) => x.trim());
+      }
+    } else {
+      arr = value;
+    }
+    if (!Array.isArray(arr)) return [];
+    const cleaned = arr
+      .filter((x: unknown): x is string => typeof x === 'string')
+      .map((x: string) => x.trim().toUpperCase())
+      .filter((x: string) =>
+        (COLOMBIA_DEPARTMENT_CODES as readonly string[]).includes(x),
+      );
+    return Array.from(new Set(cleaned));
+  })
+  @IsArray()
+  @IsString({ each: true })
+  @ArrayUnique()
+  @IsIn(COLOMBIA_DEPARTMENT_CODES as unknown as string[], { each: true })
+  departamentos?: string[];
 
   @IsNumber()
   @Min(1)

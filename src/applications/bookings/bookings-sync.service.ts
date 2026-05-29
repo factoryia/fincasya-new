@@ -441,6 +441,28 @@ export class BookingsSyncService {
     });
   }
 
+  async listContractCodes(params: {
+    propertyId?: string;
+    search?: string;
+    limit?: number;
+    page?: number;
+  }) {
+    try {
+      return await this.convexService.query('contractCodeHistory:list', {
+        propertyId: params.propertyId as any,
+        search: params.search,
+        limit: params.limit,
+        page: params.page,
+      });
+    } catch (e) {
+      if (e instanceof BadGatewayException) throw e;
+      const msg = e instanceof Error ? e.message : String(e);
+      throw new BadGatewayException(
+        `No se pudo cargar el historial de códigos de contrato: ${msg}`,
+      );
+    }
+  }
+
   async saveContractSnapshot(body: {
     contractNumber: string;
     propertyId: string;

@@ -19,6 +19,8 @@ export default defineSchema({
     title: v.string(),
     description: v.string(),
     location: v.string(),
+    /** Departamentos de Colombia donde se ubica o comercializa la finca (multi-select). */
+    departamentos: v.optional(v.array(v.string())),
     capacity: v.number(),
     /**
      * Máximo de personas para evento/celebración (invitados totales), puede ser mayor que `capacity`
@@ -931,7 +933,18 @@ export default defineSchema({
   contractFillTokens: defineTable({
     /** Token UUID aleatorio que va en la URL pública. */
     token: v.string(),
-    conversationId: v.id('conversations'),
+    /** Solo links generados desde el inbox; los de admin no tienen conversación. */
+    conversationId: v.optional(v.id('conversations')),
+    /** inbox = chat WhatsApp; admin = módulo Link de Contrato. */
+    source: v.optional(
+      v.union(v.literal('inbox'), v.literal('admin')),
+    ),
+    /** Borrador del contrato (form admin sin datos del cliente) serializado JSON. */
+    contractDraftJson: v.optional(v.string()),
+    /** Snapshot de ajustes globales del contrato al crear el link. */
+    contractSettingsJson: v.optional(v.string()),
+    /** Metadatos de la finca (título, features, propietario, etc.). */
+    propertyMetaJson: v.optional(v.string()),
     /** Datos del deal precargados en el form (para mostrarle al cliente). */
     propertyTitle: v.optional(v.string()),
     propertyLocation: v.optional(v.string()),
