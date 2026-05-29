@@ -206,4 +206,85 @@ export class BrevoEmailService {
       throw error;
     }
   }
+
+  /**
+   * Notifica al equipo cuando se recibe una solicitud de Habeas Data
+   * (Ley 1581 Colombia). Destino: HABEAS_DATA_EMAIL si está definido,
+   * caso contrario ADMIN_EMAIL.
+   */
+  async sendHabeasDataRequestToAdmin(data: {
+    fullName: string;
+    documentType: string;
+    documentNumber: string;
+    email: string;
+    phone?: string;
+    requestType: string;
+    requestTypeLabel: string;
+    description: string;
+    submittedAt: string;
+    requestId: string;
+  }) {
+    const to =
+      process.env.HABEAS_DATA_EMAIL ||
+      this.adminEmail ||
+      'comercial@fincasya.com';
+
+    const esc = (s: string | undefined) =>
+      (s ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
+
+    const htmlContent = `<!DOCTYPE html>
+<html><body style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;color:#1a1a1a;max-width:600px;margin:0 auto;padding:24px;">
+  <div style="border-bottom:3px solid #E8571F;padding-bottom:16px;margin-bottom:24px;">
+    <h1 style="margin:0;font-size:20px;">Nueva solicitud de Habeas Data</h1>
+    <p style="color:#666;font-size:13px;margin:6px 0 0;">
+      Tipo: <strong>${esc(data.requestTypeLabel)}</strong><br>
+      Recibida: ${esc(data.submittedAt)}<br>
+      ID: <code>${esc(data.requestId)}</code>
+    </p>
+  </div>
+  <h2 style="font-size:15px;margin:16px 0 8px;color:#444;">Solicitante</h2>
+  <table style="width:100%;border-collapse:collapse;font-size:14px;">
+    <tr><td style="padding:6px 0;color:#666;width:140px;">Nombre</td><td><strong>${esc(data.fullName)}</strong></td></tr>
+    <tr><td style="padding:6px 0;color:#666;">Documento</td><td>${esc(data.documentType)} ${esc(data.documentNumber)}</td></tr>
+    <tr><td style="padding:6px 0;color:#666;">Email</td><td><a href="mailto:${esc(data.email)}">${esc(data.email)}</a></td></tr>
+    ${data.phone ? `<tr><td style="padding:6px 0;color:#666;">Teléfono</td><td>${esc(data.phone)}</td></tr>` : ''}
+  </table>
+  <h2 style="font-size:15px;margin:24px 0 8px;color:#444;">Descripción</h2>
+  <div style="background:#f6f6f6;border-radius:8px;padding:16px;font-size:14px;white-space:pre-wrap;">${esc(data.description)}</div>
+  <div style="margin-top:32px;padding:16px;background:#FFF3ED;border-radius:8px;font-size:13px;color:#7a3a17;">
+    ⏱️ <strong>Plazo legal de respuesta:</strong> 10 días hábiles para consultas, 15 + 8 hábiles para reclamos (Ley 1581 arts. 14-15).
+  </div>
+</body></html>`;
+
+    try {
+      const response = await fetch('https://api.brevo.com/v3/smtp/email', {
+        method: 'POST',
+        headers: {
+          'api-key': this.apiKey,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          sender: { name: 'FincasYa Legal', email: this.senderEmail },
+          to: [{ email: to }],
+          replyTo: { email: data.email, name: data.fullName },
+          subject: `📋 Habeas Data — ${data.requestTypeLabel} — ${data.fullName}`,
+          htmlContent,
+        }),
+      });
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(
+          errorData.message || 'Error enviando notificación de Habeas Data',
+        );
+      }
+      this.logger.log(`Habeas Data notificado a admin: ${to}`);
+    } catch (error) {
+      this.logger.error(`Error enviando Habeas Data al admin: ${error.message}`);
+      // No relanzamos: la solicitud ya quedó persistida; el email es secundario.
+    }
+  }
 }
