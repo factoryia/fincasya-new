@@ -1874,6 +1874,35 @@ export async function processInboundMessageV2(
     }
   }
 
+  // ─── AUTO-ENRIQUECIMIENTO DEL CONTACTO con datos del contrato ─────────
+  // El bot recolecta nombre/cédula/email/dirección turno a turno en la fase
+  // `contract`. Apenas alguno aparezca en `updatedEntities`, lo copiamos al
+  // contact del CRM — así el equipo lo ve enriquecido sin esperar a que un
+  // asesor lo escriba a mano. Idempotente: la mutación solo escribe lo
+  // que falta en el contact (no pisa lo que ya hay).
+  {
+    const ce = result.updatedEntities as {
+      contractName?: string;
+      contractCedula?: string;
+      contractEmail?: string;
+      contractAddress?: string;
+    };
+    if (
+      ce.contractName ||
+      ce.contractCedula ||
+      ce.contractEmail ||
+      ce.contractAddress
+    ) {
+      await ctx.runMutation(deps.internal.contacts.upsertFromContractData, {
+        contactId: conv.contactId,
+        contractName: ce.contractName,
+        contractCedula: ce.contractCedula,
+        contractEmail: ce.contractEmail,
+        contractAddress: ce.contractAddress,
+      });
+    }
+  }
+
   // ─── FUERA DE HORARIO — acuse al cliente ───────────────────────────────
   // Si el cliente escribe fuera del horario laboral configurado, anexamos
   // un aviso al primer reply. Solo se anexa UNA vez por conversación

@@ -97,6 +97,114 @@ export const setLeadDealLabel = internalMutation({
   },
 });
 
+/**
+ * Auto-enriquece el contacto cuando el bot recolectó datos del contrato.
+ * Llamado desde `inbound.ts` después de cada extracción que contenga campos
+ * de contrato — así el CRM se va llenando incrementalmente turno a turno.
+ *
+ * Política de actualización (CONSERVADORA):
+ * - `cedula`, `email`, `address`, `city`: solo se llenan si el contacto NO
+ *   tiene valor todavía (no pisamos lo que un asesor haya escrito a mano).
+ * - `name`: solo se actualiza si el nombre del contrato es MÁS COMPLETO que
+ *   el actual (ej. WhatsApp profile "santi" → contrato "Santiago Andrés
+ *   Pérez López"). Heurística: el contrato gana si tiene ≥2 palabras y el
+ *   actual tiene <2 o es vacío. Si ganamos, sincronizamos `baseName` y
+ *   reconstruimos `name = baseName · dealLabel` (si hay dealLabel).
+ * - `crmType`: pasa a 'lead' si no es ya 'client'. (El upgrade a 'client'
+ *   sigue siendo responsabilidad de `bookings.create`.)
+ *
+ * Idempotente: si nada cambió, no escribe.
+ */
+export const upsertFromContractData = internalMutation({
+  args: {
+    contactId: v.id("contacts"),
+    contractName: v.optional(v.string()),
+    contractCedula: v.optional(v.string()),
+    contractEmail: v.optional(v.string()),
+    contractAddress: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    const contact = await ctx.db.get(args.contactId);
+    if (!contact) return { updated: false };
+
+    const patch: Record<string, unknown> = {};
+
+    // cedula — solo si el contacto no tiene
+    if (
+      args.contractCedula &&
+      args.contractCedula.trim().length > 0 &&
+      (!contact.cedula || contact.cedula.trim().length === 0)
+    ) {
+      patch.cedula = args.contractCedula.trim();
+    }
+
+    // email — solo si el contacto no tiene
+    if (
+      args.contractEmail &&
+      args.contractEmail.trim().length > 0 &&
+      (!contact.email || contact.email.trim().length === 0)
+    ) {
+      patch.email = args.contractEmail.trim();
+    }
+
+    // address — solo si el contacto no tiene
+    if (
+      args.contractAddress &&
+      args.contractAddress.trim().length > 0 &&
+      (!contact.address || contact.address.trim().length === 0)
+    ) {
+      patch.address = args.contractAddress.trim();
+      // Parse city de la dirección: último segmento después de la última
+      // coma. Ej. "mz 26 cs 9, villavicencio" → "Villavicencio".
+      if (!contact.city || contact.city.trim().length === 0) {
+        const parts = args.contractAddress.split(",").map((p) => p.trim());
+        const last = parts[parts.length - 1];
+        if (last && last.length > 1 && last.length < 60) {
+          // Title-case suave: primera letra mayúscula del primer token
+          const titleCased =
+            last.charAt(0).toUpperCase() + last.slice(1).toLowerCase();
+          patch.city = titleCased;
+        }
+      }
+    }
+
+    // name — solo si el del contrato es MÁS COMPLETO
+    if (args.contractName && args.contractName.trim().length > 0) {
+      const incomingName = args.contractName.trim();
+      const currentName = (contact.baseName ?? contact.name ?? "").trim();
+      const incomingWords = incomingName.split(/\s+/).filter(Boolean).length;
+      const currentWords = currentName.split(/\s+/).filter(Boolean).length;
+      const incomingMoreComplete =
+        incomingWords >= 2 &&
+        (currentWords < 2 ||
+          currentName.toLowerCase() !== incomingName.toLowerCase());
+      if (incomingMoreComplete && currentName !== incomingName) {
+        patch.baseName = incomingName;
+        // Si hay dealLabel, reconstruimos el display name; si no, el name es
+        // directo el nombre del contrato.
+        if (contact.dealLabel && contact.dealLabel.length > 0) {
+          patch.name = `${incomingName} · ${contact.dealLabel}`;
+        } else {
+          patch.name = incomingName;
+        }
+      }
+    }
+
+    // crmType — sube a 'lead' si no es ya 'client'
+    if (contact.crmType !== "client" && contact.crmType !== "lead") {
+      patch.crmType = "lead" as const;
+    }
+
+    if (Object.keys(patch).length === 0) {
+      return { updated: false };
+    }
+
+    patch.updatedAt = Date.now();
+    await ctx.db.patch(args.contactId, patch);
+    return { updated: true, fields: Object.keys(patch) };
+  },
+});
+
 export const getById = query({
   args: { contactId: v.id("contacts") },
   handler: async (ctx, args) => {

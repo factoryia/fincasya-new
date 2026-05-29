@@ -480,6 +480,12 @@ export default defineSchema({
     email: v.optional(v.string()),
     cedula: v.optional(v.string()),
     city: v.optional(v.string()),
+    /**
+     * Dirección de residencia (cuando el cliente la dio en el contrato). Se
+     * usa para auto-enriquecer el contacto en el CRM cuando el bot completa
+     * el paquete de datos del contrato (vía `contacts.upsertFromContractData`).
+     */
+    address: v.optional(v.string()),
     /** Lead: en seguimiento. Cliente: ya con reserva o relación comercial. */
     crmType: v.optional(v.union(v.literal('lead'), v.literal('client'))),
     lastReservationAt: v.optional(v.number()),
