@@ -751,6 +751,42 @@ export default defineSchema({
     .index('by_booking', ['bookingId'])
     .index('by_user', ['userId']),
 
+  /**
+   * Solicitudes de Habeas Data (Ley 1581 Colombia).
+   * Cada registro es una petición de un titular para ejercer sus derechos
+   * ARCO (Acceso, Rectificación, Cancelación, Oposición) o revocatoria.
+   *
+   * Plazos legales:
+   * - Consultas: 10 días hábiles + 5 prorrogables
+   * - Reclamos: 15 días hábiles + 8 prorrogables
+   */
+  habeasDataRequests: defineTable({
+    /** Nombre completo del titular como aparece en el documento. */
+    fullName: v.string(),
+    /** Tipo de documento: CC, CE, PA, NIT, OTRO. */
+    documentType: v.string(),
+    documentNumber: v.string(),
+    email: v.string(),
+    phone: v.optional(v.string()),
+    /** acceso | rectificacion | cancelacion | oposicion | revocatoria | queja */
+    requestType: v.string(),
+    description: v.string(),
+    /** Estado interno: pending | in_review | resolved | rejected. */
+    status: v.string(),
+    /** Notas internas del equipo (no se muestran al titular). */
+    internalNotes: v.optional(v.string()),
+    /** Fecha en la que se respondió formalmente al titular (ISO). */
+    resolvedAt: v.optional(v.number()),
+    /** IP del solicitante (auditoría — anonimizable). */
+    ipAddress: v.optional(v.string()),
+    userAgent: v.optional(v.string()),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index('by_status', ['status'])
+    .index('by_email', ['email'])
+    .index('by_created', ['createdAt']),
+
   /** Orden manual de propiedades por cada "Tab" o categoría del front */
   tabOrders: defineTable({
     tabId: v.string(), // e.g. "melgar", "cerca-bogota", "favoritas", "todas"

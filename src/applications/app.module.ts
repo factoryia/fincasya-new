@@ -18,6 +18,7 @@ import { AccountingManagersModule } from './accounting-managers/accounting-manag
 import { RolesModule } from './roles/roles.module';
 import { WebChatModule } from './web-chat/web-chat.module';
 import { AnalyticsModule } from './analytics/analytics.module';
+import { HabeasDataModule } from './habeas-data/habeas-data.module';
 import { ScheduleModule } from '@nestjs/schedule';
 
 @Module({
@@ -42,6 +43,7 @@ import { ScheduleModule } from '@nestjs/schedule';
     RolesModule,
     WebChatModule,
     AnalyticsModule,
+    HabeasDataModule,
   ],
 
   controllers: [],
