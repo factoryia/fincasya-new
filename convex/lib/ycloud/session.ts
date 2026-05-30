@@ -1,4 +1,8 @@
 import { SESSION_ACTIVE_TTL_MS, SESSION_REACTIVATE_TTL_MS } from "./constants";
+import {
+  defaultConversationStatus,
+  isGlobalAiEnabled,
+} from "../platformAi";
 
 export async function getOrCreateConversationForContact(
   ctx: any,
@@ -6,6 +10,8 @@ export async function getOrCreateConversationForContact(
   channel: "whatsapp" | "web" = "whatsapp",
 ) {
   const now = Date.now();
+  const aiEnabled = await isGlobalAiEnabled(ctx);
+  const initialStatus = defaultConversationStatus(aiEnabled);
   const all = await ctx.db
     .query("conversations")
     .withIndex("by_contact", (q: any) => q.eq("contactId", contactId))
@@ -20,7 +26,7 @@ export async function getOrCreateConversationForContact(
     if (latest) {
       if (latest.status === "resolved") {
         await ctx.db.patch(latest._id, {
-          status: "ai",
+          status: initialStatus,
           operationalState: "pending_data",
           lastMessageAt: now,
         });
@@ -58,7 +64,7 @@ export async function getOrCreateConversationForContact(
     const resolvedTs = Number(latestResolved.lastMessageAt ?? latestResolved.createdAt ?? 0);
     if (resolvedTs > 0 && now - resolvedTs < SESSION_REACTIVATE_TTL_MS) {
       await ctx.db.patch(latestResolved._id, {
-        status: "ai",
+        status: initialStatus,
         operationalState: "pending_data",
       });
       return { conversationId: latestResolved._id, isNew: false, isReactivated: true };
@@ -68,7 +74,7 @@ export async function getOrCreateConversationForContact(
   const conversationId = await ctx.db.insert("conversations", {
     contactId,
     channel,
-    status: "ai",
+    status: initialStatus,
     operationalState: "pending_data",
     lastMessageAt: now,
     createdAt: now,

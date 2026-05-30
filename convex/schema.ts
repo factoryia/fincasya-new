@@ -379,6 +379,14 @@ export default defineSchema({
     updatedAt: v.number(),
   }).index('by_scope', ['scope']),
 
+  /** Ajustes globales de plataforma (p. ej. interruptor maestro de IA). */
+  platformSettings: defineTable({
+    scope: v.literal('global'),
+    aiEnabled: v.boolean(),
+    updatedAt: v.number(),
+    updatedByUserId: v.optional(v.string()),
+  }).index('by_scope', ['scope']),
+
   // Tabla de pagos
   payments: defineTable({
     bookingId: v.id('bookings'),

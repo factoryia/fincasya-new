@@ -114,6 +114,16 @@ export class InboxService {
       }));
   }
 
+  async getAiSettings() {
+    return this.convexService.query('platformSettings:getAiSettings', {});
+  }
+
+  async setAiEnabled(aiEnabled: boolean) {
+    return this.convexService.mutation('platformSettings:setAiEnabled', {
+      aiEnabled,
+    });
+  }
+
   async setAssignedUser(conversationId: string, assignedUserId: string | null, actorUserId?: string) {
     return this.convexService.mutation('conversations:setAssignedUser', {
       conversationId,
@@ -254,6 +264,12 @@ export class InboxService {
 
   async setStatus(conversationId: string, status: 'ai' | 'human' | 'resolved', actorUserId?: string) {
     if (status === 'ai') {
+      const settings = await this.getAiSettings();
+      if (!settings?.aiEnabled) {
+        throw new BadRequestException(
+          'La IA global está desactivada. Actívala desde el panel de chats para usar el bot.',
+        );
+      }
       return this.convexService.mutation('conversations:setToAiPublic', {
         conversationId,
       });

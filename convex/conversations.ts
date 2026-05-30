@@ -450,6 +450,12 @@ export const setConversationTags = mutation({
 export const setToAiPublic = mutation({
   args: { conversationId: v.id("conversations") },
   handler: async (ctx, args) => {
+    const { isGlobalAiEnabled } = await import("./lib/platformAi");
+    if (!(await isGlobalAiEnabled(ctx))) {
+      throw new Error(
+        "La IA global está desactivada. Actívala desde el panel de chats para usar el bot.",
+      );
+    }
     const prev = await ctx.db.get(args.conversationId);
     const op = effectiveState(
       prev?.operationalState as OperationalState | undefined,

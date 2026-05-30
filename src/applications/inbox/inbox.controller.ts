@@ -58,6 +58,20 @@ export class InboxController {
     return this.inboxService.listAssignableUsers();
   }
 
+  @Get('ai-settings')
+  async getAiSettings() {
+    return this.inboxService.getAiSettings();
+  }
+
+  @Patch('ai-settings')
+  @Roles(UserRole.ADMIN)
+  async setAiSettings(@Body() body: { aiEnabled: boolean }) {
+    if (typeof body?.aiEnabled !== 'boolean') {
+      throw new BadRequestException('aiEnabled debe ser boolean');
+    }
+    return this.inboxService.setAiEnabled(body.aiEnabled);
+  }
+
   @Get()
   async list(
     @Query('status') status?: 'ai' | 'human' | 'resolved',

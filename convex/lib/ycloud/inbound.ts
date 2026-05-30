@@ -872,6 +872,12 @@ export async function processInboundMessageV2(
   if (!latestMsg || String(latestMsg._id) !== String(insertedMsgId)) return;
   if (conv.status !== "ai") return;
 
+  const globalAiEnabled = (await ctx.runQuery(
+    deps.internal.platformSettings.isAiEnabledInternal,
+    {},
+  )) as boolean;
+  if (!globalAiEnabled) return;
+
   // ───────────────────────────────────────────────────────────────────────
   // PRIORIDAD MÁXIMA: cliente con RESERVA VIGENTE o POR VENIR.
   //
