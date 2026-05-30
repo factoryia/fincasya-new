@@ -55,7 +55,7 @@ export function normalizeDepartamentos(
         .filter((x) => CODE_SET.has(x)),
     ),
   ];
-  return out;
+  return out.slice(0, 1);
 }
 
 export function getDepartmentLabel(code: string): string {

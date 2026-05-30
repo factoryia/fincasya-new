@@ -984,7 +984,7 @@ Al confirmar tu pago, recibirás el *soporte oficial* junto con todos los detall
         } as Record<string, unknown>);
       }
 
-      return result;
+      return await this.getById(id);
     } catch (error) {
       throw new BadRequestException(error.message);
     }

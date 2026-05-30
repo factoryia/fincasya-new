@@ -123,7 +123,7 @@ export class CreateFincaDto {
       .filter((x: string) =>
         (COLOMBIA_DEPARTMENT_CODES as readonly string[]).includes(x),
       );
-    return Array.from(new Set(cleaned));
+    return Array.from(new Set(cleaned)).slice(0, 1);
   })
   @IsArray()
   @IsString({ each: true })

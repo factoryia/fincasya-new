@@ -1,6 +1,7 @@
 import { v } from 'convex/values';
 import { catalogPeopleCountForFilter } from './lib/propertyCatalogCapacity';
 import { normalizeDepartamentos } from './lib/colombiaDepartments';
+import { normalizePropertyLocation } from './lib/propertyLocation';
 import { query, mutation } from './_generated/server';
 import { internal } from './_generated/api';
 
@@ -1890,6 +1891,9 @@ export const update = mutation({
 
     if (updates.departamentos !== undefined) {
       updates.departamentos = normalizeDepartamentos(updates.departamentos);
+    }
+    if (updates.location !== undefined) {
+      updates.location = normalizePropertyLocation(updates.location) ?? '';
     }
 
     await ctx.db.patch(id, {

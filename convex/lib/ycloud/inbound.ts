@@ -383,6 +383,44 @@ function detectRestrictedZoneKeywords(text: string): string[] {
   return Array.from(out);
 }
 
+/**
+ * Mapea cada REGION a su código de departamento (para el campo estructurado
+ * `property.departamentos`). COSTA es multi-departamento → no tiene un solo
+ * código, se expande solo por keywords de ubicación.
+ */
+const REGION_TO_DEPT_CODE: Record<string, string | null> = {
+  LLANOS: "META",
+  TOLIMA: "TOLIMA",
+  CUNDINAMARCA: "CUNDINAMARCA",
+  COSTA: null,
+};
+
+/**
+ * Dado el municipio que pidió el cliente, devuelve la EXPANSIÓN por
+ * departamento/zona: todas las keywords de municipios de la misma región +
+ * el código de departamento. Permite que "Melgar" traiga TODO Tolima (no solo
+ * 2-3 de Melgar). Devuelve null si el municipio no pertenece a ninguna región
+ * conocida (entonces no se expande, se filtra solo por el municipio exacto).
+ */
+function departmentExpansionForMunicipality(
+  location: string | undefined,
+): { keywords: string[]; deptCodes: string[] } | null {
+  const norm = String(location ?? "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/\p{M}/gu, "")
+    .trim();
+  if (!norm || norm === "recomendadas") return null;
+  for (const [region, kws] of Object.entries(REGIONS)) {
+    const hit = kws.some((kw) => kw === norm || norm.includes(kw));
+    if (hit) {
+      const code = REGION_TO_DEPT_CODE[region];
+      return { keywords: kws, deptCodes: code ? [code] : [] };
+    }
+  }
+  return null;
+}
+
 /** Keywords de ubicación del Eje Cafetero (para la colección homónima). */
 const EJE_CAFETERO_KEYWORDS = [
   "pereira", "armenia", "manizales", "salento", "montenegro", "quimbaya",
@@ -2161,16 +2199,36 @@ export async function processInboundMessageV2(
     // ampliamos el cap del catálogo de 12 → 25 para que vea más variedad de
     // zonas. El sort de favoritas-primero (en `whatsappCatalogs.ts`)
     // garantiza que las marcadas como favoritas salgan al inicio.
-    const expandedMode = wantsExpandedSearch(recentUserText);
-    const effectiveSendCap = expandedMode
-      ? CATALOG_EXPANDED_LIMIT
-      : MAX_CATALOG_PRODUCTS_PER_SEND;
-
     // COLECCIÓN/CATEGORÍA pedida por el cliente (playa, lujo, eje cafetero…).
     // Se detecta sobre todo el texto reciente del cliente. Si matchea, se pasa
     // como `categoryMatch` al query (filtro híbrido tag+ubicación+atributo) y
     // se ajusta el texto pre-catálogo para nombrar la colección.
     const categoryCollection = detectCategoryCollection(recentUserText);
+
+    // EXPANSIÓN POR DEPARTAMENTO/ZONA: si el cliente pidió un municipio
+    // concreto, ampliamos a toda su zona (Melgar → todo Tolima) para no
+    // quedarnos en 2-3 opciones. El municipio exacto sale PRIMERO (sort
+    // Tier 0). NO aplica en RECOMENDADAS ni cuando hay restricción/exclusión
+    // de zona activa (el cliente fue explícito sobre qué zona quiere/evita) ni
+    // cuando pidió una colección (playa/lujo/etc. ya define su propio alcance).
+    const noZoneConstraint =
+      restrictToLocationKeywords.length === 0 &&
+      excludeLocationKeywords.length === 0 &&
+      !categoryCollection;
+    const deptExpansion =
+      action.location !== "RECOMENDADAS" && noZoneConstraint
+        ? departmentExpansionForMunicipality(action.location)
+        : null;
+
+    // Cap del catálogo. Modo expandido (hasta 25 fincas) cuando el cliente
+    // pide "alrededores"/multi-zona O cuando expandimos a un departamento
+    // (Melgar → todo Tolima): así caben el municipio + el resto de la zona +
+    // las marcadas "cerca a" sin que el municipio exacto (que va primero)
+    // sature el cap normal de 12.
+    const expandedMode = wantsExpandedSearch(recentUserText) || !!deptExpansion;
+    const effectiveSendCap = expandedMode
+      ? CATALOG_EXPANDED_LIMIT
+      : MAX_CATALOG_PRODUCTS_PER_SEND;
 
     const catalogPayload = (await ctx.runQuery(
       deps.api.whatsappCatalogs.getPayloadByLocationForN8n,
@@ -2191,6 +2249,14 @@ export async function processInboundMessageV2(
         excludeRetailerIds,
         excludeLocationKeywords,
         restrictToLocationKeywords,
+        // Expansión por departamento/zona (Melgar → todo Tolima). El municipio
+        // exacto sale primero por el sort Tier 0.
+        ...(deptExpansion
+          ? {
+              expandLocationKeywords: deptExpansion.keywords,
+              expandDepartmentCodes: deptExpansion.deptCodes,
+            }
+          : {}),
         // Filtro por colección/categoría (playa, lujo, eje cafetero…) si el
         // cliente la pidió. AND adicional con location/capacity; OR interno.
         ...(categoryCollection

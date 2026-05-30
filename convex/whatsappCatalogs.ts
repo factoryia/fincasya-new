@@ -473,6 +473,23 @@ export const getPayloadByLocationForN8n = query({
      */
     restrictToLocationKeywords: v.optional(v.array(v.string())),
     /**
+     * Keywords de ubicación que AMPLÍAN el resultado (OR con el municipio
+     * pedido). Cuando el cliente pide un municipio (ej. "Melgar"), pasamos
+     * aquí los municipios del MISMO DEPARTAMENTO/zona (todo Tolima) para que
+     * el catálogo no se quede en 2-3 opciones del municipio exacto, sino que
+     * incluya toda la zona. El municipio exacto sigue saliendo PRIMERO (sort
+     * Tier 0). Distinto de `restrictToLocationKeywords` (que es AND/limita):
+     * esto es OR/amplía.
+     */
+    expandLocationKeywords: v.optional(v.array(v.string())),
+    /**
+     * Códigos de DEPARTAMENTO (ej. "TOLIMA") que amplían el resultado: una
+     * finca cuyo `departamentos` incluya alguno se acepta aunque su `location`
+     * no matchee. Complementa `expandLocationKeywords` usando el campo
+     * estructurado `property.departamentos` del panel.
+     */
+    expandDepartmentCodes: v.optional(v.array(v.string())),
+    /**
      * Filtro por CATEGORÍA / COLECCIÓN (las "pestañas" del home: Destinos de
      * Playa, Luxury, Eje Cafetero, Eventos, etc.). Es un AND adicional sobre
      * location/capacity, con semántica OR INTERNA: la finca pasa si matchea
@@ -576,15 +593,38 @@ export const getPayloadByLocationForN8n = query({
       keep: (p: any) => boolean;
     };
 
+    // Keywords que amplían a TODO el departamento/zona (Melgar → todo Tolima).
+    const expandLocLower = (args.expandLocationKeywords ?? [])
+      .map((k) => String(k ?? "").trim().toLowerCase())
+      .filter(Boolean);
+    const expandDeptUpper = (args.expandDepartmentCodes ?? [])
+      .map((c) => String(c ?? "").trim().toUpperCase())
+      .filter(Boolean);
     const matchesLocation = (p: any) => {
       if (isRecomendadas) return true;
-      if (String(p.location ?? "").toLowerCase().includes(locLower)) return true;
+      const propLoc = String(p.location ?? "").toLowerCase();
+      if (propLoc.includes(locLower)) return true;
       // Finca de OTRO municipio pero marcada "cerca a <el municipio pedido>".
       if (nearbyTag && Array.isArray(p.catalogFilterTags)) {
         const tags = p.catalogFilterTags.map((t: unknown) =>
           String(t ?? "").toLowerCase(),
         );
         if (tags.includes(nearbyTag)) return true;
+      }
+      // Expansión por DEPARTAMENTO/zona: misma zona que el municipio pedido.
+      if (
+        expandLocLower.length > 0 &&
+        propLoc &&
+        expandLocLower.some((kw) => propLoc.includes(kw))
+      ) {
+        return true;
+      }
+      // Expansión por código de departamento (campo `departamentos` del panel).
+      if (expandDeptUpper.length > 0 && Array.isArray(p.departamentos)) {
+        const depts = p.departamentos.map((d: unknown) =>
+          String(d ?? "").toUpperCase(),
+        );
+        if (depts.some((d: string) => expandDeptUpper.includes(d))) return true;
       }
       return false;
     };
