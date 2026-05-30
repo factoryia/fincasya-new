@@ -19,6 +19,7 @@ import { RolesModule } from './roles/roles.module';
 import { WebChatModule } from './web-chat/web-chat.module';
 import { AnalyticsModule } from './analytics/analytics.module';
 import { HabeasDataModule } from './habeas-data/habeas-data.module';
+import { ContractLinkModule } from './contract-link/contract-link.module';
 import { ScheduleModule } from '@nestjs/schedule';
 
 @Module({
@@ -44,6 +45,7 @@ import { ScheduleModule } from '@nestjs/schedule';
     WebChatModule,
     AnalyticsModule,
     HabeasDataModule,
+    ContractLinkModule,
   ],
 
   controllers: [],
