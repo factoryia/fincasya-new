@@ -1,5 +1,9 @@
 import { Injectable, BadRequestException, NotFoundException } from '@nestjs/common';
 import { ConvexService } from '../shared/services/convex.service';
+import {
+  buildContactsExcelBuffer,
+  buildContactsExportFilename,
+} from './contacts-export';
 
 @Injectable()
 export class ContactsService {
@@ -11,6 +15,17 @@ export class ContactsService {
     } catch (error) {
       throw new BadRequestException(error.message);
     }
+  }
+
+  async exportExcel(
+    search?: string,
+    scope: 'todos' | 'clientes' | 'leads' = 'todos',
+  ) {
+    const contacts = await this.list(search, 10_000);
+    return {
+      buffer: buildContactsExcelBuffer(contacts, scope),
+      filename: buildContactsExportFilename(scope, search),
+    };
   }
 
   async getById(id: string) {
