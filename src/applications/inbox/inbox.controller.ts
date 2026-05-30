@@ -145,6 +145,37 @@ export class InboxController {
     });
   }
 
+  @Delete(':conversationId/messages/:messageId')
+  async deleteMessage(@Param('messageId') messageId: string) {
+    return this.inboxService.deleteMessage(messageId);
+  }
+
+  @Patch(':conversationId/messages/:messageId')
+  async editMessage(
+    @Param('messageId') messageId: string,
+    @Body() body: { content?: string },
+  ) {
+    if (!body?.content?.trim()) {
+      throw new BadRequestException('content requerido');
+    }
+    return this.inboxService.editMessage(messageId, body.content.trim());
+  }
+
+  @Post(':conversationId/messages/:messageId/forward')
+  async forwardMessage(
+    @Param('messageId') messageId: string,
+    @Body() body: { targetConversationId?: string; sentByUserId?: string },
+  ) {
+    if (!body?.targetConversationId?.trim()) {
+      throw new BadRequestException('targetConversationId requerido');
+    }
+    return this.inboxService.forwardMessage(
+      messageId,
+      body.targetConversationId.trim(),
+      body.sentByUserId?.trim() || undefined,
+    );
+  }
+
   /**
    * Ficha CRM del contacto vinculado a la conversación (mismo contactId que WhatsApp).
    * GET /api/inbox/:conversationId/contact
@@ -333,6 +364,7 @@ export class InboxController {
     @Body('filename') filename?: string,
     @Body('metadata') metadata?: any,
     @Body('sentByUserId') sentByUserId?: string,
+    @Body('replyToWamid') replyToWamid?: string,
     @UploadedFile() file?: Express.Multer.File,
   ) {
     const msgType = (type || (file ? this.inferTypeFromFile(file) : 'text'));
@@ -354,6 +386,7 @@ export class InboxController {
       metadata: parsedMetadata,
       file,
       sentByUserId: sentByUserId?.trim() || undefined,
+      replyToWamid: replyToWamid?.trim() || undefined,
     });
   }
  

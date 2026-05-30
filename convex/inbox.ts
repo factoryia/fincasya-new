@@ -69,6 +69,8 @@ export const sendMessage = action({
     channel: v.optional(v.union(v.literal("whatsapp"), v.literal("web"))),
     /** Convex user._id del asesor que envía el mensaje (trazabilidad). */
     sentByUserId: v.optional(v.string()),
+    /** wamid del mensaje citado (responder en WhatsApp). */
+    replyToWamid: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
     const channel =
@@ -84,8 +86,24 @@ export const sendMessage = action({
         metadata?: unknown;
         wamid?: string;
         whatsappStatus?: string;
+        replyToWamid?: string;
       },
     ) => {
+      const replyToWamid = String(extra?.replyToWamid ?? args.replyToWamid ?? "").trim();
+      const baseMeta = {
+        ...(args.metadata && typeof args.metadata === "object"
+          ? (args.metadata as Record<string, unknown>)
+          : {}),
+        ...(extra?.metadata && typeof extra.metadata === "object"
+          ? (extra.metadata as Record<string, unknown>)
+          : {}),
+      };
+      const mergedMetadata =
+        replyToWamid.length > 6
+          ? { ...baseMeta, replyToWamid }
+          : Object.keys(baseMeta).length > 0
+            ? baseMeta
+            : extra?.metadata;
       const outbound = {
         wamid: extra?.wamid,
         whatsappStatus: extra?.whatsappStatus as
@@ -102,7 +120,7 @@ export const sendMessage = action({
           content,
           type: extra.type,
           mediaUrl: extra.mediaUrl,
-          metadata: extra.metadata,
+          metadata: mergedMetadata,
           createdAt: now,
           sentByUserId: args.sentByUserId,
           ...outbound,
@@ -113,6 +131,7 @@ export const sendMessage = action({
           content,
           createdAt: now,
           sentByUserId: args.sentByUserId,
+          metadata: mergedMetadata,
           ...outbound,
         });
       }
@@ -194,9 +213,11 @@ export const sendMessage = action({
 
     if (args.type === "text") {
       if (!args.text?.trim()) throw new Error("Texto requerido para tipo text");
+      const replyWamid = String(args.replyToWamid ?? "").trim();
       const sendResult = (await ctx.runAction(internal.ycloud.sendWhatsAppMessage, {
         to: args.phone,
         text: args.text,
+        wamid: replyWamid.length > 6 ? replyWamid : undefined,
         sendDirectly: true,
       })) as { wamid?: string; status?: string };
       await ctx.runMutation(internal.messages.insertAssistantMessage, {
@@ -206,6 +227,12 @@ export const sendMessage = action({
         sentByUserId: args.sentByUserId,
         wamid: sendResult?.wamid,
         whatsappStatus: (sendResult?.status as "sent" | undefined) ?? "sent",
+        metadata: {
+          ...(args.metadata && typeof args.metadata === "object"
+            ? (args.metadata as Record<string, unknown>)
+            : {}),
+          ...(replyWamid.length > 6 ? { replyToWamid: replyWamid } : {}),
+        },
       });
       await ctx.runMutation(internal.conversations.updateLastMessageAt, {
         conversationId: args.conversationId,

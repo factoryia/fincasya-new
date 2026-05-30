@@ -1,5 +1,5 @@
 import { v } from "convex/values";
-import { internalMutation, query } from "./_generated/server";
+import { internalMutation, mutation, query } from "./_generated/server";
 import { internal } from "./_generated/api";
 
 const whatsappStatusValidator = v.union(
@@ -242,7 +242,54 @@ export const listRecent = query({
       })
       .order("desc")
       .take(limit);
-    return list.reverse();
+    return list.reverse().filter((m) => m.deletedAt == null);
+  },
+});
+
+export const getById = query({
+  args: { messageId: v.id("messages") },
+  handler: async (ctx, args) => ctx.db.get(args.messageId),
+});
+
+/** Eliminar mensaje del inbox (soft delete). */
+export const softDelete = mutation({
+  args: { messageId: v.id("messages") },
+  handler: async (ctx, args) => {
+    const msg = await ctx.db.get(args.messageId);
+    if (!msg) throw new Error("Mensaje no encontrado");
+    if (msg.deletedAt != null) return { ok: true as const };
+    await ctx.db.patch(args.messageId, { deletedAt: Date.now() });
+    return { ok: true as const };
+  },
+});
+
+const EDIT_WINDOW_MS = 15 * 60 * 1000;
+
+/** Editar contenido de un mensaje saliente del equipo (ventana 15 min). */
+export const editContent = mutation({
+  args: {
+    messageId: v.id("messages"),
+    content: v.string(),
+  },
+  handler: async (ctx, args) => {
+    const msg = await ctx.db.get(args.messageId);
+    if (!msg) throw new Error("Mensaje no encontrado");
+    if (msg.sender !== "assistant") {
+      throw new Error("Solo se pueden editar mensajes enviados por el equipo");
+    }
+    if (msg.type && msg.type !== "text") {
+      throw new Error("Solo se pueden editar mensajes de texto");
+    }
+    if (Date.now() - msg.createdAt > EDIT_WINDOW_MS) {
+      throw new Error("Solo se puede editar dentro de los 15 minutos posteriores al envío");
+    }
+    const content = args.content.trim();
+    if (!content) throw new Error("El mensaje no puede quedar vacío");
+    await ctx.db.patch(args.messageId, {
+      content,
+      editedAt: Date.now(),
+    });
+    return { ok: true as const, wamid: msg.wamid ?? null };
   },
 });
 

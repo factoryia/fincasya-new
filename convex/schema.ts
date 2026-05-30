@@ -653,6 +653,10 @@ export default defineSchema({
         v.literal('read'),
       ),
     ),
+    /** Oculto en inbox (eliminar). */
+    deletedAt: v.optional(v.number()),
+    /** Última edición del contenido. */
+    editedAt: v.optional(v.number()),
   })
     .index('by_conversation', ['conversationId', 'createdAt'])
     .index('by_wamid', ['wamid']),

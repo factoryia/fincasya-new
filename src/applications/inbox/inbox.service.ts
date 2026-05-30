@@ -308,9 +308,10 @@ export class InboxService {
       metadata?: any;
       file?: Express.Multer.File;
       sentByUserId?: string;
+      replyToWamid?: string;
     },
   ) {
-    const { type, text, mediaUrl, metadata, file, filename: requestedFilename, sentByUserId } =
+    const { type, text, mediaUrl, metadata, file, filename: requestedFilename, sentByUserId, replyToWamid } =
       params;
     if (type === 'text' && !text?.trim()) {
       throw new BadRequestException(
@@ -365,8 +366,59 @@ export class InboxService {
       mediaUrlForStorage,
       filename,
       sentByUserId: sentByUserId || undefined,
+      replyToWamid: replyToWamid?.trim() || undefined,
     });
     return result ?? { ok: true };
+  }
+
+  async deleteMessage(messageId: string) {
+    return this.convexService.mutation('messages:softDelete', { messageId });
+  }
+
+  async editMessage(messageId: string, content: string) {
+    return this.convexService.mutation('messages:editContent', {
+      messageId,
+      content,
+    });
+  }
+
+  async forwardMessage(
+    messageId: string,
+    targetConversationId: string,
+    sentByUserId?: string,
+  ) {
+    const msg = await this.convexService.query('messages:getById', { messageId });
+    if (!msg || msg.deletedAt != null) {
+      throw new NotFoundException('Mensaje no encontrado');
+    }
+    const type = (msg.type ?? 'text') as 'text' | 'image' | 'audio' | 'document' | 'product';
+    const prefix =
+      type === 'text'
+        ? ''
+        : type === 'image'
+          ? '📷 '
+          : type === 'audio'
+            ? '🎤 '
+            : type === 'video'
+              ? '🎬 '
+              : type === 'document'
+                ? '📄 '
+                : '🏡 ';
+    const text =
+      type === 'text'
+        ? String(msg.content ?? '').trim()
+        : [prefix + String(msg.content ?? '').trim(), msg.mediaUrl ? msg.mediaUrl : '']
+            .filter(Boolean)
+            .join('\n');
+    if (!text) {
+      throw new BadRequestException('No hay contenido para reenviar');
+    }
+    return this.sendMessage(targetConversationId, {
+      type: type === 'product' ? 'text' : type,
+      text,
+      mediaUrl: type !== 'text' && type !== 'product' ? msg.mediaUrl : undefined,
+      sentByUserId,
+    });
   }
 
   /** Convierte WebP y otros formatos no soportados por WhatsApp a JPEG */
