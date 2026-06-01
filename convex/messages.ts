@@ -1,5 +1,5 @@
 import { v } from "convex/values";
-import { internalMutation, mutation, query } from "./_generated/server";
+import { internalMutation, internalQuery, mutation, query } from "./_generated/server";
 import { internal } from "./_generated/api";
 
 const whatsappStatusValidator = v.union(
@@ -64,8 +64,10 @@ export const insertUserMessage = internalMutation({
     ),
     mediaUrl: v.optional(v.string()),
     metadata: v.optional(v.any()),
+    wamid: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
+    const wamid = resolveOutboundWamid(args.wamid, args.metadata);
     const messageId = await ctx.db.insert("messages", {
       conversationId: args.conversationId,
       sender: "user",
@@ -74,6 +76,7 @@ export const insertUserMessage = internalMutation({
       mediaUrl: args.mediaUrl,
       metadata: args.metadata,
       createdAt: args.createdAt,
+      ...(wamid ? { wamid } : {}),
     });
     const conv = await ctx.db.get(args.conversationId);
     const prevUnread = conv?.inboxUnreadCount ?? 0;
@@ -249,6 +252,18 @@ export const listRecent = query({
 export const getById = query({
   args: { messageId: v.id("messages") },
   handler: async (ctx, args) => ctx.db.get(args.messageId),
+});
+
+export const getByWamid = internalQuery({
+  args: { wamid: v.string() },
+  handler: async (ctx, args) => {
+    const w = args.wamid.trim();
+    if (w.length < 6) return null;
+    return await ctx.db
+      .query("messages")
+      .withIndex("by_wamid", (q) => q.eq("wamid", w))
+      .first();
+  },
 });
 
 /** Eliminar mensaje del inbox (soft delete). */

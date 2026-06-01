@@ -826,6 +826,8 @@ export async function processInboundMessageV2(
   const rawText = String(args.text ?? "").trim();
   if (/^(status|presence)\s*:\s*active$/i.test(rawText)) return;
 
+  const inboundWamidEarly = String(args.wamid ?? "").trim();
+
   const contactId: Id<"contacts"> = await ctx.runMutation(
     deps.internal.ycloud.getOrCreateContact,
     { phone: args.phone, name: args.name },
@@ -847,18 +849,48 @@ export async function processInboundMessageV2(
 
   const now = Date.now();
   const replyToWamid = String(args.replyToWamid ?? "").trim();
-  const inboundWamid = String(args.wamid ?? "").trim();
+  const inboundWamid = inboundWamidEarly;
   const userMsgMetadata: Record<string, string> = {};
-  if (inboundWamid.length > 6) userMsgMetadata.wamid = inboundWamid;
   if (replyToWamid) userMsgMetadata.replyToWamid = replyToWamid;
-  const insertedMsgId = await ctx.runMutation(deps.internal.messages.insertUserMessage, {
-    conversationId,
-    content: finalContent,
-    createdAt: now,
-    type: args.type,
-    mediaUrl: args.mediaUrl,
-    metadata: Object.keys(userMsgMetadata).length ? userMsgMetadata : undefined,
-  });
+
+  let insertedMsgId: Id<"messages">;
+  if (inboundWamid.length > 6) {
+    const existing = (await ctx.runQuery(deps.internal.messages.getByWamid, {
+      wamid: inboundWamid,
+    })) as { _id: Id<"messages">; conversationId: Id<"conversations"> } | null;
+    if (existing && existing.conversationId === conversationId) {
+      insertedMsgId = existing._id;
+    } else {
+      insertedMsgId = await ctx.runMutation(
+        deps.internal.messages.insertUserMessage,
+        {
+          conversationId,
+          content: finalContent,
+          createdAt: now,
+          type: args.type,
+          mediaUrl: args.mediaUrl,
+          metadata: Object.keys(userMsgMetadata).length
+            ? userMsgMetadata
+            : undefined,
+          wamid: inboundWamid,
+        },
+      );
+    }
+  } else {
+    insertedMsgId = await ctx.runMutation(
+      deps.internal.messages.insertUserMessage,
+      {
+        conversationId,
+        content: finalContent,
+        createdAt: now,
+        type: args.type,
+        mediaUrl: args.mediaUrl,
+        metadata: Object.keys(userMsgMetadata).length
+          ? userMsgMetadata
+          : undefined,
+      },
+    );
+  }
 
   await new Promise((r) => setTimeout(r, INBOUND_DEBOUNCE_MS));
 

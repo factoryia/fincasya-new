@@ -95,8 +95,9 @@ http.route({
     ) {
       const evt = parsed.whatsappInboundMessage;
       const eventId = parsed.id ?? `evt_${Date.now()}`;
-      const phone = evt.from ?? '';
-      const name = (evt.customerProfile?.name ?? '').trim() || phone;
+      const phoneRaw = evt.from ?? '';
+      const phone = normalizeWhatsappPhone(phoneRaw);
+      const name = (evt.customerProfile?.name ?? '').trim() || phoneRaw;
       const wamid = evt.wamid ?? evt.id;
       const replyToWamid =
         typeof evt.context?.id === "string" && evt.context.id.trim().length > 6
@@ -121,6 +122,15 @@ http.route({
         if (dedupe.duplicate) {
           console.log('YCloud: evento duplicado, skip', { eventId, phone });
         } else {
+          await ctx.runMutation(internal.ycloud.persistInboundFromWebhook, {
+            phone,
+            customerName: name,
+            content: normalizedContent || content,
+            messageType: msgType,
+            mediaUrl: mediaUrl || undefined,
+            wamid,
+            replyToWamid,
+          });
           await ctx.runAction(internal.ycloud.processInboundMessage, {
             eventId,
             phone,
@@ -137,6 +147,17 @@ http.route({
           eventId,
           phone,
           content: normalizedContent,
+        });
+      } else if (phoneRaw && !phone) {
+        console.warn('YCloud: teléfono inválido en inbound', {
+          eventId,
+          from: phoneRaw,
+        });
+      } else if (phone && !normalizedContent && !mediaUrl) {
+        console.warn('YCloud: inbound sin contenido parseable', {
+          eventId,
+          phone,
+          rawType: evt.type,
         });
       }
     }
@@ -178,6 +199,58 @@ http.route({
           await ctx.runMutation(internal.ycloud.recordOutboundFromWebhook, {
             phone,
             customerName: evt.customerProfile?.name,
+            content: parsedMsg.content,
+            messageType: parsedMsg.msgType,
+            mediaUrl: parsedMsg.mediaUrl,
+            wamid: evt.wamid ?? evt.id,
+            whatsappStatus: 'sent',
+          });
+        }
+      } else if (phone) {
+        await ctx.runMutation(internal.ycloud.markOutboundAsHuman, { phone });
+      }
+    }
+
+    // Mensaje escrito por el DUEÑO desde la app de WhatsApp Business (coexistencia/SMB).
+    // YCloud lo reporta como `whatsapp.smb.message.echoes` (no como outbound_message.sent).
+    const smbEchoEvt = body as {
+      id?: string;
+      type?: string;
+      whatsappMessage?: {
+        id?: string;
+        wamid?: string;
+        status?: string;
+        from?: string;
+        to?: string;
+        type?: string;
+        customerProfile?: { name?: string; username?: string };
+        text?: { body?: string };
+        image?: { link?: string; caption?: string };
+        audio?: { link?: string };
+        video?: { link?: string; caption?: string };
+        document?: { link?: string; caption?: string; filename?: string };
+      };
+    };
+    if (
+      smbEchoEvt.type === 'whatsapp.smb.message.echoes' &&
+      smbEchoEvt.whatsappMessage
+    ) {
+      const evt = smbEchoEvt.whatsappMessage;
+      const phone = normalizeWhatsappPhone(evt.to ?? '');
+      const parsedMsg = parseYcloudWhatsappBody(evt);
+      if (phone && parsedMsg) {
+        const eventId =
+          smbEchoEvt.id ??
+          `smb_${evt.wamid ?? evt.id ?? `${phone}_${Date.now()}`}`;
+        const dedupe = await ctx.runMutation(
+          internal.ycloud.recordProcessedEvent,
+          { eventId },
+        );
+        if (!dedupe.duplicate) {
+          await ctx.runMutation(internal.ycloud.recordOutboundFromWebhook, {
+            phone,
+            customerName:
+              evt.customerProfile?.name ?? evt.customerProfile?.username,
             content: parsedMsg.content,
             messageType: parsedMsg.msgType,
             mediaUrl: parsedMsg.mediaUrl,

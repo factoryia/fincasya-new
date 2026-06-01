@@ -42,7 +42,16 @@ type YcloudMessageBody = {
   image?: { link?: string; caption?: string };
   audio?: { link?: string };
   video?: { link?: string; caption?: string };
+  sticker?: { link?: string };
   document?: { link?: string; caption?: string; filename?: string };
+  reaction?: { emoji?: string; message_id?: string };
+  button?: { text?: string; payload?: string };
+  interactive?: {
+    type?: string;
+    button_reply?: { title?: string; id?: string };
+    list_reply?: { title?: string; description?: string; id?: string };
+  };
+  location?: { latitude?: number; longitude?: number; name?: string; address?: string };
   order?: {
     catalog_id?: string;
     product_items?: Array<{
@@ -89,6 +98,33 @@ export function parseYcloudWhatsappBody(
       "[Documento]";
     msgType = "document";
     mediaUrl = evt.document.link;
+  } else if (evt.type === "sticker" && evt.sticker?.link) {
+    content = "[Sticker]";
+    msgType = "image";
+    mediaUrl = evt.sticker.link;
+  } else if (evt.type === "reaction" && evt.reaction) {
+    const emoji = String(evt.reaction.emoji ?? "").trim();
+    content = emoji ? `Reacción: ${emoji}` : "[Reacción eliminada]";
+    msgType = "text";
+  } else if (evt.type === "button" && evt.button) {
+    const label = String(evt.button.text ?? evt.button.payload ?? "").trim();
+    content = label || "[Respuesta de botón]";
+    msgType = "text";
+  } else if (evt.type === "interactive" && evt.interactive) {
+    const ir = evt.interactive;
+    const label =
+      ir.button_reply?.title ??
+      ir.list_reply?.title ??
+      ir.button_reply?.id ??
+      ir.list_reply?.id ??
+      "";
+    content = String(label).trim() || "[Respuesta interactiva]";
+    msgType = "text";
+  } else if (evt.type === "location" && evt.location) {
+    const name = String(evt.location.name ?? evt.location.address ?? "").trim();
+    const coords = `${evt.location.latitude ?? ""}, ${evt.location.longitude ?? ""}`;
+    content = name ? `📍 ${name}` : `📍 Ubicación (${coords})`;
+    msgType = "text";
   } else if (evt.type === "order" && evt.order?.product_items?.length) {
     const firstItem = evt.order.product_items[0];
     const retailerId = firstItem?.product_retailer_id?.trim();

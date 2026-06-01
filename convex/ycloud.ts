@@ -6,6 +6,7 @@ import {
   internalQuery,
 } from "./_generated/server";
 import { internal, api } from "./_generated/api";
+import type { Id } from "./_generated/dataModel";
 import { transcribeAudio } from "./lib/transcription";
 import { classifyContractImage } from "./lib/imageClassifier";
 import { sendCatalogToYcloud, sendTextToYcloud } from "./lib/ycloud/senders";
@@ -27,6 +28,107 @@ export const recordProcessedEvent = internalMutation({
     if (existing) return { duplicate: true };
     await ctx.db.insert("ycloudProcessedEvents", { eventId: args.eventId });
     return { duplicate: false };
+  },
+});
+
+const INBOUND_WEBHOOK_METADATA = { source: "ycloud_inbound_webhook" as const };
+
+/**
+ * Guarda el mensaje del cliente en inbox antes del bot (action).
+ * Si el action falla o tarda, el mensaje ya queda visible para operadores.
+ */
+export const persistInboundFromWebhook = internalMutation({
+  args: {
+    phone: v.string(),
+    customerName: v.optional(v.string()),
+    content: v.string(),
+    messageType: v.union(
+      v.literal("text"),
+      v.literal("image"),
+      v.literal("audio"),
+      v.literal("video"),
+      v.literal("document"),
+      v.literal("product"),
+    ),
+    mediaUrl: v.optional(v.string()),
+    wamid: v.optional(v.string()),
+    replyToWamid: v.optional(v.string()),
+  },
+  handler: async (
+    ctx,
+    args,
+  ): Promise<
+    | { ok: false; reason: "empty" }
+    | { ok: true; skipped: true; messageId: Id<"messages"> }
+    | {
+        ok: true;
+        messageId: Id<"messages">;
+        conversationId: Id<"conversations">;
+      }
+  > => {
+    const phone = normalizeWhatsappPhone(args.phone);
+    const content = String(args.content ?? "").trim();
+    if (!phone || !content) {
+      return { ok: false as const, reason: "empty" as const };
+    }
+
+    const wamid = String(args.wamid ?? "").trim();
+    if (wamid.length > 6) {
+      const existing = await ctx.db
+        .query("messages")
+        .withIndex("by_wamid", (q) => q.eq("wamid", wamid))
+        .first();
+      if (existing) {
+        return {
+          ok: true as const,
+          skipped: true as const,
+          messageId: existing._id,
+        };
+      }
+    }
+
+    const displayName = displayNameForContact(
+      phone,
+      String(args.customerName ?? "").trim() || phone,
+    );
+    const existingContact = await ctx.db
+      .query("contacts")
+      .withIndex("by_phone", (q) => q.eq("phone", phone))
+      .unique();
+    const now = Date.now();
+    const contactId: Id<"contacts"> = existingContact
+      ? existingContact._id
+      : await ctx.db.insert("contacts", {
+          phone,
+          name: displayName,
+          crmType: "lead",
+          createdAt: now,
+          updatedAt: now,
+        });
+    const { conversationId } = await getOrCreateConversationForContact(
+      ctx,
+      contactId,
+      "whatsapp",
+    );
+
+    const replyToWamid = String(args.replyToWamid ?? "").trim();
+    const metadata: Record<string, string> = { ...INBOUND_WEBHOOK_METADATA };
+    if (replyToWamid) metadata.replyToWamid = replyToWamid;
+
+    const messageId: Id<"messages"> = await ctx.runMutation(
+      internal.messages.insertUserMessage,
+      {
+        conversationId,
+        content,
+        createdAt: now,
+        type: args.messageType,
+        mediaUrl: args.mediaUrl,
+        metadata,
+        wamid: wamid.length > 6 ? wamid : undefined,
+      },
+    );
+
+    return { ok: true as const, messageId, conversationId };
   },
 });
 
