@@ -3,6 +3,11 @@ import { httpAction } from './_generated/server';
 import { authComponent, createAuth } from './betterAuth/auth';
 import { internal } from './_generated/api';
 import { parseWorkbookSheetsToPayloads } from './lib/whatsappTemplateSheet';
+import {
+  isOutboundFromBusiness,
+  normalizeWhatsappPhone,
+  parseYcloudWhatsappBody,
+} from './lib/ycloud/parseMessage';
 
 const YCLOUD_TEMPLATES_BASE = 'https://api.ycloud.com/v2/whatsapp/templates';
 
@@ -98,60 +103,10 @@ http.route({
           ? evt.context.id.trim()
           : undefined;
 
-      let content = '';
-      let msgType: 'text' | 'image' | 'audio' | 'video' | 'document' = 'text';
-      let mediaUrl = '';
-
-      if (evt.type === 'text' && evt.text?.body) {
-        content = String(evt.text.body).trim();
-        msgType = 'text';
-      } else if (evt.type === 'image' && evt.image?.link) {
-        content = (evt.image.caption ?? '').trim() || '[Imagen]';
-        msgType = 'image';
-        mediaUrl = evt.image.link;
-      } else if (evt.type === 'audio' && evt.audio?.link) {
-        content = '[Audio]';
-        msgType = 'audio';
-        mediaUrl = evt.audio.link;
-      } else if (evt.type === 'video' && evt.video?.link) {
-        content = (evt.video.caption ?? '').trim() || '[Video]';
-        msgType = 'video';
-        mediaUrl = evt.video.link;
-      } else if (evt.type === 'document' && evt.document?.link) {
-        content =
-          (evt.document.caption ?? evt.document.filename ?? '').trim() ||
-          '[Documento]';
-        msgType = 'document';
-        mediaUrl = evt.document.link;
-      } else if (evt.type === 'order' && evt.order?.product_items?.length) {
-        const firstItem = evt.order.product_items[0];
-        const retailerId = firstItem?.product_retailer_id?.trim();
-        const qty = firstItem?.quantity ?? 1;
-        const catalogId = evt.order.catalog_id?.trim();
-        const baseText =
-          evt.order.text?.trim() || 'Seleccioné una finca del catálogo.';
-        content = retailerId
-          ? `${baseText}\nproduct_retailer_id: ${retailerId}\nquantity: ${qty}${catalogId ? `\ncatalog_id: ${catalogId}` : ''}`
-          : baseText;
-        msgType = 'text';
-      } else {
-        // Fallback defensivo: algunos proveedores envían product_items en raíz del evento.
-        const anyEvt = evt as any;
-        const productItems = Array.isArray(anyEvt?.product_items)
-          ? anyEvt.product_items
-          : [];
-        if (productItems.length > 0) {
-          const firstItem = productItems[0];
-          const retailerId = String(firstItem?.product_retailer_id ?? '').trim();
-          const qty = Number(firstItem?.quantity ?? 1);
-          const catalogId = String(anyEvt?.catalog_id ?? '').trim();
-          const text = String(anyEvt?.text ?? '').trim() || 'Seleccioné una finca del catálogo.';
-          content = retailerId
-            ? `${text}\nproduct_retailer_id: ${retailerId}\nquantity: ${qty}${catalogId ? `\ncatalog_id: ${catalogId}` : ''}`
-            : text;
-          msgType = 'text';
-        }
-      }
+      const parsedMsg = parseYcloudWhatsappBody(evt);
+      const content = parsedMsg?.content ?? '';
+      const msgType = parsedMsg?.msgType ?? 'text';
+      const mediaUrl = parsedMsg?.mediaUrl ?? '';
 
       const normalizedContent = String(content || "").trim();
       const isSystemPresenceNoise =
@@ -186,25 +141,73 @@ http.route({
       }
     }
 
-    // Si YCloud envía evento de mensaje enviado por el negocio (humano desde dashboard),
-    // escalar a "human" para que la IA no siga respondiendo hasta que se vuelva a "ai".
-    const outbound = body as {
+    // Mensaje saliente (WhatsApp Business app, YCloud inbox, etc.) → guardar en inbox.
+    const outboundEvt = body as {
+      id?: string;
       type?: string;
-      whatsappOutboundMessage?: { to?: string };
+      whatsappOutboundMessage?: {
+        id?: string;
+        wamid?: string;
+        to?: string;
+        from?: string;
+        type?: string;
+        customerProfile?: { name?: string };
+        text?: { body?: string };
+        image?: { link?: string; caption?: string };
+        audio?: { link?: string };
+        video?: { link?: string; caption?: string };
+        document?: { link?: string; caption?: string; filename?: string };
+      };
     };
     if (
-      outbound.type === 'whatsapp.outbound_message.sent' &&
-      outbound.whatsappOutboundMessage?.to
+      outboundEvt.type === 'whatsapp.outbound_message.sent' &&
+      outboundEvt.whatsappOutboundMessage
     ) {
-      await ctx.runMutation(internal.ycloud.markOutboundAsHuman, {
-        phone: outbound.whatsappOutboundMessage.to,
-      });
+      const evt = outboundEvt.whatsappOutboundMessage;
+      const phone = normalizeWhatsappPhone(evt.to ?? '');
+      const parsedMsg = parseYcloudWhatsappBody(evt);
+      if (phone && parsedMsg) {
+        const eventId =
+          outboundEvt.id ??
+          `out_${evt.wamid ?? evt.id ?? `${phone}_${Date.now()}`}`;
+        const dedupe = await ctx.runMutation(
+          internal.ycloud.recordProcessedEvent,
+          { eventId },
+        );
+        if (!dedupe.duplicate) {
+          await ctx.runMutation(internal.ycloud.recordOutboundFromWebhook, {
+            phone,
+            customerName: evt.customerProfile?.name,
+            content: parsedMsg.content,
+            messageType: parsedMsg.msgType,
+            mediaUrl: parsedMsg.mediaUrl,
+            wamid: evt.wamid ?? evt.id,
+            whatsappStatus: 'sent',
+          });
+        }
+      } else if (phone) {
+        await ctx.runMutation(internal.ycloud.markOutboundAsHuman, { phone });
+      }
     }
 
-    // Estado de entrega/lectura (palomitas estilo WhatsApp en inbox).
+    // Estado de entrega/lectura (palomitas) + backfill si el mensaje salió fuera del inbox.
     const statusEvt = body as {
+      id?: string;
       type?: string;
-      whatsappMessage?: { wamid?: string; id?: string; status?: string };
+      whatsappMessage?: {
+        wamid?: string;
+        id?: string;
+        status?: string;
+        from?: string;
+        to?: string;
+        type?: string;
+        customerProfile?: { name?: string };
+        text?: { body?: string };
+        image?: { link?: string; caption?: string };
+        audio?: { link?: string };
+        video?: { link?: string; caption?: string };
+        document?: { link?: string; caption?: string; filename?: string };
+      };
     };
     if (statusEvt.type === 'whatsapp.message.updated' && statusEvt.whatsappMessage) {
       const wm = statusEvt.whatsappMessage;
@@ -218,10 +221,33 @@ http.route({
           rawStatus === 'delivered' ||
           rawStatus === 'read')
       ) {
-        await ctx.runMutation(internal.messages.updateWhatsappStatusByWamid, {
-          wamid,
-          status: rawStatus,
-        });
+        const statusUpdate = await ctx.runMutation(
+          internal.messages.updateWhatsappStatusByWamid,
+          {
+            wamid,
+            status: rawStatus,
+          },
+        );
+        if (
+          !statusUpdate.updated &&
+          (rawStatus === 'sent' || rawStatus === 'accepted') &&
+          isOutboundFromBusiness(wm.from, process.env.YCLOUD_WABA_NUMBER)
+        ) {
+          const phone = normalizeWhatsappPhone(wm.to ?? '');
+          const parsedMsg = parseYcloudWhatsappBody(wm);
+          if (phone && parsedMsg) {
+            await ctx.runMutation(internal.ycloud.recordOutboundFromWebhook, {
+              phone,
+              customerName: wm.customerProfile?.name,
+              content: parsedMsg.content,
+              messageType: parsedMsg.msgType,
+              mediaUrl: parsedMsg.mediaUrl,
+              wamid,
+              whatsappStatus:
+                rawStatus === 'accepted' ? 'accepted' : 'sent',
+            });
+          }
+        }
       }
     }
 

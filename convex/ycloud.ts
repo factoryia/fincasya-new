@@ -12,6 +12,10 @@ import { sendCatalogToYcloud, sendTextToYcloud } from "./lib/ycloud/senders";
 import { getOrCreateConversationForContact } from "./lib/ycloud/session";
 import { processInboundMessageV2 } from "./lib/ycloud/inbound";
 import { extractContractDataFromHistory } from "./lib/ycloud/contracts";
+import {
+  normalizeWhatsappPhone,
+  type YcloudMessageMediaType,
+} from "./lib/ycloud/parseMessage";
 
 export const recordProcessedEvent = internalMutation({
   args: { eventId: v.string() },
@@ -100,9 +104,11 @@ export const getOrCreateConversation = internalMutation({
 export const markOutboundAsHuman = internalMutation({
   args: { phone: v.string() },
   handler: async (ctx, args) => {
+    const phone = normalizeWhatsappPhone(args.phone);
+    if (!phone) return;
     const contact = await ctx.db
       .query("contacts")
-      .withIndex("by_phone", (q) => q.eq("phone", args.phone))
+      .withIndex("by_phone", (q) => q.eq("phone", phone))
       .unique();
     if (!contact) return;
     const conv = await ctx.db
@@ -113,6 +119,95 @@ export const markOutboundAsHuman = internalMutation({
     if (conv && (conv.status === "ai" || conv.status === "human")) {
       await ctx.db.patch(conv._id, { status: "human", attended: false });
     }
+  },
+});
+
+const OUTBOUND_WEBHOOK_METADATA = { source: "ycloud_outbound_webhook" as const };
+
+/**
+ * Persiste en inbox mensajes enviados desde WhatsApp Business / YCloud dashboard
+ * (no pasan por `inbox.sendMessage`). Dedupe por `wamid`.
+ */
+export const recordOutboundFromWebhook = internalMutation({
+  args: {
+    phone: v.string(),
+    customerName: v.optional(v.string()),
+    content: v.string(),
+    messageType: v.union(
+      v.literal("text"),
+      v.literal("image"),
+      v.literal("audio"),
+      v.literal("video"),
+      v.literal("document"),
+    ),
+    mediaUrl: v.optional(v.string()),
+    wamid: v.optional(v.string()),
+    whatsappStatus: v.optional(
+      v.union(
+        v.literal("failed"),
+        v.literal("accepted"),
+        v.literal("sent"),
+        v.literal("delivered"),
+        v.literal("read"),
+      ),
+    ),
+  },
+  handler: async (ctx, args) => {
+    const phone = normalizeWhatsappPhone(args.phone);
+    const content = String(args.content ?? "").trim();
+    if (!phone || !content) return { ok: false as const, reason: "empty" };
+
+    const wamid = String(args.wamid ?? "").trim();
+    if (wamid.length > 6) {
+      const existing = await ctx.db
+        .query("messages")
+        .withIndex("by_wamid", (q) => q.eq("wamid", wamid))
+        .first();
+      if (existing) {
+        await ctx.runMutation(internal.ycloud.markOutboundAsHuman, { phone });
+        return { ok: true as const, skipped: true as const };
+      }
+    }
+
+    const contactId = await ctx.runMutation(internal.ycloud.getOrCreateContact, {
+      phone,
+      name: String(args.customerName ?? "").trim() || phone,
+    });
+    const { conversationId } = await ctx.runMutation(
+      internal.ycloud.getOrCreateConversation,
+      { contactId },
+    );
+    const now = Date.now();
+    const mt = args.messageType as YcloudMessageMediaType;
+    const metadata = { ...OUTBOUND_WEBHOOK_METADATA };
+
+    if (mt === "text") {
+      await ctx.runMutation(internal.messages.insertAssistantMessage, {
+        conversationId,
+        content,
+        createdAt: now,
+        metadata,
+        wamid: wamid.length > 6 ? wamid : undefined,
+        whatsappStatus: args.whatsappStatus,
+      });
+    } else {
+      await ctx.runMutation(internal.messages.insertAssistantMessageWithMedia, {
+        conversationId,
+        content,
+        type: mt,
+        mediaUrl: args.mediaUrl,
+        createdAt: now,
+        metadata,
+        wamid: wamid.length > 6 ? wamid : undefined,
+        whatsappStatus: args.whatsappStatus,
+      });
+    }
+
+    await ctx.runMutation(internal.conversations.updateLastMessageAt, {
+      conversationId,
+    });
+    await ctx.runMutation(internal.ycloud.markOutboundAsHuman, { phone });
+    return { ok: true as const };
   },
 });
 
