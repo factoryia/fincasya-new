@@ -81,6 +81,100 @@ export async function sendTextToYcloud(args: {
   return { wamid, status };
 }
 
+/** Componente de plantilla ya armado para el payload de YCloud/Meta. */
+export type TemplateComponent = {
+  type: "header" | "body" | "button";
+  /** Solo para botones tipo `url`/`quick_reply` que admiten índice. */
+  sub_type?: string;
+  index?: string;
+  parameters: Array<Record<string, unknown>>;
+};
+
+/**
+ * Envía un mensaje de **plantilla preaprobada por Meta** (`type: "template"`).
+ *
+ * Es la ÚNICA forma permitida por Meta de iniciar conversación fuera de la
+ * ventana de 24h (recordatorios programados, avisos al propietario, etc.).
+ * Mensajes de texto libre fuera de ventana son rechazados por la API.
+ *
+ * `bodyParams`/`headerParams` rellenan las variables posicionales `{{1}}`,
+ * `{{2}}`… de la plantilla en el MISMO orden en que aparecen en su cuerpo.
+ */
+export async function sendTemplateToYcloud(args: {
+  to: string;
+  /** Nombre exacto de la plantilla aprobada (ej. `inicio_checkin_turista`). */
+  templateName: string;
+  /** Código de idioma de la plantilla aprobada. Default `es`. */
+  languageCode?: string;
+  bodyParams?: string[];
+  headerParams?: string[];
+  /** Componentes ya armados (botones con URL dinámica, etc.). Tienen prioridad. */
+  components?: TemplateComponent[];
+  sendDirectly?: boolean;
+}): Promise<{ wamid?: string; status?: string }> {
+  const { apiKey, wabaNumber } = requireYcloudEnv();
+  const endpoint = (args.sendDirectly ?? true)
+    ? "https://api.ycloud.com/v2/whatsapp/messages/sendDirectly"
+    : "https://api.ycloud.com/v2/whatsapp/messages";
+
+  const components: Array<Record<string, unknown>> = [];
+  if (args.components && args.components.length > 0) {
+    components.push(...args.components);
+  } else {
+    if (args.headerParams && args.headerParams.length > 0) {
+      components.push({
+        type: "header",
+        parameters: args.headerParams.map((text) => ({ type: "text", text })),
+      });
+    }
+    if (args.bodyParams && args.bodyParams.length > 0) {
+      components.push({
+        type: "body",
+        parameters: args.bodyParams.map((text) => ({ type: "text", text })),
+      });
+    }
+  }
+
+  const body: Record<string, unknown> = {
+    from: wabaNumber,
+    to: args.to,
+    type: "template",
+    template: {
+      name: args.templateName,
+      language: { code: args.languageCode ?? "es" },
+      ...(components.length > 0 ? { components } : {}),
+    },
+  };
+
+  const res = await fetch(endpoint, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "X-API-Key": apiKey },
+    body: JSON.stringify(body),
+  });
+  const textRes = await res.text();
+  if (!res.ok) {
+    throw new Error(
+      `YCloud template "${args.templateName}" error ${res.status}: ${textRes}`,
+    );
+  }
+  const parsed = textRes ? JSON.parse(textRes) : {};
+  const wamid = wamidFromYcloudSendResponse(parsed);
+  const rawStatus = ((): unknown => {
+    if (typeof parsed !== "object" || !parsed) return undefined;
+    const o = parsed as Record<string, unknown>;
+    if (typeof o.status === "string") return o.status;
+    const nested = o.whatsappMessage;
+    if (nested && typeof nested === "object") {
+      const s = (nested as Record<string, unknown>).status;
+      if (typeof s === "string") return s;
+    }
+    return undefined;
+  })();
+  const status =
+    typeof rawStatus === "string" ? rawStatus.toLowerCase() : undefined;
+  return { wamid, status };
+}
+
 const SEND_DIRECTLY = "https://api.ycloud.com/v2/whatsapp/messages/sendDirectly";
 const BETWEEN_SENDS_MS = 320;
 

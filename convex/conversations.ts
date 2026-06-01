@@ -629,9 +629,14 @@ export const list = query({
     /** Canal: whatsapp | web */
     channel: v.optional(v.union(v.literal("whatsapp"), v.literal("web"))),
     limit: v.optional(v.number()),
+    /** Offset numérico (string) para paginación del inbox. */
+    cursor: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
-    const limit = args.limit ?? 50;
+    const limit = Math.min(Math.max(args.limit ?? 50, 1), 1000);
+    const offset = args.cursor
+      ? Math.max(0, parseInt(args.cursor, 10) || 0)
+      : 0;
     let convs = args.status
       ? await ctx.db
           .query("conversations")
@@ -705,7 +710,8 @@ export const list = query({
       (a, b) =>
         (b.lastMessageAt ?? b.createdAt) - (a.lastMessageAt ?? a.createdAt)
     );
-    const slice = convs.slice(0, limit);
+    const slice = convs.slice(offset, offset + limit);
+    const hasMore = offset + slice.length < convs.length;
     const withContact = await Promise.all(
       slice.map(async (c) => {
         const { inboxUnreadCount: _u, ...rest } = c;
@@ -725,6 +731,10 @@ export const list = query({
         };
       })
     );
-    return withContact;
+    return {
+      items: withContact,
+      nextCursor: hasMore ? String(offset + limit) : null,
+      hasMore,
+    };
   },
 });

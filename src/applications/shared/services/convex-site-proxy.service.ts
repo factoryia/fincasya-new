@@ -1,9 +1,9 @@
 import { HttpException, Injectable } from '@nestjs/common';
 
-/** Misma URL/key que FincasYaWeb `lib/convex-admin.ts` (prod Convex HTTP). */
+/** Misma URL/key que FincasYaWeb `lib/convex-production.ts`. */
 const CONVEX_SITE_URL_DEFAULT =
   'https://adventurous-octopus-651.convex.site';
-const CONVEX_ADMIN_API_KEY_DEFAULT = '1d968d083e0576de40173bb2c854a4f3';
+const CONVEX_ADMIN_API_KEY_DEFAULT = '9c4729daf24f97b8adac2965af19d3a4';
 
 @Injectable()
 export class ConvexSiteProxyService {

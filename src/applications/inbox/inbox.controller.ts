@@ -86,6 +86,7 @@ export class InboxController {
     @Query('lastMessageTo') lastMessageToRaw?: string,
     @Query('channel') channel?: 'whatsapp' | 'web',
     @Query('limit') limit?: string,
+    @Query('cursor') cursor?: string,
   ) {
     const limitNum = limit ? parseInt(limit, 10) : undefined;
     const attendedBool = attended === 'true' ? true : attended === 'false' ? false : undefined;
@@ -124,6 +125,7 @@ export class InboxController {
       lastMessageTo: Number.isFinite(lastMessageTo) ? lastMessageTo : undefined,
       channel: channel === 'whatsapp' || channel === 'web' ? channel : undefined,
       limit: limitNum,
+      cursor: cursor?.trim() || undefined,
     });
   }
 

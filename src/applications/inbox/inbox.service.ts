@@ -77,6 +77,7 @@ export class InboxService {
     lastMessageTo?: number;
     channel?: 'whatsapp' | 'web';
     limit?: number;
+    cursor?: string;
   }) {
     return this.convexService.query('conversations:list', params);
   }

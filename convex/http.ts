@@ -38,6 +38,33 @@ function requireYCloudApiKey(request: Request): Response | null {
   return null;
 }
 
+/**
+ * Proxys Next.js / Nest (`X-API-Key` = CONVEX_ADMIN_API_KEY).
+ * Acepta la clave admin dedicada o YCLOUD_API_KEY (mismo valor en muchos entornos).
+ */
+function requireConvexSiteApiKey(request: Request): Response | null {
+  const keys = [
+    process.env.CONVEX_ADMIN_API_KEY,
+    process.env.YCLOUD_API_KEY,
+  ].filter((k): k is string => typeof k === 'string' && k.length > 0);
+
+  if (keys.length === 0) {
+    return jsonResponse(
+      {
+        error:
+          'Configura CONVEX_ADMIN_API_KEY o YCLOUD_API_KEY en Convex (mismo valor que en el servidor Next.js)',
+      },
+      503,
+    );
+  }
+
+  const provided = request.headers.get('X-API-Key');
+  if (!provided || !keys.includes(provided)) {
+    return jsonResponse({ error: 'Unauthorized' }, 401);
+  }
+  return null;
+}
+
 const http = httpRouter();
 
 authComponent.registerRoutes(http, createAuth, { cors: true });
@@ -878,7 +905,7 @@ http.route({
   path: '/api/analytics/page-view',
   method: 'POST',
   handler: httpAction(async (ctx, request) => {
-    const denied = requireYCloudApiKey(request);
+    const denied = requireConvexSiteApiKey(request);
     if (denied) return denied;
 
     let body: { path?: string } = {};
@@ -899,7 +926,7 @@ http.route({
   path: '/api/analytics/stats',
   method: 'GET',
   handler: httpAction(async (ctx, request) => {
-    const denied = requireYCloudApiKey(request);
+    const denied = requireConvexSiteApiKey(request);
     if (denied) return denied;
 
     const stats = await ctx.runQuery(internal.siteAnalytics.getDashboardStats, {});

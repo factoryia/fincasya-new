@@ -97,6 +97,15 @@ export default defineSchema({
     /** URL de la plantilla del contrato en PDF. */
     contractTemplateUrl: v.optional(v.string()),
     /**
+     * Datos de contacto del propietario y del encargado de la finca (spec §6).
+     * El encargado es una persona distinta del propietario que también recibe
+     * comunicaciones (recordatorios de llegada). Teléfonos en formato E.164.
+     */
+    propietarioNombre: v.optional(v.string()),
+    propietarioTelefono: v.optional(v.string()),
+    encargadoNombre: v.optional(v.string()),
+    encargadoTelefono: v.optional(v.string()),
+    /**
      * Etiquetas de filtros del sitio (pestañas del home): luxury, eventos, cerca-bogota, melgar, etc.
      * Si el campo falta, la web usa reglas legacy por ubicación/texto. Si existe (puede ser []), aplica modo explícito.
      */
@@ -347,6 +356,34 @@ export default defineSchema({
     createdAt: v.number(),
     updatedAt: v.optional(v.number()),
     reminderSent: v.optional(v.boolean()),
+    /**
+     * Check-in del turista completado (spec §4/§5). Lo marca el portal de
+     * check-in o el equipo (check-in manual). Se usa para filtrar a quién
+     * recordarle el check-in pendiente (no molestar a quien ya lo hizo).
+     */
+    checkinCompleted: v.optional(v.boolean()),
+    checkinCompletedAt: v.optional(v.number()),
+    /**
+     * Etiqueta libre para agrupar reservas en envíos en lote (spec §10),
+     * p. ej. "puente_festivo".
+     */
+    broadcastTag: v.optional(v.string()),
+    /**
+     * Bitácora de mensajes programados ya enviados, para dedupe por momento
+     * del timeline (spec §3) y trazabilidad. `key` es la clave del momento
+     * (ej. "tourist_checkin_start"), `recipient` el teléfono destino.
+     */
+    scheduledMessages: v.optional(
+      v.array(
+        v.object({
+          key: v.string(),
+          recipient: v.string(),
+          sentAt: v.number(),
+          wamid: v.optional(v.string()),
+          status: v.optional(v.string()),
+        }),
+      ),
+    ),
   })
     .index('by_property', ['propertyId'])
     .index('by_status', ['status'])

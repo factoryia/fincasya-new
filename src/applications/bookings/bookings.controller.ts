@@ -18,6 +18,10 @@ import type { Request } from 'express';
 import { FilesInterceptor, FileInterceptor } from '@nestjs/platform-express';
 import { BookingsSyncService } from './bookings-sync.service';
 import { BookingsRemindersService } from './bookings-reminders.service';
+import {
+  CheckinMessagingService,
+  type CheckinMomentKey,
+} from './checkin-messaging.service';
 import { ConvexAuthGuard } from '../shared/guards/convex-auth.guard';
 import { AdminGuard } from '../shared/guards/admin.guard';
 import { OwnerOrAdminGuard } from '../shared/guards/owner-or-admin.guard';
@@ -32,12 +36,170 @@ export class BookingsController {
     private readonly bookingsSyncService: BookingsSyncService,
     private readonly authService: AuthService,
     private readonly remindersService: BookingsRemindersService,
+    private readonly checkinMessaging: CheckinMessagingService,
   ) {}
 
   @Post('trigger-reminders')
   @UseGuards(ConvexAuthGuard, AdminGuard)
   async triggerReminders() {
     return this.remindersService.triggerRemindersManually();
+  }
+
+  // ───────────────────────────────────────────────────────────────────────
+  // Mensajería de check-in (timeline §3 + envío en lote §10)
+  // ───────────────────────────────────────────────────────────────────────
+
+  /** Catálogo de plantillas Meta del flujo de check-in. */
+  @Get('checkin/templates')
+  @UseGuards(ConvexAuthGuard, RolesGuard)
+  @Roles(UserRole.ADMIN, UserRole.ASSISTANT)
+  async listCheckinTemplates() {
+    return this.checkinMessaging.listTemplates();
+  }
+
+  /** Registra (crea) las plantillas del catálogo en YCloud/Meta. */
+  @Post('checkin/register-templates')
+  @UseGuards(ConvexAuthGuard, AdminGuard)
+  async registerCheckinTemplates(
+    @Body() body: { wabaId?: string; onlyKeys?: string[] },
+  ) {
+    return this.checkinMessaging.registerTemplates(body?.wabaId, body?.onlyKeys);
+  }
+
+  /** Dispara manualmente todos los momentos programados de HOY. */
+  @Post('checkin/trigger-daily')
+  @UseGuards(ConvexAuthGuard, AdminGuard)
+  async triggerCheckinDaily(@Body() body: { dryRun?: boolean }) {
+    return this.checkinMessaging.triggerDailyManually(Boolean(body?.dryRun));
+  }
+
+  /** Dispara un único momento con una ventana de fecha explícita. */
+  @Post('checkin/trigger-moment')
+  @UseGuards(ConvexAuthGuard, RolesGuard)
+  @Roles(UserRole.ADMIN, UserRole.ASSISTANT)
+  async triggerCheckinMoment(
+    @Body()
+    body: {
+      key: CheckinMomentKey;
+      minDate: number;
+      maxDate: number;
+      tag?: string;
+      dryRun?: boolean;
+    },
+  ) {
+    if (!body?.key || !body?.minDate || !body?.maxDate) {
+      throw new HttpException(
+        'key, minDate y maxDate son requeridos',
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+    return this.checkinMessaging.triggerMoment(
+      body.key,
+      body.minDate,
+      body.maxDate,
+      body.tag,
+      Boolean(body.dryRun),
+    );
+  }
+
+  /** Reservas candidatas (con params por defecto) para el envío en lote. */
+  @Get('checkin/batch-candidates')
+  @UseGuards(ConvexAuthGuard, RolesGuard)
+  @Roles(UserRole.ADMIN, UserRole.ASSISTANT)
+  async listBatchCandidates(
+    @Query('templateKey') templateKey: string,
+    @Query('minDate') minDate: string,
+    @Query('maxDate') maxDate: string,
+    @Query('tag') tag?: string,
+  ) {
+    const min = Number(minDate);
+    const max = Number(maxDate);
+    if (!templateKey || !Number.isFinite(min) || !Number.isFinite(max)) {
+      throw new HttpException(
+        'templateKey, minDate y maxDate son requeridos',
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+    return this.checkinMessaging.listBookingsForBatch(
+      templateKey,
+      min,
+      max,
+      tag?.trim() || undefined,
+    );
+  }
+
+  /** Envío en lote con destinatarios ya editados por el equipo (spec §10). */
+  @Post('checkin/send-batch')
+  @UseGuards(ConvexAuthGuard, RolesGuard)
+  @Roles(UserRole.ADMIN, UserRole.ASSISTANT)
+  async sendCheckinBatch(
+    @Body()
+    body: {
+      templateKey: string;
+      recipients: Array<{
+        bookingId?: string;
+        to: string;
+        recipientName?: string;
+        bodyParams: string[];
+        logToInbox?: boolean;
+      }>;
+      dryRun?: boolean;
+    },
+  ) {
+    if (!body?.templateKey || !Array.isArray(body?.recipients)) {
+      throw new HttpException(
+        'templateKey y recipients son requeridos',
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+    return this.checkinMessaging.sendBatch(
+      body.templateKey,
+      body.recipients,
+      Boolean(body.dryRun),
+    );
+  }
+
+  /** Envío manual de una plantilla a UNA reserva (desde el modal de Reservas). */
+  @Post('checkin/:id/send')
+  @UseGuards(ConvexAuthGuard, RolesGuard)
+  @Roles(UserRole.ADMIN, UserRole.ASSISTANT)
+  async sendTemplateToBooking(
+    @Param('id') id: string,
+    @Body() body: { templateKey: string; dryRun?: boolean },
+  ) {
+    if (!body?.templateKey) {
+      throw new HttpException(
+        'templateKey es requerido',
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+    return this.checkinMessaging.sendTemplateToBooking(
+      id,
+      body.templateKey,
+      Boolean(body.dryRun),
+    );
+  }
+
+  /** Etiqueta de lote (ej. "puente_festivo") sobre una reserva. */
+  @Post('checkin/:id/tag')
+  @UseGuards(ConvexAuthGuard, RolesGuard)
+  @Roles(UserRole.ADMIN, UserRole.ASSISTANT)
+  async setBroadcastTag(
+    @Param('id') id: string,
+    @Body('tag') tag: string | null,
+  ) {
+    return this.checkinMessaging.setBroadcastTag(id, tag ?? null);
+  }
+
+  /** Check-in manual / marcar completado (spec §8.1). */
+  @Post('checkin/:id/completed')
+  @UseGuards(ConvexAuthGuard, RolesGuard)
+  @Roles(UserRole.ADMIN, UserRole.ASSISTANT)
+  async setCheckinCompleted(
+    @Param('id') id: string,
+    @Body('completed') completed: boolean,
+  ) {
+    return this.checkinMessaging.setCheckinCompleted(id, Boolean(completed));
   }
 
   @Get('count')

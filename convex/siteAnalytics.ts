@@ -6,17 +6,28 @@ import {
   type QueryCtx,
 } from './_generated/server';
 
+/** Mes calendario en Colombia (dashboard y visitas reales del sitio). */
+function bogotaYearMonth(ts: number): { year: number; month: number } {
+  const parts = new Intl.DateTimeFormat('en', {
+    timeZone: 'America/Bogota',
+    year: 'numeric',
+    month: 'numeric',
+  }).formatToParts(new Date(ts));
+  return {
+    year: Number(parts.find((p) => p.type === 'year')?.value ?? 1970),
+    month: Number(parts.find((p) => p.type === 'month')?.value ?? 1),
+  };
+}
+
 function monthKey(ts = Date.now()): string {
-  const d = new Date(ts);
-  const y = d.getUTCFullYear();
-  const m = String(d.getUTCMonth() + 1).padStart(2, '0');
-  return `${y}-${m}`;
+  const { year, month } = bogotaYearMonth(ts);
+  return `${year}-${String(month).padStart(2, '0')}`;
 }
 
 function prevMonthKey(ts = Date.now()): string {
-  const d = new Date(ts);
-  d.setUTCMonth(d.getUTCMonth() - 1);
-  return monthKey(d.getTime());
+  const { year, month } = bogotaYearMonth(ts);
+  const d = new Date(year, month - 2, 1);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
 }
 
 async function incrementMetric(ctx: MutationCtx, key: string, delta = 1) {
