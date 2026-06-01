@@ -391,7 +391,13 @@ export class InboxService {
     if (!msg || msg.deletedAt != null) {
       throw new NotFoundException('Mensaje no encontrado');
     }
-    const type = (msg.type ?? 'text') as 'text' | 'image' | 'audio' | 'document' | 'product';
+    const type = (msg.type ?? 'text') as
+      | 'text'
+      | 'image'
+      | 'audio'
+      | 'video'
+      | 'document'
+      | 'product';
     const prefix =
       type === 'text'
         ? ''
@@ -413,10 +419,17 @@ export class InboxService {
     if (!text) {
       throw new BadRequestException('No hay contenido para reenviar');
     }
+    const forwardType =
+      type === 'product'
+        ? 'text'
+        : type === 'video'
+          ? 'document'
+          : type;
     return this.sendMessage(targetConversationId, {
-      type: type === 'product' ? 'text' : type,
+      type: forwardType,
       text,
-      mediaUrl: type !== 'text' && type !== 'product' ? msg.mediaUrl : undefined,
+      mediaUrl:
+        forwardType !== 'text' ? msg.mediaUrl : undefined,
       sentByUserId,
     });
   }
