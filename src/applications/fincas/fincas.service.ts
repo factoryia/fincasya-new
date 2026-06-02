@@ -581,6 +581,7 @@ Al confirmar tu pago, recibirás el *soporte oficial* junto con todos los detall
 
   /**
    * Lista de fincas para feed de catálogo (Meta/WhatsApp). Solo incluye las que tienen al menos una imagen.
+   * Incluye product_type y custom_label_* para conjuntos/colecciones en Commerce Manager.
    */
   async getCatalogFeedRows(): Promise<
     {
@@ -594,14 +595,12 @@ Al confirmar tu pago, recibirás el *soporte oficial* junto con todos los detall
       price: string;
       availability: string;
       condition: string;
+      product_type: string;
+      custom_label_0: string;
+      custom_label_1: string;
+      custom_label_2: string;
     }[]
   > {
-    const baseUrl = (
-      process.env.CATALOG_PRODUCT_BASE_URL ||
-      process.env.FRONTEND_URL ||
-      process.env.SITE_URL ||
-      'https://fincasya.cloud'
-    ).replace(/\/$/, '');
     const result = await this.convexService.query('fincas:list', {
       limit: 2000,
     });
@@ -616,6 +615,10 @@ Al confirmar tu pago, recibirás el *soporte oficial* junto con todos los detall
       price: string;
       availability: string;
       condition: string;
+      product_type: string;
+      custom_label_0: string;
+      custom_label_1: string;
+      custom_label_2: string;
     }[] = [];
     for (const p of result.properties || []) {
       const images = (p as { images?: string[] }).images ?? [];
@@ -647,6 +650,14 @@ Al confirmar tu pago, recibirás el *soporte oficial* junto con todos los detall
       const videoUrl =
         String((p as { video?: string }).video ?? '').trim() || '';
 
+      const departments = this.getPropertyDepartments(p as {
+        departamentos?: string[];
+        location?: unknown;
+      });
+      const primaryDepartment = departments[0] ?? 'Sin departamento';
+      const isFavorite = (p as { isFavorite?: boolean }).isFavorite === true;
+      const category = String((p as { category?: string }).category ?? '').trim();
+
       rows.push({
         id,
         title,
@@ -658,6 +669,10 @@ Al confirmar tu pago, recibirás el *soporte oficial* junto con todos los detall
         price: `${priceBase} COP`,
         availability: 'in stock',
         condition: 'new',
+        product_type: primaryDepartment,
+        custom_label_0: isFavorite ? 'Favoritas' : '',
+        custom_label_1: departments.join(', '),
+        custom_label_2: category,
       });
     }
     return rows;
@@ -681,6 +696,10 @@ Al confirmar tu pago, recibirás el *soporte oficial* junto con todos los detall
       'price',
       'availability',
       'condition',
+      'product_type',
+      'custom_label_0',
+      'custom_label_1',
+      'custom_label_2',
     ];
     const lines = [headers.join(',')];
     for (const r of rows) {
@@ -696,6 +715,10 @@ Al confirmar tu pago, recibirás el *soporte oficial* junto con todos los detall
           r.price,
           r.availability,
           r.condition,
+          r.product_type,
+          r.custom_label_0,
+          r.custom_label_1,
+          r.custom_label_2,
         ]
           .map(escape)
           .join(','),
