@@ -1251,7 +1251,7 @@ http.route({
       );
     }
 
-    return jsonResponse({ ok: true, ...result }, 200, CHECKIN_CORS);
+    return jsonResponse({ ...result, ok: true }, 200, CHECKIN_CORS);
   }),
 });
 
