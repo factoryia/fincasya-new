@@ -2,7 +2,6 @@ import {
   Body,
   Controller,
   Get,
-  HttpException,
   Post,
   Put,
   Query,
@@ -11,6 +10,7 @@ import {
 } from '@nestjs/common';
 import type { Request, Response } from 'express';
 import { GoogleCalendarService } from '../shared/services/google-calendar.service';
+import { ConvexSiteProxyService } from '../shared/services/convex-site-proxy.service';
 
 // URI canónico único registrado en Google Cloud Console.
 // Debe coincidir exactamente con handleConnect() en el frontend y con route.ts.
@@ -19,7 +19,10 @@ const LOCAL_REDIRECT_URI = 'http://localhost:3000/api/admin/calendar-callback';
 
 @Controller('admin')
 export class AdminController {
-  constructor(private readonly googleCalendarService: GoogleCalendarService) {}
+  constructor(
+    private readonly googleCalendarService: GoogleCalendarService,
+    private readonly convexProxy: ConvexSiteProxyService,
+  ) {}
 
   @Get('google-calendar/status')
   async getGoogleCalendarStatus() {
@@ -105,14 +108,14 @@ export class AdminController {
    */
   @Get('contract-settings')
   async getContractSettings() {
-    return this.proxyConvexAdminJson('/api/admin/contract-settings', 'GET');
+    return this.convexProxy.forwardJson('GET', '/api/admin/contract-settings');
   }
 
   @Put('contract-settings')
   async putContractSettings(@Body() body: Record<string, unknown>) {
-    return this.proxyConvexAdminJson(
-      '/api/admin/contract-settings',
+    return this.convexProxy.forwardJson(
       'PUT',
+      '/api/admin/contract-settings',
       body,
     );
   }
@@ -123,48 +126,10 @@ export class AdminController {
    */
   @Post('contract-link')
   async createContractLink(@Body() body: Record<string, unknown>) {
-    return this.proxyConvexAdminJson('/api/admin/contract-link', 'POST', body);
-  }
-
-  private async proxyConvexAdminJson(
-    path: string,
-    method: 'GET' | 'PUT' | 'POST',
-    body?: Record<string, unknown>,
-  ) {
-    const baseUrl = (
-      process.env.CONVEX_SITE_URL || 'https://adventurous-octopus-651.convex.site'
-    ).replace(/\/$/, '');
-    // Fallback alineado con el lado de Next.js (`FincasYaWeb/lib/convex-admin.ts`)
-    // para que funcione aunque la env no esté definida en el servidor.
-    const apiKey =
-      process.env.CONVEX_ADMIN_API_KEY?.trim() ||
-      process.env.YCLOUD_API_KEY?.trim() ||
-      '1d968d083e0576de40173bb2c854a4f3';
-    if (!apiKey) {
-      return {
-        error:
-          'Falta CONVEX_ADMIN_API_KEY o YCLOUD_API_KEY en el servidor NestJS',
-      };
-    }
-    const sendsBody = method === 'PUT' || method === 'POST';
-    const res = await fetch(`${baseUrl}${path}`, {
-      method,
-      headers: {
-        'X-API-Key': apiKey,
-        ...(sendsBody ? { 'Content-Type': 'application/json' } : {}),
-      },
-      ...(sendsBody && body != null ? { body: JSON.stringify(body) } : {}),
-    });
-    const text = await res.text();
-    let payload: unknown = text;
-    try {
-      payload = text ? JSON.parse(text) : null;
-    } catch {
-      payload = { error: text || res.statusText };
-    }
-    if (!res.ok) {
-      throw new HttpException(payload as object, res.status);
-    }
-    return payload;
+    return this.convexProxy.forwardJson(
+      'POST',
+      '/api/admin/contract-link',
+      body,
+    );
   }
 }

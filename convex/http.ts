@@ -784,7 +784,7 @@ http.route({
   path: '/api/admin/contract-settings',
   method: 'GET',
   handler: httpAction(async (ctx, request) => {
-    const denied = requireYCloudApiKey(request);
+    const denied = requireConvexSiteApiKey(request);
     if (denied) return denied;
 
     const row = await ctx.runQuery(
@@ -808,7 +808,7 @@ http.route({
   path: '/api/admin/contract-settings',
   method: 'PUT',
   handler: httpAction(async (ctx, request) => {
-    const denied = requireYCloudApiKey(request);
+    const denied = requireConvexSiteApiKey(request);
     if (denied) return denied;
 
     let body: unknown;
@@ -1045,7 +1045,7 @@ http.route({
   path: '/api/admin/contract-link',
   method: 'POST',
   handler: httpAction(async (ctx, request) => {
-    const denied = requireYCloudApiKey(request);
+    const denied = requireConvexSiteApiKey(request);
     if (denied) return denied;
 
     let body: {
@@ -1100,7 +1100,7 @@ http.route({
   pathPrefix: '/api/admin/contract-link/',
   method: 'GET',
   handler: httpAction(async (ctx, request) => {
-    const denied = requireYCloudApiKey(request);
+    const denied = requireConvexSiteApiKey(request);
     if (denied) return denied;
 
     const url = new URL(request.url);
