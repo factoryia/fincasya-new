@@ -7,7 +7,8 @@ export type CatalogFeatureInput = {
 };
 
 const DEFAULT_FEATURE_EMOJI = '✅';
-const NUMBERED_ITEM = /^\d+\.\s*(.+)$/;
+/** Lista 1. PISCINA — no confundir con montos COP ($300.000). */
+const NUMBERED_ITEM = /^\d+\.\s*([A-Za-zÁÉÍÓÚÜÑáéíóúüñ].*)$/;
 const CATALOG_URL_LINE =
   /^\s*https?:\/\/[^\s]*(?:fincasya\.com|fincasya\.cloud)[^\s]*\s*$/i;
 
@@ -45,10 +46,13 @@ export function inferEmojiForFeatureName(name: string): string {
   return DEFAULT_FEATURE_EMOJI;
 }
 
-/** Separa listas numeradas pegadas: "1. A2. B" → líneas distintas. */
+/** Separa listas numeradas pegadas: "1. PISCINA2. JACUZZI" → líneas (no rompe $300.000). */
 export function expandDenseNumberedList(text: string): string {
-  if (!/\d+\.\s*/.test(text)) return text;
-  return text.replace(/([^\n])(?=\d+\.\s*)/g, '$1\n');
+  if (!/\d+\.\s*[A-Za-zÁÉÍÓÚÜÑáéíóúüñ]/.test(text)) return text;
+  return text.replace(
+    /([^\n])(?=\d+\.\s*[A-Za-zÁÉÍÓÚÜÑáéíóúüñ])/g,
+    '$1\n',
+  );
 }
 
 function featureName(f: unknown): string {

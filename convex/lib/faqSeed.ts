@@ -71,7 +71,7 @@ export const FAQ_INITIAL_SEED: Array<{
   },
   {
     key: 'faq:personal-servicio',
-    title: 'Personal de servicio (cocina y aseo)',
+    title: 'Personal de servicio (sujeto a disponibilidad)',
     text: [
       '¡Claro que sí! Con gusto te comparto la información sobre el personal de servicio para tu estadía:',
       '',
