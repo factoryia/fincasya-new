@@ -2,6 +2,11 @@ import { v } from 'convex/values';
 import { catalogPeopleCountForFilter } from './lib/propertyCatalogCapacity';
 import { normalizeDepartamentos } from './lib/colombiaDepartments';
 import { normalizePropertyLocation } from './lib/propertyLocation';
+import {
+  normalizeSearchText,
+  propertySearchRelevanceScore,
+  textMatchesSearchTerm,
+} from './lib/searchText';
 import { query, mutation } from './_generated/server';
 import { internal } from './_generated/api';
 
@@ -1083,22 +1088,49 @@ export const search = query({
 
     const allProperties = await ctx.db.query('properties').collect();
 
-    const lower = (s: string) => s.toLowerCase();
+    const normalizedTerms = searchTerms.map((term) =>
+      normalizeSearchText(term),
+    );
+
     const matchesTerm = (p: (typeof allProperties)[number], term: string) =>
-      lower(p.title).includes(term) ||
-      lower(p.description ?? '').includes(term) ||
-      lower(p.location).includes(term) ||
-      (p.code && lower(p.code).includes(term));
+      textMatchesSearchTerm(p.title, term) ||
+      textMatchesSearchTerm(p.description ?? '', term) ||
+      textMatchesSearchTerm(p.location, term) ||
+      (p.code ? textMatchesSearchTerm(p.code, term) : false);
+
     const countMatches = (p: (typeof allProperties)[number]) =>
-      searchTerms.filter((term) => matchesTerm(p, term)).length;
+      normalizedTerms.filter((term) => matchesTerm(p, term)).length;
 
     const visibleProperties = allProperties.filter(
       (p: { active?: boolean; visible?: boolean }) =>
         p.active !== false && p.visible !== false,
     );
     const filtered = visibleProperties
-      .filter((p) => searchTerms.some((term) => matchesTerm(p, term)))
-      .sort((a, b) => countMatches(b) - countMatches(a))
+      .filter((p) => normalizedTerms.some((term) => matchesTerm(p, term)))
+      .sort((a, b) => {
+        const matchDiff = countMatches(b) - countMatches(a);
+        if (matchDiff !== 0) return matchDiff;
+        return (
+          propertySearchRelevanceScore(
+            {
+              title: b.title,
+              description: b.description,
+              location: b.location,
+              code: b.code,
+            },
+            args.query,
+          ) -
+          propertySearchRelevanceScore(
+            {
+              title: a.title,
+              description: a.description,
+              location: a.location,
+              code: a.code,
+            },
+            args.query,
+          )
+        );
+      })
       .slice(0, limit);
 
     const propertiesWithDetails = await Promise.all(
