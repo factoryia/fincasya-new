@@ -1,0 +1,203 @@
+import { v } from 'convex/values';
+import { internalMutation, internalQuery } from './_generated/server';
+import type { Doc, Id } from './_generated/dataModel';
+
+/**
+ * Portal público de check-in del turista (`/checkin/:reference`).
+ *
+ * El turista llega desde el botón de la plantilla de WhatsApp
+ * `inicio_checkin_turista` (variable `linkCheckin`). No hay login: la "llave"
+ * es la `reference` de la reserva (o, como respaldo, el `_id` del booking, igual
+ * que arma el link `checkinMessaging.planSendsForMoment`).
+ *
+ * Soporta GUARDADO PARCIAL: el turista puede registrar algunos invitados hoy y
+ * el resto otro día con el mismo link (no expira). El check-in solo se marca
+ * como completado cuando la lista coincide con el total de personas de la
+ * reserva (validación estricta en `submitCheckin`).
+ */
+
+/** Forma del invitado tal como llega del portal / se guarda en la reserva. */
+const guestValidator = v.object({
+  nombreCompleto: v.string(),
+  cedula: v.optional(v.string()),
+  esMenor: v.optional(v.boolean()),
+});
+
+type Guest = {
+  nombreCompleto: string;
+  cedula?: string;
+  esMenor?: boolean;
+};
+
+/** Total de personas esperadas según la reserva (lo que se debe registrar). */
+function expectedGuestCount(booking: Doc<'bookings'>): number {
+  const base = Number(booking.numeroPersonas) || 0;
+  return Math.max(base, 0);
+}
+
+/** Normaliza y valida la lista de invitados recibida del portal. */
+function normalizeGuests(raw: unknown): { guests: Guest[]; error?: string } {
+  if (!Array.isArray(raw)) return { guests: [] };
+  const guests: Guest[] = [];
+  for (const item of raw) {
+    if (!item || typeof item !== 'object') continue;
+    const obj = item as Record<string, unknown>;
+    const nombreCompleto = String(obj.nombreCompleto ?? '').trim();
+    const cedula = String(obj.cedula ?? '').trim();
+    const esMenor = Boolean(obj.esMenor);
+    // Filas completamente vacías se ignoran (el turista deja un renglón en blanco).
+    if (!nombreCompleto && !cedula && !esMenor) continue;
+    guests.push({
+      nombreCompleto,
+      cedula: cedula || undefined,
+      esMenor: esMenor || undefined,
+    });
+  }
+  return { guests };
+}
+
+/** Encuentra una reserva por `reference` y, si no, por `_id`. */
+async function findBooking(
+  ctx: { db: any },
+  key: string,
+): Promise<Doc<'bookings'> | null> {
+  const trimmed = key.trim();
+  if (!trimmed) return null;
+
+  const byRef = await ctx.db
+    .query('bookings')
+    .withIndex('by_reference', (q: any) => q.eq('reference', trimmed))
+    .first();
+  if (byRef) return byRef as Doc<'bookings'>;
+
+  // Respaldo: el link puede usar el `_id` cuando la reserva no tiene reference.
+  try {
+    const byId = await ctx.db.get(trimmed as Id<'bookings'>);
+    if (byId && (byId as any).numeroPersonas !== undefined) {
+      return byId as Doc<'bookings'>;
+    }
+  } catch {
+    /* `key` no es un Id válido de Convex → no es match por id */
+  }
+  return null;
+}
+
+/** Resumen seguro (sin datos sensibles) + lo ya guardado, para precargar el portal. */
+export const getForPortal = internalQuery({
+  args: { key: v.string() },
+  handler: async (ctx, args) => {
+    const booking = await findBooking(ctx, args.key);
+    if (!booking) return null;
+
+    const property = await ctx.db.get(booking.propertyId);
+
+    return {
+      reference: booking.reference ?? booking._id,
+      nombreTitular: booking.nombreCompleto,
+      propertyTitle: (property as { title?: string } | null)?.title ?? 'tu finca',
+      propertyLocation:
+        (property as { location?: string } | null)?.location ?? null,
+      fechaEntrada: booking.fechaEntrada,
+      fechaSalida: booking.fechaSalida,
+      numeroPersonas: expectedGuestCount(booking),
+      status: booking.status,
+      checkinCompleted: booking.checkinCompleted === true,
+      checkinUpdatedAt: booking.checkinUpdatedAt ?? null,
+      guests: (booking.checkinGuests ?? []) as Guest[],
+      needsEmpleada: booking.checkinNeedsEmpleada === true,
+      needsTeam: booking.checkinNeedsTeam === true,
+      serviciosNota: booking.checkinServiciosNota ?? '',
+    };
+  },
+});
+
+/**
+ * Guarda AVANCE PARCIAL del check-in (no valida cantidad, no marca completado).
+ * Permite al turista llenar algunos invitados y continuar luego con el mismo link.
+ */
+export const saveDraft = internalMutation({
+  args: {
+    key: v.string(),
+    guests: v.array(guestValidator),
+    needsEmpleada: v.optional(v.boolean()),
+    needsTeam: v.optional(v.boolean()),
+    serviciosNota: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    const booking = await findBooking(ctx, args.key);
+    if (!booking) return { ok: false as const, reason: 'not_found' };
+
+    const { guests } = normalizeGuests(args.guests);
+
+    await ctx.db.patch(booking._id, {
+      checkinGuests: guests,
+      checkinNeedsEmpleada: args.needsEmpleada ?? false,
+      checkinNeedsTeam: args.needsTeam ?? false,
+      checkinServiciosNota: args.serviciosNota?.trim() || undefined,
+      checkinUpdatedAt: Date.now(),
+      updatedAt: Date.now(),
+    });
+
+    return {
+      ok: true as const,
+      saved: guests.length,
+      expected: expectedGuestCount(booking),
+    };
+  },
+});
+
+/**
+ * ENVÍO FINAL del check-in (validación estricta): la cantidad de invitados debe
+ * coincidir con el total de personas de la reserva, y cada mayor de 2 años debe
+ * tener nombre completo + cédula. Marca `checkinCompleted`.
+ */
+export const submitCheckin = internalMutation({
+  args: {
+    key: v.string(),
+    guests: v.array(guestValidator),
+    needsEmpleada: v.optional(v.boolean()),
+    needsTeam: v.optional(v.boolean()),
+    serviciosNota: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    const booking = await findBooking(ctx, args.key);
+    if (!booking) return { ok: false as const, reason: 'not_found' };
+
+    const { guests } = normalizeGuests(args.guests);
+    const expected = expectedGuestCount(booking);
+
+    if (expected > 0 && guests.length !== expected) {
+      return {
+        ok: false as const,
+        reason: 'count_mismatch',
+        expected,
+        got: guests.length,
+      };
+    }
+
+    // Cada persona necesita nombre; los mayores de 2 años, además, cédula.
+    for (let i = 0; i < guests.length; i++) {
+      const g = guests[i];
+      if (!g.nombreCompleto) {
+        return { ok: false as const, reason: 'missing_name', index: i };
+      }
+      if (!g.esMenor && !g.cedula) {
+        return { ok: false as const, reason: 'missing_cedula', index: i };
+      }
+    }
+
+    const now = Date.now();
+    await ctx.db.patch(booking._id, {
+      checkinGuests: guests,
+      checkinNeedsEmpleada: args.needsEmpleada ?? false,
+      checkinNeedsTeam: args.needsTeam ?? false,
+      checkinServiciosNota: args.serviciosNota?.trim() || undefined,
+      checkinCompleted: true,
+      checkinCompletedAt: now,
+      checkinUpdatedAt: now,
+      updatedAt: now,
+    });
+
+    return { ok: true as const, completed: true, total: guests.length };
+  },
+});

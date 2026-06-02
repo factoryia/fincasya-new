@@ -1154,4 +1154,122 @@ http.route({
   }),
 });
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Portal público de check-in del turista (`/checkin/:reference`).
+// No requiere X-API-Key: el cliente final lo abre desde el botón de la plantilla
+// de WhatsApp `inicio_checkin_turista`. La "llave" es la `reference` de la
+// reserva. El link NO expira y admite guardado parcial (llenar unos invitados
+// hoy y el resto otro día con el mismo enlace).
+// ─────────────────────────────────────────────────────────────────────────────
+
+const CHECKIN_CORS = { 'Access-Control-Allow-Origin': '*' } as const;
+
+/** GET /api/checkin/:reference → resumen de la reserva + lo ya guardado. */
+http.route({
+  pathPrefix: '/api/checkin/',
+  method: 'GET',
+  handler: httpAction(async (ctx, request) => {
+    const url = new URL(request.url);
+    const key = decodeURIComponent(
+      url.pathname.replace('/api/checkin/', ''),
+    ).trim();
+
+    if (!key) return jsonResponse({ error: 'Referencia inválida' }, 400, CHECKIN_CORS);
+
+    const data = await ctx.runQuery(internal.checkinPortal.getForPortal, { key });
+    if (!data) {
+      return jsonResponse(
+        { error: 'not_found', message: 'No encontramos esta reserva.' },
+        404,
+        CHECKIN_CORS,
+      );
+    }
+
+    return jsonResponse({ ok: true, ...data }, 200, CHECKIN_CORS);
+  }),
+});
+
+/** POST /api/checkin/:reference → guarda avance (`save`) o envía (`submit`). */
+http.route({
+  pathPrefix: '/api/checkin/',
+  method: 'POST',
+  handler: httpAction(async (ctx, request) => {
+    const url = new URL(request.url);
+    const key = decodeURIComponent(
+      url.pathname.replace('/api/checkin/', ''),
+    ).trim();
+
+    if (!key) return jsonResponse({ error: 'Referencia inválida' }, 400, CHECKIN_CORS);
+
+    let body: {
+      action?: 'save' | 'submit';
+      guests?: Array<{
+        nombreCompleto?: string;
+        cedula?: string;
+        esMenor?: boolean;
+      }>;
+      needsEmpleada?: boolean;
+      needsTeam?: boolean;
+      serviciosNota?: string;
+    };
+    try {
+      body = (await request.json()) as typeof body;
+    } catch {
+      return jsonResponse({ error: 'Body JSON inválido' }, 400, CHECKIN_CORS);
+    }
+
+    const guests = (Array.isArray(body?.guests) ? body.guests : []).map((g) => ({
+      nombreCompleto: String(g?.nombreCompleto ?? '').trim(),
+      cedula: String(g?.cedula ?? '').trim() || undefined,
+      esMenor: Boolean(g?.esMenor) || undefined,
+    }));
+    const payload = {
+      key,
+      guests,
+      needsEmpleada: Boolean(body?.needsEmpleada),
+      needsTeam: Boolean(body?.needsTeam),
+      serviciosNota: body?.serviciosNota?.trim() || undefined,
+    };
+
+    const isSubmit = body?.action === 'submit';
+    const result = isSubmit
+      ? await ctx.runMutation(internal.checkinPortal.submitCheckin, payload)
+      : await ctx.runMutation(internal.checkinPortal.saveDraft, payload);
+
+    if (!result.ok) {
+      const reason = (result as { reason?: string }).reason ?? 'error';
+      const statusMap: Record<string, number> = {
+        not_found: 404,
+        count_mismatch: 422,
+        missing_name: 422,
+        missing_cedula: 422,
+      };
+      return jsonResponse(
+        { error: reason, ...result },
+        statusMap[reason] ?? 400,
+        CHECKIN_CORS,
+      );
+    }
+
+    return jsonResponse({ ok: true, ...result }, 200, CHECKIN_CORS);
+  }),
+});
+
+/** OPTIONS preflight (CORS) para el portal de check-in. */
+http.route({
+  pathPrefix: '/api/checkin/',
+  method: 'OPTIONS',
+  handler: httpAction(async () => {
+    return new Response(null, {
+      status: 204,
+      headers: {
+        'Access-Control-Allow-Origin': '*',
+        'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+        'Access-Control-Allow-Headers': 'Content-Type',
+        'Access-Control-Max-Age': '86400',
+      },
+    });
+  }),
+});
+
 export default http;

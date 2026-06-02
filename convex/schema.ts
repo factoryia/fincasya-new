@@ -364,6 +364,30 @@ export default defineSchema({
     checkinCompleted: v.optional(v.boolean()),
     checkinCompletedAt: v.optional(v.number()),
     /**
+     * Lista de invitados que ingresan, capturada por el turista en el portal
+     * público de check-in (`/checkin/:reference`). Cada persona mayor de 2 años
+     * lleva nombre completo + cédula; los menores de 2 años se marcan con
+     * `esMenor` y no requieren cédula. Se permite guardado parcial (el turista
+     * puede llenar unos hoy y los demás otro día con el mismo link).
+     */
+    checkinGuests: v.optional(
+      v.array(
+        v.object({
+          nombreCompleto: v.string(),
+          cedula: v.optional(v.string()),
+          esMenor: v.optional(v.boolean()),
+        }),
+      ),
+    ),
+    /** El turista indicó que necesita empleada de servicio (portal de check-in). */
+    checkinNeedsEmpleada: v.optional(v.boolean()),
+    /** El turista indicó que necesita team (portal de check-in). */
+    checkinNeedsTeam: v.optional(v.boolean()),
+    /** Nota libre opcional sobre servicios (cantidad, horario, etc.). */
+    checkinServiciosNota: v.optional(v.string()),
+    /** Última vez que el turista guardó avance o envió su check-in. */
+    checkinUpdatedAt: v.optional(v.number()),
+    /**
      * Etiqueta libre para agrupar reservas en envíos en lote (spec §10),
      * p. ej. "puente_festivo".
      */
