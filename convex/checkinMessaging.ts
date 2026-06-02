@@ -14,6 +14,7 @@ import {
   ALL_TEMPLATE_KEYS,
   buildBodyParams,
   buildRegisterPayload,
+  buildSendComponents,
   CHECKIN_TEMPLATES,
   getTemplateDef,
   renderTemplateBody,
@@ -35,6 +36,17 @@ function firstName(full: string | undefined | null): string {
   const s = String(full ?? "").trim();
   if (!s) return "";
   return s.split(/\s+/)[0];
+}
+
+/** Fecha de llegada legible en español (hora Colombia). Ej: "15 de junio de 2026". */
+function formatFechaLlegada(ms: number): string {
+  if (!Number.isFinite(ms)) return "tu fecha de llegada";
+  return new Intl.DateTimeFormat("es-CO", {
+    day: "numeric",
+    month: "long",
+    year: "numeric",
+    timeZone: "America/Bogota",
+  }).format(new Date(ms));
 }
 
 /**
@@ -323,6 +335,7 @@ function planSendsForMoment(
             bodyParams: buildBodyParams(def, {
               nombreTurista: firstName(b.nombreCompleto),
               nombreFinca: finca,
+              fechaLlegada: formatFechaLlegada(b.fechaEntrada),
               linkCheckin: link,
             }),
             logToInbox: true,
@@ -483,6 +496,7 @@ function resolveManualSend(
     bodyParams: buildBodyParams(def, {
       nombreTurista: firstName(b.nombreCompleto),
       nombreFinca: finca,
+      fechaLlegada: formatFechaLlegada(b.fechaEntrada),
       linkCheckin: link,
       horaSalida: b.horaSalida || "la hora acordada",
     }),
@@ -532,11 +546,12 @@ export const sendTemplateToBooking = action({
     }
 
     try {
+      const components = buildSendComponents(def, resolved.bodyParams);
       const { wamid, status } = await sendTemplateToYcloud({
         to: resolved.to,
         templateName: def.name,
         languageCode: def.language,
-        bodyParams: resolved.bodyParams,
+        ...(components ? { components } : { bodyParams: resolved.bodyParams }),
       });
       await ctx.runMutation(internal.checkinMessaging.recordScheduledMessage, {
         bookingId: b._id,
@@ -606,11 +621,12 @@ export const runScheduledMoment = action({
         continue;
       }
       try {
+        const components = buildSendComponents(def, plan.bodyParams);
         const { wamid, status } = await sendTemplateToYcloud({
           to: plan.to,
           templateName: def.name,
           languageCode: def.language,
-          bodyParams: plan.bodyParams,
+          ...(components ? { components } : { bodyParams: plan.bodyParams }),
         });
         await ctx.runMutation(internal.checkinMessaging.recordScheduledMessage, {
           bookingId: plan.bookingId,
@@ -690,6 +706,7 @@ export const listBookingsForBatch = query({
           (property as { propietarioNombre?: string } | null)?.propietarioNombre,
         ),
         nombreFinca: finca,
+        fechaLlegada: formatFechaLlegada(b.fechaEntrada),
         linkCheckin: `${portal}/${cr}`,
         horaSalida: b.horaSalida || "la hora acordada",
       };
@@ -748,11 +765,12 @@ export const sendBatchTemplate = action({
         continue;
       }
       try {
+        const components = buildSendComponents(def, r.bodyParams);
         const { wamid, status } = await sendTemplateToYcloud({
           to,
           templateName: def.name,
           languageCode: def.language,
-          bodyParams: r.bodyParams,
+          ...(components ? { components } : { bodyParams: r.bodyParams }),
         });
         if (r.bookingId) {
           await ctx.runMutation(internal.checkinMessaging.recordScheduledMessage, {

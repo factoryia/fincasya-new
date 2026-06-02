@@ -11,7 +11,25 @@
  * `paramKeys`, los `{{n}}` del cuerpo y `exampleParams` siempre alineados.
  */
 
+import type { TemplateComponent } from "./senders";
+
 export type TemplateCategory = "UTILITY" | "MARKETING" | "AUTHENTICATION";
+
+/**
+ * Botón de la plantilla. `url` = botón "Visitar sitio web" con URL dinámica
+ * (`urlBase` + `{{1}}`); al enviar, el sufijo dinámico es la referencia de la
+ * reserva. `quick_reply` solo devuelve el texto (no abre links).
+ */
+export type TemplateButton =
+  | {
+      type: "url";
+      text: string;
+      /** Base fija de la URL, termina en "/". Ej: "https://fincasya.com/checkin/". */
+      urlBase: string;
+      /** Sufijo de ejemplo para la aprobación de Meta. Ej: "CR-1234". */
+      exampleSuffix: string;
+    }
+  | { type: "quick_reply"; text: string };
 
 /** Clave lógica de cada momento del timeline (estable, usada por el motor). */
 export type CheckinTemplateKey =
@@ -36,6 +54,8 @@ export type TemplateDef = {
   /** Encabezado fijo opcional (texto, sin variables). */
   header?: string;
   footer?: string;
+  /** Botón opcional (URL dinámica o respuesta rápida). */
+  button?: TemplateButton;
   /** Valores de ejemplo (uno por `paramKey`) para la aprobación de Meta. */
   exampleParams: string[];
 };
@@ -57,13 +77,20 @@ export const CHECKIN_TEMPLATES: Record<CheckinTemplateKey, TemplateDef> = {
     name: "inicio_checkin_turista",
     language: "es",
     category: "UTILITY",
-    paramKeys: ["nombreTurista", "nombreFinca", "linkCheckin"],
+    paramKeys: ["nombreTurista", "nombreFinca", "fechaLlegada", "linkCheckin"],
     bodyText:
-      "Hola {{1}}, estamos próximos a tu check-in en {{2}} 🏡 Para agilizar tu ingreso, ingresa tu lista de invitados y confirma tus servicios aquí: {{3}} Recuerda: sin check-in no hay ingreso.",
+      "¡Hola {{1}}! 🌿 Ya estamos próximos a tu llegada a {{2}} el {{3}}.\n\nPara confirmar tu ingreso necesitamos que hagas tu check-in: ingresa tu lista de invitados (nombre completo y cédula de cada persona mayor de 2 años) y cuéntanos si vas a necesitar empleada de servicio o team.\n\n⚠️ Recuerda: sin check-in no podemos dar ingreso a la finca. Puedes guardar tu avance y continuar cuando quieras.\n\nHaz tu check-in aquí 👇 {{4}}",
     footer: "FincasYa",
+    button: {
+      type: "url",
+      text: "Hacer check-in",
+      urlBase: "https://fincasya.com/checkin/",
+      exampleSuffix: "CR-1234",
+    },
     exampleParams: [
-      "Camilo",
-      "Villa del Lago",
+      "Santiago",
+      "Cartagena Aparta-Estudio Luxury 3PAX",
+      "15 de junio de 2026",
       "https://fincasya.com/checkin/CR-1234",
     ],
   },
@@ -164,6 +191,18 @@ export function buildRegisterPayload(
   if (def.footer) {
     components.push({ type: "FOOTER", text: def.footer });
   }
+  if (def.button) {
+    const btn =
+      def.button.type === "url"
+        ? {
+            type: "URL",
+            text: def.button.text,
+            url: `${def.button.urlBase}{{1}}`,
+            example: [`${def.button.urlBase}${def.button.exampleSuffix}`],
+          }
+        : { type: "QUICK_REPLY", text: def.button.text };
+    components.push({ type: "BUTTONS", buttons: [btn] });
+  }
   return {
     wabaId,
     name: def.name,
@@ -171,6 +210,43 @@ export function buildRegisterPayload(
     category: def.category,
     components,
   };
+}
+
+/**
+ * Construye los `components` para ENVIAR una plantilla que tiene botón (cuerpo
+ * + botón URL dinámico). El sufijo dinámico del botón se deriva del valor de
+ * `linkCheckin` en `bodyParams` (la parte después del último "/").
+ *
+ * Devuelve `undefined` si la plantilla no tiene botón → el llamador debe usar
+ * `bodyParams` como antes.
+ */
+export function buildSendComponents(
+  def: TemplateDef,
+  bodyParams: string[],
+): TemplateComponent[] | undefined {
+  if (!def.button) return undefined;
+
+  const components: TemplateComponent[] = [];
+  if (bodyParams.length > 0) {
+    components.push({
+      type: "body",
+      parameters: bodyParams.map((text) => ({ type: "text", text })),
+    });
+  }
+
+  if (def.button.type === "url") {
+    const linkIdx = def.paramKeys.indexOf("linkCheckin");
+    const linkVal = linkIdx >= 0 ? (bodyParams[linkIdx] ?? "") : "";
+    const suffix = linkVal.split("/").filter(Boolean).pop() ?? "";
+    components.push({
+      type: "button",
+      sub_type: "url",
+      index: "0",
+      parameters: [{ type: "text", text: suffix }],
+    });
+  }
+
+  return components;
 }
 
 /** Render del cuerpo con variables aplicadas (para logear en inbox lo enviado). */
