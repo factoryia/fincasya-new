@@ -74,7 +74,7 @@ export const CHECKIN_TEMPLATES: Record<CheckinTemplateKey, TemplateDef> = {
     category: "UTILITY",
     paramKeys: ["nombreTurista", "nombreFinca", "linkCheckin"],
     bodyText:
-      "Hola {{1}}, aún tienes pendiente tu check-in para tu viaje a {{2}}. Complétalo aquí para asegurar tu ingreso: {{3}}",
+      "Hola {{1}}, aún tienes pendiente tu check-in para tu viaje a {{2}}. Complétalo aquí para asegurar tu ingreso: {{3}} ¡Gracias!",
     footer: "FincasYa",
     exampleParams: [
       "Camilo",

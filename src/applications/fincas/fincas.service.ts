@@ -164,6 +164,7 @@ import {
   parseContractSettingsPayload,
   resolveContractMoneyLabel,
 } from './contract-template-values';
+import { buildCatalogProductDescription } from './catalog-description';
 import {
   DEFAULT_CONSULTANT_SYSTEM_PROMPT,
   PROMPT_INTERNAL_PAGE_ID,
@@ -579,17 +580,6 @@ Al confirmar tu pago, recibirás el *soporte oficial* junto con todos los detall
   }
 
   /**
-   * Características para el feed Meta/WhatsApp: lista numerada vertical (misma lógica que contrato).
-   */
-  private formatCatalogFeaturesBlock(
-    features: Array<{ name?: string; emoji?: string | null; quantity?: number }> | undefined,
-  ): string {
-    const plain = formatFincaFeaturesPlain(features ?? []);
-    if (!plain) return '';
-    return `\n\n${plain}`;
-  }
-
-  /**
    * Lista de fincas para feed de catálogo (Meta/WhatsApp). Solo incluye las que tienen al menos una imagen.
    */
   async getCatalogFeedRows(): Promise<
@@ -632,13 +622,11 @@ Al confirmar tu pago, recibirás el *soporte oficial* junto con todos los detall
       if (images.length === 0) continue;
       const id = String((p as { _id: string })._id);
       const title = ((p as { title?: string }).title ?? 'Finca').slice(0, 200);
-      const rawDescription = ((p as { description?: string }).description ?? '')
-        .replace(/<[^>]*>/g, '')
-        .trim();
       const features = (p as { features?: { name?: string; emoji?: string | null }[] })
         .features;
-      const description = (
-        rawDescription + this.formatCatalogFeaturesBlock(features)
+      const description = buildCatalogProductDescription(
+        (p as { description?: string }).description,
+        features,
       ).slice(0, 9999);
       const priceBase = (p as { priceBase?: number }).priceBase ?? 0;
 

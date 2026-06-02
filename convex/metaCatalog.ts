@@ -4,6 +4,7 @@ import { v } from 'convex/values';
 import { internalAction, action } from './_generated/server';
 import { internal, api } from './_generated/api';
 import type { Id } from './_generated/dataModel';
+import { buildCatalogProductDescription } from './lib/catalogDescription';
 
 /**
  * Sincroniza catálogos de Meta a whatsappCatalogs.
@@ -96,6 +97,11 @@ const PRODUCT_BASE_URL =
 type PropForCatalog = {
   title?: string;
   description?: string;
+  features?: Array<{
+    name?: string;
+    emoji?: string | null;
+    quantity?: number;
+  }>;
   images?: string[];
   video?: string;
   priceBase?: number;
@@ -115,7 +121,10 @@ function buildMetaPayload(
     id: retailerId,
     name: productName,
     title: productName,
-    description: (prop.description || '').slice(0, 5000),
+    description: buildCatalogProductDescription(
+      prop.description,
+      prop.features,
+    ).slice(0, 5000),
     price: `${price} COP`,
     availability: 'in stock',
     brand: 'Finca',
