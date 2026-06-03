@@ -76,6 +76,7 @@ export class InboxService {
     lastMessageFrom?: number;
     lastMessageTo?: number;
     channel?: 'whatsapp' | 'web';
+    search?: string;
     limit?: number;
     cursor?: string;
   }) {
@@ -152,6 +153,25 @@ export class InboxService {
       operationalState,
       userId,
     });
+  }
+
+  async getConversation(conversationId: string) {
+    const conv = await this.convexService.query('conversations:getById', {
+      conversationId,
+    });
+    if (!conv) throw new NotFoundException('Conversacion no encontrada');
+    const contact = await this.convexService.query('contacts:getById', {
+      contactId: (conv as { contactId: string }).contactId,
+    });
+    return {
+      ...conv,
+      contact: contact
+        ? {
+            name: (contact as { name?: string }).name ?? '',
+            phone: (contact as { phone?: string }).phone ?? '',
+          }
+        : { name: '', phone: '' },
+    };
   }
 
   async getMessages(
@@ -244,6 +264,26 @@ export class InboxService {
 
   async deleteQuickReplyTemplate(templateId: string) {
     return this.convexService.mutation('quickReplyTemplates:remove', { id: templateId });
+  }
+
+  /** Plantillas de WhatsApp (Meta) que el asesor puede enviar manualmente. */
+  async listManualTemplates() {
+    return this.convexService.query('checkinMessaging:listManualTemplates', {});
+  }
+
+  /** Envía una plantilla de WhatsApp a la conversación abierta (envío manual). */
+  async sendManualTemplate(
+    conversationId: string,
+    templateKey: string,
+    bodyParams: string[],
+    sentByUserId?: string,
+  ) {
+    return this.convexService.action('checkinMessaging:sendTemplateToConversation', {
+      conversationId,
+      templateKey,
+      bodyParams,
+      sentByUserId,
+    });
   }
 
   async sendQuickTemplateToConversation(conversationId: string, templateId: string) {

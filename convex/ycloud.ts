@@ -9,7 +9,15 @@ import { internal, api } from "./_generated/api";
 import type { Id } from "./_generated/dataModel";
 import { transcribeAudio } from "./lib/transcription";
 import { classifyContractImage } from "./lib/imageClassifier";
-import { sendCatalogToYcloud, sendTextToYcloud } from "./lib/ycloud/senders";
+import {
+  sendCatalogToYcloud,
+  sendTextToYcloud,
+  sendTemplateToYcloud,
+} from "./lib/ycloud/senders";
+import {
+  buildSendComponents,
+  getTemplateDef,
+} from "./lib/ycloud/templateCatalog";
 import { getOrCreateConversationForContact } from "./lib/ycloud/session";
 import { processInboundMessageV2 } from "./lib/ycloud/inbound";
 import { extractContractDataFromHistory } from "./lib/ycloud/contracts";
@@ -321,6 +329,32 @@ export const sendWhatsAppMessage = internalAction({
     sendDirectly: v.optional(v.boolean()),
   },
   handler: async (_ctx, args) => sendTextToYcloud(args),
+});
+
+/**
+ * Envía una plantilla preaprobada (Meta) por su CLAVE lógica del catálogo
+ * (`getTemplateDef`). Se usa para iniciar conversación dentro de la ventana
+ * de 24h o fuera de ella — por ejemplo, la plantilla de consentimiento de
+ * datos (`data_consent`) que dispara el bot en el primer contacto.
+ */
+export const sendWhatsAppTemplate = internalAction({
+  args: {
+    to: v.string(),
+    templateKey: v.string(),
+    bodyParams: v.optional(v.array(v.string())),
+  },
+  handler: async (_ctx, args) => {
+    const def = getTemplateDef(args.templateKey);
+    if (!def) throw new Error(`Plantilla desconocida: ${args.templateKey}`);
+    const bodyParams = args.bodyParams ?? [];
+    const components = buildSendComponents(def, bodyParams);
+    return await sendTemplateToYcloud({
+      to: args.to,
+      templateName: def.name,
+      languageCode: def.language,
+      ...(components ? { components } : { bodyParams }),
+    });
+  },
 });
 
 export const recordCatalogOutboundWamids = internalMutation({

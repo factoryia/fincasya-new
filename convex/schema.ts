@@ -561,6 +561,23 @@ export default defineSchema({
     crmType: v.optional(v.union(v.literal('lead'), v.literal('client'))),
     lastReservationAt: v.optional(v.number()),
     /**
+     * Consentimiento de tratamiento de datos (Ley 1581) recogido por WhatsApp
+     * vía la plantilla `tratamiento_de_datos`. Solo se pide UNA vez por usuario:
+     *   - `undefined`: nunca se ha pedido / sin respuesta todavía.
+     *   - `granted`: el usuario respondió "Sí, autorizo" → el bot puede operar.
+     *   - `denied`: respondió "No autorizo" → el bot queda en pausa.
+     */
+    dataConsentStatus: v.optional(
+      v.union(v.literal('granted'), v.literal('denied')),
+    ),
+    /** Momento (ms) en que el usuario respondió a la solicitud de consentimiento. */
+    dataConsentAt: v.optional(v.number()),
+    /**
+     * Momento (ms) del último envío de la plantilla de consentimiento. Evita
+     * reenviarla en bucle si el usuario escribe varias veces antes de responder.
+     */
+    dataConsentRequestedAt: v.optional(v.number()),
+    /**
      * Nombre BASE del contacto (el original del perfil de WhatsApp / panel).
      * Se preserva cuando `name` se enriquece con el contexto del deal en
      * curso. Si está vacío, el name no se ha enriquecido todavía.

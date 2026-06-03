@@ -40,9 +40,15 @@ export type CheckinTemplateKey =
   | "owner_arrival_tomorrow"
   | "tourist_departure";
 
+/** Plantillas fuera del timeline de check-in (transaccionales / consentimiento). */
+export type ExtraTemplateKey = "data_consent";
+
+/** Cualquier plantilla preaprobada conocida por el código. */
+export type TemplateKey = CheckinTemplateKey | ExtraTemplateKey;
+
 export type TemplateDef = {
   /** Clave lógica interna. */
-  key: CheckinTemplateKey;
+  key: TemplateKey;
   /** Nombre EXACTO aprobado en Meta (snake_case, sin mayúsculas). */
   name: string;
   language: string;
@@ -56,8 +62,36 @@ export type TemplateDef = {
   footer?: string;
   /** Botón opcional (URL dinámica o respuesta rápida). */
   button?: TemplateButton;
+  /**
+   * Botones múltiples (respuestas rápidas). Tiene prioridad sobre `button`.
+   * Se usa, por ejemplo, en la plantilla de consentimiento de datos
+   * ("Sí, autorizo" / "No autorizo").
+   */
+  buttons?: TemplateButton[];
   /** Valores de ejemplo (uno por `paramKey`) para la aprobación de Meta. */
   exampleParams: string[];
+};
+
+/**
+ * Plantillas transaccionales que NO son parte del timeline de check-in
+ * (no las agenda el cron ni aparecen en el admin de check-in), pero sí
+ * existen aprobadas en Meta y se usan desde el bot / envío manual.
+ */
+export const EXTRA_TEMPLATES: Record<ExtraTemplateKey, TemplateDef> = {
+  data_consent: {
+    key: "data_consent",
+    name: "tratamiento_de_datos",
+    language: "es",
+    category: "UTILITY",
+    paramKeys: ["nombre"],
+    bodyText:
+      "¡Hola, {{1}}! 👋 Gracias por confiar en FincasYa.com. Para comenzar a buscar la finca ideal para ti y ofrecerte una atención personalizada, necesitamos tu autorización para el tratamiento de tus datos personales, de acuerdo con nuestra política de privacidad.\n\n¿Nos autorizas a continuar?",
+    buttons: [
+      { type: "quick_reply", text: "Sí, autorizo" },
+      { type: "quick_reply", text: "No autorizo" },
+    ],
+    exampleParams: ["Santiago"],
+  },
 };
 
 export const CHECKIN_TEMPLATES: Record<CheckinTemplateKey, TemplateDef> = {
@@ -148,8 +182,21 @@ export const ALL_TEMPLATE_KEYS = Object.keys(
   CHECKIN_TEMPLATES,
 ) as CheckinTemplateKey[];
 
+/**
+ * Mapa combinado de TODAS las plantillas conocidas (check-in + extra). Se usa
+ * para resolver una plantilla por su clave lógica desde cualquier flujo (bot,
+ * envío manual). El scheduler de check-in sigue usando solo `CHECKIN_TEMPLATES`.
+ */
+export const ALL_TEMPLATES: Record<TemplateKey, TemplateDef> = {
+  ...EXTRA_TEMPLATES,
+  ...CHECKIN_TEMPLATES,
+};
+
+/** Claves de plantillas que se pueden enviar MANUALMENTE desde el inbox. */
+export const MANUAL_TEMPLATE_KEYS = Object.keys(ALL_TEMPLATES) as TemplateKey[];
+
 export function getTemplateDef(key: string): TemplateDef | undefined {
-  return (CHECKIN_TEMPLATES as Record<string, TemplateDef>)[key];
+  return (ALL_TEMPLATES as Record<string, TemplateDef>)[key];
 }
 
 /**
@@ -191,17 +238,23 @@ export function buildRegisterPayload(
   if (def.footer) {
     components.push({ type: "FOOTER", text: def.footer });
   }
-  if (def.button) {
-    const btn =
-      def.button.type === "url"
+  const buttonDefs: TemplateButton[] = def.buttons?.length
+    ? def.buttons
+    : def.button
+      ? [def.button]
+      : [];
+  if (buttonDefs.length > 0) {
+    const buttons = buttonDefs.map((b) =>
+      b.type === "url"
         ? {
             type: "URL",
-            text: def.button.text,
-            url: `${def.button.urlBase}{{1}}`,
-            example: [`${def.button.urlBase}${def.button.exampleSuffix}`],
+            text: b.text,
+            url: `${b.urlBase}{{1}}`,
+            example: [`${b.urlBase}${b.exampleSuffix}`],
           }
-        : { type: "QUICK_REPLY", text: def.button.text };
-    components.push({ type: "BUTTONS", buttons: [btn] });
+        : { type: "QUICK_REPLY", text: b.text },
+    );
+    components.push({ type: "BUTTONS", buttons });
   }
   return {
     wabaId,

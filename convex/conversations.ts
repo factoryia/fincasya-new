@@ -7,6 +7,10 @@ import {
   operationalStateValidator,
   type OperationalState,
 } from "./conversationOperationalState";
+import {
+  contactMatchesInboxSearch,
+  resolveConversationChannel,
+} from "./lib/inboxContactDisplay";
 
 function effectiveState(
   s: OperationalState | undefined,
@@ -628,6 +632,8 @@ export const list = query({
     lastMessageTo: v.optional(v.number()),
     /** Canal: whatsapp | web */
     channel: v.optional(v.union(v.literal("whatsapp"), v.literal("web"))),
+    /** Nombre o teléfono del contacto (substring, case-insensitive). */
+    search: v.optional(v.string()),
     limit: v.optional(v.number()),
     /** Offset numérico (string) para paginación del inbox. */
     cursor: v.optional(v.string()),
@@ -644,19 +650,45 @@ export const list = query({
           .collect()
       : await ctx.db.query("conversations").collect();
 
-    if (args.channel) {
-      const matched: typeof convs = [];
-      for (const c of convs) {
-        let effective: "whatsapp" | "web";
-        if (c.channel === "web" || c.channel === "whatsapp") {
-          effective = c.channel;
-        } else {
-          const contact = await ctx.db.get(c.contactId);
-          effective = contact?.phone?.startsWith("web:") ? "web" : "whatsapp";
+    const searchQ = args.search?.trim() ?? "";
+    const needsContactLookup = Boolean(args.channel) || searchQ.length > 0;
+    const contactById = new Map<
+      string,
+      { name?: string; phone?: string } | null
+    >();
+
+    if (needsContactLookup) {
+      const getContact = async (contactId: typeof convs[number]["contactId"]) => {
+        const key = String(contactId);
+        if (!contactById.has(key)) {
+          contactById.set(key, await ctx.db.get(contactId));
         }
-        if (effective === args.channel) matched.push(c);
+        return contactById.get(key) ?? null;
+      };
+
+      if (args.channel) {
+        const matched: typeof convs = [];
+        for (const c of convs) {
+          const contact = await getContact(c.contactId);
+          if (
+            resolveConversationChannel(c, contact) === args.channel
+          ) {
+            matched.push(c);
+          }
+        }
+        convs = matched;
       }
-      convs = matched;
+
+      if (searchQ.length > 0) {
+        const matched: typeof convs = [];
+        for (const c of convs) {
+          const contact = await getContact(c.contactId);
+          if (contactMatchesInboxSearch(contact, c.channel, searchQ)) {
+            matched.push(c);
+          }
+        }
+        convs = matched;
+      }
     }
 
     if (args.attended !== undefined) {

@@ -12,11 +12,13 @@ import type { Id } from "./_generated/dataModel";
 import { sendTemplateToYcloud } from "./lib/ycloud/senders";
 import {
   ALL_TEMPLATE_KEYS,
+  ALL_TEMPLATES,
   buildBodyParams,
   buildRegisterPayload,
   buildSendComponents,
   CHECKIN_TEMPLATES,
   getTemplateDef,
+  MANUAL_TEMPLATE_KEYS,
   renderTemplateBody,
   type CheckinTemplateKey,
   type TemplateDef,
@@ -79,6 +81,122 @@ export const listCheckinTemplates = query({
         footer: def.footer ?? null,
       };
     }),
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Envío MANUAL de plantillas desde el inbox (cualquier conversación)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Lista las plantillas que un asesor puede enviar manualmente desde el chat
+ * (set curado: check-in + transaccionales como `tratamiento_de_datos`). Cada
+ * una expone su cuerpo, las variables `{{n}}` a rellenar y sus botones.
+ */
+export const listManualTemplates = query({
+  args: {},
+  handler: async () =>
+    MANUAL_TEMPLATE_KEYS.map((key) => {
+      const def = ALL_TEMPLATES[key];
+      const buttons = def.buttons ?? (def.button ? [def.button] : []);
+      return {
+        key: def.key,
+        name: def.name,
+        language: def.language,
+        category: def.category,
+        bodyText: def.bodyText,
+        paramKeys: def.paramKeys,
+        exampleParams: def.exampleParams,
+        footer: def.footer ?? null,
+        buttons: buttons.map((b) => ({ type: b.type, text: b.text })),
+      };
+    }),
+});
+
+/** Destinatario (teléfono + nombre) de una conversación, para el envío manual. */
+export const getConversationRecipient = internalQuery({
+  args: { conversationId: v.id("conversations") },
+  handler: async (ctx, args) => {
+    const conv = await ctx.db.get(args.conversationId);
+    if (!conv) return null;
+    const contact = await ctx.db.get(conv.contactId);
+    if (!contact) return null;
+    return {
+      channel: conv.channel,
+      phone: contact.phone,
+      name: contact.baseName?.trim() || contact.name?.trim() || "",
+    };
+  },
+});
+
+/**
+ * Envía una plantilla preaprobada a la conversación abierta en el inbox (envío
+ * manual del asesor). Resuelve el teléfono del contacto, manda la plantilla por
+ * YCloud y deja registrado en el inbox el texto renderizado (con los mismos
+ * `{{n}}` que verá el cliente) marcado como envío humano.
+ */
+export const sendTemplateToConversation = action({
+  args: {
+    conversationId: v.id("conversations"),
+    templateKey: v.string(),
+    bodyParams: v.optional(v.array(v.string())),
+    sentByUserId: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    const def = getTemplateDef(args.templateKey);
+    if (!def) throw new Error(`Plantilla desconocida: ${args.templateKey}`);
+
+    const recipient = (await ctx.runQuery(
+      internal.checkinMessaging.getConversationRecipient,
+      { conversationId: args.conversationId },
+    )) as { channel: string; phone: string; name: string } | null;
+    if (!recipient) throw new Error("Conversación o contacto no encontrado");
+    if (recipient.channel === "web") {
+      throw new Error(
+        "Las plantillas de WhatsApp solo se pueden enviar a conversaciones de WhatsApp.",
+      );
+    }
+
+    const to = normalizeOutboundPhone(recipient.phone);
+    if (!to) throw new Error("El contacto no tiene un teléfono válido.");
+
+    const bodyParams = (args.bodyParams ?? []).map((p) => String(p ?? ""));
+    const components = buildSendComponents(def, bodyParams);
+    const { wamid, status } = await sendTemplateToYcloud({
+      to,
+      templateName: def.name,
+      languageCode: def.language,
+      ...(components ? { components } : { bodyParams }),
+    });
+
+    const tplButtons = (def.buttons ?? (def.button ? [def.button] : [])).map(
+      (b) => ({ type: b.type, text: b.text }),
+    );
+    await ctx.runMutation(internal.messages.insertAssistantMessage, {
+      conversationId: args.conversationId,
+      content: renderTemplateBody(def, bodyParams),
+      createdAt: Date.now(),
+      sentByUserId: args.sentByUserId,
+      wamid: wamid && wamid.length > 6 ? wamid : undefined,
+      metadata: {
+        source: "manual_template",
+        templateName: def.name,
+        templateKey: def.key,
+        templateFooter: def.footer ?? undefined,
+        templateButtons: tplButtons,
+      },
+    });
+    await ctx.runMutation(internal.conversations.updateLastMessageAt, {
+      conversationId: args.conversationId,
+    });
+
+    return {
+      ok: true as const,
+      to,
+      wamid,
+      status,
+      preview: renderTemplateBody(def, bodyParams),
+    };
+  },
 });
 
 // ─────────────────────────────────────────────────────────────────────────────

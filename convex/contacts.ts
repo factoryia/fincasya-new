@@ -1,6 +1,12 @@
 import { v } from "convex/values";
 import type { Id } from "./_generated/dataModel";
-import { mutation, query, internalMutation, type QueryCtx } from "./_generated/server";
+import {
+  mutation,
+  query,
+  internalMutation,
+  internalQuery,
+  type QueryCtx,
+} from "./_generated/server";
 
 const MAX_CONVERSATION_TAGS = 25;
 const MAX_TAG_LENGTH = 64;
@@ -209,6 +215,51 @@ export const getById = query({
   args: { contactId: v.id("contacts") },
   handler: async (ctx, args) => {
     return await ctx.db.get(args.contactId);
+  },
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Consentimiento de tratamiento de datos (Ley 1581) — gate del bot en WhatsApp
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Lee el estado de consentimiento del contacto (para el gate del bot). */
+export const getDataConsent = internalQuery({
+  args: { contactId: v.id("contacts") },
+  handler: async (ctx, args) => {
+    const contact = await ctx.db.get(args.contactId);
+    if (!contact) return null;
+    return {
+      status: contact.dataConsentStatus ?? null,
+      requestedAt: contact.dataConsentRequestedAt ?? null,
+      respondedAt: contact.dataConsentAt ?? null,
+      name: contact.baseName?.trim() || contact.name?.trim() || "",
+    };
+  },
+});
+
+/** Marca que se envió la plantilla de consentimiento (para no reenviarla en bucle). */
+export const markDataConsentRequested = internalMutation({
+  args: { contactId: v.id("contacts") },
+  handler: async (ctx, args) => {
+    await ctx.db.patch(args.contactId, {
+      dataConsentRequestedAt: Date.now(),
+      updatedAt: Date.now(),
+    });
+  },
+});
+
+/** Registra la respuesta del usuario a la solicitud de consentimiento. */
+export const setDataConsent = internalMutation({
+  args: {
+    contactId: v.id("contacts"),
+    status: v.union(v.literal("granted"), v.literal("denied")),
+  },
+  handler: async (ctx, args) => {
+    await ctx.db.patch(args.contactId, {
+      dataConsentStatus: args.status,
+      dataConsentAt: Date.now(),
+      updatedAt: Date.now(),
+    });
   },
 });
 

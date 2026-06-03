@@ -8,6 +8,11 @@ import {
 } from "../bot/entities";
 import { INBOUND_DEBOUNCE_MS, MAX_CATALOG_PRODUCTS_PER_SEND } from "./constants";
 import {
+  buildBodyParams,
+  getTemplateDef,
+  renderTemplateBody,
+} from "./templateCatalog";
+import {
   getFaqTextByKey,
   localFaqFallback,
   localFaqMatchesForText,
@@ -1146,6 +1151,143 @@ export async function processInboundMessageV2(
       team: "operaciones",
     });
     return;
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════
+  // GATE DE CONSENTIMIENTO DE DATOS (Ley 1581) — solo WhatsApp, UNA vez.
+  //
+  // Va DESPUÉS de los casos críticos (reserva vigente, etiquetas de handoff
+  // duro y emergencia) para no interrumpir a clientes ya activos ni demorar
+  // una urgencia. Antes de iniciar el flujo comercial, el cliente NUEVO debe
+  // autorizar el tratamiento de sus datos. El bot envía la plantilla
+  // `tratamiento_de_datos` con botones "Sí, autorizo" / "No autorizo":
+  //   - "Sí, autorizo"  → se marca el consentimiento y se CONTINÚA el flujo
+  //     normal (bienvenida, o la intención previa si ya escribió algo útil —
+  //     `runBotTurn` lo decide más abajo).
+  //   - "No autorizo"   → mensaje cordial + el bot queda en pausa para este
+  //     contacto (puede reintentar escribiendo de nuevo).
+  //   - cualquier otra cosa sin responder → (re)envía la plantilla (cooldown).
+  //
+  // Quien YA autorizó alguna vez nunca vuelve a ver esta solicitud. El canal
+  // web no pasa por este gate.
+  // ═══════════════════════════════════════════════════════════════════════
+  if ((deps.channel ?? "whatsapp") === "whatsapp") {
+    const consent = (await ctx.runQuery(deps.internal.contacts.getDataConsent, {
+      contactId,
+    })) as null | {
+      status: "granted" | "denied" | null;
+      requestedAt: number | null;
+      respondedAt: number | null;
+      name: string;
+    };
+
+    if (consent && consent.status !== "granted") {
+      // `lowerText` ya viene normalizado (sin acentos, minúsculas) del burst.
+      // El "no" se evalúa primero porque "no autorizo" contiene "autorizo".
+      const saysDeny =
+        /\bno\s+autoriz|no\s+acepto|no\s+estoy\s+de\s+acuerdo|^no\b|no\s+gracias/.test(
+          lowerText,
+        );
+      const saysGrant =
+        !saysDeny &&
+        /autoriz|acepto|de\s+acuerdo|^si\b|claro\s+que\s+si|por\s+supuesto/.test(
+          lowerText,
+        );
+
+      if (saysGrant) {
+        await ctx.runMutation(deps.internal.contacts.setDataConsent, {
+          contactId,
+          status: "granted",
+        });
+        await ctx.runMutation(deps.internal.messages.insertSystemMessage, {
+          conversationId,
+          content:
+            "✅ El cliente AUTORIZÓ el tratamiento de datos (Ley 1581) por WhatsApp.",
+          createdAt: Date.now(),
+          metadata: { kind: "data_consent", consentStatus: "granted" },
+        });
+        // FALL THROUGH: el resto de `processInboundMessageV2` corre normal y
+        // `runBotTurn` envía la bienvenida o atiende la intención previa.
+      } else if (saysDeny) {
+        await ctx.runMutation(deps.internal.contacts.setDataConsent, {
+          contactId,
+          status: "denied",
+        });
+        const denyMsg =
+          "Entiendo 🙏 Sin tu autorización para el tratamiento de datos personales no podemos continuar con la búsqueda ni ofrecerte atención personalizada. Si cambias de opinión, escríbenos cuando quieras y con gusto te ayudamos 💚";
+        await ctx.runMutation(deps.internal.messages.insertAssistantMessage, {
+          conversationId,
+          content: denyMsg,
+          createdAt: Date.now(),
+        });
+        await ctx.runMutation(deps.internal.messages.insertSystemMessage, {
+          conversationId,
+          content:
+            "🚫 El cliente NO autorizó el tratamiento de datos. El bot quedó en pausa para este contacto.",
+          createdAt: Date.now() + 5,
+          metadata: { kind: "data_consent", consentStatus: "denied" },
+        });
+        await deliverText({ to: args.phone, text: denyMsg, wamid: args.wamid });
+        await ctx.runMutation(deps.internal.conversations.updateLastMessageAt, {
+          conversationId,
+        });
+        return;
+      } else {
+        // Sin respuesta clara → (re)enviar la plantilla de consentimiento.
+        // Cooldown para no spamear si el cliente escribe varias veces seguidas.
+        const CONSENT_RESEND_COOLDOWN_MS = 60_000;
+        const lastReq = Number(consent.requestedAt ?? 0);
+        const shouldSend =
+          !lastReq || Date.now() - lastReq > CONSENT_RESEND_COOLDOWN_MS;
+        if (shouldSend) {
+          const def = getTemplateDef("data_consent");
+          if (def) {
+            const firstName =
+              (consent.name || args.name || "").trim().split(/\s+/)[0] || "";
+            const bodyParams = buildBodyParams(def, { nombre: firstName });
+            let templateWamid: string | undefined;
+            try {
+              const sent = (await ctx.runAction(
+                deps.internal.ycloud.sendWhatsAppTemplate,
+                { to: args.phone, templateKey: "data_consent", bodyParams },
+              )) as { wamid?: string; status?: string };
+              templateWamid = sent?.wamid;
+            } catch (err) {
+              console.error(
+                "inbound: error enviando plantilla de consentimiento:",
+                err,
+              );
+            }
+            await ctx.runMutation(
+              deps.internal.contacts.markDataConsentRequested,
+              { contactId },
+            );
+            await ctx.runMutation(deps.internal.messages.insertAssistantMessage, {
+              conversationId,
+              content: renderTemplateBody(def, bodyParams),
+              createdAt: Date.now(),
+              wamid:
+                templateWamid && templateWamid.length > 6
+                  ? templateWamid
+                  : undefined,
+              metadata: {
+                source: "data_consent_template",
+                templateName: def.name,
+                templateFooter: def.footer ?? undefined,
+                templateButtons: (
+                  def.buttons ?? (def.button ? [def.button] : [])
+                ).map((b) => ({ type: b.type, text: b.text })),
+              },
+            });
+            await ctx.runMutation(
+              deps.internal.conversations.updateLastMessageAt,
+              { conversationId },
+            );
+          }
+        }
+        return;
+      }
+    }
   }
 
   // ─── (2) PROPIETARIO ──────────────────────────────────────────────────

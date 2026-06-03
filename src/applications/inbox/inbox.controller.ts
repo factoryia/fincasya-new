@@ -58,6 +58,27 @@ export class InboxController {
     return this.inboxService.listAssignableUsers();
   }
 
+  /**
+   * Lista las plantillas de WhatsApp (Meta) que un asesor puede enviar
+   * manualmente desde el chat (check-in + transaccionales).
+   * GET /api/inbox/manual-templates
+   */
+  @Get('manual-templates')
+  async listManualTemplates() {
+    return this.inboxService.listManualTemplates();
+  }
+
+  /**
+   * Plantillas de respuesta rápida (quick replies).
+   * IMPORTANTE: debe declararse ANTES de `@Get(':conversationId')`, si no
+   * Express captura "/templates" como un conversationId y revienta el validador.
+   * GET /api/inbox/templates
+   */
+  @Get('templates')
+  async listTemplates() {
+    return this.inboxService.listQuickReplyTemplates();
+  }
+
   @Get('ai-settings')
   async getAiSettings() {
     return this.inboxService.getAiSettings();
@@ -85,6 +106,7 @@ export class InboxController {
     @Query('lastMessageFrom') lastMessageFromRaw?: string,
     @Query('lastMessageTo') lastMessageToRaw?: string,
     @Query('channel') channel?: 'whatsapp' | 'web',
+    @Query('search') search?: string,
     @Query('limit') limit?: string,
     @Query('cursor') cursor?: string,
   ) {
@@ -124,9 +146,19 @@ export class InboxController {
       lastMessageFrom: Number.isFinite(lastMessageFrom) ? lastMessageFrom : undefined,
       lastMessageTo: Number.isFinite(lastMessageTo) ? lastMessageTo : undefined,
       channel: channel === 'whatsapp' || channel === 'web' ? channel : undefined,
+      search: search?.trim() || undefined,
       limit: limitNum,
       cursor: cursor?.trim() || undefined,
     });
+  }
+
+  /**
+   * Obtener una conversación por id (cabecera del chat sin depender del listado filtrado).
+   * GET /api/inbox/:conversationId
+   */
+  @Get(':conversationId')
+  async getConversation(@Param('conversationId') conversationId: string) {
+    return this.inboxService.getConversation(conversationId);
   }
 
   /**
@@ -209,11 +241,6 @@ export class InboxController {
     return this.inboxService.updateContactForConversation(conversationId, body);
   }
 
-  @Get('templates')
-  async listTemplates() {
-    return this.inboxService.listQuickReplyTemplates();
-  }
-
   @Post('templates')
   @UseInterceptors(
     FileInterceptor('file', {
@@ -254,6 +281,27 @@ export class InboxController {
     @Param('templateId') templateId: string,
   ) {
     return this.inboxService.sendQuickTemplateToConversation(conversationId, templateId);
+  }
+
+  /**
+   * Envía manualmente una plantilla de WhatsApp a la conversación.
+   * POST /api/inbox/:conversationId/send-manual-template
+   * Body: { templateKey: string, bodyParams?: string[], sentByUserId?: string }
+   */
+  @Post(':conversationId/send-manual-template')
+  async sendManualTemplate(
+    @Param('conversationId') conversationId: string,
+    @Body() body: { templateKey?: string; bodyParams?: string[]; sentByUserId?: string },
+  ) {
+    if (!body?.templateKey?.trim()) {
+      throw new BadRequestException('templateKey es obligatorio');
+    }
+    return this.inboxService.sendManualTemplate(
+      conversationId,
+      body.templateKey.trim(),
+      Array.isArray(body.bodyParams) ? body.bodyParams.map((p) => String(p ?? '')) : [],
+      body.sentByUserId?.trim() || undefined,
+    );
   }
 
   /**
