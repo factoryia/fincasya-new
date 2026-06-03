@@ -1239,7 +1239,25 @@ export async function processInboundMessageV2(
         const lastReq = Number(consent.requestedAt ?? 0);
         const shouldSend =
           !lastReq || Date.now() - lastReq > CONSENT_RESEND_COOLDOWN_MS;
+        const isFirstRequest = !lastReq;
         if (shouldSend) {
+          // Bienvenida ANTES de la plantilla de consentimiento, pero solo la
+          // PRIMERA vez (en los reenvíos por cooldown no repetimos el saludo).
+          // Así el contacto nuevo recibe: 1) saludo de bienvenida y enseguida
+          // 2) la solicitud de tratamiento de datos, en el mismo turno.
+          if (isFirstRequest) {
+            const welcomeMsg =
+              "¡Hola! 👋 Bienvenido(a) a *FincasYa* 🌿 Te ayudamos a encontrar la finca ideal para tus vacaciones, descanso o eventos especiales. 🏡✨";
+            await ctx.runMutation(
+              deps.internal.messages.insertAssistantMessage,
+              { conversationId, content: welcomeMsg, createdAt: Date.now() },
+            );
+            await deliverText({
+              to: args.phone,
+              text: welcomeMsg,
+              wamid: args.wamid,
+            });
+          }
           const def = getTemplateDef("data_consent");
           if (def) {
             const firstName =
