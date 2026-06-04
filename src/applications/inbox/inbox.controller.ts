@@ -170,12 +170,17 @@ export class InboxController {
     @Param('conversationId') conversationId: string,
     @Query('limit') limit?: string,
     @Query('beforeCreatedAt') beforeCreatedAt?: string,
+    @Query('beforeCreationTime') beforeCreationTime?: string,
   ) {
     const limitNum = limit ? parseInt(limit, 10) : undefined;
     const beforeMs = beforeCreatedAt ? parseInt(beforeCreatedAt, 10) : undefined;
+    const beforeCt = beforeCreationTime
+      ? parseFloat(beforeCreationTime)
+      : undefined;
     return this.inboxService.getMessages(conversationId, {
       limit: limitNum,
       beforeCreatedAt: Number.isFinite(beforeMs) ? beforeMs : undefined,
+      beforeCreationTime: Number.isFinite(beforeCt) ? beforeCt : undefined,
     });
   }
 

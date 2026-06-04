@@ -228,24 +228,49 @@ export const listRecent = query({
     conversationId: v.id("conversations"),
     limit: v.optional(v.number()),
     /**
-     * Si se envía, devuelve los mensajes anteriores a este `createdAt` (exclusivo),
+     * Si se envía, devuelve los mensajes anteriores a este `createdAt`,
      * en orden cronológico ascendente (igual que sin cursor). Sirve para scroll infinito hacia arriba.
      */
     beforeCreatedAt: v.optional(v.number()),
+    /**
+     * Desempate estable junto a `beforeCreatedAt`. Evita perder mensajes que
+     * comparten el mismo `createdAt` (ráfagas del bot insertadas en el mismo ms):
+     * al paginar usamos `<=` sobre `createdAt` y descartamos por `_creationTime`
+     * únicamente los que ya se entregaron.
+     */
+    beforeCreationTime: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
     const limit = Math.min(Math.max(args.limit ?? 50, 1), 150);
-    const list = await ctx.db
+    const { beforeCreatedAt, beforeCreationTime } = args;
+
+    // Filtramos `deletedAt` ANTES de `take` para que una página nunca quede
+    // corta por mensajes borrados (eso hacía que el front cortara el scroll
+    // infinito y "no trajera todo el histórico"). Sobre-leemos cuando hay
+    // cursor para absorber los duplicados del mismo ms ya entregados.
+    const rows = await ctx.db
       .query("messages")
       .withIndex("by_conversation", (q) => {
         const base = q.eq("conversationId", args.conversationId);
-        return args.beforeCreatedAt != null
-          ? base.lt("createdAt", args.beforeCreatedAt)
+        return beforeCreatedAt != null
+          ? base.lte("createdAt", beforeCreatedAt)
           : base;
       })
       .order("desc")
-      .take(limit);
-    return list.reverse().filter((m) => m.deletedAt == null);
+      .filter((q) => q.eq(q.field("deletedAt"), undefined))
+      .take(limit + (beforeCreatedAt != null ? limit : 0));
+
+    const older = rows.filter((m) => {
+      if (beforeCreatedAt == null) return true;
+      if (m.createdAt < beforeCreatedAt) return true;
+      // Mismo milisegundo: solo los anteriores al cursor (por `_creationTime`).
+      if (m.createdAt === beforeCreatedAt) {
+        return beforeCreationTime != null && m._creationTime < beforeCreationTime;
+      }
+      return false;
+    });
+
+    return older.slice(0, limit).reverse();
   },
 });
 

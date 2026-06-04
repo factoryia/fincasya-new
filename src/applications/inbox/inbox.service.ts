@@ -176,12 +176,13 @@ export class InboxService {
 
   async getMessages(
     conversationId: string,
-    opts?: { limit?: number; beforeCreatedAt?: number },
+    opts?: { limit?: number; beforeCreatedAt?: number; beforeCreationTime?: number },
   ) {
     return this.convexService.query('messages:listRecent', {
       conversationId,
       limit: opts?.limit,
       beforeCreatedAt: opts?.beforeCreatedAt,
+      beforeCreationTime: opts?.beforeCreationTime,
     });
   }
 
