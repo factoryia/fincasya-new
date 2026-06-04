@@ -622,6 +622,22 @@ function resolveManualSend(
 }
 
 /**
+ * Devuelve el link del portal de check-in de una reserva (mismo que va en la
+ * plantilla de WhatsApp), para copiarlo manualmente cuando NO se quiere enviar
+ * por WhatsApp.
+ */
+export const getCheckinLink = query({
+  args: { bookingId: v.id("bookings") },
+  handler: async (ctx, args): Promise<{ link: string; reference: string }> => {
+    const b = await ctx.db.get(args.bookingId);
+    if (!b) throw new Error("Reserva no encontrada");
+    const cr = ((b as { reference?: string }).reference ||
+      (b._id as string)) as string;
+    return { link: `${checkinPortalBase()}/${cr}`, reference: cr };
+  },
+});
+
+/**
  * Envía manualmente una plantilla a UNA reserva concreta (desde el modal de
  * Reservas). Resuelve el teléfono y las variables a partir de la reserva; no
  * aplica dedupe ni filtro de fecha (el equipo decide cuándo mandarlo).
