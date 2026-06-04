@@ -202,6 +202,14 @@ export class BookingsController {
     return this.checkinMessaging.setCheckinCompleted(id, Boolean(completed));
   }
 
+  /** Link del portal de check-in (para copiar manualmente). */
+  @Get('checkin/:id/link')
+  @UseGuards(ConvexAuthGuard, RolesGuard)
+  @Roles(UserRole.ADMIN, UserRole.ASSISTANT)
+  async getCheckinLink(@Param('id') id: string) {
+    return this.checkinMessaging.getCheckinLink(id);
+  }
+
   @Get('count')
   @UseGuards(ConvexAuthGuard, AdminGuard)
   async count() {

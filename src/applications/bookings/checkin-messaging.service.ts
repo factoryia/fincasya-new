@@ -225,4 +225,11 @@ export class CheckinMessagingService {
       completed,
     });
   }
+
+  /** Link del portal de check-in (para copiar sin enviar por WhatsApp). */
+  async getCheckinLink(bookingId: string) {
+    return this.convexService.query('checkinMessaging:getCheckinLink', {
+      bookingId,
+    });
+  }
 }
