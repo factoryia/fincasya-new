@@ -94,6 +94,10 @@ export default defineSchema({
     marketplaceForSale: v.optional(v.boolean()),
     /** Valor de venta de referencia en COP (marketplace). */
     salePriceCop: v.optional(v.number()),
+    /** Metros cuadrados construidos o del lote (marketplace / modo venta). */
+    saleSquareMeters: v.optional(v.number()),
+    /** Descripción comercial para venta (distinta del texto de arriendo). */
+    saleDescription: v.optional(v.string()),
     /** URL de la plantilla del contrato en PDF. */
     contractTemplateUrl: v.optional(v.string()),
     /**

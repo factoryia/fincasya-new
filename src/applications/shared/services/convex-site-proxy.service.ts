@@ -1,21 +1,14 @@
 import { HttpException, Injectable } from '@nestjs/common';
 
-/** Misma URL/key que FincasYaWeb `lib/convex-production.ts`. */
-const CONVEX_SITE_URL_DEFAULT =
+/** Misma URL/key que FincasYaWeb `lib/convex-production.ts` (quemado por ahora). */
+const CONVEX_SITE_URL =
   'https://adventurous-octopus-651.convex.site';
-const CONVEX_ADMIN_API_KEY_DEFAULT = '9c4729daf24f97b8adac2965af19d3a4';
+const CONVEX_ADMIN_API_KEY = '9c4729daf24f97b8adac2965af19d3a4';
 
 @Injectable()
 export class ConvexSiteProxyService {
   private getConfig(): { baseUrl: string; apiKey: string } {
-    const baseUrl = (
-      process.env.CONVEX_SITE_URL || CONVEX_SITE_URL_DEFAULT
-    ).replace(/\/$/, '');
-    const apiKey =
-      process.env.CONVEX_ADMIN_API_KEY?.trim() ||
-      process.env.YCLOUD_API_KEY?.trim() ||
-      CONVEX_ADMIN_API_KEY_DEFAULT;
-    return { baseUrl, apiKey };
+    return { baseUrl: CONVEX_SITE_URL.replace(/\/$/, ''), apiKey: CONVEX_ADMIN_API_KEY };
   }
 
   async forwardJson(

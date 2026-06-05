@@ -11,6 +11,7 @@ import {
   contactMatchesInboxSearch,
   resolveConversationChannel,
 } from "./lib/inboxContactDisplay";
+import { getConversationLastMessagePreview } from "./lib/inboxMessagePreview";
 
 function effectiveState(
   s: OperationalState | undefined,
@@ -747,10 +748,14 @@ export const list = query({
     const withContact = await Promise.all(
       slice.map(async (c) => {
         const { inboxUnreadCount: _u, ...rest } = c;
-        const contact = await ctx.db.get(c.contactId);
-        const assignedUser = await withAssignedUser(ctx, c.assignedUserId);
+        const [contact, assignedUser, lastMessagePreview] = await Promise.all([
+          ctx.db.get(c.contactId),
+          withAssignedUser(ctx, c.assignedUserId),
+          getConversationLastMessagePreview(ctx, c._id),
+        ]);
         return {
           ...rest,
+          lastMessagePreview,
           unreadCount: _u ?? 0,
           operationalState: effectiveState(
             c.operationalState as OperationalState | undefined

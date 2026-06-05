@@ -408,6 +408,18 @@ export class CreateFincaDto {
   @Transform(({ value }) => toNumber(value))
   salePriceCop?: number;
 
+  /** Metros cuadrados (marketplace / ficha en venta). */
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  @Transform(({ value }) => toNumber(value))
+  saleSquareMeters?: number;
+
+  /** Descripción comercial para venta (distinta del arriendo). */
+  @IsOptional()
+  @IsString()
+  saleDescription?: string;
+
   /**
    * IDs de pestañas del catálogo. Incluye los IDs del sitio (`luxury`, `melgar`, …)
    * y categorías personalizadas creadas desde el admin (slug en kebab-case).

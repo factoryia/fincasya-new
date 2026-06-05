@@ -1649,6 +1649,8 @@ export const create = mutation({
     catalogFilterTags: v.optional(v.array(v.string())),
     marketplaceForSale: v.optional(v.boolean()),
     salePriceCop: v.optional(v.number()),
+    saleSquareMeters: v.optional(v.number()),
+    saleDescription: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
     const now = Date.now();
@@ -1718,6 +1720,12 @@ export const create = mutation({
         : {}),
       marketplaceForSale: args.marketplaceForSale ?? false,
       ...(args.salePriceCop !== undefined ? { salePriceCop: args.salePriceCop } : {}),
+      ...(args.saleSquareMeters !== undefined
+        ? { saleSquareMeters: args.saleSquareMeters }
+        : {}),
+      ...(args.saleDescription !== undefined
+        ? { saleDescription: args.saleDescription }
+        : {}),
       createdAt: now,
       updatedAt: now,
     });
@@ -1886,6 +1894,8 @@ export const update = mutation({
     catalogFilterTags: v.optional(v.array(v.string())),
     marketplaceForSale: v.optional(v.boolean()),
     salePriceCop: v.optional(v.number()),
+    saleSquareMeters: v.optional(v.number()),
+    saleDescription: v.optional(v.string()),
     pricing: v.optional(
       v.array(
         v.object({
