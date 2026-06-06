@@ -1211,6 +1211,10 @@ http.route({
       needsEmpleada?: boolean;
       needsTeam?: boolean;
       serviciosNota?: string;
+      menoresDe2?: number;
+      placas?: string;
+      observaciones?: string;
+      aceptaTratamientoDatos?: boolean;
     };
     try {
       body = (await request.json()) as typeof body;
@@ -1226,6 +1230,16 @@ http.route({
     const payload = {
       key,
       guests,
+      menoresDe2:
+        body?.menoresDe2 === undefined
+          ? undefined
+          : Math.max(0, Math.floor(Number(body.menoresDe2) || 0)),
+      placas: body?.placas?.trim() || undefined,
+      observaciones: body?.observaciones?.trim() || undefined,
+      aceptaTratamientoDatos:
+        body?.aceptaTratamientoDatos === undefined
+          ? undefined
+          : body.aceptaTratamientoDatos === true,
       needsEmpleada: Boolean(body?.needsEmpleada),
       needsTeam: Boolean(body?.needsTeam),
       serviciosNota: body?.serviciosNota?.trim() || undefined,
@@ -1243,6 +1257,7 @@ http.route({
         count_mismatch: 422,
         missing_name: 422,
         missing_cedula: 422,
+        missing_data_consent: 422,
       };
       return jsonResponse(
         { error: reason, ...result },

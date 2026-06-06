@@ -29,6 +29,45 @@ type Guest = {
   esMenor?: boolean;
 };
 
+const checkinExtrasValidator = {
+  menoresDe2: v.optional(v.number()),
+  placas: v.optional(v.string()),
+  observaciones: v.optional(v.string()),
+  aceptaTratamientoDatos: v.optional(v.boolean()),
+};
+
+type CheckinExtrasArgs = {
+  menoresDe2?: number;
+  placas?: string;
+  observaciones?: string;
+  aceptaTratamientoDatos?: boolean;
+  needsEmpleada?: boolean;
+  needsTeam?: boolean;
+  serviciosNota?: string;
+};
+
+function parseMenoresDe2(value: unknown): number {
+  const n = Number(value);
+  if (!Number.isFinite(n) || n < 0) return 0;
+  return Math.floor(n);
+}
+
+/** Campos del portal distintos de la lista de invitados. */
+function buildCheckinExtrasPatch(args: CheckinExtrasArgs) {
+  return {
+    checkinNeedsEmpleada: args.needsEmpleada ?? false,
+    checkinNeedsTeam: args.needsTeam ?? false,
+    checkinServiciosNota: args.serviciosNota?.trim() || undefined,
+    checkinMenoresDe2: parseMenoresDe2(args.menoresDe2),
+    checkinPlacas: args.placas?.trim() || undefined,
+    checkinObservaciones: args.observaciones?.trim() || undefined,
+    checkinAceptaDatos:
+      args.aceptaTratamientoDatos === undefined
+        ? undefined
+        : args.aceptaTratamientoDatos === true,
+  };
+}
+
 /** Total de personas esperadas según la reserva (lo que se debe registrar). */
 function expectedGuestCount(booking: Doc<'bookings'>): number {
   const base = Number(booking.numeroPersonas) || 0;
@@ -99,11 +138,17 @@ export const getForPortal = internalQuery({
         (property as { location?: string } | null)?.location ?? null,
       fechaEntrada: booking.fechaEntrada,
       fechaSalida: booking.fechaSalida,
+      horaEntrada: booking.horaEntrada ?? null,
+      horaSalida: booking.horaSalida ?? null,
       numeroPersonas: expectedGuestCount(booking),
       status: booking.status,
       checkinCompleted: booking.checkinCompleted === true,
       checkinUpdatedAt: booking.checkinUpdatedAt ?? null,
       guests: (booking.checkinGuests ?? []) as Guest[],
+      menoresDe2: booking.checkinMenoresDe2 ?? 0,
+      placas: booking.checkinPlacas ?? '',
+      observaciones: booking.checkinObservaciones ?? '',
+      aceptaTratamientoDatos: booking.checkinAceptaDatos === true,
       needsEmpleada: booking.checkinNeedsEmpleada === true,
       needsTeam: booking.checkinNeedsTeam === true,
       serviciosNota: booking.checkinServiciosNota ?? '',
@@ -122,6 +167,7 @@ export const saveDraft = internalMutation({
     needsEmpleada: v.optional(v.boolean()),
     needsTeam: v.optional(v.boolean()),
     serviciosNota: v.optional(v.string()),
+    ...checkinExtrasValidator,
   },
   handler: async (ctx, args) => {
     const booking = await findBooking(ctx, args.key);
@@ -131,9 +177,7 @@ export const saveDraft = internalMutation({
 
     await ctx.db.patch(booking._id, {
       checkinGuests: guests,
-      checkinNeedsEmpleada: args.needsEmpleada ?? false,
-      checkinNeedsTeam: args.needsTeam ?? false,
-      checkinServiciosNota: args.serviciosNota?.trim() || undefined,
+      ...buildCheckinExtrasPatch(args),
       checkinUpdatedAt: Date.now(),
       updatedAt: Date.now(),
     });
@@ -158,10 +202,15 @@ export const submitCheckin = internalMutation({
     needsEmpleada: v.optional(v.boolean()),
     needsTeam: v.optional(v.boolean()),
     serviciosNota: v.optional(v.string()),
+    ...checkinExtrasValidator,
   },
   handler: async (ctx, args) => {
     const booking = await findBooking(ctx, args.key);
     if (!booking) return { ok: false as const, reason: 'not_found' };
+
+    if (args.aceptaTratamientoDatos !== true) {
+      return { ok: false as const, reason: 'missing_data_consent' };
+    }
 
     const { guests } = normalizeGuests(args.guests);
     const expected = expectedGuestCount(booking);
@@ -189,9 +238,10 @@ export const submitCheckin = internalMutation({
     const now = Date.now();
     await ctx.db.patch(booking._id, {
       checkinGuests: guests,
-      checkinNeedsEmpleada: args.needsEmpleada ?? false,
-      checkinNeedsTeam: args.needsTeam ?? false,
-      checkinServiciosNota: args.serviciosNota?.trim() || undefined,
+      ...buildCheckinExtrasPatch({
+        ...args,
+        aceptaTratamientoDatos: true,
+      }),
       checkinCompleted: true,
       checkinCompletedAt: now,
       checkinUpdatedAt: now,

@@ -389,6 +389,14 @@ export default defineSchema({
     checkinNeedsTeam: v.optional(v.boolean()),
     /** Nota libre opcional sobre servicios (cantidad, horario, etc.). */
     checkinServiciosNota: v.optional(v.string()),
+    /** Menores de 2 años (no cuentan para cupo ni van en `checkinGuests`). */
+    checkinMenoresDe2: v.optional(v.number()),
+    /** Placas de vehículos indicadas en el portal de check-in. */
+    checkinPlacas: v.optional(v.string()),
+    /** Solicitudes especiales del huésped en el portal de check-in. */
+    checkinObservaciones: v.optional(v.string()),
+    /** Consentimiento habeas data (Ley 1581) en el envío final del check-in. */
+    checkinAceptaDatos: v.optional(v.boolean()),
     /** Última vez que el turista guardó avance o envió su check-in. */
     checkinUpdatedAt: v.optional(v.number()),
     /**
