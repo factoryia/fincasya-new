@@ -430,6 +430,40 @@ export class BookingsSyncService {
     return this.convexService.query('bookings:list', params);
   }
 
+  async getBookingPayments(bookingId: string) {
+    return this.convexService.query('bookings:getPaymentsByBooking', {
+      bookingId: bookingId as any,
+    });
+  }
+
+  async createManualPayment(
+    bookingId: string,
+    body: {
+      type: 'ABONO_50' | 'SALDO_50' | 'COMPLETO' | 'REEMBOLSO';
+      amount: number;
+      paymentMethod?: string;
+      reference?: string;
+      notes?: string;
+    },
+  ) {
+    const amount = Math.floor(Number(body.amount) || 0);
+    if (!Number.isFinite(amount) || amount <= 0) {
+      throw new BadRequestException('El monto debe ser mayor a cero.');
+    }
+
+    const paymentId = await this.convexService.mutation('bookings:createPayment', {
+      bookingId: bookingId as any,
+      type: body.type,
+      amount,
+      paymentMethod: body.paymentMethod?.trim() || 'Manual',
+      reference: body.reference?.trim() || undefined,
+      notes: body.notes?.trim() || undefined,
+      status: 'PAID',
+    });
+
+    return this.getBookingPayments(bookingId);
+  }
+
   async getBookingByContractNumber(contractNumber: string) {
     const booking = await this.convexService.query(
       'bookings:getByContractNumber',

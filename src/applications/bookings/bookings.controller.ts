@@ -387,6 +387,40 @@ export class BookingsController {
     return this.bookingsSyncService.createBooking(body, files);
   }
 
+  @Get(':id/payments')
+  @UseGuards(ConvexAuthGuard, RolesGuard)
+  @Roles(UserRole.ADMIN, UserRole.ASSISTANT, UserRole.VENDEDOR)
+  async getBookingPayments(@Param('id') id: string) {
+    const data = await this.bookingsSyncService.getBookingPayments(id);
+    if (!data) {
+      throw new HttpException('Reserva no encontrada', HttpStatus.NOT_FOUND);
+    }
+    return data;
+  }
+
+  @Post(':id/payments')
+  @UseGuards(ConvexAuthGuard, RolesGuard)
+  @Roles(UserRole.ADMIN, UserRole.ASSISTANT, UserRole.VENDEDOR)
+  async createManualPayment(
+    @Param('id') id: string,
+    @Body()
+    body: {
+      type: 'ABONO_50' | 'SALDO_50' | 'COMPLETO' | 'REEMBOLSO';
+      amount: number;
+      paymentMethod?: string;
+      reference?: string;
+      notes?: string;
+    },
+  ) {
+    if (!body?.type || body.amount === undefined) {
+      throw new HttpException(
+        'type y amount son requeridos',
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+    return this.bookingsSyncService.createManualPayment(id, body);
+  }
+
   @Delete(':id')
   @UseGuards(ConvexAuthGuard, AdminGuard)
   async remove(@Param('id') id: string) {

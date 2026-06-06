@@ -668,6 +668,60 @@ export const cancel = mutation({
   },
 });
 
+function isPaidPaymentStatus(status: string | undefined): boolean {
+  const s = String(status ?? '').toLowerCase();
+  return s === 'paid' || s === 'pagado' || s === 'approved' || s === 'aprobado';
+}
+
+/** Suma abonos confirmados menos reembolsos para una reserva. */
+function netPaidFromPayments(
+  payments: Array<{ type: string; amount: number; status?: string }>,
+): number {
+  return payments.reduce((sum, p) => {
+    if (!isPaidPaymentStatus(p.status)) return sum;
+    const amt = Number(p.amount) || 0;
+    return p.type === 'REEMBOLSO' ? sum - amt : sum + amt;
+  }, 0);
+}
+
+function deriveBookingPaymentStatus(
+  precioTotal: number,
+  netPaid: number,
+): 'PENDING' | 'PARTIAL' | 'PAID' | 'REFUNDED' {
+  if (netPaid < 0) return 'REFUNDED';
+  if (netPaid <= 0) return 'PENDING';
+  if (netPaid >= precioTotal) return 'PAID';
+  return 'PARTIAL';
+}
+
+/** Pagos de una reserva (admin / detalle de reserva). */
+export const getPaymentsByBooking = query({
+  args: { bookingId: v.id('bookings') },
+  handler: async (ctx, args) => {
+    const booking = await ctx.db.get(args.bookingId);
+    if (!booking) return null;
+
+    const payments = await ctx.db
+      .query('payments')
+      .withIndex('by_booking', (q) => q.eq('bookingId', args.bookingId))
+      .collect();
+
+    payments.sort((a, b) => b.createdAt - a.createdAt);
+
+    const netPaid = netPaidFromPayments(payments);
+    const pending = Math.max(0, booking.precioTotal - netPaid);
+
+    return {
+      bookingId: booking._id,
+      precioTotal: booking.precioTotal,
+      paymentStatus: booking.paymentStatus,
+      netPaid,
+      pending,
+      payments,
+    };
+  },
+});
+
 /**
  * Crear un pago
  */
@@ -687,52 +741,53 @@ export const createPayment = mutation({
     paymentMethod: v.optional(v.string()),
     checkoutUrl: v.optional(v.string()),
     status: v.optional(v.string()),
+    notes: v.optional(v.string()),
     wompiData: v.optional(v.any()),
     boldData: v.optional(v.any()),
   },
   handler: async (ctx, args) => {
     const now = Date.now();
+    const amount = Math.max(0, Math.floor(Number(args.amount) || 0));
+    if (amount <= 0) {
+      throw new Error('El monto del pago debe ser mayor a cero.');
+    }
 
     const paymentId = await ctx.db.insert('payments', {
       bookingId: args.bookingId,
       type: args.type,
-      amount: args.amount,
+      amount,
       currency: args.currency ?? 'COP',
       transactionId: args.transactionId,
       reference: args.reference,
       paymentMethod: args.paymentMethod,
       checkoutUrl: args.checkoutUrl,
-      status: args.status ?? 'pending',
+      status: args.status ?? 'PAID',
+      notes: args.notes?.trim() || undefined,
       wompiData: args.wompiData,
       boldData: args.boldData,
       createdAt: now,
       updatedAt: now,
     });
 
-    // Actualizar estado de pago de la reserva si es necesario
     const booking = await ctx.db.get(args.bookingId);
     if (booking) {
-      let paymentStatus: 'PENDING' | 'PARTIAL' | 'PAID' | 'REFUNDED' =
-        'PENDING';
-
-      // Calcular total pagado
       const payments = await ctx.db
         .query('payments')
         .withIndex('by_booking', (q) => q.eq('bookingId', args.bookingId))
-        .filter((q) => q.neq(q.field('status'), 'refunded'))
         .collect();
 
-      const totalPaid = payments.reduce((sum, p) => sum + p.amount, 0);
-
-      if (totalPaid >= booking.precioTotal) {
-        paymentStatus = 'PAID';
-      } else if (totalPaid > 0) {
-        paymentStatus = 'PARTIAL';
-      }
+      const netPaid = netPaidFromPayments(payments);
+      const paymentStatus = deriveBookingPaymentStatus(
+        booking.precioTotal,
+        netPaid,
+      );
 
       await ctx.db.patch(args.bookingId, {
         paymentStatus,
         updatedAt: now,
+        ...(paymentStatus === 'PAID' && booking.status !== 'CANCELLED'
+          ? { status: 'PAID' as const }
+          : {}),
       });
     }
 
