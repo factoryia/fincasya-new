@@ -3,6 +3,11 @@ import { query, mutation, internalQuery } from './_generated/server';
 import { api, internal } from './_generated/api';
 import type { Doc } from './_generated/dataModel';
 import { normalizeContractLookupQueryConvex } from './lib/contractLookup';
+import {
+  deriveBookingPaymentStatus,
+  netPaidFromPayments,
+  pendingFromTotal,
+} from './lib/bookingPayments';
 
 /** Fecha calendario YYYY-MM-DD en hora de Colombia (negocio). */
 function calendarDateColombia(ms: number): string {
@@ -668,32 +673,6 @@ export const cancel = mutation({
   },
 });
 
-function isPaidPaymentStatus(status: string | undefined): boolean {
-  const s = String(status ?? '').toLowerCase();
-  return s === 'paid' || s === 'pagado' || s === 'approved' || s === 'aprobado';
-}
-
-/** Suma abonos confirmados menos reembolsos para una reserva. */
-function netPaidFromPayments(
-  payments: Array<{ type: string; amount: number; status?: string }>,
-): number {
-  return payments.reduce((sum, p) => {
-    if (!isPaidPaymentStatus(p.status)) return sum;
-    const amt = Number(p.amount) || 0;
-    return p.type === 'REEMBOLSO' ? sum - amt : sum + amt;
-  }, 0);
-}
-
-function deriveBookingPaymentStatus(
-  precioTotal: number,
-  netPaid: number,
-): 'PENDING' | 'PARTIAL' | 'PAID' | 'REFUNDED' {
-  if (netPaid < 0) return 'REFUNDED';
-  if (netPaid <= 0) return 'PENDING';
-  if (netPaid >= precioTotal) return 'PAID';
-  return 'PARTIAL';
-}
-
 /** Pagos de una reserva (admin / detalle de reserva). */
 export const getPaymentsByBooking = query({
   args: { bookingId: v.id('bookings') },
@@ -709,7 +688,7 @@ export const getPaymentsByBooking = query({
     payments.sort((a, b) => b.createdAt - a.createdAt);
 
     const netPaid = netPaidFromPayments(payments);
-    const pending = Math.max(0, booking.precioTotal - netPaid);
+    const pending = pendingFromTotal(booking.precioTotal, netPaid);
 
     return {
       bookingId: booking._id,

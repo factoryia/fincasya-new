@@ -1,6 +1,10 @@
 import { v } from 'convex/values';
 import { internalMutation, internalQuery } from './_generated/server';
 import type { Doc, Id } from './_generated/dataModel';
+import {
+  netPaidFromPayments,
+  pendingFromTotal,
+} from './lib/bookingPayments';
 
 /**
  * Portal público de check-in del turista (`/checkin/:reference`).
@@ -130,6 +134,14 @@ export const getForPortal = internalQuery({
 
     const property = await ctx.db.get(booking.propertyId);
 
+    const payments = await ctx.db
+      .query('payments')
+      .withIndex('by_booking', (q) => q.eq('bookingId', booking._id))
+      .collect();
+    const pagoTotal = netPaidFromPayments(payments);
+    const precioTotal = Number(booking.precioTotal) || 0;
+    const pagoPendiente = pendingFromTotal(precioTotal, pagoTotal);
+
     return {
       reference: booking.reference ?? booking._id,
       nombreTitular: booking.nombreCompleto,
@@ -152,6 +164,10 @@ export const getForPortal = internalQuery({
       needsEmpleada: booking.checkinNeedsEmpleada === true,
       needsTeam: booking.checkinNeedsTeam === true,
       serviciosNota: booking.checkinServiciosNota ?? '',
+      precioTotal,
+      pagoTotal,
+      pagoPendiente,
+      pagoCompleto: pagoPendiente <= 0,
     };
   },
 });
