@@ -165,6 +165,7 @@ import {
   resolveContractMoneyLabel,
 } from './contract-template-values';
 import { buildCatalogProductDescription } from './catalog-description';
+import { buildCatalogPriceFields } from './catalog-price';
 import {
   DEFAULT_CONSULTANT_SYSTEM_PROMPT,
   PROMPT_INTERNAL_PAGE_ID,
@@ -593,6 +594,7 @@ Al confirmar tu pago, recibirás el *soporte oficial* junto con todos los detall
       additional_image_link: string;
       'video[0].url': string;
       price: string;
+      sale_price: string;
       availability: string;
       condition: string;
       product_type: string;
@@ -613,6 +615,7 @@ Al confirmar tu pago, recibirás el *soporte oficial* junto con todos los detall
       additional_image_link: string;
       'video[0].url': string;
       price: string;
+      sale_price: string;
       availability: string;
       condition: string;
       product_type: string;
@@ -632,6 +635,8 @@ Al confirmar tu pago, recibirás el *soporte oficial* junto con todos los detall
         features,
       ).slice(0, 9999);
       const priceBase = (p as { priceBase?: number }).priceBase ?? 0;
+      const priceOriginal = (p as { priceOriginal?: number }).priceOriginal;
+      const catalogPrices = buildCatalogPriceFields(priceBase, priceOriginal);
 
       // Usar el slug si existe, de lo contrario generar uno exactamente igual al frontend
       let slug = (p).slug;
@@ -666,7 +671,8 @@ Al confirmar tu pago, recibirás el *soporte oficial* junto con todos los detall
         image_link: images[0],
         additional_image_link: images.slice(1).join(','),
         'video[0].url': videoUrl,
-        price: `${priceBase} COP`,
+        price: catalogPrices.price,
+        sale_price: catalogPrices.sale_price,
         availability: 'in stock',
         condition: 'new',
         product_type: primaryDepartment,
@@ -694,6 +700,7 @@ Al confirmar tu pago, recibirás el *soporte oficial* junto con todos los detall
       'additional_image_link',
       'video[0].url',
       'price',
+      'sale_price',
       'availability',
       'condition',
       'product_type',
@@ -713,6 +720,7 @@ Al confirmar tu pago, recibirás el *soporte oficial* junto con todos los detall
           r.additional_image_link,
           r['video[0].url'],
           r.price,
+          r.sale_price,
           r.availability,
           r.condition,
           r.product_type,

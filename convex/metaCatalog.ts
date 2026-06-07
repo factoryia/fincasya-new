@@ -5,16 +5,17 @@ import { internalAction, action } from './_generated/server';
 import { internal, api } from './_generated/api';
 import type { Id } from './_generated/dataModel';
 import { buildCatalogProductDescription } from './lib/catalogDescription';
+import { buildCatalogPriceFields } from './lib/catalogPrice';
 
 /**
- * Sincroniza catálogos de Meta a whatsappCatalogs.
+ * Sincroniza cat?logos de Meta a whatsappCatalogs.
  * Usa GET /{catalogId}?fields=id,name (solo requiere catalog_management, no business_management).
  * Ejecutar: npx convex run metaCatalog:syncCatalogsFromMeta
  * O con IDs: npx convex run metaCatalog:syncCatalogsFromMeta '{"catalogIds": ["1560075992300705", "803534855410286"]}'
  */
 export const syncCatalogsFromMeta = action({
   args: {
-    /** IDs de catálogos en Meta. Por defecto: los dos catálogos conocidos. */
+    /** IDs de cat?logos en Meta. Por defecto: los dos cat?logos conocidos. */
     catalogIds: v.optional(v.array(v.string())),
   },
   handler: async (ctx, args) => {
@@ -45,15 +46,15 @@ export const syncCatalogsFromMeta = action({
     }
 
     if (catalogs.length === 0) {
-      return { message: 'No se obtuvieron catálogos', catalogs: [] };
+      return { message: 'No se obtuvieron cat?logos', catalogs: [] };
     }
     await ctx.runMutation(internal.whatsappCatalogs.syncFromMeta, { catalogs });
-    return { message: 'Catálogos sincronizados', catalogs };
+    return { message: 'Cat?logos sincronizados', catalogs };
   },
 });
 
 /**
- * Probar token y catálogo: GET graph.facebook.com/v19.0/{CATALOG_ID}?access_token=TOKEN
+ * Probar token y cat?logo: GET graph.facebook.com/v19.0/{CATALOG_ID}?access_token=TOKEN
  * Ejecutar: npx convex run metaCatalog:testMetaCatalogToken '{"catalogId": "1560075992300705"}'
  */
 export const testMetaCatalogToken = action({
@@ -105,7 +106,7 @@ type PropForCatalog = {
   images?: string[];
   video?: string;
   priceBase?: number;
-  priceBaja?: number;
+  priceOriginal?: number;
 };
 
 function buildMetaPayload(
@@ -113,7 +114,10 @@ function buildMetaPayload(
   propertyId: Id<'properties'>,
 ): Record<string, unknown> {
   const retailerId = String(propertyId);
-  const price = prop.priceBase ?? 0;
+  const catalogPrices = buildCatalogPriceFields(
+    prop.priceBase,
+    prop.priceOriginal,
+  );
   const base = PRODUCT_BASE_URL.replace(/\/$/, '');
   const productUrl = `${base}/fincas/${retailerId}`;
   const productName = (prop.title || 'Finca').trim() || 'Finca';
@@ -125,16 +129,19 @@ function buildMetaPayload(
       prop.description,
       prop.features,
     ).slice(0, 5000),
-    price: `${price} COP`,
+    price: catalogPrices.price,
     availability: 'in stock',
     brand: 'Finca',
     condition: 'new',
     url: productUrl,
     link: productUrl,
   };
+  if (catalogPrices.sale_price) {
+    payload.sale_price = catalogPrices.sale_price;
+  }
   const images = prop.images?.filter(Boolean) ?? [];
   if (images.length > 0) {
-    // Campo principal que espera Meta para el catálogo: enlace de imagen.
+    // Campo principal que espera Meta para el cat?logo: enlace de imagen.
     payload.image_link = images[0];
     if (images.length > 1) {
       payload.additional_image_link = images.slice(1);
@@ -142,12 +149,8 @@ function buildMetaPayload(
   }
   if (prop.video) {
     payload.video = [{ url: prop.video, tag: [] }];
-    // Compatibilidad adicional para catálogos que esperan campo directo.
+    // Compatibilidad adicional para cat?logos que esperan campo directo.
     payload.video_url = prop.video;
-  }
-  // Solo enviar sale_price si es un descuento real (menor que el precio)
-  if (prop.priceBaja != null && prop.priceBaja > 0 && prop.priceBaja < price) {
-    payload.sale_price = `${prop.priceBaja} COP`;
   }
   return payload;
 }
@@ -167,8 +170,8 @@ async function getPropertyPayload(
 }
 
 /**
- * Sincroniza una finca a todos los catálogos en propertyWhatsAppCatalog.
- * Lo llama Nest después de crear finca con catalogIds.
+ * Sincroniza una finca a todos los cat?logos en propertyWhatsAppCatalog.
+ * Lo llama Nest despu?s de crear finca con catalogIds.
  */
 export const syncPropertyToCatalogs = action({
   args: { propertyId: v.id('properties') },
@@ -208,7 +211,7 @@ export const syncPropertyToCatalogs = action({
       const text = await res.text();
       if (!res.ok)
         throw new Error(
-          `Meta API error ${res.status} (catálogo ${wid}): ${text}`,
+          `Meta API error ${res.status} (cat?logo ${wid}): ${text}`,
         );
       const data = text
         ? (JSON.parse(text) as {
@@ -221,7 +224,7 @@ export const syncPropertyToCatalogs = action({
       for (const st of data.validation_status ?? []) {
         if (st.errors?.length) {
           throw new Error(
-            `Meta rechazó el producto (${st.retailer_id}): ${st.errors.map((e) => e.message).join('; ')}`,
+            `Meta rechaz? el producto (${st.retailer_id}): ${st.errors.map((e) => e.message).join('; ')}`,
           );
         }
       }
@@ -232,7 +235,7 @@ export const syncPropertyToCatalogs = action({
 });
 
 /**
- * Sincroniza una finca con un catálogo de Meta (CREATE o UPDATE).
+ * Sincroniza una finca con un cat?logo de Meta (CREATE o UPDATE).
  * retailer_id = propertyId para consistencia (crear/actualizar/eliminar).
  */
 export const syncProductToMetaCatalog = internalAction({
@@ -275,7 +278,7 @@ export const syncProductToMetaCatalog = internalAction({
 });
 
 /**
- * Sincroniza una finca a todos los catálogos en los que está (UPDATE).
+ * Sincroniza una finca a todos los cat?logos en los que est? (UPDATE).
  */
 export const syncPropertyToAllCatalogs = internalAction({
   args: { propertyId: v.id('properties') },
@@ -343,8 +346,8 @@ export const syncPropertyToAllCatalogs = internalAction({
 });
 
 /**
- * Re-sincroniza en Meta todas las fincas que tengan vínculo en propertyWhatsAppCatalog.
- * Útil cuando se actualiza contenido multimedia (ej. video) y se quiere propagar en bloque.
+ * Re-sincroniza en Meta todas las fincas que tengan v?nculo en propertyWhatsAppCatalog.
+ * ��til cuando se actualiza contenido multimedia (ej. video) y se quiere propagar en bloque.
  *
  * Ejecutar: npx convex run metaCatalog:resyncAllLinkedPropertiesToMeta
  */
@@ -367,14 +370,14 @@ export const resyncAllLinkedPropertiesToMeta = action({
     }
 
     return {
-      message: 'Re-sincronización programada',
+      message: 'Re-sincronizaci?n programada',
       propertiesScheduled: scheduled,
     };
   },
 });
 
 /**
- * Elimina productos del catálogo de Meta por retailer_id (llamar al borrar una finca).
+ * Elimina productos del cat?logo de Meta por retailer_id (llamar al borrar una finca).
  */
 export const deleteFromMetaCatalogs = internalAction({
   args: {
