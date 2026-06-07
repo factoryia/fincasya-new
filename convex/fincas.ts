@@ -3,7 +3,8 @@ import { catalogPeopleCountForFilter } from './lib/propertyCatalogCapacity';
 import { normalizeDepartamentos } from './lib/colombiaDepartments';
 import { normalizePropertyLocation } from './lib/propertyLocation';
 import {
-  normalizeSearchText,
+  parseCapacitySearchParts,
+  propertyMatchesCapacitySearch,
   propertySearchRelevanceScore,
   textMatchesSearchTerm,
 } from './lib/searchText';
@@ -1068,6 +1069,7 @@ export const getBySlug = query({
 /**
  * Buscar fincas por texto. Acepta mensajes largos: extrae palabras clave y devuelve fincas que coincidan con alguna.
  * Ej: "Estoy buscando en Melgar una Finca para 5 personas" → coincide con ubicación/nombre que contenga "melgar".
+ * También filtra por cupo: "15" o "15 pax" devuelve fincas con capacidad 15.
  */
 export const search = query({
   args: {
@@ -1081,33 +1083,68 @@ export const search = query({
       .replace(/[^\wáéíóúñ\s]/g, ' ')
       .replace(/\s+/g, ' ')
       .trim();
-    const words = input
-      .split(' ')
-      .filter((w) => w.length >= 2 && !SEARCH_STOPWORDS.has(w));
-    const searchTerms = words.length > 0 ? words : [input.slice(0, 50)];
+
+    const { capacityTargets, textTerms: rawTextTerms } =
+      parseCapacitySearchParts(args.query);
+    const textTerms = rawTextTerms.filter((term) => !SEARCH_STOPWORDS.has(term));
+
+    if (capacityTargets.length === 0 && textTerms.length === 0 && input) {
+      textTerms.push(input.slice(0, 50));
+    }
 
     const allProperties = await ctx.db.query('properties').collect();
 
-    const normalizedTerms = searchTerms.map((term) =>
-      normalizeSearchText(term),
-    );
-
-    const matchesTerm = (p: (typeof allProperties)[number], term: string) =>
+    const matchesTextTerm = (
+      p: (typeof allProperties)[number],
+      term: string,
+    ) =>
       textMatchesSearchTerm(p.title, term) ||
       textMatchesSearchTerm(p.description ?? '', term) ||
       textMatchesSearchTerm(p.location, term) ||
       (p.code ? textMatchesSearchTerm(p.code, term) : false);
 
-    const countMatches = (p: (typeof allProperties)[number]) =>
-      normalizedTerms.filter((term) => matchesTerm(p, term)).length;
+    const matchesCapacityTarget = (
+      p: (typeof allProperties)[number],
+      target: number,
+    ) =>
+      propertyMatchesCapacitySearch(p, target) ||
+      textMatchesSearchTerm(p.title, String(target)) ||
+      textMatchesSearchTerm(p.description ?? '', String(target));
+
+    const matchesCapacity = (p: (typeof allProperties)[number]) =>
+      capacityTargets.length === 0 ||
+      capacityTargets.some((target) => matchesCapacityTarget(p, target));
+
+    const matchesText = (p: (typeof allProperties)[number]) =>
+      textTerms.length === 0 ||
+      textTerms.some((term) => matchesTextTerm(p, term));
+
+    const countMatches = (p: (typeof allProperties)[number]) => {
+      let count = textTerms.filter((term) => matchesTextTerm(p, term)).length;
+      for (const target of capacityTargets) {
+        if (matchesCapacityTarget(p, target)) count += 1;
+      }
+      return count;
+    };
+
+    const capacityRelevanceBoost = (p: (typeof allProperties)[number]) => {
+      if (capacityTargets.length === 0) return 0;
+      return capacityTargets.reduce((score, target) => {
+        if (propertyMatchesCapacitySearch(p, target)) return score + 500;
+        if (matchesCapacityTarget(p, target)) return score + 200;
+        return score;
+      }, 0);
+    };
 
     const visibleProperties = allProperties.filter(
       (p: { active?: boolean; visible?: boolean }) =>
         p.active !== false && p.visible !== false,
     );
     const filtered = visibleProperties
-      .filter((p) => normalizedTerms.some((term) => matchesTerm(p, term)))
+      .filter((p) => matchesCapacity(p) && matchesText(p))
       .sort((a, b) => {
+        const boostDiff = capacityRelevanceBoost(b) - capacityRelevanceBoost(a);
+        if (boostDiff !== 0) return boostDiff;
         const matchDiff = countMatches(b) - countMatches(a);
         if (matchDiff !== 0) return matchDiff;
         return (
