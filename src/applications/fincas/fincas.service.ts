@@ -628,11 +628,21 @@ Al confirmar tu pago, recibirás el *soporte oficial* junto con todos los detall
       if (images.length === 0) continue;
       const id = String((p as { _id: string })._id);
       const title = ((p as { title?: string }).title ?? 'Finca').slice(0, 200);
-      const features = (p as { features?: { name?: string; emoji?: string | null }[] })
-        .features;
+      const features = (
+        p as {
+          features?: {
+            name?: string;
+            emoji?: string | null;
+            quantity?: number;
+            zone?: string | null;
+          }[];
+        }
+      ).features;
+      const zoneOrder = (p as { zoneOrder?: string[] }).zoneOrder;
       const description = buildCatalogProductDescription(
         (p as { description?: string }).description,
         features,
+        zoneOrder,
       ).slice(0, 9999);
       const priceBase = (p as { priceBase?: number }).priceBase ?? 0;
       const priceOriginal = (p as { priceOriginal?: number }).priceOriginal;

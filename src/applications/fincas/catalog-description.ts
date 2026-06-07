@@ -4,7 +4,17 @@ export type CatalogFeatureInput = {
   label?: string;
   emoji?: string | null;
   quantity?: number;
+  /** Zona/sección a la que pertenece (ej. "GENERAL", "HABITACIÓN 01"). */
+  zone?: string | null;
 };
+
+const DEFAULT_ZONE = 'General';
+
+function featureZone(f: unknown): string {
+  if (!f || typeof f !== 'object') return DEFAULT_ZONE;
+  const z = (f as CatalogFeatureInput).zone;
+  return typeof z === 'string' && z.trim() ? z.trim() : DEFAULT_ZONE;
+}
 
 const DEFAULT_FEATURE_EMOJI = '✅';
 /** Lista 1. PISCINA — no confundir con montos COP ($300.000). */
@@ -129,6 +139,56 @@ export function formatFincaFeaturesForCatalog(features: unknown[]): string {
     .join('\n');
 }
 
+/**
+ * Lista agrupada por zona/habitación, respetando `zoneOrder`. Cada zona lleva
+ * encabezado y debajo sus amenidades (igual que el detalle de la web).
+ */
+export function formatFincaFeaturesByZone(
+  features: unknown[],
+  zoneOrder?: string[],
+): string {
+  if (!features?.length) return '';
+
+  // Agrupar features por zona.
+  const byZone = new Map<string, unknown[]>();
+  for (const f of features) {
+    if (!featureName(f)) continue;
+    const zone = featureZone(f);
+    const list = byZone.get(zone);
+    if (list) list.push(f);
+    else byZone.set(zone, [f]);
+  }
+  if (byZone.size === 0) return '';
+
+  // Si solo hay una zona y es la General, no ponemos encabezado (lista simple).
+  if (byZone.size === 1 && byZone.has(DEFAULT_ZONE)) {
+    return formatFincaFeaturesForCatalog(byZone.get(DEFAULT_ZONE)!);
+  }
+
+  // Ordenar zonas: primero zoneOrder, luego General arriba del resto, resto alfabético.
+  const present = Array.from(byZone.keys());
+  const ordered: string[] = [];
+  for (const z of zoneOrder ?? []) {
+    if (byZone.has(z) && !ordered.includes(z)) ordered.push(z);
+  }
+  const rest = present
+    .filter((z) => !ordered.includes(z))
+    .sort((a, b) => {
+      if (a === DEFAULT_ZONE) return -1;
+      if (b === DEFAULT_ZONE) return 1;
+      return a.localeCompare(b, 'es');
+    });
+  const finalZones = [...ordered, ...rest];
+
+  const blocks: string[] = [];
+  for (const zone of finalZones) {
+    const lines = formatFincaFeaturesForCatalog(byZone.get(zone) ?? []);
+    if (!lines) continue;
+    blocks.push(`*${zone.toUpperCase()}*\n${lines}`);
+  }
+  return blocks.join('\n\n');
+}
+
 function formatExtractedFeatureLines(names: string[]): string {
   if (!names.length) return '';
   const map = new Map<string, { name: string; count: number; emoji: string }>();
@@ -197,12 +257,14 @@ export function stripEmbeddedFeaturesBlock(description: string): string {
 export function buildCatalogProductDescription(
   description: string | undefined,
   features: unknown[] | undefined,
+  zoneOrder?: string[],
 ): string {
   const { text: base, extractedNames } = stripNumberedListFromDescription(
     description ?? '',
   );
 
-  let featuresBlock = formatFincaFeaturesForCatalog(features ?? []);
+  // Agrupado por zona/habitación (igual que el detalle de la web).
+  let featuresBlock = formatFincaFeaturesByZone(features ?? [], zoneOrder);
   if (!featuresBlock && extractedNames.length > 0) {
     featuresBlock = formatExtractedFeatureLines(extractedNames);
   }
