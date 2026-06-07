@@ -126,15 +126,32 @@ export function aggregateFeaturesForCatalog(
   return Array.from(map.values());
 }
 
-/** Lista vertical solo con emoji (sin números). */
+/** Quita prefijo numérico (01–99) y sufijo «(xN)» del nombre guardado. */
+function featureNameWithoutQuantity(name: string): string {
+  let text = name.trim();
+  const suffix = text.match(/^(.+?)\s*\([×x]\s*(\d+)\)\s*$/i);
+  if (suffix) text = suffix[1].trim();
+  const leading = text.match(/^(\d{1,2})\s+(.+)$/);
+  if (leading) {
+    const n = parseInt(leading[1], 10);
+    if (n >= 1 && n <= 99) return leading[2].trim();
+  }
+  return text;
+}
+
+/**
+ * Lista vertical con emoji. Si cantidad > 1, antepone el número con dos dígitos
+ * (ej. "04 HABITACIONES"), igual que el detalle de la web — en vez de "(x4)".
+ */
 export function formatFincaFeaturesForCatalog(features: unknown[]): string {
   const items = aggregateFeaturesForCatalog(features);
   if (!items.length) return '';
 
   return items
     .map(({ name, count, emoji }) => {
-      const suffix = count > 1 ? ` (x${count})` : '';
-      return `${emoji} ${name}${suffix}`;
+      const base = featureNameWithoutQuantity(name);
+      const label = count > 1 ? `${String(count).padStart(2, '0')} ${base}` : base;
+      return `${emoji} ${label}`;
     })
     .join('\n');
 }
@@ -208,8 +225,9 @@ function formatExtractedFeatureLines(names: string[]): string {
 
   return Array.from(map.values())
     .map(({ name, count, emoji }) => {
-      const suffix = count > 1 ? ` (x${count})` : '';
-      return `${emoji} ${name}${suffix}`;
+      const base = featureNameWithoutQuantity(name);
+      const label = count > 1 ? `${String(count).padStart(2, '0')} ${base}` : base;
+      return `${emoji} ${label}`;
     })
     .join('\n');
 }
