@@ -12,6 +12,7 @@ import {
   resolveConversationChannel,
 } from "./lib/inboxContactDisplay";
 import { getConversationLastMessagePreview } from "./lib/inboxMessagePreview";
+import { jsonSafeString } from "./lib/jsonSafeString";
 
 function effectiveState(
   s: OperationalState | undefined,
@@ -755,15 +756,32 @@ export const list = query({
         ]);
         return {
           ...rest,
+          ...(rest.tags
+            ? { tags: rest.tags.map((t) => jsonSafeString(t)) }
+            : {}),
+          ...(rest.lastCatalogSearch
+            ? {
+                lastCatalogSearch: {
+                  ...rest.lastCatalogSearch,
+                  location: jsonSafeString(rest.lastCatalogSearch.location),
+                },
+              }
+            : {}),
           lastMessagePreview,
           unreadCount: _u ?? 0,
           operationalState: effectiveState(
             c.operationalState as OperationalState | undefined
           ),
-          assignedUser,
+          assignedUser: assignedUser
+            ? {
+                ...assignedUser,
+                name: jsonSafeString(assignedUser.name),
+                email: jsonSafeString(assignedUser.email),
+              }
+            : null,
           contact: {
-            phone: contact?.phone ?? "",
-            name: contact?.name ?? "",
+            phone: jsonSafeString(contact?.phone ?? ""),
+            name: jsonSafeString(contact?.name ?? ""),
           },
         };
       })

@@ -1,5 +1,6 @@
 import type { QueryCtx } from "../_generated/server";
 import type { Id } from "../_generated/dataModel";
+import { jsonSafeString, truncateJsonSafe } from "./jsonSafeString";
 
 const PREVIEW_MAX_LEN = 80;
 
@@ -7,11 +8,9 @@ export function buildInboxMessagePreview(
   content: string | undefined,
   type?: string,
 ): string {
-  const text = (content ?? "").trim();
+  const text = jsonSafeString(content).trim();
   if (text) {
-    return text.length > PREVIEW_MAX_LEN
-      ? text.slice(0, PREVIEW_MAX_LEN) + "…"
-      : text;
+    return truncateJsonSafe(text, PREVIEW_MAX_LEN);
   }
   switch (type) {
     case "image":

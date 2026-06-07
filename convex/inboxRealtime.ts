@@ -13,6 +13,7 @@ import { v } from 'convex/values';
 import { query, type QueryCtx } from './_generated/server';
 import { components } from './_generated/api';
 import { getConversationLastMessagePreview } from './lib/inboxMessagePreview';
+import { jsonSafeString } from './lib/jsonSafeString';
 
 type AllowedRole =
   | 'admin'
@@ -113,11 +114,26 @@ export const listConversations = query({
 
       out.push({
         ...rest,
+        ...(rest.tags
+          ? { tags: rest.tags.map((t) => jsonSafeString(t)) }
+          : {}),
+        ...(rest.lastCatalogSearch
+          ? {
+              lastCatalogSearch: {
+                ...rest.lastCatalogSearch,
+                location: jsonSafeString(rest.lastCatalogSearch.location),
+              },
+            }
+          : {}),
         lastMessagePreview,
         unreadCount: inboxUnreadCount ?? 0,
         contact: {
-          name: (contact as { name?: string } | null)?.name ?? '',
-          phone: (contact as { phone?: string } | null)?.phone ?? '',
+          name: jsonSafeString(
+            (contact as { name?: string } | null)?.name ?? '',
+          ),
+          phone: jsonSafeString(
+            (contact as { phone?: string } | null)?.phone ?? '',
+          ),
         },
       });
     }
