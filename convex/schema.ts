@@ -346,6 +346,11 @@ export default defineSchema({
     isDirectBooking: v.optional(v.boolean()),
     googleEventId: v.optional(v.string()),
     googleCalendarId: v.optional(v.string()),
+    /**
+     * Etiqueta/código que reemplaza el prefijo "Reserva:" en el título del
+     * evento de Google Calendar. Si está vacío, no se antepone nada.
+     */
+    calendarLabel: v.optional(v.string()),
     multimedia: v.optional(
       v.array(
         v.object({

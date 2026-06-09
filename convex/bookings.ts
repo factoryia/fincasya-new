@@ -393,6 +393,8 @@ export const create = mutation({
     reference: v.optional(v.string()),
     googleEventId: v.optional(v.string()),
     googleCalendarId: v.optional(v.string()),
+    /** Código/etiqueta que reemplaza "Reserva:" en el título del evento. */
+    calendarLabel: v.optional(v.string()),
     horaEntrada: v.optional(v.string()), // "15:00"
     horaSalida: v.optional(v.string()), // "11:00"
     fechaCheckOut: v.optional(v.number()), // Para compatibilidad con nombres de UI
@@ -538,6 +540,7 @@ export const create = mutation({
       detallesEvento: args.detallesEvento,
       googleEventId: args.googleEventId,
       googleCalendarId: args.googleCalendarId,
+      calendarLabel: args.calendarLabel,
       horaSalida: args.horaSalida,
       address: args.address,
       multimedia: args.multimedia,
