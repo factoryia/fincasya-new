@@ -455,7 +455,10 @@ export default defineSchema({
   /** Ajustes globales de plataforma (p. ej. interruptor maestro de IA). */
   platformSettings: defineTable({
     scope: v.literal('global'),
+    /** Legacy: activa/desactiva ambos canales si no hay toggles por canal. */
     aiEnabled: v.boolean(),
+    webAiEnabled: v.optional(v.boolean()),
+    whatsappAiEnabled: v.optional(v.boolean()),
     updatedAt: v.number(),
     updatedByUserId: v.optional(v.string()),
   }).index('by_scope', ['scope']),

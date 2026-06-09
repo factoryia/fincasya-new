@@ -1,5 +1,73 @@
 import type { Id } from '../_generated/dataModel';
-import { GLOBAL_PLATFORM_SCOPE } from './platformAi';
+import {
+  AiChannel,
+  GLOBAL_PLATFORM_SCOPE,
+  getPlatformSettingsRow,
+  resolveChannelAiEnabled,
+} from './platformAi';
+
+type PlatformSettingsPatch = {
+  aiEnabled?: boolean;
+  webAiEnabled?: boolean;
+  whatsappAiEnabled?: boolean;
+  updatedAt: number;
+  updatedByUserId?: string;
+};
+
+async function upsertPlatformSettings(
+  ctx: { db: any },
+  patch: PlatformSettingsPatch,
+): Promise<Id<'platformSettings'>> {
+  const existing = await ctx.db
+    .query('platformSettings')
+    .withIndex('by_scope', (q: any) => q.eq('scope', GLOBAL_PLATFORM_SCOPE))
+    .unique();
+
+  if (existing) {
+    await ctx.db.patch(existing._id, patch);
+    return existing._id;
+  }
+
+  return await ctx.db.insert('platformSettings', {
+    scope: GLOBAL_PLATFORM_SCOPE,
+    aiEnabled: patch.aiEnabled ?? false,
+    webAiEnabled: patch.webAiEnabled,
+    whatsappAiEnabled: patch.whatsappAiEnabled,
+    updatedAt: patch.updatedAt,
+    updatedByUserId: patch.updatedByUserId,
+  });
+}
+
+async function escalateChannelAiConversationsToHuman(
+  ctx: { db: any },
+  channel: AiChannel,
+) {
+  const aiConversations = await ctx.db
+    .query('conversations')
+    .withIndex('by_status', (q: any) => q.eq('status', 'ai'))
+    .collect();
+
+  for (const conversation of aiConversations) {
+    if (conversation.channel !== channel) continue;
+    await ctx.db.patch(conversation._id, { status: 'human' });
+  }
+}
+
+async function restoreChannelHumanConversationsToAi(
+  ctx: { db: any },
+  channel: AiChannel,
+) {
+  const humanConversations = await ctx.db
+    .query('conversations')
+    .withIndex('by_status', (q: any) => q.eq('status', 'human'))
+    .collect();
+
+  for (const conversation of humanConversations) {
+    if (conversation.channel !== channel) continue;
+    if (conversation.assignedUserId) continue;
+    await ctx.db.patch(conversation._id, { status: 'ai' });
+  }
+}
 
 export async function upsertGlobalAiEnabled(
   ctx: { db: any },
@@ -7,37 +75,21 @@ export async function upsertGlobalAiEnabled(
   updatedByUserId?: string,
 ): Promise<Id<'platformSettings'>> {
   const now = Date.now();
-  const existing = await ctx.db
-    .query('platformSettings')
-    .withIndex('by_scope', (q: any) => q.eq('scope', GLOBAL_PLATFORM_SCOPE))
-    .unique();
-
-  if (existing) {
-    await ctx.db.patch(existing._id, {
-      aiEnabled,
-      updatedAt: now,
-      updatedByUserId,
-    });
-    return existing._id;
-  }
-
-  return await ctx.db.insert('platformSettings', {
-    scope: GLOBAL_PLATFORM_SCOPE,
+  const settingsId = await upsertPlatformSettings(ctx, {
     aiEnabled,
+    webAiEnabled: aiEnabled,
+    whatsappAiEnabled: aiEnabled,
     updatedAt: now,
     updatedByUserId,
   });
-}
-
-async function escalateAllAiConversationsToHuman(ctx: { db: any }) {
-  const aiConversations = await ctx.db
-    .query('conversations')
-    .withIndex('by_status', (q: any) => q.eq('status', 'ai'))
-    .collect();
-
-  for (const conversation of aiConversations) {
-    await ctx.db.patch(conversation._id, { status: 'human' });
+  if (!aiEnabled) {
+    await escalateChannelAiConversationsToHuman(ctx, 'web');
+    await escalateChannelAiConversationsToHuman(ctx, 'whatsapp');
+  } else {
+    await restoreChannelHumanConversationsToAi(ctx, 'web');
+    await restoreChannelHumanConversationsToAi(ctx, 'whatsapp');
   }
+  return settingsId;
 }
 
 export async function setGlobalAiEnabled(
@@ -45,9 +97,39 @@ export async function setGlobalAiEnabled(
   aiEnabled: boolean,
   updatedByUserId?: string,
 ) {
-  const settingsId = await upsertGlobalAiEnabled(ctx, aiEnabled, updatedByUserId);
+  return await upsertGlobalAiEnabled(ctx, aiEnabled, updatedByUserId);
+}
+
+export async function setChannelAiEnabled(
+  ctx: { db: any },
+  channel: AiChannel,
+  aiEnabled: boolean,
+  updatedByUserId?: string,
+) {
+  const now = Date.now();
+  const existing = await getPlatformSettingsRow(ctx);
+  const webAiEnabled =
+    channel === 'web'
+      ? aiEnabled
+      : resolveChannelAiEnabled(existing, 'web');
+  const whatsappAiEnabled =
+    channel === 'whatsapp'
+      ? aiEnabled
+      : resolveChannelAiEnabled(existing, 'whatsapp');
+
+  const settingsId = await upsertPlatformSettings(ctx, {
+    aiEnabled: webAiEnabled || whatsappAiEnabled,
+    webAiEnabled,
+    whatsappAiEnabled,
+    updatedAt: now,
+    updatedByUserId,
+  });
+
   if (!aiEnabled) {
-    await escalateAllAiConversationsToHuman(ctx);
+    await escalateChannelAiConversationsToHuman(ctx, channel);
+  } else {
+    await restoreChannelHumanConversationsToAi(ctx, channel);
   }
+
   return settingsId;
 }

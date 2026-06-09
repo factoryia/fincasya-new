@@ -1,7 +1,7 @@
 import { SESSION_ACTIVE_TTL_MS, SESSION_REACTIVATE_TTL_MS } from "./constants";
 import {
   defaultConversationStatus,
-  isGlobalAiEnabled,
+  isChannelAiEnabled,
 } from "../platformAi";
 
 export async function getOrCreateConversationForContact(
@@ -10,7 +10,7 @@ export async function getOrCreateConversationForContact(
   channel: "whatsapp" | "web" = "whatsapp",
 ) {
   const now = Date.now();
-  const aiEnabled = await isGlobalAiEnabled(ctx);
+  const aiEnabled = await isChannelAiEnabled(ctx, channel);
   const initialStatus = defaultConversationStatus(aiEnabled);
   const all = await ctx.db
     .query("conversations")

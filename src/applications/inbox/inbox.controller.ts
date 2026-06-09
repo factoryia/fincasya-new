@@ -86,7 +86,19 @@ export class InboxController {
 
   @Patch('ai-settings')
   @Roles(UserRole.ADMIN)
-  async setAiSettings(@Body() body: { aiEnabled: boolean }) {
+  async setAiSettings(
+    @Body()
+    body: {
+      aiEnabled?: boolean;
+      channel?: 'whatsapp' | 'web';
+    },
+  ) {
+    if (body?.channel) {
+      if (typeof body?.aiEnabled !== 'boolean') {
+        throw new BadRequestException('aiEnabled debe ser boolean');
+      }
+      return this.inboxService.setChannelAiEnabled(body.channel, body.aiEnabled);
+    }
     if (typeof body?.aiEnabled !== 'boolean') {
       throw new BadRequestException('aiEnabled debe ser boolean');
     }

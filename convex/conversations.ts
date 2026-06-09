@@ -456,13 +456,19 @@ export const setConversationTags = mutation({
 export const setToAiPublic = mutation({
   args: { conversationId: v.id("conversations") },
   handler: async (ctx, args) => {
-    const { isGlobalAiEnabled } = await import("./lib/platformAi");
-    if (!(await isGlobalAiEnabled(ctx))) {
+    const { isChannelAiEnabled } = await import("./lib/platformAi");
+    const prev = await ctx.db.get(args.conversationId);
+    if (!prev) {
+      throw new Error("Conversación no encontrada");
+    }
+    const channel = (prev.channel ?? "whatsapp") as "whatsapp" | "web";
+    if (!(await isChannelAiEnabled(ctx, channel))) {
       throw new Error(
-        "La IA global está desactivada. Actívala desde el panel de chats para usar el bot.",
+        channel === "web"
+          ? "La IA del chat web está desactivada. Actívala desde el panel de chats para usar el bot."
+          : "La IA de WhatsApp está desactivada. Actívala desde el panel de chats para usar el bot.",
       );
     }
-    const prev = await ctx.db.get(args.conversationId);
     const op = effectiveState(
       prev?.operationalState as OperationalState | undefined,
     );

@@ -909,11 +909,12 @@ export async function processInboundMessageV2(
   if (!latestMsg || String(latestMsg._id) !== String(insertedMsgId)) return;
   if (conv.status !== "ai") return;
 
-  const globalAiEnabled = (await ctx.runQuery(
-    deps.internal.platformSettings.isAiEnabledInternal,
-    {},
+  const channel = deps.channel ?? "whatsapp";
+  const channelAiEnabled = (await ctx.runQuery(
+    deps.internal.platformSettings.isChannelAiEnabledInternal,
+    { channel },
   )) as boolean;
-  if (!globalAiEnabled) return;
+  if (!channelAiEnabled) return;
 
   // ───────────────────────────────────────────────────────────────────────
   // PRIORIDAD MÁXIMA: cliente con RESERVA VIGENTE o POR VENIR.
