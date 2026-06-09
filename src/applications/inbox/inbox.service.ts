@@ -1159,6 +1159,7 @@ export class InboxService {
     precioTotal: number | string;
     temporada: string;
     observaciones?: string;
+    calendarLabel?: string;
     multimediaFiles?: Express.Multer.File[];
   }) {
     const { conversationId, multimediaFiles, ...bookingParams } = params;

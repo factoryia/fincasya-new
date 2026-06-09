@@ -2,6 +2,44 @@ import { v } from "convex/values";
 import { action, internalAction, internalQuery, mutation, query } from "./_generated/server";
 import { api, internal } from "./_generated/api";
 
+/** Fecha calendario en Colombia (YYYY-MM-DD) a partir de un timestamp ms. */
+function calendarDateColombiaISO(ms: number): string {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/Bogota",
+  }).format(new Date(ms));
+}
+
+/**
+ * Slot de 30 min para una reserva dentro de su día de ENTRADA. Cuenta cuántas
+ * reservas del mismo día de entrada se crearon antes que esta (orden por
+ * createdAt) → ese índice es el slot (0 = 00:00, 1 = 00:30, ...). Determinista.
+ */
+export const getCalendarSlotForDay = internalQuery({
+  args: { fechaEntrada: v.number(), bookingId: v.id("bookings") },
+  handler: async (ctx, args) => {
+    const dayIso = calendarDateColombiaISO(args.fechaEntrada);
+    const target = await ctx.db.get(args.bookingId);
+    const targetCreatedAt = target?.createdAt ?? Date.now();
+    // Ventana amplia: todas las reservas que entran ese mismo día.
+    const dayStart = new Date(`${dayIso}T00:00:00-05:00`).getTime();
+    const dayEnd = dayStart + 24 * 60 * 60 * 1000;
+    const sameDay = await ctx.db
+      .query("bookings")
+      .withIndex("by_dates", (q) =>
+        q.gte("fechaEntrada", dayStart).lt("fechaEntrada", dayEnd),
+      )
+      .collect();
+    const before = sameDay.filter(
+      (b) =>
+        b.status !== "CANCELLED" &&
+        calendarDateColombiaISO(b.fechaEntrada) === dayIso &&
+        (b.createdAt < targetCreatedAt ||
+          (b.createdAt === targetCreatedAt && b._id < args.bookingId)),
+    );
+    return before.length; // índice de slot
+  },
+});
+
 /**
  * Refresca el access token de Google usando el refresh token almacenado.
  */
@@ -262,21 +300,55 @@ export const syncBookingToCalendar = internalAction({
 
     const calendarId = gc.calendarId ?? "primary";
     const timezone = "America/Bogota";
-    const summary = `Reserva: ${booking.property?.title || "Finca"} - ${booking.nombreCompleto}`;
+
+    // Prefijo configurable por reserva: si `calendarLabel` viene definido,
+    // reemplaza a "Reserva:". Si viene vacío (""), no se antepone nada. Si es
+    // undefined (reservas viejas), se mantiene "Reserva:" por compatibilidad.
+    const rawLabel = (booking as { calendarLabel?: string }).calendarLabel;
+    const label = rawLabel === undefined ? "Reserva:" : rawLabel.trim();
+    const tituloFinca = `${booking.property?.title || "Finca"} - ${booking.nombreCompleto}`;
+    const summary = label ? `${label} ${tituloFinca}` : tituloFinca;
+
+    // Número de noches para la descripción.
+    const noches =
+      (booking as { numeroNoches?: number }).numeroNoches ??
+      Math.max(
+        1,
+        Math.round(
+          (booking.fechaSalida - booking.fechaEntrada) /
+            (24 * 60 * 60 * 1000),
+        ),
+      );
+
     const description = [
       `Cliente: ${booking.nombreCompleto}`,
       `Cédula: ${booking.cedula}`,
       `Celular: ${booking.celular}`,
       `Correo: ${booking.correo}`,
       `Personas: ${booking.numeroPersonas}`,
+      `Noches: ${noches}`,
       `Total: $${booking.precioTotal.toLocaleString("es-CO")}`,
       booking.observaciones ? `Observaciones: ${booking.observaciones}` : null,
     ]
       .filter(Boolean)
       .join("\n");
 
-    const startDateTime = new Date(booking.fechaEntrada).toISOString();
-    const endDateTime = new Date(booking.fechaSalida).toISOString();
+    // El evento se ubica en el DÍA DE ENTRADA, en un bloque de 30 min apilado
+    // desde medianoche (00:00, 00:30, 01:00...) según el orden de creación de
+    // las reservas de ese mismo día. Así varias fincas del mismo día no se
+    // solapan en bloques gigantes; la duración real va como "Noches: N".
+    const SLOT_MIN = 30;
+    const slot = (await ctx.runQuery(
+      internal.googleCalendar.getCalendarSlotForDay,
+      { fechaEntrada: booking.fechaEntrada, bookingId: args.bookingId },
+    )) as number;
+    const dayStartUtcMs = new Date(
+      `${calendarDateColombiaISO(booking.fechaEntrada)}T00:00:00-05:00`,
+    ).getTime();
+    const startMs = dayStartUtcMs + slot * SLOT_MIN * 60 * 1000;
+    const endMs = startMs + SLOT_MIN * 60 * 1000;
+    const startDateTime = new Date(startMs).toISOString();
+    const endDateTime = new Date(endMs).toISOString();
 
     const url = booking.googleEventId 
         ? `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(calendarId)}/events/${encodeURIComponent(booking.googleEventId)}`

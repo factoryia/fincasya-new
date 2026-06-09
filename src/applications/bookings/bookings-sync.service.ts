@@ -65,6 +65,7 @@ export class BookingsSyncService {
       depositoMascotas?: number | string;
       sobrecargoMascotas?: number | string;
       observaciones?: string;
+      calendarLabel?: string;
       horaEntrada?: string;
       horaSalida?: string;
       city?: string;
@@ -215,6 +216,7 @@ export class BookingsSyncService {
         (fechaSalidaNum - fechaEntradaNum) / (1000 * 60 * 60 * 24),
       ),
       observaciones: params.observaciones,
+      calendarLabel: params.calendarLabel,
       horaEntrada: params.horaEntrada,
       horaSalida: params.horaSalida,
       city: params.city,
