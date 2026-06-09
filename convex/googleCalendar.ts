@@ -315,13 +315,19 @@ export const syncBookingToCalendar = internalAction({
       noches === 1 ? "NOCHE" : "NOCHES"
     }`;
 
-    // Título del evento: "{código} {NOMBRE CLIENTE}, {FINCA}, {NN NOCHE(S)}".
+    // Título del evento: "{código} {NOMBRE CLIENTE}, {FINCA 4 PALABRAS}, {NN NOCHE(S)}".
     // `calendarLabel`: si viene definido reemplaza a "Reserva:"; si viene vacío
     // ("") no se antepone nada; si es undefined (reservas viejas) usa "Reserva:".
     const rawLabel = (booking as { calendarLabel?: string }).calendarLabel;
     const label = rawLabel === undefined ? "Reserva:" : rawLabel.trim();
     const cliente = (booking.nombreCompleto || "").toUpperCase();
-    const finca = (booking.property?.title || "Finca").toUpperCase();
+    // Solo las primeras 4 palabras del nombre de la finca (sin el código final).
+    const finca = (booking.property?.title || "Finca")
+      .toUpperCase()
+      .split(/\s+/)
+      .filter(Boolean)
+      .slice(0, 4)
+      .join(" ");
     const cuerpo = `${cliente}, ${finca}, ${nochesTxt}`;
     const summary = label ? `${label} ${cuerpo}` : cuerpo;
 
