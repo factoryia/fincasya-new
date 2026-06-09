@@ -301,15 +301,7 @@ export const syncBookingToCalendar = internalAction({
     const calendarId = gc.calendarId ?? "primary";
     const timezone = "America/Bogota";
 
-    // Prefijo configurable por reserva: si `calendarLabel` viene definido,
-    // reemplaza a "Reserva:". Si viene vacío (""), no se antepone nada. Si es
-    // undefined (reservas viejas), se mantiene "Reserva:" por compatibilidad.
-    const rawLabel = (booking as { calendarLabel?: string }).calendarLabel;
-    const label = rawLabel === undefined ? "Reserva:" : rawLabel.trim();
-    const tituloFinca = `${booking.property?.title || "Finca"} - ${booking.nombreCompleto}`;
-    const summary = label ? `${label} ${tituloFinca}` : tituloFinca;
-
-    // Número de noches para la descripción.
+    // Número de noches (para título y descripción).
     const noches =
       (booking as { numeroNoches?: number }).numeroNoches ??
       Math.max(
@@ -319,6 +311,19 @@ export const syncBookingToCalendar = internalAction({
             (24 * 60 * 60 * 1000),
         ),
       );
+    const nochesTxt = `${String(noches).padStart(2, "0")} ${
+      noches === 1 ? "NOCHE" : "NOCHES"
+    }`;
+
+    // Título del evento: "{código} {NOMBRE CLIENTE}, {FINCA}, {NN NOCHE(S)}".
+    // `calendarLabel`: si viene definido reemplaza a "Reserva:"; si viene vacío
+    // ("") no se antepone nada; si es undefined (reservas viejas) usa "Reserva:".
+    const rawLabel = (booking as { calendarLabel?: string }).calendarLabel;
+    const label = rawLabel === undefined ? "Reserva:" : rawLabel.trim();
+    const cliente = (booking.nombreCompleto || "").toUpperCase();
+    const finca = (booking.property?.title || "Finca").toUpperCase();
+    const cuerpo = `${cliente}, ${finca}, ${nochesTxt}`;
+    const summary = label ? `${label} ${cuerpo}` : cuerpo;
 
     const description = [
       `Cliente: ${booking.nombreCompleto}`,
