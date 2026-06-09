@@ -4,7 +4,17 @@ export type CatalogFeatureInput = {
   label?: string;
   emoji?: string | null;
   quantity?: number;
+  /** Zona/sección a la que pertenece (ej. "GENERAL", "HABITACIÓN 01"). */
+  zone?: string | null;
 };
+
+const DEFAULT_ZONE = 'General';
+
+function featureZone(f: unknown): string {
+  if (!f || typeof f !== 'object') return DEFAULT_ZONE;
+  const z = (f as CatalogFeatureInput).zone;
+  return typeof z === 'string' && z.trim() ? z.trim() : DEFAULT_ZONE;
+}
 
 const DEFAULT_FEATURE_EMOJI = '✅';
 /** Lista 1. PISCINA — no confundir con montos COP ($300.000). */
@@ -116,17 +126,84 @@ export function aggregateFeaturesForCatalog(
   return Array.from(map.values());
 }
 
-/** Lista vertical solo con emoji (sin números). */
+/** Quita prefijo numérico (01–99) y sufijo «(xN)» del nombre guardado. */
+function featureNameWithoutQuantity(name: string): string {
+  let text = name.trim();
+  const suffix = text.match(/^(.+?)\s*\([×x]\s*(\d+)\)\s*$/i);
+  if (suffix) text = suffix[1].trim();
+  const leading = text.match(/^(\d{1,2})\s+(.+)$/);
+  if (leading) {
+    const n = parseInt(leading[1], 10);
+    if (n >= 1 && n <= 99) return leading[2].trim();
+  }
+  return text;
+}
+
+/**
+ * Lista vertical con emoji. Si cantidad > 1, antepone el número con dos dígitos
+ * (ej. "04 HABITACIONES"), igual que el detalle de la web — en vez de "(x4)".
+ */
 export function formatFincaFeaturesForCatalog(features: unknown[]): string {
   const items = aggregateFeaturesForCatalog(features);
   if (!items.length) return '';
 
   return items
     .map(({ name, count, emoji }) => {
-      const suffix = count > 1 ? ` (x${count})` : '';
-      return `${emoji} ${name}${suffix}`;
+      const base = featureNameWithoutQuantity(name);
+      const label = count > 1 ? `${String(count).padStart(2, '0')} ${base}` : base;
+      return `${emoji} ${label}`;
     })
     .join('\n');
+}
+
+/**
+ * Lista agrupada por zona/habitación, respetando `zoneOrder`. Cada zona lleva
+ * encabezado y debajo sus amenidades (igual que el detalle de la web).
+ */
+export function formatFincaFeaturesByZone(
+  features: unknown[],
+  zoneOrder?: string[],
+): string {
+  if (!features?.length) return '';
+
+  // Agrupar features por zona.
+  const byZone = new Map<string, unknown[]>();
+  for (const f of features) {
+    if (!featureName(f)) continue;
+    const zone = featureZone(f);
+    const list = byZone.get(zone);
+    if (list) list.push(f);
+    else byZone.set(zone, [f]);
+  }
+  if (byZone.size === 0) return '';
+
+  // Si solo hay una zona y es la General, no ponemos encabezado (lista simple).
+  if (byZone.size === 1 && byZone.has(DEFAULT_ZONE)) {
+    return formatFincaFeaturesForCatalog(byZone.get(DEFAULT_ZONE)!);
+  }
+
+  // Ordenar zonas: primero zoneOrder, luego General arriba del resto, resto alfabético.
+  const present = Array.from(byZone.keys());
+  const ordered: string[] = [];
+  for (const z of zoneOrder ?? []) {
+    if (byZone.has(z) && !ordered.includes(z)) ordered.push(z);
+  }
+  const rest = present
+    .filter((z) => !ordered.includes(z))
+    .sort((a, b) => {
+      if (a === DEFAULT_ZONE) return -1;
+      if (b === DEFAULT_ZONE) return 1;
+      return a.localeCompare(b, 'es');
+    });
+  const finalZones = [...ordered, ...rest];
+
+  const blocks: string[] = [];
+  for (const zone of finalZones) {
+    const lines = formatFincaFeaturesForCatalog(byZone.get(zone) ?? []);
+    if (!lines) continue;
+    blocks.push(`*${zone.toUpperCase()}*\n${lines}`);
+  }
+  return blocks.join('\n\n');
 }
 
 function formatExtractedFeatureLines(names: string[]): string {
@@ -148,8 +225,9 @@ function formatExtractedFeatureLines(names: string[]): string {
 
   return Array.from(map.values())
     .map(({ name, count, emoji }) => {
-      const suffix = count > 1 ? ` (x${count})` : '';
-      return `${emoji} ${name}${suffix}`;
+      const base = featureNameWithoutQuantity(name);
+      const label = count > 1 ? `${String(count).padStart(2, '0')} ${base}` : base;
+      return `${emoji} ${label}`;
     })
     .join('\n');
 }
@@ -197,12 +275,14 @@ export function stripEmbeddedFeaturesBlock(description: string): string {
 export function buildCatalogProductDescription(
   description: string | undefined,
   features: unknown[] | undefined,
+  zoneOrder?: string[],
 ): string {
   const { text: base, extractedNames } = stripNumberedListFromDescription(
     description ?? '',
   );
 
-  let featuresBlock = formatFincaFeaturesForCatalog(features ?? []);
+  // Agrupado por zona/habitación (igual que el detalle de la web).
+  let featuresBlock = formatFincaFeaturesByZone(features ?? [], zoneOrder);
   if (!featuresBlock && extractedNames.length > 0) {
     featuresBlock = formatExtractedFeatureLines(extractedNames);
   }
