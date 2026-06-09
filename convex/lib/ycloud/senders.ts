@@ -58,7 +58,10 @@ export async function sendTextToYcloud(args: {
   if (args.wamid) body.context = { message_id: args.wamid };
   const res = await fetch(endpoint, {
     method: "POST",
-    headers: { "Content-Type": "application/json", "X-API-Key": apiKey },
+    headers: {
+      "Content-Type": "application/json; charset=utf-8",
+      "X-API-Key": apiKey,
+    },
     body: JSON.stringify(body),
   });
   const textRes = await res.text();
@@ -148,7 +151,10 @@ export async function sendTemplateToYcloud(args: {
 
   const res = await fetch(endpoint, {
     method: "POST",
-    headers: { "Content-Type": "application/json", "X-API-Key": apiKey },
+    headers: {
+      "Content-Type": "application/json; charset=utf-8",
+      "X-API-Key": apiKey,
+    },
     body: JSON.stringify(body),
   });
   const textRes = await res.text();
@@ -230,7 +236,10 @@ export async function sendCatalogToYcloud(args: {
     }
     const res = await fetch(SEND_DIRECTLY, {
       method: "POST",
-      headers: { "Content-Type": "application/json", "X-API-Key": apiKey },
+      headers: {
+      "Content-Type": "application/json; charset=utf-8",
+      "X-API-Key": apiKey,
+    },
       body: JSON.stringify(body),
     });
     const text = await res.text();

@@ -238,7 +238,10 @@ export const registerCheckinTemplates = action({
       try {
         const res = await fetch(YCLOUD_TEMPLATES_BASE, {
           method: "POST",
-          headers: { "Content-Type": "application/json", "X-API-Key": apiKey },
+          headers: {
+            "Content-Type": "application/json; charset=utf-8",
+            "X-API-Key": apiKey,
+          },
           body: JSON.stringify(payload),
         });
         const text = await res.text();

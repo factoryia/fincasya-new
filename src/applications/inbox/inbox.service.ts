@@ -597,6 +597,27 @@ export class InboxService {
         const d = Math.round(Number(raw.depositoGarantiaCop));
         if (Number.isFinite(d) && d >= 0) raw.refundableDeposit = String(d);
       }
+      if (raw.valorAbono != null && raw.depositAmount == null) {
+        const a = Math.round(Number(raw.valorAbono));
+        if (Number.isFinite(a) && a >= 0) raw.depositAmount = a;
+      }
+      if (raw.valorSaldo != null && raw.balanceAmount == null) {
+        const s = Math.round(Number(raw.valorSaldo));
+        if (Number.isFinite(s) && s >= 0) raw.balanceAmount = s;
+      }
+      if (raw.fechaAbono && !raw.depositDate) {
+        raw.depositDate = this.pdfService.toIsoDate(raw.fechaAbono);
+      }
+      if (raw.fechaSaldo && !raw.balanceDate) {
+        raw.balanceDate = this.pdfService.toIsoDate(raw.fechaSaldo);
+      }
+      if (raw.subtotalAlojamientoCop != null && raw.rentAmount == null) {
+        const r = Math.round(Number(raw.subtotalAlojamientoCop));
+        if (Number.isFinite(r) && r >= 0) raw.rentAmount = r;
+      }
+      if (raw.contrato && !raw.contractNumber) {
+        raw.contractNumber = String(raw.contrato).trim();
+      }
       if (raw.depositoMascotasCop != null && raw.petCount == null) {
         const m = Math.round(Number(raw.depositoMascotasCop));
         if (m === 100000) raw.petCount = 1;

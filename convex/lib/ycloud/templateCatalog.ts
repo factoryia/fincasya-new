@@ -85,7 +85,7 @@ export const EXTRA_TEMPLATES: Record<ExtraTemplateKey, TemplateDef> = {
     category: "UTILITY",
     paramKeys: ["nombre"],
     bodyText:
-      "¡Hola, {{1}}! 👋 Gracias por confiar en FincasYa.com. Para comenzar a buscar la finca ideal para ti y ofrecerte una atención personalizada, necesitamos tu autorización para el tratamiento de tus datos personales, de acuerdo con nuestra política de privacidad.\n\n¿Nos autorizas a continuar?",
+      "¡Hola, {{1}}! Gracias por confiar en FincasYa.com. Para comenzar a buscar la finca ideal para ti y ofrecerte una atención personalizada, necesitamos tu autorización para el tratamiento de tus datos personales, de acuerdo con nuestra política de privacidad.\n\n¿Nos autorizas a continuar?",
     buttons: [
       { type: "quick_reply", text: "Sí, autorizo" },
       { type: "quick_reply", text: "No autorizo" },
@@ -102,7 +102,7 @@ export const CHECKIN_TEMPLATES: Record<CheckinTemplateKey, TemplateDef> = {
     category: "UTILITY",
     paramKeys: ["nombrePropietario", "nombreFinca"],
     bodyText:
-      "Hola {{1}} 👋 Te recordamos que esta semana tenemos alquiler en tu finca {{2}}. Quedamos atentos a cualquier coordinación.",
+      "Hola {{1}}, te recordamos que esta semana tenemos alquiler en tu finca {{2}}. Quedamos atentos a cualquier coordinación.",
     footer: "FincasYa",
     exampleParams: ["Hernán", "Villa del Lago"],
   },
@@ -113,7 +113,7 @@ export const CHECKIN_TEMPLATES: Record<CheckinTemplateKey, TemplateDef> = {
     category: "UTILITY",
     paramKeys: ["nombreTurista", "nombreFinca", "fechaLlegada", "linkCheckin"],
     bodyText:
-      "¡Hola {{1}}! 🌿 Ya estamos próximos a tu llegada a {{2}} el {{3}}.\n\nPara confirmar tu ingreso necesitamos que hagas tu check-in: ingresa tu lista de invitados (nombre completo y cédula de cada persona mayor de 2 años) y cuéntanos si vas a necesitar empleada de servicio o team.\n\n⚠️ Recuerda: sin check-in no podemos dar ingreso a la finca. Puedes guardar tu avance y continuar cuando quieras.\n\nHaz tu check-in aquí 👇 {{4}}",
+      "¡Hola {{1}}! Ya estamos próximos a tu llegada a {{2}} el {{3}}.\n\nPara confirmar tu ingreso necesitamos que hagas tu check-in: ingresa tu lista de invitados (nombre completo y cédula de cada persona mayor de 2 años) y cuéntanos si vas a necesitar empleada de servicio o team.\n\nIMPORTANTE: sin check-in no podemos dar ingreso a la finca. Puedes guardar tu avance y continuar cuando quieras.\n\nHaz tu check-in aquí: {{4}}",
     footer: "FincasYa",
     button: {
       type: "url",
@@ -150,7 +150,7 @@ export const CHECKIN_TEMPLATES: Record<CheckinTemplateKey, TemplateDef> = {
     category: "UTILITY",
     paramKeys: ["nombreTurista", "nombreFinca"],
     bodyText:
-      "Hola {{1}}, mañana es tu viaje a {{2}} 🎉 No olvides completar tu check-in si aún no lo has hecho. ¡Te esperamos!",
+      "Hola {{1}}, mañana es tu viaje a {{2}}. No olvides completar tu check-in si aún no lo has hecho. ¡Te esperamos!",
     footer: "FincasYa",
     exampleParams: ["Camilo", "Villa del Lago"],
   },
