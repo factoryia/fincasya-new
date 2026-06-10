@@ -108,12 +108,14 @@ export const CHECKIN_TEMPLATES: Record<CheckinTemplateKey, TemplateDef> = {
   },
   tourist_checkin_start: {
     key: "tourist_checkin_start",
-    name: "inicio_checkin_turista",
+    // v2: se agrega advertencia de pago al 100% (solicitud de Hernán, 9 jun 2026).
+    // Meta no permite editar plantillas aprobadas, por eso se versiona el nombre.
+    name: "inicio_checkin_turista_v2",
     language: "es",
     category: "UTILITY",
     paramKeys: ["nombreTurista", "nombreFinca", "fechaLlegada", "linkCheckin"],
     bodyText:
-      "¡Hola {{1}}! Ya estamos próximos a tu llegada a {{2}} el {{3}}.\n\nPara confirmar tu ingreso necesitamos que hagas tu check-in: ingresa tu lista de invitados (nombre completo y cédula de cada persona mayor de 2 años) y cuéntanos si vas a necesitar empleada de servicio o team.\n\nIMPORTANTE: sin check-in no podemos dar ingreso a la finca. Puedes guardar tu avance y continuar cuando quieras.\n\nHaz tu check-in aquí: {{4}}",
+      "¡Hola {{1}}! Ya estamos próximos a tu llegada a {{2}} el {{3}}.\n\nPara confirmar tu ingreso necesitamos que hagas tu check-in: ingresa tu lista de invitados (nombre completo y cédula de cada persona mayor de 2 años) y cuéntanos si vas a necesitar empleada de servicio o team.\n\nIMPORTANTE: sin check-in no podemos dar ingreso a la finca, y para hacer uso de la propiedad el pago de tu reserva debe estar al 100% antes de la llegada. Puedes guardar tu avance del check-in y continuar cuando quieras.\n\nHaz tu check-in aquí: {{4}}",
     footer: "FincasYa",
     button: {
       type: "url",
