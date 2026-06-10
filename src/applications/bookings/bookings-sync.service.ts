@@ -30,11 +30,15 @@ export class BookingsSyncService {
     propertyId: string,
     fechaEntrada: number,
     fechaSalida: number,
+    excludeBookingId?: string,
   ) {
     return this.convexService.query('bookings:checkAvailability', {
       propertyId: propertyId as any,
       fechaEntrada,
       fechaSalida,
+      ...(excludeBookingId
+        ? { excludeBookingId: excludeBookingId as any }
+        : {}),
     });
   }
 
@@ -302,6 +306,200 @@ export class BookingsSyncService {
     }
 
     return { bookingId, integritySignature };
+  }
+
+  /**
+   * Actualizar una reserva existente (admin).
+   */
+  async updateBooking(
+    bookingId: string,
+    params: {
+      propertyId: string;
+      nombreCompleto: string;
+      cedula: string;
+      celular: string;
+      correo: string;
+      fechaEntrada: number | string;
+      fechaSalida: number | string;
+      numeroPersonas: number | string;
+      precioTotal: number | string;
+      temporada: string;
+      numeroMascotas?: number | string;
+      costoMascotas?: number | string;
+      depositoMascotas?: number | string;
+      sobrecargoMascotas?: number | string;
+      observaciones?: string;
+      calendarLabel?: string;
+      horaEntrada?: string;
+      horaSalida?: string;
+      city?: string;
+      purpose?: string;
+      reference?: string;
+      address?: string;
+      status?: string;
+      personasAdicionales?: number | string;
+      groupType?: string;
+      costoPersonasAdicionales?: number | string;
+      costoPersonalServicio?: number | string;
+      depositoGarantia?: number | string;
+      depositoAseo?: number | string;
+      discountAmount?: number | string;
+      subtotal?: number | string;
+      tieneMascotas?: boolean | string;
+      multimediaLinks?:
+        | string
+        | Array<{ url: string; name?: string; type?: string }>;
+    },
+    multimediaFiles?: Express.Multer.File[],
+  ) {
+    const parseNum = (val: any) => {
+      if (typeof val === 'string') return parseFloat(val);
+      if (typeof val === 'number') return val;
+      return undefined;
+    };
+
+    const parseBool = (val: any) => {
+      if (typeof val === 'boolean') return val;
+      if (val === 'true') return true;
+      if (val === 'false') return false;
+      return undefined;
+    };
+
+    const fechaEntradaNum = parseNum(params.fechaEntrada) || 0;
+    const fechaSalidaNum = parseNum(params.fechaSalida) || 0;
+    const numeroPersonasNum = parseNum(params.numeroPersonas) || 1;
+    const precioTotalNum = parseNum(params.precioTotal) || 0;
+    const numeroMascotasNum = parseNum(params.numeroMascotas) || 0;
+    const costoMascotasNum = parseNum(params.costoMascotas) || 0;
+    const depositoMascotasNum = parseNum(params.depositoMascotas) || 0;
+    const sobrecargoMascotasNum = parseNum(params.sobrecargoMascotas) || 0;
+    const personasAdicionalesNum = parseNum(params.personasAdicionales);
+    const costoPersonasAdicionalesNum = parseNum(params.costoPersonasAdicionales);
+    const costoPersonalServicioNum = parseNum(params.costoPersonalServicio);
+    const depositoGarantiaNum = parseNum(params.depositoGarantia);
+    const depositoAseoNum = parseNum(params.depositoAseo);
+    const discountAmountNum = parseNum(params.discountAmount);
+    const subtotalNum = parseNum(params.subtotal);
+    const tieneMascotasBool = parseBool(params.tieneMascotas);
+
+    const normalizedStatus =
+      typeof params.status === 'string' ? params.status.trim().toUpperCase() : undefined;
+    const allowedStatuses = new Set([
+      'PENDING',
+      'PENDING_PAYMENT',
+      'CONFIRMED',
+      'PAID',
+      'CANCELLED',
+      'COMPLETED',
+    ]);
+
+    const existing = await this.convexService.query('bookings:getById', {
+      id: bookingId as any,
+    });
+    if (!existing) {
+      throw new Error('Reserva no encontrada');
+    }
+
+    const multimedia: {
+      url: string;
+      name: string;
+      type: string;
+      size?: number;
+      uploadedAt?: number;
+    }[] = [...(existing.multimedia || [])];
+
+    const rawMultimediaLinks = params.multimediaLinks;
+    if (rawMultimediaLinks) {
+      let parsedLinks: Array<{ url: string; name?: string; type?: string }> =
+        [];
+      if (typeof rawMultimediaLinks === 'string') {
+        try {
+          const candidate = JSON.parse(rawMultimediaLinks);
+          if (Array.isArray(candidate)) parsedLinks = candidate;
+        } catch {
+          // ignore
+        }
+      } else if (Array.isArray(rawMultimediaLinks)) {
+        parsedLinks = rawMultimediaLinks;
+      }
+
+      for (const item of parsedLinks.filter((i) => i?.url)) {
+        if (!multimedia.some((m) => m.url === item.url)) {
+          multimedia.push({
+            url: item.url,
+            name: item.name || 'Documento',
+            type: item.type || 'application/pdf',
+          });
+        }
+      }
+    }
+
+    if (multimediaFiles && multimediaFiles.length > 0) {
+      const uploadedMedia = await Promise.all(
+        multimediaFiles.map(async (file) => {
+          const url = await this.s3Service.uploadFile(
+            file,
+            'bookings/multimedia',
+          );
+          return {
+            url,
+            name: file.originalname,
+            type: file.mimetype,
+            size: file.size,
+            uploadedAt: Date.now(),
+          };
+        }),
+      );
+      multimedia.push(...uploadedMedia);
+    }
+
+    const nochesCalendario = Math.max(
+      1,
+      Math.ceil((fechaSalidaNum - fechaEntradaNum) / (1000 * 60 * 60 * 24)),
+    );
+
+    await this.convexService.mutation('bookings:adminUpdate', {
+      id: bookingId as any,
+      propertyId: params.propertyId as any,
+      nombreCompleto: params.nombreCompleto,
+      cedula: params.cedula,
+      celular: params.celular,
+      correo: params.correo,
+      fechaEntrada: fechaEntradaNum,
+      fechaSalida: fechaSalidaNum,
+      horaEntrada: params.horaEntrada,
+      horaSalida: params.horaSalida,
+      numeroNoches: nochesCalendario,
+      numeroPersonas: numeroPersonasNum,
+      personasAdicionales: personasAdicionalesNum,
+      tieneMascotas: tieneMascotasBool ?? numeroMascotasNum > 0,
+      numeroMascotas: numeroMascotasNum,
+      subtotal: subtotalNum ?? precioTotalNum,
+      costoPersonasAdicionales: costoPersonasAdicionalesNum,
+      costoMascotas: costoMascotasNum,
+      depositoMascotas: depositoMascotasNum,
+      sobrecargoMascotas: sobrecargoMascotasNum,
+      costoPersonalServicio: costoPersonalServicioNum,
+      depositoGarantia: depositoGarantiaNum,
+      depositoAseo: depositoAseoNum,
+      discountAmount: discountAmountNum,
+      precioTotal: precioTotalNum,
+      temporada: params.temporada,
+      observaciones: params.observaciones,
+      city: params.city,
+      purpose: params.purpose,
+      groupType: params.groupType,
+      reference: params.reference,
+      address: params.address,
+      calendarLabel: params.calendarLabel,
+      status:
+        normalizedStatus && allowedStatuses.has(normalizedStatus)
+          ? normalizedStatus
+          : undefined,
+      multimedia: multimedia.length > 0 ? multimedia : undefined,
+    });
+
+    return { bookingId };
   }
 
   /**

@@ -264,6 +264,7 @@ export const checkAvailability = query({
     propertyId: v.id('properties'),
     fechaEntrada: v.number(),
     fechaSalida: v.number(),
+    excludeBookingId: v.optional(v.id('bookings')),
   },
   handler: async (ctx, args) => {
     // Buscar reservas que se solapen con las fechas solicitadas
@@ -292,9 +293,13 @@ export const checkAvailability = query({
       .filter((q) => q.neq(q.field('status'), 'CANCELLED'))
       .collect();
 
+    const filtered = args.excludeBookingId
+      ? conflictingBookings.filter((b) => b._id !== args.excludeBookingId)
+      : conflictingBookings;
+
     return {
-      available: conflictingBookings.length === 0,
-      conflictingBookings: conflictingBookings.map((b) => ({
+      available: filtered.length === 0,
+      conflictingBookings: filtered.map((b) => ({
         id: b._id,
         fechaEntrada: b.fechaEntrada,
         fechaSalida: b.fechaSalida,
@@ -619,6 +624,145 @@ export const update = mutation({
     });
 
     // Sincronizar cambios con Google Calendar
+    await ctx.scheduler.runAfter(
+      0,
+      internal.googleCalendar.syncBookingToCalendar,
+      {
+        bookingId: id,
+      },
+    );
+
+    return id;
+  },
+});
+
+/**
+ * Actualización completa de reserva (admin). Permite cambiar finca, fechas,
+ * huésped, precios y observaciones. Excluye la reserva actual al validar cupo.
+ */
+export const adminUpdate = mutation({
+  args: {
+    id: v.id('bookings'),
+    propertyId: v.optional(v.id('properties')),
+    nombreCompleto: v.optional(v.string()),
+    cedula: v.optional(v.string()),
+    celular: v.optional(v.string()),
+    correo: v.optional(v.string()),
+    fechaEntrada: v.optional(v.number()),
+    fechaSalida: v.optional(v.number()),
+    horaEntrada: v.optional(v.string()),
+    horaSalida: v.optional(v.string()),
+    numeroNoches: v.optional(v.number()),
+    numeroPersonas: v.optional(v.number()),
+    personasAdicionales: v.optional(v.number()),
+    tieneMascotas: v.optional(v.boolean()),
+    numeroMascotas: v.optional(v.number()),
+    subtotal: v.optional(v.number()),
+    costoPersonasAdicionales: v.optional(v.number()),
+    costoMascotas: v.optional(v.number()),
+    depositoMascotas: v.optional(v.number()),
+    sobrecargoMascotas: v.optional(v.number()),
+    costoPersonalServicio: v.optional(v.number()),
+    depositoGarantia: v.optional(v.number()),
+    depositoAseo: v.optional(v.number()),
+    discountAmount: v.optional(v.number()),
+    precioTotal: v.optional(v.number()),
+    temporada: v.optional(v.string()),
+    observaciones: v.optional(v.string()),
+    city: v.optional(v.string()),
+    purpose: v.optional(v.string()),
+    groupType: v.optional(v.string()),
+    reference: v.optional(v.string()),
+    address: v.optional(v.string()),
+    calendarLabel: v.optional(v.string()),
+    status: v.optional(
+      v.union(
+        v.literal('PENDING'),
+        v.literal('PENDING_PAYMENT'),
+        v.literal('CONFIRMED'),
+        v.literal('PAID'),
+        v.literal('CANCELLED'),
+        v.literal('COMPLETED'),
+      ),
+    ),
+    multimedia: v.optional(
+      v.array(
+        v.object({
+          url: v.string(),
+          name: v.string(),
+          type: v.string(),
+          size: v.optional(v.number()),
+          uploadedAt: v.optional(v.number()),
+        }),
+      ),
+    ),
+  },
+  handler: async (ctx, args) => {
+    const { id, ...updates } = args;
+    const booking = await ctx.db.get(id);
+
+    if (!booking) {
+      throw new Error('Reserva no encontrada');
+    }
+
+    const propertyId = updates.propertyId ?? booking.propertyId;
+    const fechaEntrada = updates.fechaEntrada ?? booking.fechaEntrada;
+    const fechaSalida = updates.fechaSalida ?? booking.fechaSalida;
+
+    if (fechaSalida <= fechaEntrada) {
+      throw new Error('La fecha de salida debe ser posterior a la de entrada');
+    }
+
+    const availability = await ctx.runQuery(api.bookings.checkAvailability, {
+      propertyId,
+      fechaEntrada,
+      fechaSalida,
+      excludeBookingId: id,
+    });
+
+    if (!availability.available) {
+      throw new Error(
+        'La propiedad no está disponible para las fechas seleccionadas',
+      );
+    }
+
+    const patch: Record<string, unknown> = {
+      ...updates,
+      propertyId,
+      fechaEntrada,
+      fechaSalida,
+      updatedAt: Date.now(),
+    };
+
+    await ctx.db.patch(id, patch);
+
+    const availabilityBlocks = await ctx.db
+      .query('propertyAvailability')
+      .withIndex('by_booking', (q) => q.eq('bookingId', id))
+      .collect();
+
+    if (availabilityBlocks.length > 0) {
+      await Promise.all(
+        availabilityBlocks.map((block) =>
+          ctx.db.patch(block._id, {
+            propertyId,
+            fechaEntrada,
+            fechaSalida,
+          }),
+        ),
+      );
+    } else {
+      await ctx.db.insert('propertyAvailability', {
+        propertyId,
+        bookingId: id,
+        fechaEntrada,
+        fechaSalida,
+        blocked: true,
+        reason: 'Reserva confirmada',
+        googleEventId: booking.googleEventId,
+      });
+    }
+
     await ctx.scheduler.runAfter(
       0,
       internal.googleCalendar.syncBookingToCalendar,

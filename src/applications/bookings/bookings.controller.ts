@@ -2,6 +2,7 @@ import {
   Controller,
   Get,
   Post,
+  Put,
   Delete,
   Body,
   Query,
@@ -290,12 +291,14 @@ export class BookingsController {
       propertyId: string;
       fechaEntrada: number;
       fechaSalida: number;
+      excludeBookingId?: string;
     },
   ) {
     return this.bookingsSyncService.checkAvailability(
       body.propertyId,
       body.fechaEntrada,
       body.fechaSalida,
+      body.excludeBookingId,
     );
   }
 
@@ -385,6 +388,17 @@ export class BookingsController {
     @UploadedFiles() files?: Express.Multer.File[],
   ) {
     return this.bookingsSyncService.createBooking(body, files);
+  }
+
+  @Put(':id')
+  @UseGuards(ConvexAuthGuard, AdminGuard)
+  @UseInterceptors(FilesInterceptor('multimedia'))
+  async update(
+    @Param('id') id: string,
+    @Body() body: any,
+    @UploadedFiles() files?: Express.Multer.File[],
+  ) {
+    return this.bookingsSyncService.updateBooking(id, body, files);
   }
 
   @Get(':id/payments')
