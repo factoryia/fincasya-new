@@ -12,6 +12,19 @@ import { FincasService } from '../fincas/fincas.service';
 import { BrevoEmailService } from '../shared/services/brevo-email.service';
 import * as crypto from 'crypto';
 
+const DAY_MS = 1000 * 60 * 60 * 24;
+/**
+ * Noches calendario en hora de Colombia (UTC-5, sin DST), ignorando las horas
+ * de entrada/salida. Evita la "noche fantasma" que producía Math.ceil sobre
+ * timestamps completos cuando la hora de salida era mayor que la de entrada
+ * (ej. 12→15 jun daba 4 noches en vez de 3).
+ */
+function calendarNights(entradaMs: number, salidaMs: number): number {
+  const BOGOTA_OFFSET_MS = 5 * 60 * 60 * 1000;
+  const dayIndex = (ms: number) => Math.floor((ms - BOGOTA_OFFSET_MS) / DAY_MS);
+  return Math.max(1, dayIndex(salidaMs) - dayIndex(entradaMs));
+}
+
 @Injectable()
 export class BookingsSyncService {
   constructor(
@@ -216,9 +229,7 @@ export class BookingsSyncService {
       fechaSalida: fechaSalidaNum,
       numeroPersonas: numeroPersonasNum,
       precioTotal: precioTotalNum,
-      numeroNoches: Math.ceil(
-        (fechaSalidaNum - fechaEntradaNum) / (1000 * 60 * 60 * 24),
-      ),
+      numeroNoches: calendarNights(fechaEntradaNum, fechaSalidaNum),
       observaciones: params.observaciones,
       calendarLabel: params.calendarLabel,
       horaEntrada: params.horaEntrada,
@@ -271,7 +282,7 @@ export class BookingsSyncService {
           checkOutDate: checkOutDateStr,
           checkInTime: params.horaEntrada || '03:00 PM',
           checkOutTime: params.horaSalida || '01:00 PM',
-          nightlyPrice: String(precioTotalNum / (Math.max(1, Math.ceil((fechaSalidaNum - fechaEntradaNum) / (1000 * 60 * 60 * 24))))), 
+          nightlyPrice: String(precioTotalNum / calendarNights(fechaEntradaNum, fechaSalidaNum)),
           totalPrice: String(precioTotalNum),
           contractNumber: params.reference || `REC-${bookingId.slice(-6)}`,
           bankName: 'Bold/FincasYa',
