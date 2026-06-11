@@ -36,4 +36,20 @@ export class UpdateOwnerInfoDto {
   @IsOptional()
   @IsString()
   chamberOfCommerceUrl?: string;
+
+  @IsOptional()
+  @IsString()
+  propietarioNombre?: string;
+
+  @IsOptional()
+  @IsString()
+  propietarioTelefono?: string;
+
+  @IsOptional()
+  @IsString()
+  propietarioCedula?: string;
+
+  @IsOptional()
+  @IsString()
+  propietarioCorreo?: string;
 }

@@ -1347,6 +1347,18 @@ Al confirmar tu pago, recibirás el *soporte oficial* junto con todos los detall
         bankName: dto.bankName ?? '',
         accountNumber: dto.accountNumber ?? '',
         rntNumber: dto.rntNumber ?? '',
+        ...(dto.propietarioNombre !== undefined
+          ? { propietarioNombre: dto.propietarioNombre.trim() }
+          : {}),
+        ...(dto.propietarioTelefono !== undefined
+          ? { propietarioTelefono: dto.propietarioTelefono.trim() }
+          : {}),
+        ...(dto.propietarioCedula !== undefined
+          ? { propietarioCedula: dto.propietarioCedula.trim() }
+          : {}),
+        ...(dto.propietarioCorreo !== undefined
+          ? { propietarioCorreo: dto.propietarioCorreo.trim() }
+          : {}),
         ...(dto.bankCertificationUrl !== undefined
           ? { bankCertificationUrl: dto.bankCertificationUrl }
           : {}),
@@ -1384,10 +1396,40 @@ Al confirmar tu pago, recibirás el *soporte oficial* junto con todos los detall
         }
       }
 
-      return await this.convexService.mutation(
+      const result = await this.convexService.mutation(
         'propertyOwners:upsert',
         updateData,
       );
+
+      const propertySync: Record<string, string> = {};
+      if (dto.propietarioNombre !== undefined) {
+        propertySync.propietarioNombre = dto.propietarioNombre.trim();
+      }
+      if (dto.propietarioTelefono !== undefined) {
+        propertySync.propietarioTelefono = dto.propietarioTelefono.trim();
+      }
+      if (dto.propietarioCedula !== undefined) {
+        propertySync.propietarioCedula = dto.propietarioCedula.trim();
+      }
+      if (dto.propietarioCorreo !== undefined) {
+        propertySync.propietarioCorreo = dto.propietarioCorreo.trim();
+      }
+
+      if (Object.keys(propertySync).length > 0) {
+        try {
+          await this.convexService.mutation('fincas:update', {
+            id: propertyId,
+            ...propertySync,
+          });
+        } catch (syncError) {
+          console.warn(
+            '[owner] No se pudo sincronizar contacto en la finca:',
+            syncError,
+          );
+        }
+      }
+
+      return result;
     } catch (error) {
       throw new BadRequestException(error.message);
     }
