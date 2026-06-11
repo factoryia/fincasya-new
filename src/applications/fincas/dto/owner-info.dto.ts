@@ -1,20 +1,12 @@
-import { IsString, IsOptional, IsArray, ValidateNested } from 'class-validator';
-import { Transform, Type } from 'class-transformer';
+import { IsString, IsOptional, IsArray } from 'class-validator';
+import { Transform } from 'class-transformer';
 
-export class OwnerBankAccountDto {
-  @IsString()
+export type OwnerBankAccountInput = {
   id: string;
-
-  @IsString()
   bankName: string;
-
-  @IsString()
   accountNumber: string;
-
-  @IsOptional()
-  @IsString()
   accountType?: string;
-}
+};
 
 export class UpdateOwnerInfoDto {
   @IsOptional()
@@ -35,21 +27,37 @@ export class UpdateOwnerInfoDto {
 
   @IsOptional()
   @IsArray()
-  @ValidateNested({ each: true })
-  @Type(() => OwnerBankAccountDto)
   @Transform(({ value }) => {
     if (!value) return undefined;
-    if (typeof value === 'string') {
-      try {
-        const parsed = JSON.parse(value);
-        return Array.isArray(parsed) ? parsed : undefined;
-      } catch {
-        return undefined;
-      }
-    }
-    return Array.isArray(value) ? value : undefined;
+    const raw =
+      typeof value === 'string'
+        ? (() => {
+            try {
+              return JSON.parse(value);
+            } catch {
+              return undefined;
+            }
+          })()
+        : value;
+    if (!Array.isArray(raw)) return undefined;
+    return raw
+      .map((item) => {
+        if (!item || typeof item !== 'object') return null;
+        const row = item as Record<string, unknown>;
+        return {
+          id: String(row.id ?? row.Id ?? '').trim(),
+          bankName: String(row.bankName ?? row.BankName ?? '').trim(),
+          accountNumber: String(
+            row.accountNumber ?? row.AccountNumber ?? '',
+          ).trim(),
+          accountType: String(
+            row.accountType ?? row.AccountType ?? '',
+          ).trim(),
+        };
+      })
+      .filter(Boolean);
   })
-  bankAccounts?: OwnerBankAccountDto[];
+  bankAccounts?: OwnerBankAccountInput[];
 
   @IsOptional()
   @IsString()
