@@ -1,5 +1,6 @@
 import { Module, forwardRef } from '@nestjs/common';
 import { BookingsController } from './bookings.controller';
+import { PaymentPortalController } from './payment-portal.controller';
 import { SharedModule } from '../shared/shared.module';
 import { AuthModule } from '../auth/auth.module';
 import { FincasModule } from '../fincas/fincas.module';
@@ -10,7 +11,7 @@ import { RolesGuard } from '../shared/guards/roles.guard';
 
 @Module({
   imports: [SharedModule, AuthModule, forwardRef(() => FincasModule)],
-  controllers: [BookingsController],
+  controllers: [BookingsController, PaymentPortalController],
   providers: [
     BookingsSyncService,
     BookingsRemindersService,

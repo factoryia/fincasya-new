@@ -274,6 +274,94 @@ export class CheckinMessagingService {
 
   /** Datos públicos del portal de pago por CR o id de reserva. */
   async getPaymentPortalByReference(key: string) {
-    return this.convexService.query('paymentPortal:getByReference', { key });
+    const trimmed = String(key ?? '').trim();
+    if (!trimmed) return null;
+
+    try {
+      const data = await this.convexService.query(
+        'paymentPortal:getByReference',
+        { key: trimmed },
+      );
+      if (data) return data;
+    } catch {
+      /* query aún no desplegada: intentar HTTP de Convex */
+    }
+
+    const base =
+      process.env.CONVEX_SITE_URL ||
+      'https://adventurous-octopus-651.convex.site';
+    try {
+      const res = await fetch(
+        `${base.replace(/\/+$/, '')}/api/payment/${encodeURIComponent(trimmed)}`,
+      );
+      if (res.status === 404) return null;
+      if (!res.ok) return null;
+      const json = (await res.json()) as Record<string, unknown>;
+      if (json?.error === 'not_found') return null;
+      return json;
+    } catch {
+      return null;
+    }
+  }
+
+  /** Sube soporte de pago al portal (proxy a Convex HTTP). */
+  async submitPaymentPortalReceipt(
+    key: string,
+    payload: {
+      file: Express.Multer.File;
+      bankAccountId?: string;
+      bankName?: string;
+      amount?: number;
+    },
+  ) {
+    const trimmed = String(key ?? '').trim();
+    if (!trimmed) {
+      throw new Error('Referencia inválida');
+    }
+
+    const base =
+      process.env.CONVEX_SITE_URL ||
+      'https://adventurous-octopus-651.convex.site';
+    const form = new FormData();
+    form.append(
+      'file',
+      new Blob([new Uint8Array(payload.file.buffer)], {
+        type: payload.file.mimetype || 'image/jpeg',
+      }),
+      payload.file.originalname || 'comprobante.jpg',
+    );
+    if (payload.bankAccountId) {
+      form.append('bankAccountId', payload.bankAccountId);
+    }
+    if (payload.bankName) form.append('bankName', payload.bankName);
+    if (payload.amount != null && payload.amount > 0) {
+      form.append('amount', String(payload.amount));
+    }
+
+    const res = await fetch(
+      `${base.replace(/\/+$/, '')}/api/payment/${encodeURIComponent(trimmed)}`,
+      { method: 'POST', body: form },
+    );
+
+    const text = await res.text();
+    let body: unknown = text;
+    try {
+      body = text ? JSON.parse(text) : null;
+    } catch {
+      body = { error: text || res.statusText };
+    }
+
+    if (!res.ok) {
+      throw new Error(
+        typeof body === 'object' &&
+          body !== null &&
+          'error' in body &&
+          typeof (body as { error: unknown }).error === 'string'
+          ? (body as { error: string }).error
+          : 'No se pudo enviar el comprobante',
+      );
+    }
+
+    return body;
   }
 }
