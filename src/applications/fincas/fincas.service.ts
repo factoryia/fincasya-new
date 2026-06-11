@@ -1340,7 +1340,22 @@ Al confirmar tu pago, recibirás el *soporte oficial* junto con todos los detall
     },
   ) {
     try {
-      const updateData: any = { ...dto, propertyId };
+      const updateData: any = {
+        propertyId,
+        ownerUserId: dto.ownerUserId ?? '',
+        rutNumber: dto.rutNumber ?? '',
+        bankName: dto.bankName ?? '',
+        accountNumber: dto.accountNumber ?? '',
+        rntNumber: dto.rntNumber ?? '',
+        ...(dto.bankCertificationUrl !== undefined
+          ? { bankCertificationUrl: dto.bankCertificationUrl }
+          : {}),
+        ...(dto.idCopyUrl !== undefined ? { idCopyUrl: dto.idCopyUrl } : {}),
+        ...(dto.rntPdfUrl !== undefined ? { rntPdfUrl: dto.rntPdfUrl } : {}),
+        ...(dto.chamberOfCommerceUrl !== undefined
+          ? { chamberOfCommerceUrl: dto.chamberOfCommerceUrl }
+          : {}),
+      };
 
       if (files) {
         if (files.bankCertification) {

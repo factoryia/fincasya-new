@@ -1,25 +1,25 @@
-import { IsString, IsOptional, IsNotEmpty } from 'class-validator';
+import { IsString, IsOptional } from 'class-validator';
 
 export class UpdateOwnerInfoDto {
-  @IsNotEmpty()
+  @IsOptional()
   @IsString()
-  ownerUserId: string;
+  ownerUserId?: string;
 
-  @IsNotEmpty()
+  @IsOptional()
   @IsString()
-  rutNumber: string;
+  rutNumber?: string;
 
-  @IsNotEmpty()
+  @IsOptional()
   @IsString()
-  bankName: string;
+  bankName?: string;
 
-  @IsNotEmpty()
+  @IsOptional()
   @IsString()
-  accountNumber: string;
+  accountNumber?: string;
 
-  @IsNotEmpty()
+  @IsOptional()
   @IsString()
-  rntNumber: string;
+  rntNumber?: string;
 
   @IsOptional()
   @IsString()
