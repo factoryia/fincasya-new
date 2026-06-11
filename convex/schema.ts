@@ -945,6 +945,17 @@ export default defineSchema({
     rutNumber: v.string(),
     bankName: v.string(),
     accountNumber: v.string(),
+    /** Cuentas bancarias adicionales del propietario (la primera también se refleja en bankName/accountNumber). */
+    bankAccounts: v.optional(
+      v.array(
+        v.object({
+          id: v.string(),
+          bankName: v.string(),
+          accountNumber: v.string(),
+          accountType: v.optional(v.string()),
+        }),
+      ),
+    ),
     rntNumber: v.string(),
     /** Datos de contacto del propietario (registro manual, sin usuario vinculado) */
     propietarioNombre: v.optional(v.string()),

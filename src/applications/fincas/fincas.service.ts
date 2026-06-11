@@ -1340,13 +1340,34 @@ Al confirmar tu pago, recibirás el *soporte oficial* junto con todos los detall
     },
   ) {
     try {
+      const normalizedBankAccounts = Array.isArray(dto.bankAccounts)
+        ? dto.bankAccounts
+            .map((account) => ({
+              id: String(account.id ?? '').trim(),
+              bankName: String(account.bankName ?? '').trim(),
+              accountNumber: String(account.accountNumber ?? '').trim(),
+              ...(account.accountType?.trim()
+                ? { accountType: account.accountType.trim() }
+                : {}),
+            }))
+            .filter(
+              (account) =>
+                account.bankName.length > 0 || account.accountNumber.length > 0,
+            )
+        : undefined;
+
+      const primaryBank = normalizedBankAccounts?.[0];
+
       const updateData: any = {
         propertyId,
         ownerUserId: dto.ownerUserId ?? '',
         rutNumber: dto.rutNumber ?? '',
-        bankName: dto.bankName ?? '',
-        accountNumber: dto.accountNumber ?? '',
+        bankName: primaryBank?.bankName ?? dto.bankName ?? '',
+        accountNumber: primaryBank?.accountNumber ?? dto.accountNumber ?? '',
         rntNumber: dto.rntNumber ?? '',
+        ...(normalizedBankAccounts !== undefined
+          ? { bankAccounts: normalizedBankAccounts }
+          : {}),
         ...(dto.propietarioNombre !== undefined
           ? { propietarioNombre: dto.propietarioNombre.trim() }
           : {}),
