@@ -503,6 +503,22 @@ export class CreateFincaDto {
     return Array.isArray(value) ? value : [];
   })
   zoneOrder?: string[];
+
+  @IsOptional()
+  @IsString()
+  propietarioNombre?: string;
+
+  @IsOptional()
+  @IsString()
+  propietarioTelefono?: string;
+
+  @IsOptional()
+  @IsString()
+  propietarioCedula?: string;
+
+  @IsOptional()
+  @IsString()
+  propietarioCorreo?: string;
 }
 
 export class PricingItemDto {

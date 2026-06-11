@@ -1933,6 +1933,10 @@ export const update = mutation({
     salePriceCop: v.optional(v.number()),
     saleSquareMeters: v.optional(v.number()),
     saleDescription: v.optional(v.string()),
+    propietarioNombre: v.optional(v.string()),
+    propietarioTelefono: v.optional(v.string()),
+    propietarioCedula: v.optional(v.string()),
+    propietarioCorreo: v.optional(v.string()),
     pricing: v.optional(
       v.array(
         v.object({

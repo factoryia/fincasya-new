@@ -107,6 +107,8 @@ export default defineSchema({
      */
     propietarioNombre: v.optional(v.string()),
     propietarioTelefono: v.optional(v.string()),
+    propietarioCedula: v.optional(v.string()),
+    propietarioCorreo: v.optional(v.string()),
     encargadoNombre: v.optional(v.string()),
     encargadoTelefono: v.optional(v.string()),
     /**
