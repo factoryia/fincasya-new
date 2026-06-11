@@ -405,6 +405,37 @@ export default defineSchema({
     /** Última vez que el turista guardó avance o envió su check-in. */
     checkinUpdatedAt: v.optional(v.number()),
     /**
+     * Portal público de pago (`/pago/:reference`): cuentas seleccionadas por el
+     * equipo para mostrar al cliente en el link compartido.
+     */
+    paymentPortalConfig: v.optional(
+      v.object({
+        bankAccountIds: v.array(v.string()),
+        paymentMediaIds: v.optional(v.array(v.string())),
+        updatedAt: v.number(),
+      }),
+    ),
+    /** Soportes de pago subidos por el cliente desde el portal público. */
+    paymentPortalReceipts: v.optional(
+      v.array(
+        v.object({
+          id: v.string(),
+          bankAccountId: v.optional(v.string()),
+          bankName: v.optional(v.string()),
+          amount: v.optional(v.number()),
+          receiptUrl: v.string(),
+          fileName: v.optional(v.string()),
+          mimeType: v.optional(v.string()),
+          status: v.union(
+            v.literal('pending'),
+            v.literal('approved'),
+            v.literal('rejected'),
+          ),
+          submittedAt: v.number(),
+        }),
+      ),
+    ),
+    /**
      * Etiqueta libre para agrupar reservas en envíos en lote (spec §10),
      * p. ej. "puente_festivo".
      */

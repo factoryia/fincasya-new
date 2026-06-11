@@ -181,6 +181,32 @@ export class BookingsController {
     );
   }
 
+  /** Resumen de pago + imágenes por WhatsApp al cliente de la reserva. */
+  @Post('checkin/:id/send-payment')
+  @UseGuards(ConvexAuthGuard, RolesGuard)
+  @Roles(UserRole.ADMIN, UserRole.ASSISTANT)
+  async sendPaymentSummary(
+    @Param('id') id: string,
+    @Body()
+    body: {
+      messageText: string;
+      images?: Array<{ label?: string; imageUrl: string }>;
+      dryRun?: boolean;
+    },
+  ) {
+    if (!body?.messageText?.trim()) {
+      throw new HttpException(
+        'messageText es requerido',
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+    return this.checkinMessaging.sendPaymentSummary(id, {
+      messageText: body.messageText.trim(),
+      images: Array.isArray(body.images) ? body.images : [],
+      dryRun: Boolean(body.dryRun),
+    });
+  }
+
   /** Etiqueta de lote (ej. "puente_festivo") sobre una reserva. */
   @Post('checkin/:id/tag')
   @UseGuards(ConvexAuthGuard, RolesGuard)
@@ -209,6 +235,48 @@ export class BookingsController {
   @Roles(UserRole.ADMIN, UserRole.ASSISTANT)
   async getCheckinLink(@Param('id') id: string) {
     return this.checkinMessaging.getCheckinLink(id);
+  }
+
+  /** Link del portal de pago (para compartir con el cliente). */
+  @Get('payment/:id/link')
+  @UseGuards(ConvexAuthGuard, RolesGuard)
+  @Roles(UserRole.ADMIN, UserRole.ASSISTANT)
+  async getPaymentLink(@Param('id') id: string) {
+    return this.checkinMessaging.getPaymentLink(id);
+  }
+
+  /** Portal de pago público (fallback si Convex HTTP no responde). */
+  @Get('payment-public/:key')
+  async getPaymentPortalPublic(@Param('key') key: string) {
+    const data = await this.checkinMessaging.getPaymentPortalByReference(key);
+    if (!data) {
+      throw new HttpException(
+        { error: 'not_found', message: 'No encontramos esta reserva.' },
+        HttpStatus.NOT_FOUND,
+      );
+    }
+    return { ok: true, ...data };
+  }
+
+  /** Cuentas/imágenes que verá el cliente en el portal de pago. */
+  @Post('payment/:id/config')
+  @UseGuards(ConvexAuthGuard, RolesGuard)
+  @Roles(UserRole.ADMIN, UserRole.ASSISTANT)
+  async savePaymentPortalConfig(
+    @Param('id') id: string,
+    @Body()
+    body: { bankAccountIds: string[]; paymentMediaIds?: string[] },
+  ) {
+    if (!Array.isArray(body?.bankAccountIds)) {
+      throw new HttpException(
+        'bankAccountIds es requerido',
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+    return this.checkinMessaging.savePaymentPortalConfig(id, {
+      bankAccountIds: body.bankAccountIds,
+      paymentMediaIds: body.paymentMediaIds,
+    });
   }
 
   @Get('count')

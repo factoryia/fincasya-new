@@ -218,6 +218,26 @@ export class CheckinMessagingService {
     });
   }
 
+  /** Resumen de pago + imágenes QR/flyer por WhatsApp (YCloud). */
+  async sendPaymentSummary(
+    bookingId: string,
+    payload: {
+      messageText: string;
+      images: Array<{ label?: string; imageUrl: string }>;
+      dryRun?: boolean;
+    },
+  ) {
+    return this.convexService.action(
+      'checkinPaymentSend:sendPaymentSummaryToBooking',
+      {
+        bookingId,
+        messageText: payload.messageText,
+        images: payload.images,
+        dryRun: Boolean(payload.dryRun),
+      },
+    );
+  }
+
   /** Check-in manual / marcar completado (spec §8.1). */
   async setCheckinCompleted(bookingId: string, completed: boolean) {
     return this.convexService.mutation('checkinMessaging:setCheckinCompleted', {
@@ -231,5 +251,29 @@ export class CheckinMessagingService {
     return this.convexService.query('checkinMessaging:getCheckinLink', {
       bookingId,
     });
+  }
+
+  /** Link del portal de pago compartible con el cliente. */
+  async getPaymentLink(bookingId: string) {
+    return this.convexService.query('paymentPortal:getPaymentLink', {
+      bookingId,
+    });
+  }
+
+  /** Guarda cuentas/imágenes visibles en el portal de pago. */
+  async savePaymentPortalConfig(
+    bookingId: string,
+    payload: { bankAccountIds: string[]; paymentMediaIds?: string[] },
+  ) {
+    return this.convexService.mutation('paymentPortal:savePaymentPortalConfig', {
+      bookingId,
+      bankAccountIds: payload.bankAccountIds,
+      paymentMediaIds: payload.paymentMediaIds ?? [],
+    });
+  }
+
+  /** Datos públicos del portal de pago por CR o id de reserva. */
+  async getPaymentPortalByReference(key: string) {
+    return this.convexService.query('paymentPortal:getByReference', { key });
   }
 }

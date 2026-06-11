@@ -182,6 +182,94 @@ export async function sendTemplateToYcloud(args: {
 }
 
 const SEND_DIRECTLY = "https://api.ycloud.com/v2/whatsapp/messages/sendDirectly";
+
+async function uploadMediaBufferToYcloud(args: {
+  buffer: Uint8Array;
+  mimeType: string;
+  filename: string;
+}): Promise<string> {
+  const { apiKey, wabaNumber } = requireYcloudEnv();
+  const form = new FormData();
+  const arrayBuffer = new ArrayBuffer(args.buffer.byteLength);
+  new Uint8Array(arrayBuffer).set(args.buffer);
+  form.append(
+    "file",
+    new Blob([arrayBuffer], { type: args.mimeType }),
+    args.filename,
+  );
+
+  const uploadUrl = `https://api.ycloud.com/v2/whatsapp/media/${encodeURIComponent(wabaNumber)}/upload`;
+  const uploadRes = await fetch(uploadUrl, {
+    method: "POST",
+    headers: { "X-API-Key": apiKey },
+    body: form,
+    duplex: "half",
+  } as RequestInit);
+
+  if (!uploadRes.ok) {
+    const errText = await uploadRes.text();
+    throw new Error(`YCloud upload failed: ${uploadRes.status} - ${errText}`);
+  }
+  const uploadResult = (await uploadRes.json()) as { id?: string };
+  const mediaId = uploadResult?.id;
+  if (!mediaId) throw new Error("YCloud upload did not return media id");
+  return mediaId;
+}
+
+export async function sendImageToYcloud(args: {
+  to: string;
+  imageBuffer: Uint8Array;
+  mimeType: string;
+  filename?: string;
+  caption?: string;
+}): Promise<{ wamid?: string; status?: string }> {
+  const { apiKey, wabaNumber } = requireYcloudEnv();
+  const mediaId = await uploadMediaBufferToYcloud({
+    buffer: args.imageBuffer,
+    mimeType: args.mimeType,
+    filename: args.filename || "pago.jpg",
+  });
+
+  const body: Record<string, unknown> = {
+    from: wabaNumber,
+    to: args.to,
+    type: "image",
+    image: {
+      id: mediaId,
+      ...(args.caption?.trim() ? { caption: args.caption.trim() } : {}),
+    },
+  };
+
+  const res = await fetch(SEND_DIRECTLY, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json; charset=utf-8",
+      "X-API-Key": apiKey,
+    },
+    body: JSON.stringify(body),
+  });
+  const textRes = await res.text();
+  if (!res.ok) {
+    throw new Error(`YCloud image send failed: ${res.status}: ${textRes}`);
+  }
+  const parsed = textRes ? JSON.parse(textRes) : {};
+  const wamid = wamidFromYcloudSendResponse(parsed);
+  const rawStatus = ((): unknown => {
+    if (typeof parsed !== "object" || !parsed) return undefined;
+    const o = parsed as Record<string, unknown>;
+    if (typeof o.status === "string") return o.status;
+    const nested = o.whatsappMessage;
+    if (nested && typeof nested === "object") {
+      const s = (nested as Record<string, unknown>).status;
+      if (typeof s === "string") return s;
+    }
+    return undefined;
+  })();
+  const status =
+    typeof rawStatus === "string" ? rawStatus.toLowerCase() : undefined;
+  return { wamid, status };
+}
+
 const BETWEEN_SENDS_MS = 320;
 
 /** Cuerpo cuando no hay línea de precio pero sí hay más fichas (sin numerar ni texto interno). */

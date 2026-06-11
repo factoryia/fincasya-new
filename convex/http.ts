@@ -1287,4 +1287,176 @@ http.route({
   }),
 });
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Portal público de pago del turista (`/pago/:reference`).
+// ─────────────────────────────────────────────────────────────────────────────
+
+const PAYMENT_CORS = { 'Access-Control-Allow-Origin': '*' } as const;
+
+/** GET /api/payment/:reference */
+http.route({
+  pathPrefix: '/api/payment/',
+  method: 'GET',
+  handler: httpAction(async (ctx, request) => {
+    const url = new URL(request.url);
+    const key = decodeURIComponent(
+      url.pathname.replace('/api/payment/', ''),
+    ).trim();
+
+    if (!key) {
+      return jsonResponse({ error: 'Referencia inválida' }, 400, PAYMENT_CORS);
+    }
+
+    const data = await ctx.runQuery(internal.paymentPortal.getForPortal, {
+      key,
+    });
+    if (!data) {
+      return jsonResponse(
+        { error: 'not_found', message: 'No encontramos esta reserva.' },
+        404,
+        PAYMENT_CORS,
+      );
+    }
+
+    return jsonResponse({ ok: true, ...data }, 200, PAYMENT_CORS);
+  }),
+});
+
+/** POST /api/payment/:reference — subir soporte de pago (JSON o multipart). */
+http.route({
+  pathPrefix: '/api/payment/',
+  method: 'POST',
+  handler: httpAction(async (ctx, request) => {
+    const url = new URL(request.url);
+    const key = decodeURIComponent(
+      url.pathname.replace('/api/payment/', ''),
+    ).trim();
+
+    if (!key) {
+      return jsonResponse({ error: 'Referencia inválida' }, 400, PAYMENT_CORS);
+    }
+
+    const contentType = request.headers.get('content-type') ?? '';
+
+    let bankAccountId: string | undefined;
+    let bankName: string | undefined;
+    let amount: number | undefined;
+    let receiptUrl = '';
+    let fileName: string | undefined;
+    let mimeType: string | undefined;
+
+    if (contentType.includes('multipart/form-data')) {
+      let formData: FormData;
+      try {
+        formData = await request.formData();
+      } catch {
+        return jsonResponse(
+          { error: 'multipart/form-data inválido' },
+          400,
+          PAYMENT_CORS,
+        );
+      }
+
+      const file = formData.get('file') as File | null;
+      bankAccountId =
+        String(formData.get('bankAccountId') ?? '').trim() || undefined;
+      bankName = String(formData.get('bankName') ?? '').trim() || undefined;
+      const amountRaw = String(formData.get('amount') ?? '').trim();
+      amount = amountRaw ? Math.max(0, Math.floor(Number(amountRaw) || 0)) : undefined;
+
+      if (!file || typeof file.arrayBuffer !== 'function') {
+        return jsonResponse(
+          { error: 'Adjunta el comprobante en el campo "file"' },
+          400,
+          PAYMENT_CORS,
+        );
+      }
+
+      if (file.size > 900_000) {
+        return jsonResponse(
+          { error: 'La imagen es muy grande (máx. ~900 KB).' },
+          413,
+          PAYMENT_CORS,
+        );
+      }
+
+      const arrayBuffer = await file.arrayBuffer();
+      const bytes = new Uint8Array(arrayBuffer);
+      let binary = '';
+      const CHUNK = 0x8000;
+      for (let i = 0; i < bytes.length; i += CHUNK) {
+        binary += String.fromCharCode(...bytes.subarray(i, i + CHUNK));
+      }
+      const b64 = btoa(binary);
+      mimeType = file.type || 'image/jpeg';
+      fileName = file.name || 'comprobante.jpg';
+      receiptUrl = `data:${mimeType};base64,${b64}`;
+    } else {
+      let body: {
+        bankAccountId?: string;
+        bankName?: string;
+        amount?: number;
+        receiptUrl?: string;
+        fileName?: string;
+        mimeType?: string;
+      };
+      try {
+        body = (await request.json()) as typeof body;
+      } catch {
+        return jsonResponse({ error: 'Body JSON inválido' }, 400, PAYMENT_CORS);
+      }
+      bankAccountId = body.bankAccountId?.trim() || undefined;
+      bankName = body.bankName?.trim() || undefined;
+      amount =
+        body.amount === undefined
+          ? undefined
+          : Math.max(0, Math.floor(Number(body.amount) || 0));
+      receiptUrl = String(body.receiptUrl ?? '').trim();
+      fileName = body.fileName?.trim() || undefined;
+      mimeType = body.mimeType?.trim() || undefined;
+    }
+
+    const result = await ctx.runMutation(internal.paymentPortal.submitReceipt, {
+      key,
+      bankAccountId,
+      bankName,
+      amount,
+      receiptUrl,
+      fileName,
+      mimeType,
+    });
+
+    if (!result.ok) {
+      const reason = (result as { reason?: string }).reason ?? 'error';
+      const statusMap: Record<string, number> = {
+        not_found: 404,
+        missing_receipt: 422,
+      };
+      return jsonResponse(
+        { error: reason, ...result },
+        statusMap[reason] ?? 400,
+        PAYMENT_CORS,
+      );
+    }
+
+    return jsonResponse({ ...result, ok: true }, 200, PAYMENT_CORS);
+  }),
+});
+
+http.route({
+  pathPrefix: '/api/payment/',
+  method: 'OPTIONS',
+  handler: httpAction(async () => {
+    return new Response(null, {
+      status: 204,
+      headers: {
+        'Access-Control-Allow-Origin': '*',
+        'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+        'Access-Control-Allow-Headers': 'Content-Type',
+        'Access-Control-Max-Age': '86400',
+      },
+    });
+  }),
+});
+
 export default http;
