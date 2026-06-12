@@ -119,12 +119,16 @@ function resolvePortalAccounts(
   config: Doc<'bookings'>['paymentPortalConfig'],
 ) {
   const allAccounts = payload.bankAccounts ?? [];
-  const ids =
-    config?.bankAccountIds?.length
-      ? config.bankAccountIds
-      : payload.primaryBankAccountId
-        ? [payload.primaryBankAccountId]
-        : allAccounts.map((a) => a.id);
+  let ids: string[];
+
+  if (config != null) {
+    // Config guardada explícitamente: respetar [] (sin cuentas para el cliente).
+    ids = config.bankAccountIds ?? [];
+  } else if (payload.primaryBankAccountId) {
+    ids = [payload.primaryBankAccountId];
+  } else {
+    ids = allAccounts.map((a) => a.id);
+  }
 
   const accounts = allAccounts
     .filter((a) => ids.includes(a.id))
