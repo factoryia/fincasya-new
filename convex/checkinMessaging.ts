@@ -631,12 +631,29 @@ function resolveManualSend(
  */
 export const getCheckinLink = query({
   args: { bookingId: v.id("bookings") },
-  handler: async (ctx, args): Promise<{ link: string; reference: string }> => {
+  handler: async (ctx, args): Promise<{
+    link: string;
+    reference: string;
+    checkinUbicacionUrl?: string;
+  }> => {
     const b = await ctx.db.get(args.bookingId);
     if (!b) throw new Error("Reserva no encontrada");
     const cr = ((b as { reference?: string }).reference ||
       (b._id as string)) as string;
-    return { link: `${checkinPortalBase()}/${cr}`, reference: cr };
+
+    let checkinUbicacionUrl: string | undefined;
+    const ownerInfo = await ctx.db
+      .query("propertyOwnerInfo")
+      .withIndex("by_property", (q) => q.eq("propertyId", b.propertyId))
+      .unique();
+    const mapsUrl = String(ownerInfo?.checkinUbicacionUrl ?? "").trim();
+    if (mapsUrl) checkinUbicacionUrl = mapsUrl;
+
+    return {
+      link: `${checkinPortalBase()}/${cr}`,
+      reference: cr,
+      ...(checkinUbicacionUrl ? { checkinUbicacionUrl } : {}),
+    };
   },
 });
 

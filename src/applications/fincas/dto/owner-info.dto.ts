@@ -94,4 +94,8 @@ export class UpdateOwnerInfoDto {
   @IsOptional()
   @IsString()
   propietarioCorreo?: string;
+
+  @IsOptional()
+  @IsString()
+  checkinUbicacionUrl?: string;
 }

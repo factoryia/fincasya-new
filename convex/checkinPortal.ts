@@ -125,6 +125,18 @@ async function findBooking(
   return null;
 }
 
+async function loadCheckinUbicacionUrl(
+  ctx: { db: any },
+  propertyId: Id<'properties'>,
+): Promise<string | null> {
+  const ownerInfo = await ctx.db
+    .query('propertyOwnerInfo')
+    .withIndex('by_property', (q: any) => q.eq('propertyId', propertyId))
+    .unique();
+  const url = String(ownerInfo?.checkinUbicacionUrl ?? '').trim();
+  return url || null;
+}
+
 /** Resumen seguro (sin datos sensibles) + lo ya guardado, para precargar el portal. */
 export const getForPortal = internalQuery({
   args: { key: v.string() },
@@ -141,6 +153,10 @@ export const getForPortal = internalQuery({
     const pagoTotal = netPaidFromPayments(payments);
     const precioTotal = Number(booking.precioTotal) || 0;
     const pagoPendiente = pendingFromTotal(precioTotal, pagoTotal);
+    const checkinUbicacionUrl = await loadCheckinUbicacionUrl(
+      ctx,
+      booking.propertyId,
+    );
 
     return {
       reference: booking.reference ?? booking._id,
@@ -168,6 +184,7 @@ export const getForPortal = internalQuery({
       pagoTotal,
       pagoPendiente,
       pagoCompleto: pagoPendiente <= 0,
+      checkinUbicacionUrl,
     };
   },
 });

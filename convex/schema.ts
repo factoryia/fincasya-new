@@ -962,6 +962,8 @@ export default defineSchema({
     propietarioTelefono: v.optional(v.string()),
     propietarioCedula: v.optional(v.string()),
     propietarioCorreo: v.optional(v.string()),
+    /** Link de Maps (Google/Apple) — solo check-in; no se usa en catálogo ni GPS público. */
+    checkinUbicacionUrl: v.optional(v.string()),
     /** URLs de documentos cargados (PDF) */
     bankCertificationUrl: v.optional(v.string()),
     idCopyUrl: v.optional(v.string()),

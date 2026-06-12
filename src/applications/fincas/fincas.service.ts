@@ -1380,6 +1380,9 @@ Al confirmar tu pago, recibirás el *soporte oficial* junto con todos los detall
         ...(dto.propietarioCorreo !== undefined
           ? { propietarioCorreo: dto.propietarioCorreo.trim() }
           : {}),
+        ...(dto.checkinUbicacionUrl !== undefined
+          ? { checkinUbicacionUrl: dto.checkinUbicacionUrl.trim() }
+          : {}),
         ...(dto.bankCertificationUrl !== undefined
           ? { bankCertificationUrl: dto.bankCertificationUrl }
           : {}),
