@@ -53,7 +53,13 @@ export class FeaturesController {
       new ParseFilePipe({
         validators: [
           new MaxFileSizeValidator({ maxSize: 2 * 1024 * 1024 }),
-          new FileTypeValidator({ fileType: /(svg|xml)/ }),
+          new FileTypeValidator({
+            fileType: /(svg|xml)/,
+            // Los SVG son XML de texto plano y no tienen "magic number"
+            // detectable, por lo que la validación por firma binaria
+            // (default en NestJS 11) los rechaza. Validamos por mimetype.
+            skipMagicNumbersValidation: true,
+          }),
         ],
         fileIsRequired: false,
       }),
@@ -99,7 +105,13 @@ export class FeaturesController {
       new ParseFilePipe({
         validators: [
           new MaxFileSizeValidator({ maxSize: 2 * 1024 * 1024 }),
-          new FileTypeValidator({ fileType: /(svg|xml)/ }),
+          new FileTypeValidator({
+            fileType: /(svg|xml)/,
+            // Los SVG son XML de texto plano y no tienen "magic number"
+            // detectable, por lo que la validación por firma binaria
+            // (default en NestJS 11) los rechaza. Validamos por mimetype.
+            skipMagicNumbersValidation: true,
+          }),
         ],
         fileIsRequired: false,
       }),
