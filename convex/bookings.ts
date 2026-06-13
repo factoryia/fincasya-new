@@ -1,5 +1,5 @@
 import { v } from 'convex/values';
-import { query, mutation, internalQuery } from './_generated/server';
+import { query, mutation, internalQuery, internalMutation } from './_generated/server';
 import { api, internal } from './_generated/api';
 import type { Doc } from './_generated/dataModel';
 import { normalizeContractLookupQueryConvex } from './lib/contractLookup';
@@ -1185,5 +1185,66 @@ export const findActiveOrUpcomingByGuestPhone = internalQuery({
         Math.abs(a.fechaEntrada - now) - Math.abs(b.fechaEntrada - now),
     );
     return matches[0];
+  },
+});
+
+/** Reservas elegibles para re-sincronizar con Google Calendar (sin paginar). */
+export const listForCalendarResync = internalQuery({
+  args: { includePast: v.optional(v.boolean()) },
+  handler: async (ctx, args) => {
+    const now = Date.now();
+    const all = await ctx.db.query('bookings').collect();
+    return all.filter(
+      (booking) =>
+        booking.status !== 'CANCELLED' &&
+        (args.includePast === true || booking.fechaSalida >= now),
+    );
+  },
+});
+
+/** Quita el vínculo con un evento de Google Calendar sin disparar sync. */
+export const clearGoogleCalendarLink = internalMutation({
+  args: { id: v.id('bookings') },
+  handler: async (ctx, args) => {
+    await ctx.db.patch(args.id, {
+      googleEventId: undefined,
+      googleCalendarId: undefined,
+      updatedAt: Date.now(),
+    });
+  },
+});
+
+/** Limpia vínculos de calendario en lote (p. ej. al cambiar de cuenta Google). */
+export const clearAllGoogleCalendarLinks = internalMutation({
+  args: {},
+  handler: async (ctx) => {
+    const bookings = await ctx.db.query('bookings').collect();
+    let cleared = 0;
+    for (const booking of bookings) {
+      if (booking.status === 'CANCELLED' || !booking.googleEventId) continue;
+      await ctx.db.patch(booking._id, {
+        googleEventId: undefined,
+        googleCalendarId: undefined,
+        updatedAt: Date.now(),
+      });
+      cleared++;
+    }
+    return { cleared };
+  },
+});
+
+/** Persiste el ID del evento de Google sin re-disparar sincronización. */
+export const setGoogleCalendarLink = internalMutation({
+  args: {
+    id: v.id('bookings'),
+    googleEventId: v.string(),
+    googleCalendarId: v.string(),
+  },
+  handler: async (ctx, args) => {
+    await ctx.db.patch(args.id, {
+      googleEventId: args.googleEventId,
+      googleCalendarId: args.googleCalendarId,
+      updatedAt: Date.now(),
+    });
   },
 });

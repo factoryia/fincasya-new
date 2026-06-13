@@ -104,6 +104,31 @@ export const getForSync = internalQuery({
   },
 });
 
+/** Email conectado antes de un nuevo OAuth (evita referencia circular en actions). */
+export const getPreviousConnectedEmail = internalQuery({
+  args: {},
+  handler: async (ctx): Promise<string | undefined> => {
+    const row = await ctx.db.query("googleCalendarIntegrations").first();
+    return row?.connectedEmail;
+  },
+});
+
+type ExchangeCodeResult = {
+  ok: true;
+  email: string | undefined;
+  previousEmail: string | undefined;
+  accountChanged: boolean;
+  shouldResync: boolean;
+};
+
+type ResyncAllResult = {
+  ok: true;
+  cleared: number;
+  scheduled: number;
+  calendarId: string;
+  connectedEmail: string | undefined;
+};
+
 // ============ MUTATIONS ============
 
 export const saveTokens = mutation({
@@ -211,12 +236,13 @@ export const exchangeCodeForTokens = action({
     code: v.string(),
     redirectUri: v.string(),
   },
-  handler: async (ctx, args) => {
+  handler: async (ctx, args): Promise<ExchangeCodeResult> => {
     const clientId = process.env.GOOGLE_CLIENT_ID;
     const clientSecret = process.env.GOOGLE_CLIENT_SECRET;
-    if (!clientId || !clientSecret) throw new Error("Credenciales de Google no configuradas");
+    if (!clientId || !clientSecret) {
+      throw new Error("Credenciales de Google no configuradas");
+    }
 
-    // 1. Obtener Tokens
     const tokenRes = await fetch("https://oauth2.googleapis.com/token", {
       method: "POST",
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
@@ -236,30 +262,46 @@ export const exchangeCodeForTokens = action({
 
     const tokens = await tokenRes.json();
 
-    // 2. Obtener Perfil (Email)
     const profileRes = await fetch("https://www.googleapis.com/oauth2/v3/userinfo", {
-        headers: { Authorization: `Bearer ${tokens.access_token}` }
+      headers: { Authorization: `Bearer ${tokens.access_token}` },
     });
-    
+
     let connectedEmail: string | undefined;
     let connectedName: string | undefined;
 
     if (profileRes.ok) {
-        const profile = await profileRes.json();
-        connectedEmail = profile.email;
-        connectedName = profile.name;
+      const profile = await profileRes.json();
+      connectedEmail = profile.email;
+      connectedName = profile.name;
     }
 
-    // 3. Guardar en DB
+    const previousEmailRaw = await ctx.runQuery(
+      internal.googleCalendar.getPreviousConnectedEmail,
+      {},
+    );
+    const previousEmail = previousEmailRaw ?? undefined;
+
     await ctx.runMutation(api.googleCalendar.saveTokens, {
       accessToken: tokens.access_token,
-      refreshToken: tokens.refresh_token, // Solo viene en el primer login si se usa prompt:consent
+      refreshToken: tokens.refresh_token,
       expiresAt: Date.now() + tokens.expires_in * 1000,
+      calendarId: "primary",
       connectedEmail,
       connectedName,
     });
 
-    return { ok: true, email: connectedEmail };
+    const accountChanged =
+      Boolean(previousEmail) &&
+      Boolean(connectedEmail) &&
+      previousEmail !== connectedEmail;
+
+    return {
+      ok: true,
+      email: connectedEmail,
+      previousEmail,
+      accountChanged,
+      shouldResync: accountChanged,
+    };
   },
 });
 
@@ -300,6 +342,9 @@ export const syncBookingToCalendar = internalAction({
 
     const calendarId = gc.calendarId ?? "primary";
     const timezone = "America/Bogota";
+    const eventBelongsToCurrentCalendar =
+      Boolean(booking.googleEventId) &&
+      (!booking.googleCalendarId || booking.googleCalendarId === calendarId);
 
     // Número de noches (para título y descripción).
     const noches =
@@ -361,27 +406,67 @@ export const syncBookingToCalendar = internalAction({
     const startDateTime = new Date(startMs).toISOString();
     const endDateTime = new Date(endMs).toISOString();
 
-    const url = booking.googleEventId 
-        ? `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(calendarId)}/events/${encodeURIComponent(booking.googleEventId)}`
-        : `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(calendarId)}/events`;
-    
-    const method = booking.googleEventId ? "PATCH" : "POST";
+    const eventBody = {
+      summary,
+      description,
+      start: { dateTime: startDateTime, timeZone: timezone },
+      end: { dateTime: endDateTime, timeZone: timezone },
+      location: booking.property?.location || "",
+    };
 
-    const res = await fetch(url, {
-        method,
-        headers: {
-          Authorization: `Bearer ${accessToken}`,
-          "Content-Type": "application/json",
+    const createEvent = async () => {
+      const res = await fetch(
+        `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(calendarId)}/events`,
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify(eventBody),
         },
-        body: JSON.stringify({
-          summary,
-          description,
-          start: { dateTime: startDateTime, timeZone: timezone },
-          end: { dateTime: endDateTime, timeZone: timezone },
-          location: booking.property?.location || "",
-        }),
+      );
+      if (!res.ok) {
+        const err = await res.text();
+        console.error("Error creando evento en Google Calendar:", res.status, err);
+        return null;
       }
-    );
+      return (await res.json()) as { id?: string };
+    };
+
+    if (!eventBelongsToCurrentCalendar) {
+      const event = await createEvent();
+      if (event?.id) {
+        await ctx.runMutation(internal.bookings.setGoogleCalendarLink, {
+          id: args.bookingId,
+          googleEventId: event.id,
+          googleCalendarId: calendarId,
+        });
+      }
+      return;
+    }
+
+    const patchUrl = `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(calendarId)}/events/${encodeURIComponent(booking.googleEventId!)}`;
+    let res = await fetch(patchUrl, {
+      method: "PATCH",
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(eventBody),
+    });
+
+    if (res.status === 404) {
+      const event = await createEvent();
+      if (event?.id) {
+        await ctx.runMutation(internal.bookings.setGoogleCalendarLink, {
+          id: args.bookingId,
+          googleEventId: event.id,
+          googleCalendarId: calendarId,
+        });
+      }
+      return;
+    }
 
     if (!res.ok) {
       const err = await res.text();
@@ -391,12 +476,52 @@ export const syncBookingToCalendar = internalAction({
 
     const event = (await res.json()) as { id?: string };
     if (event?.id && !booking.googleEventId) {
-      await ctx.runMutation(api.bookings.update, {
+      await ctx.runMutation(internal.bookings.setGoogleCalendarLink, {
         id: args.bookingId,
         googleEventId: event.id,
         googleCalendarId: calendarId,
       });
     }
+  },
+});
+
+export const resyncAllBookingsToCalendar = action({
+  args: {
+    includePast: v.optional(v.boolean()),
+  },
+  handler: async (ctx, args): Promise<ResyncAllResult> => {
+    const gc = await ctx.runQuery(internal.googleCalendar.getForSync, {});
+    if (!gc?.connected || !gc.refreshToken) {
+      throw new Error("Google Calendar no conectado");
+    }
+
+    const clearResult = await ctx.runMutation(
+      internal.bookings.clearAllGoogleCalendarLinks,
+      {},
+    );
+    const cleared = clearResult.cleared;
+
+    const bookings = await ctx.runQuery(internal.bookings.listForCalendarResync, {
+      includePast: args.includePast ?? true,
+    });
+
+    let scheduled = 0;
+    for (const booking of bookings) {
+      await ctx.scheduler.runAfter(
+        scheduled * 150,
+        internal.googleCalendar.syncBookingToCalendar,
+        { bookingId: booking._id },
+      );
+      scheduled++;
+    }
+
+    return {
+      ok: true,
+      cleared,
+      scheduled,
+      calendarId: gc.calendarId ?? "primary",
+      connectedEmail: gc.connectedEmail,
+    };
   },
 });
 

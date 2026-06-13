@@ -59,6 +59,16 @@ export class GoogleCalendarService {
   }
 
   /**
+   * Re-sincroniza todas las reservas activas al calendario Google conectado.
+   * Útil al migrar de una cuenta (p. ej. personal) a comercial@fincasya.com.
+   */
+  async resyncAllBookings(includePast = true) {
+    return this.convexService.action('googleCalendar:resyncAllBookingsToCalendar', {
+      includePast,
+    });
+  }
+
+  /**
    * Validar la conexión con Google Calendar (Leyendo de Convex).
    */
   async validateConnection(): Promise<{ connected: boolean; calendarId: string; connectedEmail?: string; connectedName?: string; error?: string; needsReauth?: boolean }> {

@@ -86,8 +86,14 @@ export class AdminController {
     }
 
     try {
-      await this.googleCalendarService.exchangeCode(code, redirectUri);
-      return res.redirect(`${appUrl}/admin/reservations?success=true`);
+      const result = await this.googleCalendarService.exchangeCode(code, redirectUri);
+      const shouldMigrate =
+        result && typeof result === 'object' && 'shouldResync' in result && result.shouldResync
+          ? '1'
+          : '0';
+      return res.redirect(
+        `${appUrl}/admin/reservations?success=true&migrate=${shouldMigrate}`,
+      );
     } catch (err) {
       console.error('[calendar-callback] Error intercambiando código:', err);
       const msg = (err).message || 'exchange_failed';
@@ -100,6 +106,11 @@ export class AdminController {
   @Post('google-calendar/disconnect')
   async disconnect() {
     return this.googleCalendarService.disconnect();
+  }
+
+  @Post('google-calendar/resync')
+  async resyncGoogleCalendar(@Body() body: { includePast?: boolean }) {
+    return this.googleCalendarService.resyncAllBookings(body?.includePast ?? true);
   }
 
   /**
