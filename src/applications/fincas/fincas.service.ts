@@ -85,6 +85,39 @@ function findEnclosingWordParagraph(
   return { start: pStart, end: pEnd + '</w:p>'.length };
 }
 
+function buildWordBankAccountsInlineXml(lines: string[]): string {
+  return lines
+    .map((line, i) => {
+      const t = escapeWordPlainText(line);
+      const br = i > 0 ? '<w:r><w:br/></w:r>' : '';
+      return `${br}<w:r><w:t xml:space="preserve">${t}</w:t></w:r>`;
+    })
+    .join('');
+}
+
+/**
+ * Sustituye el bloque {{cuentaNumero}}…{{titularCedula}} por varias cuentas
+ * (salto de línea entre cada una) cuando hay 2+ cuentas en el contrato.
+ */
+function replaceWordBankAccountPlaceholderCluster(
+  xml: string,
+  lines: string[],
+): string {
+  if (lines.length <= 1) return xml;
+  const gap = WORD_TEMPLATE_GAP;
+  const cuentaKey = Array.from('cuentaNumero')
+    .map((ch) => escapeRegExp(ch))
+    .join(gap);
+  const titularKey = Array.from('titularCedula')
+    .map((ch) => escapeRegExp(ch))
+    .join(gap);
+  const re = new RegExp(
+    `(\\{${gap}\\{${gap}${cuentaKey}${gap}\\}${gap}\\}|\\{\\{${gap}${cuentaKey}${gap}\\}\\})[\\s\\S]*?(\\{${gap}\\{${gap}${titularKey}${gap}\\}${gap}\\}|\\{\\{${gap}${titularKey}${gap}\\}\\})`,
+  );
+  const inline = buildWordBankAccountsInlineXml(lines);
+  return xml.replace(re, inline);
+}
+
 /**
  * Sustituye el párrafo que contiene {{caracteristicasDeFinca}} por líneas
  * alineadas a la izquierda. Evita que Word justifique cada ítem en una sola línea.
@@ -229,6 +262,7 @@ import { GenerateContractDto } from './dto/generate-contract.dto';
 import { loadDefaultContractTemplateBytes } from './contract-default-template';
 import {
   buildBankAccountsPlainSnippet,
+  buildBankAccountsWordLines,
   formatFincaFeaturesPlain,
   parseContractSettingsPayload,
   resolveContractMoneyLabel,
@@ -1747,11 +1781,15 @@ Al confirmar tu pago, recibirás el *soporte oficial* junto con todos los detall
       const selectedBankIds =
         Array.isArray(dto.bankAccountIds) && dto.bankAccountIds.length > 0
           ? dto.bankAccountIds.map(String)
-          : primaryBankAccountId
-            ? [String(primaryBankAccountId)]
-            : contractBankAccountIds.length > 0
-              ? contractBankAccountIds.map(String)
+          : contractBankAccountIds.length > 0
+            ? contractBankAccountIds.map(String)
+            : primaryBankAccountId
+              ? [String(primaryBankAccountId)]
               : [];
+      const bankWordLines = buildBankAccountsWordLines(
+        bankAccounts,
+        selectedBankIds,
+      );
       const cuentasBancariasPlain = buildBankAccountsPlainSnippet(
         bankAccounts,
         selectedBankIds,
@@ -1995,6 +2033,19 @@ Al confirmar tu pago, recibirás el *soporte oficial* junto con todos los detall
                 processed,
                 key,
                 val,
+              );
+            }
+          }
+          if (bankWordLines.length > 1) {
+            processed = replaceWordBankAccountPlaceholderCluster(
+              processed,
+              bankWordLines,
+            );
+            for (const key of ['cuentasBancarias', 'cuentasBancariasContrato']) {
+              processed = replaceWordListPlaceholderWithLeftAlign(
+                processed,
+                key,
+                bankWordLines.join('\n'),
               );
             }
           }

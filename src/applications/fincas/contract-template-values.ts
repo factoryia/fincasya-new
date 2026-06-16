@@ -150,6 +150,25 @@ export function formatCopLabel(amount: number): string {
   }).format(Math.round(amount));
 }
 
+/** Una línea por cuenta, orden igual a la plantilla Word (número + banco + titular). */
+export function formatBankAccountContractLine(
+  account: ContractBankAccountInput,
+): string {
+  const bankLabel = [account.accountType, account.bankName]
+    .filter(Boolean)
+    .join(' ');
+  return `${account.accountNumber ?? ''} ${bankLabel} a nombre de ${account.ownerName ?? ''} con la cédula N° ${account.ownerCedula ?? ''}`.trim();
+}
+
+export function buildBankAccountsWordLines(
+  bankAccounts: ContractBankAccountInput[],
+  selectedIds: string[],
+): string[] {
+  return bankAccounts
+    .filter((a) => a.id && selectedIds.includes(String(a.id)))
+    .map(formatBankAccountContractLine);
+}
+
 /** Texto plano de cuentas para plantilla Word (varias cuentas). */
 export function buildBankAccountsPlainSnippet(
   bankAccounts: ContractBankAccountInput[],
@@ -170,19 +189,9 @@ export function buildBankAccountsPlainSnippet(
     const holder = fallback.ownerName?.trim() || '';
     const cedula = fallback.ownerCedula?.trim() || '';
     if (num || bankLabel) {
-      return `${bankLabel} N° ${num} a nombre de ${holder} con la cédula N° ${cedula}`.trim();
+      return `${num} ${bankLabel} a nombre de ${holder} con la cédula N° ${cedula}`.trim();
     }
   }
   if (selected.length === 0) return '';
-  if (selected.length === 1) {
-    const a = selected[0];
-    const bankLabel = [a.accountType, a.bankName].filter(Boolean).join(' ');
-    return `${bankLabel} N° ${a.accountNumber ?? ''} a nombre de ${a.ownerName ?? ''} con la cédula N° ${a.ownerCedula ?? ''}`.trim();
-  }
-  return selected
-    .map((a) => {
-      const bankLabel = [a.accountType, a.bankName].filter(Boolean).join(' ');
-      return `• ${bankLabel} N° ${a.accountNumber ?? ''} — ${a.ownerName ?? ''} (C.C. ${a.ownerCedula ?? ''})`;
-    })
-    .join('\n');
+  return buildBankAccountsWordLines(bankAccounts, selectedIds).join('\n');
 }
