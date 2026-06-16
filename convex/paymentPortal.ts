@@ -191,15 +191,21 @@ export const savePaymentPortalConfig = mutation({
     bookingId: v.id('bookings'),
     bankAccountIds: v.array(v.string()),
     paymentMediaIds: v.optional(v.array(v.string())),
+    boldLink: v.optional(v.string()),
+    boldSurcharge: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
     const booking = await ctx.db.get(args.bookingId);
     if (!booking) throw new Error('Reserva no encontrada');
 
+    const boldLink = args.boldLink?.trim();
+
     await ctx.db.patch(args.bookingId, {
       paymentPortalConfig: {
         bankAccountIds: args.bankAccountIds,
         paymentMediaIds: args.paymentMediaIds ?? [],
+        boldLink: boldLink || undefined,
+        boldSurcharge: boldLink ? args.boldSurcharge : undefined,
         updatedAt: Date.now(),
       },
       updatedAt: Date.now(),
@@ -247,6 +253,8 @@ async function buildPortalView(ctx: { db: any }, key: string) {
     breakdown: computeBreakdown(booking),
     bankAccounts: accounts,
     paymentMedia: media,
+    boldLink: booking.paymentPortalConfig?.boldLink ?? null,
+    boldSurcharge: booking.paymentPortalConfig?.boldSurcharge ?? null,
     receipts: (booking.paymentPortalReceipts ?? []).map((r) => ({
       id: r.id,
       bankAccountId: r.bankAccountId,

@@ -265,7 +265,12 @@ export class BookingsController {
   async savePaymentPortalConfig(
     @Param('id') id: string,
     @Body()
-    body: { bankAccountIds: string[]; paymentMediaIds?: string[] },
+    body: {
+      bankAccountIds: string[];
+      paymentMediaIds?: string[];
+      boldLink?: string;
+      boldSurcharge?: number;
+    },
   ) {
     if (!Array.isArray(body?.bankAccountIds)) {
       throw new HttpException(
@@ -276,6 +281,8 @@ export class BookingsController {
     return this.checkinMessaging.savePaymentPortalConfig(id, {
       bankAccountIds: body.bankAccountIds,
       paymentMediaIds: body.paymentMediaIds,
+      boldLink: body.boldLink,
+      boldSurcharge: body.boldSurcharge,
     });
   }
 

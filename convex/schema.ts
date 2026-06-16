@@ -414,6 +414,10 @@ export default defineSchema({
       v.object({
         bankAccountIds: v.array(v.string()),
         paymentMediaIds: v.optional(v.array(v.string())),
+        /** Link de pago Bold (tarjeta de crédito) para esta reserva. */
+        boldLink: v.optional(v.string()),
+        /** Recargo % informativo junto al link de Bold (ej. 5). */
+        boldSurcharge: v.optional(v.number()),
         updatedAt: v.number(),
       }),
     ),

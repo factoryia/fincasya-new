@@ -263,12 +263,19 @@ export class CheckinMessagingService {
   /** Guarda cuentas/imágenes visibles en el portal de pago. */
   async savePaymentPortalConfig(
     bookingId: string,
-    payload: { bankAccountIds: string[]; paymentMediaIds?: string[] },
+    payload: {
+      bankAccountIds: string[];
+      paymentMediaIds?: string[];
+      boldLink?: string;
+      boldSurcharge?: number;
+    },
   ) {
     return this.convexService.mutation('paymentPortal:savePaymentPortalConfig', {
       bookingId,
       bankAccountIds: payload.bankAccountIds,
       paymentMediaIds: payload.paymentMediaIds ?? [],
+      boldLink: payload.boldLink,
+      boldSurcharge: payload.boldSurcharge,
     });
   }
 
