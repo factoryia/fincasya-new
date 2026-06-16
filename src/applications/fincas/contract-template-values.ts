@@ -25,12 +25,30 @@ export type PropertyContractOwnerOverride = {
   ciudadCedula?: string;
 };
 
+export type ContractBankAccountInput = {
+  id?: string;
+  bankName?: string;
+  accountType?: string;
+  accountNumber?: string;
+  ownerName?: string;
+  ownerCedula?: string;
+};
+
 export function parseContractSettingsPayload(payload: unknown): {
   admin: ContractAdminSettings;
   ownerOverrides: Record<string, PropertyContractOwnerOverride>;
+  bankAccounts: ContractBankAccountInput[];
+  contractBankAccountIds: string[];
+  primaryBankAccountId: string | null;
 } {
   if (!payload || typeof payload !== 'object') {
-    return { admin: { ...DEFAULT_CONTRACT_ADMIN }, ownerOverrides: {} };
+    return {
+      admin: { ...DEFAULT_CONTRACT_ADMIN },
+      ownerOverrides: {},
+      bankAccounts: [],
+      contractBankAccountIds: [],
+      primaryBankAccountId: null,
+    };
   }
   const o = payload as Record<string, unknown>;
   const rawAdmin = o.adminSettings;
@@ -46,7 +64,23 @@ export function parseContractSettingsPayload(payload: unknown): {
           PropertyContractOwnerOverride
         >)
       : {};
-  return { admin, ownerOverrides };
+  const bankAccounts = Array.isArray(o.bankAccounts)
+    ? (o.bankAccounts as ContractBankAccountInput[])
+    : [];
+  const contractBankAccountIds = Array.isArray(o.contractBankAccountIds)
+    ? (o.contractBankAccountIds as string[])
+    : [];
+  const primaryBankAccountId =
+    typeof o.primaryBankAccountId === 'string' && o.primaryBankAccountId.trim()
+      ? o.primaryBankAccountId.trim()
+      : null;
+  return {
+    admin,
+    ownerOverrides,
+    bankAccounts,
+    contractBankAccountIds,
+    primaryBankAccountId,
+  };
 }
 
 /** Agrupa características por nombre y suma `quantity` (o 1 por fila). */
@@ -114,4 +148,41 @@ export function formatCopLabel(amount: number): string {
     currency: 'COP',
     minimumFractionDigits: 0,
   }).format(Math.round(amount));
+}
+
+/** Texto plano de cuentas para plantilla Word (varias cuentas). */
+export function buildBankAccountsPlainSnippet(
+  bankAccounts: ContractBankAccountInput[],
+  selectedIds: string[],
+  fallback?: {
+    accountNumber?: string;
+    bankName?: string;
+    ownerName?: string;
+    ownerCedula?: string;
+  },
+): string {
+  const selected = bankAccounts.filter(
+    (a) => a.id && selectedIds.includes(String(a.id)),
+  );
+  if (selected.length === 0 && fallback) {
+    const bankLabel = fallback.bankName?.trim() || '';
+    const num = fallback.accountNumber?.trim() || '';
+    const holder = fallback.ownerName?.trim() || '';
+    const cedula = fallback.ownerCedula?.trim() || '';
+    if (num || bankLabel) {
+      return `${bankLabel} N° ${num} a nombre de ${holder} con la cédula N° ${cedula}`.trim();
+    }
+  }
+  if (selected.length === 0) return '';
+  if (selected.length === 1) {
+    const a = selected[0];
+    const bankLabel = [a.accountType, a.bankName].filter(Boolean).join(' ');
+    return `${bankLabel} N° ${a.accountNumber ?? ''} a nombre de ${a.ownerName ?? ''} con la cédula N° ${a.ownerCedula ?? ''}`.trim();
+  }
+  return selected
+    .map((a) => {
+      const bankLabel = [a.accountType, a.bankName].filter(Boolean).join(' ');
+      return `• ${bankLabel} N° ${a.accountNumber ?? ''} — ${a.ownerName ?? ''} (C.C. ${a.ownerCedula ?? ''})`;
+    })
+    .join('\n');
 }

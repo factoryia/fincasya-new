@@ -153,4 +153,24 @@ export class GenerateContractDto {
   /** Aseo final de la finca (COP, esta reserva). */
   @IsOptional()
   cleaningFee?: number;
+
+  /** Manilla de condominio (COP). */
+  @IsOptional()
+  manillaCondominio?: number;
+
+  /** Otros cobros no alojamiento (COP). */
+  @IsOptional()
+  otherCharges?: number;
+
+  /** IDs de cuentas bancarias a listar en el contrato. */
+  @IsOptional()
+  bankAccountIds?: string[];
+
+  @IsOptional()
+  @IsString()
+  propertyOwnerCedula?: string;
+
+  @IsOptional()
+  @IsString()
+  propertyOwnerCity?: string;
 }

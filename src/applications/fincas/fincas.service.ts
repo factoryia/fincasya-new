@@ -51,6 +51,75 @@ function replaceByPlainInnerKey(
   return s;
 }
 
+const WORD_TEMPLATE_GAP =
+  '(?:<[^>]+>|[\\s\\u00A0\\u200B\\uFEFF]|&nbsp;|&#0*160;|&#x0*A0;|&#32;|&#x20;)*';
+
+/** Escapa texto plano para nodos `<w:t>` de Word. */
+function escapeWordPlainText(rawVal: string): string {
+  return (rawVal ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+/** Una línea por párrafo alineado a la izquierda (listas en contrato Word). */
+function buildWordLeftAlignedParagraphs(lines: string[]): string {
+  return lines
+    .map((line) => {
+      const t = escapeWordPlainText(line);
+      return `<w:p><w:pPr><w:jc w:val="left"/></w:pPr><w:r><w:t xml:space="preserve">${t}</w:t></w:r></w:p>`;
+    })
+    .join('');
+}
+
+function findEnclosingWordParagraph(
+  xml: string,
+  innerStart: number,
+  innerEnd: number,
+): { start: number; end: number } | null {
+  const pStart = xml.lastIndexOf('<w:p', innerStart);
+  if (pStart === -1) return null;
+  const pEnd = xml.indexOf('</w:p>', innerEnd);
+  if (pEnd === -1) return null;
+  return { start: pStart, end: pEnd + '</w:p>'.length };
+}
+
+/**
+ * Sustituye el párrafo que contiene {{caracteristicasDeFinca}} por líneas
+ * alineadas a la izquierda. Evita que Word justifique cada ítem en una sola línea.
+ */
+function replaceWordListPlaceholderWithLeftAlign(
+  xml: string,
+  key: string,
+  rawVal: string,
+): string {
+  const keyPart = Array.from(key)
+    .map((ch) => escapeRegExp(ch))
+    .join(WORD_TEMPLATE_GAP);
+  const re = new RegExp(
+    `\\{${WORD_TEMPLATE_GAP}\\{${WORD_TEMPLATE_GAP}${keyPart}${WORD_TEMPLATE_GAP}\\}${WORD_TEMPLATE_GAP}\\}|\\{\\{${WORD_TEMPLATE_GAP}${keyPart}${WORD_TEMPLATE_GAP}\\}\\}`,
+  );
+  const match = re.exec(xml);
+  if (!match) return xml;
+
+  const lines = (rawVal ?? '')
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+  const replacement = lines.length ? buildWordLeftAlignedParagraphs(lines) : '';
+
+  const para = findEnclosingWordParagraph(
+    xml,
+    match.index,
+    match.index + match[0].length,
+  );
+  if (!para) {
+    return xml.replace(re, escapeWordTemplateValue(rawVal));
+  }
+  return xml.slice(0, para.start) + replacement + xml.slice(para.end);
+}
+
 /** Escapa texto para XML de Word; los saltos de línea se convierten en `<w:br/>`. */
 function escapeWordTemplateValue(rawVal: string): string {
   let v = (rawVal ?? '')
@@ -87,8 +156,7 @@ function applyWordTemplateReplacements(
   // Entre letras, alrededor de `{{`/`}}` o entre clave y cierre: Word mete
   // espacios / &nbsp; / w:tab, no solo etiquetas (antes solo aceptábamos XML
   // y fallaba "llave" + espacio + `}}`).
-  const gap =
-    '(?:<[^>]+>|[\\s\\u00A0\\u200B\\uFEFF]|&nbsp;|&#0*160;|&#x0*A0;|&#32;|&#x20;)*';
+  const gap = WORD_TEMPLATE_GAP;
 
   const entries = Object.entries(values)
     .filter(([k, v]) => k && v !== undefined)
@@ -160,6 +228,7 @@ import { UpdateOwnerInfoDto } from './dto/owner-info.dto';
 import { GenerateContractDto } from './dto/generate-contract.dto';
 import { loadDefaultContractTemplateBytes } from './contract-default-template';
 import {
+  buildBankAccountsPlainSnippet,
   formatFincaFeaturesPlain,
   parseContractSettingsPayload,
   resolveContractMoneyLabel,
@@ -1654,7 +1723,7 @@ Al confirmar tu pago, recibirás el *soporte oficial* junto con todos los detall
       } catch {
         console.warn('[api] Ajustes globales del contrato no disponibles');
       }
-      const { admin: contractAdmin, ownerOverrides } =
+      const { admin: contractAdmin, ownerOverrides, bankAccounts, contractBankAccountIds, primaryBankAccountId } =
         parseContractSettingsPayload(contractSettingsPayload);
       const ownerOverride =
         ownerOverrides[propertyId] ??
@@ -1667,16 +1736,69 @@ Al confirmar tu pago, recibirás el *soporte oficial* junto con todos los detall
         (dto.propertyOwnerName && String(dto.propertyOwnerName).trim()) ||
         ownerOverride.nombreCompleto?.trim() ||
         '';
+      const cedulaPropietario =
+        (dto.propertyOwnerCedula && String(dto.propertyOwnerCedula).trim()) ||
+        ownerOverride.cedula?.trim() ||
+        '';
+      const ciudadCedulaPropietario =
+        (dto.propertyOwnerCity && String(dto.propertyOwnerCity).trim()) ||
+        ownerOverride.ciudadCedula?.trim() ||
+        '';
+      const selectedBankIds =
+        Array.isArray(dto.bankAccountIds) && dto.bankAccountIds.length > 0
+          ? dto.bankAccountIds.map(String)
+          : primaryBankAccountId
+            ? [String(primaryBankAccountId)]
+            : contractBankAccountIds.length > 0
+              ? contractBankAccountIds.map(String)
+              : [];
+      const cuentasBancariasPlain = buildBankAccountsPlainSnippet(
+        bankAccounts,
+        selectedBankIds,
+        {
+          accountNumber: dto.accountNumber ?? '',
+          bankName: dto.bankName ?? '',
+          ownerName: dto.accountHolder ?? '',
+          ownerCedula: dto.idNumber ?? '',
+        },
+      );
+      const selectedBankAccounts = bankAccounts.filter(
+        (a) => a.id && selectedBankIds.includes(String(a.id)),
+      );
+      const contractBankAccount =
+        selectedBankAccounts[0] ??
+        (selectedBankIds.length === 0
+          ? null
+          : bankAccounts.find((a) => a.id === selectedBankIds[0]) ?? null);
+      const contractBankLabel = contractBankAccount
+        ? [contractBankAccount.accountType, contractBankAccount.bankName]
+            .filter(Boolean)
+            .join(' ')
+        : (valuesMapping[mappingKeys.bankName] ?? '');
+      const contractAccountNumber =
+        contractBankAccount?.accountNumber ??
+        valuesMapping[mappingKeys.accountNumber] ??
+        '';
+      const contractAccountHolder =
+        contractBankAccount?.ownerName ??
+        valuesMapping[mappingKeys.accountHolder] ??
+        '';
+      const contractAccountCedula =
+        contractBankAccount?.ownerCedula ??
+        valuesMapping[mappingKeys.idNumber] ??
+        '';
 
       // --- PREPARACIÓN DE VALORES PARA WORD/HTML (plantilla maestra única) ---
       const wordValues: Record<string, string> = {
         fechaGeneracion: valuesMapping[mappingKeys.date] ?? '',
         precioLetras: valuesMapping[mappingKeys.priceText] ?? '',
         precioNumerico: valuesMapping[mappingKeys.priceNumeric] ?? '',
-        bancoNombre: valuesMapping[mappingKeys.bankName] ?? '',
-        cuentaNumero: valuesMapping[mappingKeys.accountNumber] ?? '',
-        titularNombre: valuesMapping[mappingKeys.accountHolder] ?? '',
-        titularCedula: valuesMapping[mappingKeys.idNumber] ?? '',
+        bancoNombre: contractBankLabel,
+        cuentaNumero: contractAccountNumber,
+        titularNombre: contractAccountHolder,
+        titularCedula: contractAccountCedula,
+        cuentasBancarias: cuentasBancariasPlain,
+        cuentasBancariasContrato: cuentasBancariasPlain,
         contratoNumero: valuesMapping[mappingKeys.contractNumber] ?? '',
         fechaEntrada: valuesMapping[mappingKeys.checkInDate] ?? '',
         fechaLlegada: valuesMapping[mappingKeys.checkInDate] ?? '',
@@ -1692,8 +1814,8 @@ Al confirmar tu pago, recibirás el *soporte oficial* junto con todos los detall
         fechaEntradaMini: checkInMini,
         fechaLlegadaMini: checkInMini,
         fechaSalidaMini: checkOutMini,
-        horaLlegada: dto.checkInTime || '03:00 PM',
-        horaSalida: dto.checkOutTime || '01:00 PM',
+        horaLlegada: dto.checkInTime || '10:00 AM',
+        horaSalida: dto.checkOutTime || '04:00 PM',
         ciudadCliente: valuesMapping[mappingKeys.clientCity] || dto.clientCity || '',
         direccionCliente: valuesMapping[mappingKeys.clientAddress] || dto.clientAddress || '',
         clienteNombre: valuesMapping[mappingKeys.clientName] ?? '',
@@ -1713,6 +1835,8 @@ Al confirmar tu pago, recibirás el *soporte oficial* junto con todos los detall
         característicasDeFinca: caracteristicasPlain,
         caracteristicasDeFinca: caracteristicasPlain,
         nombrePropietario,
+        cedulaPropietario,
+        ciudadCedulaPropietario,
         adminNombre: (contractAdmin.adminName ?? '').trim(),
         adminCedula: (contractAdmin.adminCedula ?? '').trim(),
         adminCiudad: (contractAdmin.adminCity ?? '').trim(),
@@ -1861,8 +1985,21 @@ Al confirmar tu pago, recibirás el *soporte oficial* junto con todos los detall
       } else if (isDocx) {
         console.log('[api] Detectado formato Word (.docx)');
 
-        const processXml = (xml: string) =>
-          applyWordTemplateReplacements(xml, wordValues);
+        const processXml = (xml: string) => {
+          let processed = xml;
+          const listKeys = ['caracteristicasDeFinca', 'característicasDeFinca'];
+          for (const key of listKeys) {
+            const val = wordValues[key];
+            if (val !== undefined) {
+              processed = replaceWordListPlaceholderWithLeftAlign(
+                processed,
+                key,
+                val,
+              );
+            }
+          }
+          return applyWordTemplateReplacements(processed, wordValues);
+        };
 
         try {
           const zip = new PizZip(templateBytes);
