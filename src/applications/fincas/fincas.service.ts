@@ -1926,6 +1926,33 @@ Al confirmar tu pago, recibirás el *soporte oficial* junto con todos los detall
         }
       }
 
+      const sanitizedTitle = this.sanitizeFilename(finca.title || 'Finca');
+      const contractNumSuffix = resolvedContractNumber
+        ? `_${resolvedContractNumber}`
+        : '';
+
+      let finalBuffer: Buffer;
+      let finalFilename: string;
+      let finalMimeType: string;
+
+      const incomingCustomHtml =
+        typeof dto.customHtml === 'string' ? dto.customHtml.trim() : '';
+      const useCustomHtml =
+        incomingCustomHtml.length > 0 && incomingCustomHtml.length <= 400_000;
+
+      if (useCustomHtml) {
+        console.log(
+          `[api] Contrato desde HTML de vista previa (${incomingCustomHtml.length} chars).`,
+        );
+        const fullHtml = await this.wrapContractFragmentHtml(
+          incomingCustomHtml,
+          finca as { title?: string; location?: string },
+          resolvedContractNumber,
+        );
+        finalBuffer = await this.pdfService.htmlToPdf(fullHtml);
+        finalFilename = `Contrato_${sanitizedTitle}${contractNumSuffix}.pdf`;
+        finalMimeType = 'application/pdf';
+      } else {
       // Plantilla maestra única (formato QUINTA OLAYA): mismos estilos para todas las fincas.
       let templateBytes: Buffer | null = await loadDefaultContractTemplateBytes();
       if (!templateBytes) {
@@ -1938,44 +1965,6 @@ Al confirmar tu pago, recibirás el *soporte oficial* junto con todos los detall
         '[api] Plantilla Word maestra (formato QUINTA OLAYA) + datos de finca/cliente.',
       );
 
-      const sanitizedTitle = this.sanitizeFilename(finca.title || 'Finca');
-      const contractNumSuffix = resolvedContractNumber
-        ? `_${resolvedContractNumber}`
-        : '';
-
-      let finalBuffer: Buffer;
-      let finalFilename: string;
-      let finalMimeType: string;
-
-      if (!templateBytes) {
-        const incomingCustomHtml =
-          typeof dto.customHtml === 'string' ? dto.customHtml.trim() : '';
-        const useCustomHtml =
-          incomingCustomHtml.length > 0 && incomingCustomHtml.length <= 400_000;
-
-        if (useCustomHtml) {
-          console.log(
-            `[api] Sin plantilla Word: usando customHtml del frontend (${incomingCustomHtml.length} chars).`,
-          );
-          const fullHtml = await this.wrapContractFragmentHtml(
-            incomingCustomHtml,
-            finca as { title?: string; location?: string },
-            resolvedContractNumber,
-          );
-          finalBuffer = await this.pdfService.htmlToPdf(fullHtml);
-        } else {
-          console.log(
-            '[api] Sin plantilla Word ni customHtml: PDF fallback HTML mínimo.',
-          );
-          const fallbackHtml = this.buildContractFallbackHtml(
-            wordValues,
-            finca as { title?: string; location?: string },
-          );
-          finalBuffer = await this.pdfService.htmlToPdf(fallbackHtml);
-        }
-        finalFilename = `Contrato_${sanitizedTitle}${contractNumSuffix}.pdf`;
-        finalMimeType = 'application/pdf';
-      } else {
       // --- DETECCIÓN DE FORMATO Y PROCESAMIENTO ---
       const isDocx = templateBytes.slice(0, 2).toString() === 'PK';
       const isHtml = templateBytes.slice(0, 500).toString().toLowerCase().includes('<html');
