@@ -108,9 +108,8 @@ export const CHECKIN_TEMPLATES: Record<CheckinTemplateKey, TemplateDef> = {
   },
   tourist_checkin_start: {
     key: "tourist_checkin_start",
-    // v3: tono más cálido, CR + llegada con día/hora, check-in 36 h antes (jun 2026).
-    // Meta no permite editar plantillas aprobadas, por eso se versiona el nombre.
-    name: "inicio_checkin_turista_v3",
+    // v5: texto con emojis (🌴 ⚠️ 👉 —) según copy operativo; v4 sin emojis queda obsoleta.
+    name: "inicio_checkin_turista",
     language: "es",
     category: "UTILITY",
     paramKeys: [
