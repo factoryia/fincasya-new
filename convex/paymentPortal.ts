@@ -97,6 +97,7 @@ type ContractPayload = {
     ownerCedula?: string;
     imageUrl?: string;
     imageUrls?: string[];
+    qrOnly?: boolean;
   }>;
   paymentMedia?: Array<{
     id: string;
@@ -143,6 +144,7 @@ function resolvePortalAccounts(
         ownerCedula: a.ownerCedula ?? '',
         imageUrl: images[0] ?? null,
         imageUrls: images,
+        qrOnly: a.qrOnly ?? false,
       };
     });
 
