@@ -108,15 +108,20 @@ export const CHECKIN_TEMPLATES: Record<CheckinTemplateKey, TemplateDef> = {
   },
   tourist_checkin_start: {
     key: "tourist_checkin_start",
-    // v2: se agrega advertencia de pago al 100% (solicitud de Hernán, 9 jun 2026).
+    // v3: tono más cálido, CR + llegada con día/hora, check-in 36 h antes (jun 2026).
     // Meta no permite editar plantillas aprobadas, por eso se versiona el nombre.
-    name: "inicio_checkin_turista_v2",
+    name: "inicio_checkin_turista_v3",
     language: "es",
     category: "UTILITY",
-    paramKeys: ["nombreTurista", "nombreFinca", "fechaLlegada", "linkCheckin"],
+    paramKeys: [
+      "nombreTurista",
+      "nombreFinca",
+      "referenciaReserva",
+      "fechaLlegada",
+      "linkCheckin",
+    ],
     bodyText:
-      "¡Hola {{1}}! Ya estamos próximos a tu llegada a {{2}} el {{3}}.\n\nPara confirmar tu ingreso necesitamos que hagas tu check-in: ingresa tu lista de invitados (nombre completo y cédula de cada persona mayor de 2 años) y cuéntanos si vas a necesitar empleada de servicio o team.\n\nIMPORTANTE: sin check-in no podemos dar ingreso a la finca, y para hacer uso de la propiedad el pago de tu reserva debe estar al 100% antes de la llegada. Puedes guardar tu avance del check-in y continuar cuando quieras.\n\nHaz tu check-in aquí: {{4}}",
-    footer: "FincasYa",
+      "¡Hola {{1}}! Ya casi llega tu momento de descansar en {{2}} 🌴\n{{3}} · Llegada: {{4}}\n\n⚠️ MUY IMPORTANTE: haz tu check-in (lista de invitados con nombre y cédula) mínimo 36 horas antes de tu llegada. Sin check-in no podemos dar ingreso a la finca, y recuerda que para el uso de la propiedad el pago debe estar al 100%.\n\nHaz tu check-in aquí 👉 {{5}}\n\nPuedes guardar tu avance y volver al mismo enlace cuando quieras. — FincasYa",
     button: {
       type: "url",
       text: "Hacer check-in",
@@ -125,8 +130,9 @@ export const CHECKIN_TEMPLATES: Record<CheckinTemplateKey, TemplateDef> = {
     },
     exampleParams: [
       "Santiago",
-      "Cartagena Aparta-Estudio Luxury 3PAX",
-      "15 de junio de 2026",
+      "Villa del Lago",
+      "CR-1234",
+      "sábado 15 de junio de 2026, 3:00 PM",
       "https://fincasya.com/checkin/CR-1234",
     ],
   },

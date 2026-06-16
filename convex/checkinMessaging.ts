@@ -40,15 +40,35 @@ function firstName(full: string | undefined | null): string {
   return s.split(/\s+/)[0];
 }
 
-/** Fecha de llegada legible en español (hora Colombia). Ej: "15 de junio de 2026". */
-function formatFechaLlegada(ms: number): string {
+function formatHoraEntrada(hora?: string | null): string {
+  const s = String(hora ?? "").trim();
+  if (!s) return "3:00 PM";
+  const match = /^(\d{1,2}):(\d{2})$/.exec(s);
+  if (!match) return s;
+  let h = parseInt(match[1], 10);
+  const m = match[2];
+  const ampm = h >= 12 ? "PM" : "AM";
+  if (h === 0) h = 12;
+  else if (h > 12) h -= 12;
+  return `${h}:${m} ${ampm}`;
+}
+
+/** Fecha de llegada legible en español (hora Colombia). Ej: "sábado 15 de junio de 2026, 3:00 PM". */
+function formatFechaLlegada(ms: number, horaEntrada?: string | null): string {
   if (!Number.isFinite(ms)) return "tu fecha de llegada";
-  return new Intl.DateTimeFormat("es-CO", {
+  const date = new Date(ms);
+  const dia = new Intl.DateTimeFormat("es-CO", {
+    weekday: "long",
+    timeZone: "America/Bogota",
+  }).format(date);
+  const fecha = new Intl.DateTimeFormat("es-CO", {
     day: "numeric",
     month: "long",
     year: "numeric",
     timeZone: "America/Bogota",
-  }).format(new Date(ms));
+  }).format(date);
+  const diaCapitalizado = dia.charAt(0).toUpperCase() + dia.slice(1);
+  return `${diaCapitalizado} ${fecha}, ${formatHoraEntrada(horaEntrada)}`;
 }
 
 /**
@@ -337,6 +357,7 @@ type EnrichedBooking = {
   celular: string;
   fechaEntrada: number;
   fechaSalida: number;
+  horaEntrada?: string;
   horaSalida?: string;
   reference?: string;
   checkinCompleted?: boolean;
@@ -376,6 +397,7 @@ export const bookingsInWindow = internalQuery({
           celular: b.celular,
           fechaEntrada: b.fechaEntrada,
           fechaSalida: b.fechaSalida,
+          horaEntrada: b.horaEntrada,
           horaSalida: b.horaSalida,
           reference: b.reference,
           checkinCompleted: b.checkinCompleted,
@@ -456,7 +478,8 @@ function planSendsForMoment(
             bodyParams: buildBodyParams(def, {
               nombreTurista: firstName(b.nombreCompleto),
               nombreFinca: finca,
-              fechaLlegada: formatFechaLlegada(b.fechaEntrada),
+              referenciaReserva: cr,
+              fechaLlegada: formatFechaLlegada(b.fechaEntrada, b.horaEntrada),
               linkCheckin: link,
             }),
             logToInbox: true,
@@ -561,6 +584,7 @@ export const getBookingForSend = internalQuery({
       celular: b.celular,
       fechaEntrada: b.fechaEntrada,
       fechaSalida: b.fechaSalida,
+      horaEntrada: b.horaEntrada,
       horaSalida: b.horaSalida,
       reference: b.reference,
       checkinCompleted: b.checkinCompleted,
@@ -617,7 +641,8 @@ function resolveManualSend(
     bodyParams: buildBodyParams(def, {
       nombreTurista: firstName(b.nombreCompleto),
       nombreFinca: finca,
-      fechaLlegada: formatFechaLlegada(b.fechaEntrada),
+      referenciaReserva: cr,
+      fechaLlegada: formatFechaLlegada(b.fechaEntrada, b.horaEntrada),
       linkCheckin: link,
       horaSalida: b.horaSalida || "la hora acordada",
     }),
@@ -860,7 +885,8 @@ export const listBookingsForBatch = query({
           (property as { propietarioNombre?: string } | null)?.propietarioNombre,
         ),
         nombreFinca: finca,
-        fechaLlegada: formatFechaLlegada(b.fechaEntrada),
+        referenciaReserva: cr,
+        fechaLlegada: formatFechaLlegada(b.fechaEntrada, b.horaEntrada),
         linkCheckin: `${portal}/${cr}`,
         horaSalida: b.horaSalida || "la hora acordada",
       };
