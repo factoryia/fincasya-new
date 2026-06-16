@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { ConvexService } from '../shared/services/convex.service';
+import { S3Service } from '../shared/services/s3.service';
 import { addDays, startOfDay, endOfDay, getDay } from 'date-fns';
 
 /** Clave lógica de cada momento del timeline (debe coincidir con el catálogo Convex). */
@@ -54,7 +55,10 @@ type MomentResult = {
 export class CheckinMessagingService {
   private readonly logger = new Logger(CheckinMessagingService.name);
 
-  constructor(private readonly convexService: ConvexService) {}
+  constructor(
+    private readonly convexService: ConvexService,
+    private readonly s3Service: S3Service,
+  ) {}
 
   /** Cron diario: dispara cada momento del timeline cuyo día aplique hoy. */
   @Cron(CronExpression.EVERY_DAY_AT_9AM)
@@ -263,12 +267,19 @@ export class CheckinMessagingService {
   /** Guarda cuentas/imágenes visibles en el portal de pago. */
   async savePaymentPortalConfig(
     bookingId: string,
-    payload: { bankAccountIds: string[]; paymentMediaIds?: string[] },
+    payload: {
+      bankAccountIds: string[];
+      paymentMediaIds?: string[];
+      boldLink?: string;
+      boldSurcharge?: number;
+    },
   ) {
     return this.convexService.mutation('paymentPortal:savePaymentPortalConfig', {
       bookingId,
       bankAccountIds: payload.bankAccountIds,
       paymentMediaIds: payload.paymentMediaIds ?? [],
+      boldLink: payload.boldLink,
+      boldSurcharge: payload.boldSurcharge,
     });
   }
 
@@ -322,25 +333,29 @@ export class CheckinMessagingService {
     const base =
       process.env.CONVEX_SITE_URL ||
       'https://adventurous-octopus-651.convex.site';
-    const form = new FormData();
-    form.append(
-      'file',
-      new Blob([new Uint8Array(payload.file.buffer)], {
-        type: payload.file.mimetype || 'image/jpeg',
-      }),
-      payload.file.originalname || 'comprobante.jpg',
-    );
-    if (payload.bankAccountId) {
-      form.append('bankAccountId', payload.bankAccountId);
-    }
-    if (payload.bankName) form.append('bankName', payload.bankName);
-    if (payload.amount != null && payload.amount > 0) {
-      form.append('amount', String(payload.amount));
-    }
+
+    // Subimos el comprobante a S3 y guardamos solo la URL. Antes se enviaba el
+    // archivo como base64 al doc de la reserva en Convex, que tiene un límite
+    // de 1 MiB: un comprobante grande lo desbordaba y la subida fallaba.
+    const receiptUrl = await this.s3Service.uploadImage(payload.file);
 
     const res = await fetch(
       `${base.replace(/\/+$/, '')}/api/payment/${encodeURIComponent(trimmed)}`,
-      { method: 'POST', body: form },
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          receiptUrl,
+          fileName: payload.file.originalname || 'comprobante.jpg',
+          mimeType: payload.file.mimetype || 'image/jpeg',
+          bankAccountId: payload.bankAccountId,
+          bankName: payload.bankName,
+          amount:
+            payload.amount != null && payload.amount > 0
+              ? payload.amount
+              : undefined,
+        }),
+      },
     );
 
     const text = await res.text();
