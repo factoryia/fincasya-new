@@ -108,19 +108,20 @@ export const CHECKIN_TEMPLATES: Record<CheckinTemplateKey, TemplateDef> = {
   },
   tourist_checkin_start: {
     key: "tourist_checkin_start",
-    // v5: texto con emojis (🌴 ⚠️ 👉 —) según copy operativo; v4 sin emojis queda obsoleta.
+    // v6: llegada y hora de ingreso en líneas separadas (copy operativo, jun 2026).
+    // Hoy se usa para copiar/pegar; si se reactiva el envío Meta debe re-aprobarse.
     name: "inicio_checkin_turista",
     language: "es",
     category: "UTILITY",
     paramKeys: [
       "nombreTurista",
       "nombreFinca",
-      "referenciaReserva",
       "fechaLlegada",
+      "horaIngreso",
       "linkCheckin",
     ],
     bodyText:
-      "¡Hola {{1}}! Ya casi llega tu momento de descansar en {{2}} 🌴\n{{3}} · Llegada: {{4}}\n\n⚠️ MUY IMPORTANTE: haz tu check-in (lista de invitados con nombre y cédula) mínimo 36 horas antes de tu llegada. Sin check-in no podemos dar ingreso a la finca, y recuerda que para el uso de la propiedad el pago debe estar al 100%.\n\nHaz tu check-in aquí 👉 {{5}}\n\nPuedes guardar tu avance y volver al mismo enlace cuando quieras. — FincasYa",
+      "¡Hola, {{1}}! 👋\n🌴 Ya casi llega el momento de disfrutar de {{2}}.\n📅 Llegada: {{3}}\n🕒 Ingreso: {{4}}\n\nPara continuar con tu proceso de ingreso, por favor realiza tu check-in aquí:\n👉 {{5}}\n\n⚠️ Importante: El check-in debe completarse mínimo 36 horas antes de tu llegada. Sin este proceso no podremos autorizar el ingreso a la propiedad.\n\n🏡 FincasYa.com",
     button: {
       type: "url",
       text: "Hacer check-in",
@@ -128,11 +129,11 @@ export const CHECKIN_TEMPLATES: Record<CheckinTemplateKey, TemplateDef> = {
       exampleSuffix: "CR-1234",
     },
     exampleParams: [
-      "Santiago",
-      "Villa del Lago",
-      "CR-1234",
-      "sábado 15 de junio de 2026, 3:00 PM",
-      "https://fincasya.com/checkin/CR-1234",
+      "Vanessa",
+      "MELGAR VILLA PALMA 13PAX MG#008",
+      "Sábado 20 de junio de 2026",
+      "10:00 AM",
+      "https://fincasya.com/checkin/2642",
     ],
   },
   tourist_checkin_pending: {

@@ -54,7 +54,7 @@ function formatHoraEntrada(hora?: string | null): string {
 }
 
 /** Fecha de llegada legible en español (hora Colombia). Ej: "sábado 15 de junio de 2026, 3:00 PM". */
-function formatFechaLlegada(ms: number, horaEntrada?: string | null): string {
+function formatFechaLlegada(ms: number): string {
   if (!Number.isFinite(ms)) return "tu fecha de llegada";
   const date = new Date(ms);
   const dia = new Intl.DateTimeFormat("es-CO", {
@@ -68,7 +68,8 @@ function formatFechaLlegada(ms: number, horaEntrada?: string | null): string {
     timeZone: "America/Bogota",
   }).format(date);
   const diaCapitalizado = dia.charAt(0).toUpperCase() + dia.slice(1);
-  return `${diaCapitalizado} ${fecha}, ${formatHoraEntrada(horaEntrada)}`;
+  // Solo la fecha: la hora de ingreso va en su propia línea/variable.
+  return `${diaCapitalizado} ${fecha}`;
 }
 
 /**
@@ -479,7 +480,8 @@ function planSendsForMoment(
               nombreTurista: firstName(b.nombreCompleto),
               nombreFinca: finca,
               referenciaReserva: cr,
-              fechaLlegada: formatFechaLlegada(b.fechaEntrada, b.horaEntrada),
+              fechaLlegada: formatFechaLlegada(b.fechaEntrada),
+              horaIngreso: formatHoraEntrada(b.horaEntrada),
               linkCheckin: link,
             }),
             logToInbox: true,
@@ -642,7 +644,8 @@ function resolveManualSend(
       nombreTurista: firstName(b.nombreCompleto),
       nombreFinca: finca,
       referenciaReserva: cr,
-      fechaLlegada: formatFechaLlegada(b.fechaEntrada, b.horaEntrada),
+      fechaLlegada: formatFechaLlegada(b.fechaEntrada),
+      horaIngreso: formatHoraEntrada(b.horaEntrada),
       linkCheckin: link,
       horaSalida: b.horaSalida || "la hora acordada",
     }),
@@ -886,7 +889,8 @@ export const listBookingsForBatch = query({
         ),
         nombreFinca: finca,
         referenciaReserva: cr,
-        fechaLlegada: formatFechaLlegada(b.fechaEntrada, b.horaEntrada),
+        fechaLlegada: formatFechaLlegada(b.fechaEntrada),
+        horaIngreso: formatHoraEntrada(b.horaEntrada),
         linkCheckin: `${portal}/${cr}`,
         horaSalida: b.horaSalida || "la hora acordada",
       };
