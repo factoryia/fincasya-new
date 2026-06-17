@@ -64,11 +64,15 @@ function escapeWordPlainText(rawVal: string): string {
 }
 
 /** Una línea por párrafo alineado a la izquierda (listas en contrato Word). */
-function buildWordLeftAlignedParagraphs(lines: string[]): string {
+function buildWordLeftAlignedParagraphs(
+  lines: string[],
+  bold = false,
+): string {
+  const rPr = bold ? '<w:rPr><w:b/><w:bCs/></w:rPr>' : '';
   return lines
     .map((line) => {
       const t = escapeWordPlainText(line);
-      return `<w:p><w:pPr><w:jc w:val="left"/></w:pPr><w:r><w:t xml:space="preserve">${t}</w:t></w:r></w:p>`;
+      return `<w:p><w:pPr><w:jc w:val="left"/></w:pPr><w:r>${rPr}<w:t xml:space="preserve">${t}</w:t></w:r></w:p>`;
     })
     .join('');
 }
@@ -140,7 +144,9 @@ function replaceWordListPlaceholderWithLeftAlign(
     .split(/\r?\n/)
     .map((line) => line.trim())
     .filter(Boolean);
-  const replacement = lines.length ? buildWordLeftAlignedParagraphs(lines) : '';
+  const replacement = lines.length
+    ? buildWordLeftAlignedParagraphs(lines, true)
+    : '';
 
   const para = findEnclosingWordParagraph(
     xml,

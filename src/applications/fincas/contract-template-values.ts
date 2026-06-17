@@ -111,16 +111,24 @@ export function aggregatePropertyFeatureCounts(
   return Array.from(counts.entries()).map(([name, count]) => ({ name, count }));
 }
 
-/** Lista numerada vertical (Word / catálogo Meta): una línea por ítem. */
+/** Línea de amenidad para contrato: «04 HABITACIONES» o «PISCINA» (sin 1. ni x4 al final). */
+export function formatFeatureContractLine(name: string, count: number): string {
+  const label = name.trim().toUpperCase();
+  if (!label) return '';
+  if (count > 1) {
+    return `${String(count).padStart(2, '0')} ${label}`;
+  }
+  return label;
+}
+
+/** Lista vertical para Word/PDF del contrato (una línea por ítem). */
 export function formatFincaFeaturesPlain(features: unknown[]): string {
   const items = aggregatePropertyFeatureCounts(features);
   if (!items.length) return '';
 
   return items
-    .map(({ name, count }, i) => {
-      const suffix = count > 1 ? ` (x${count})` : '';
-      return `${i + 1}. ${name}${suffix}`;
-    })
+    .map(({ name, count }) => formatFeatureContractLine(name, count))
+    .filter(Boolean)
     .join('\n');
 }
 
