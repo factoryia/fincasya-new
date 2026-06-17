@@ -375,6 +375,12 @@ export default defineSchema({
     checkinCompleted: v.optional(v.boolean()),
     checkinCompletedAt: v.optional(v.number()),
     /**
+     * Marca manual: el equipo envió el check-in al cliente (ej. copió el
+     * mensaje). Lleva la reserva a la etapa "morado / check-in enviado" en
+     * el semáforo del calendario, sin esperar un envío automático.
+     */
+    checkinSentManualAt: v.optional(v.number()),
+    /**
      * Lista de invitados que ingresan, capturada por el turista en el portal
      * público de check-in (`/checkin/:reference`). Cada persona mayor de 2 años
      * lleva nombre completo + cédula; los menores de 2 años se marcan con

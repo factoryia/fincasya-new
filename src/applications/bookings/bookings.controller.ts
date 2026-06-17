@@ -201,6 +201,17 @@ export class BookingsController {
     }
   }
 
+  /** Marca/desmarca manualmente el check-in como enviado (etapa morado). */
+  @Post('checkin/:id/mark-sent')
+  @UseGuards(ConvexAuthGuard, RolesGuard)
+  @Roles(UserRole.ADMIN, UserRole.ASSISTANT)
+  async markCheckinSent(
+    @Param('id') id: string,
+    @Body() body: { sent?: boolean },
+  ) {
+    return this.checkinMessaging.markCheckinSent(id, body?.sent ?? true);
+  }
+
   /** Resumen de pago + imágenes por WhatsApp al cliente de la reserva. */
   @Post('checkin/:id/send-payment')
   @UseGuards(ConvexAuthGuard, RolesGuard)
