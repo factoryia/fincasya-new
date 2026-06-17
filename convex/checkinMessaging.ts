@@ -40,17 +40,29 @@ function firstName(full: string | undefined | null): string {
   return s.split(/\s+/)[0];
 }
 
-function formatHoraEntrada(hora?: string | null): string {
+function formatHoraEntrada(hora?: string | null, ms?: number): string {
   const s = String(hora ?? "").trim();
-  if (!s) return "3:00 PM";
   const match = /^(\d{1,2}):(\d{2})$/.exec(s);
-  if (!match) return s;
-  let h = parseInt(match[1], 10);
-  const m = match[2];
-  const ampm = h >= 12 ? "PM" : "AM";
-  if (h === 0) h = 12;
-  else if (h > 12) h -= 12;
-  return `${h}:${m} ${ampm}`;
+  if (match) {
+    let h = parseInt(match[1], 10);
+    const m = match[2];
+    const ampm = h >= 12 ? "PM" : "AM";
+    if (h === 0) h = 12;
+    else if (h > 12) h -= 12;
+    return `${h}:${m} ${ampm}`;
+  }
+  if (s) return s; // ya viene formateada (ej. "10:00 AM")
+  // Sin campo horaEntrada: derivar la hora del timestamp de llegada
+  // (hora Colombia), igual que la página de check-in.
+  if (ms != null && Number.isFinite(ms)) {
+    return new Intl.DateTimeFormat("en-US", {
+      hour: "numeric",
+      minute: "2-digit",
+      hour12: true,
+      timeZone: "America/Bogota",
+    }).format(new Date(ms));
+  }
+  return "10:00 AM";
 }
 
 /** Fecha de llegada legible en español (hora Colombia). Ej: "sábado 15 de junio de 2026, 3:00 PM". */
@@ -481,7 +493,7 @@ function planSendsForMoment(
               nombreFinca: finca,
               referenciaReserva: cr,
               fechaLlegada: formatFechaLlegada(b.fechaEntrada),
-              horaIngreso: formatHoraEntrada(b.horaEntrada),
+              horaIngreso: formatHoraEntrada(b.horaEntrada, b.fechaEntrada),
               linkCheckin: link,
             }),
             logToInbox: true,
@@ -645,7 +657,7 @@ function resolveManualSend(
       nombreFinca: finca,
       referenciaReserva: cr,
       fechaLlegada: formatFechaLlegada(b.fechaEntrada),
-      horaIngreso: formatHoraEntrada(b.horaEntrada),
+      horaIngreso: formatHoraEntrada(b.horaEntrada, b.fechaEntrada),
       linkCheckin: link,
       horaSalida: b.horaSalida || "la hora acordada",
     }),
@@ -890,7 +902,7 @@ export const listBookingsForBatch = query({
         nombreFinca: finca,
         referenciaReserva: cr,
         fechaLlegada: formatFechaLlegada(b.fechaEntrada),
-        horaIngreso: formatHoraEntrada(b.horaEntrada),
+        horaIngreso: formatHoraEntrada(b.horaEntrada, b.fechaEntrada),
         linkCheckin: `${portal}/${cr}`,
         horaSalida: b.horaSalida || "la hora acordada",
       };
