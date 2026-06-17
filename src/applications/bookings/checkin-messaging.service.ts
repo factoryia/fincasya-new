@@ -264,6 +264,14 @@ export class CheckinMessagingService {
     });
   }
 
+  /** Marca/desmarca manualmente el check-in como enviado (etapa morado). */
+  async markCheckinSent(bookingId: string, sent: boolean) {
+    return this.convexService.mutation('bookings:markCheckinSent', {
+      id: bookingId,
+      sent,
+    });
+  }
+
   /** Guarda cuentas/imágenes visibles en el portal de pago. */
   async savePaymentPortalConfig(
     bookingId: string,

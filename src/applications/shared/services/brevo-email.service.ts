@@ -3,6 +3,7 @@ import {
   getAdminNotificationTemplate,
   getClientConfirmationTemplate,
   getReminderTemplate,
+  getCheckinInvitationTemplate,
 } from './email-templates';
 
 @Injectable()
@@ -205,6 +206,53 @@ export class BrevoEmailService {
       );
       throw error;
     }
+  }
+
+  /** Invitación al check-in (envío manual desde la ventana de la reserva). */
+  async sendCheckinInvitationToClient(data: {
+    clientEmail: string;
+    clientName: string;
+    propertyTitle: string;
+    checkInDate: string;
+    checkInTime: string;
+    reference: string;
+    checkinUrl: string;
+  }) {
+    if (!data.clientEmail) {
+      throw new Error('La reserva no tiene correo del cliente');
+    }
+    const htmlContent = getCheckinInvitationTemplate({
+      logoUrl: this.logoUrl,
+      clientName: data.clientName,
+      propertyTitle: data.propertyTitle,
+      checkInDate: data.checkInDate,
+      checkInTime: data.checkInTime,
+      reference: data.reference,
+      checkinUrl: data.checkinUrl,
+    });
+
+    const response = await fetch('https://api.brevo.com/v3/smtp/email', {
+      method: 'POST',
+      headers: {
+        'api-key': this.apiKey,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        sender: { name: this.senderName, email: this.senderEmail },
+        to: [{ email: data.clientEmail, name: data.clientName }],
+        subject: `📋 Completa tu check-in para ${data.propertyTitle}`,
+        htmlContent,
+      }),
+    });
+
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}));
+      throw new Error(
+        errorData.message || 'Error al enviar el correo de check-in',
+      );
+    }
+
+    this.logger.log(`Correo de check-in enviado a cliente: ${data.clientEmail}`);
   }
 
   /**

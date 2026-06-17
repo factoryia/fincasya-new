@@ -1058,6 +1058,19 @@ export const markReminderSent = mutation({
   },
 });
 
+/** Marca/desmarca manualmente el check-in como enviado (etapa morado). */
+export const markCheckinSent = mutation({
+  args: { id: v.id('bookings'), sent: v.optional(v.boolean()) },
+  handler: async (ctx, args) => {
+    const sent = args.sent ?? true;
+    await ctx.db.patch(args.id, {
+      checkinSentManualAt: sent ? Date.now() : undefined,
+      updatedAt: Date.now(),
+    });
+    return { ok: true, sent };
+  },
+});
+
 /**
  * Busca una reserva por número de contrato.
  * Coincidencias: texto en `observaciones` (p. ej. "Contrato: FY-2005"), `reference`, sin depender

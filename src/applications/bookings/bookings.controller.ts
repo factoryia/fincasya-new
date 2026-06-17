@@ -181,6 +181,37 @@ export class BookingsController {
     );
   }
 
+  /** Envía el correo de invitación al check-in al cliente de la reserva. */
+  @Post('checkin/:id/send-email')
+  @UseGuards(ConvexAuthGuard, RolesGuard)
+  @Roles(UserRole.ADMIN, UserRole.ASSISTANT)
+  async sendCheckinEmail(@Param('id') id: string) {
+    try {
+      return await this.remindersService.sendCheckinInvitation(id);
+    } catch (err) {
+      throw new HttpException(
+        {
+          error:
+            err instanceof Error
+              ? err.message
+              : 'No se pudo enviar el correo de check-in',
+        },
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+  }
+
+  /** Marca/desmarca manualmente el check-in como enviado (etapa morado). */
+  @Post('checkin/:id/mark-sent')
+  @UseGuards(ConvexAuthGuard, RolesGuard)
+  @Roles(UserRole.ADMIN, UserRole.ASSISTANT)
+  async markCheckinSent(
+    @Param('id') id: string,
+    @Body() body: { sent?: boolean },
+  ) {
+    return this.checkinMessaging.markCheckinSent(id, body?.sent ?? true);
+  }
+
   /** Resumen de pago + imágenes por WhatsApp al cliente de la reserva. */
   @Post('checkin/:id/send-payment')
   @UseGuards(ConvexAuthGuard, RolesGuard)

@@ -72,4 +72,66 @@ export class BookingsRemindersService {
   async triggerRemindersManually() {
     return this.handleCron();
   }
+
+  /** Hora de ingreso legible: usa horaEntrada si existe, si no la deriva del
+   *  timestamp de llegada (hora Colombia). */
+  private formatHoraIngreso(hora?: string | null, ms?: number): string {
+    const s = String(hora ?? '').trim();
+    const m = /^(\d{1,2}):(\d{2})$/.exec(s);
+    if (m) {
+      let h = parseInt(m[1], 10);
+      const ampm = h >= 12 ? 'PM' : 'AM';
+      if (h === 0) h = 12;
+      else if (h > 12) h -= 12;
+      return `${h}:${m[2]} ${ampm}`;
+    }
+    if (s) return s;
+    if (ms != null && Number.isFinite(ms)) {
+      return new Intl.DateTimeFormat('en-US', {
+        hour: 'numeric',
+        minute: '2-digit',
+        hour12: true,
+        timeZone: 'America/Bogota',
+      }).format(new Date(ms));
+    }
+    return '10:00 AM';
+  }
+
+  /** Envía el correo de invitación al check-in para una reserva (envío manual). */
+  async sendCheckinInvitation(bookingId: string) {
+    const booking = await this.convexService.query('bookings:getById', {
+      id: bookingId,
+    });
+    if (!booking) throw new Error('Reserva no encontrada');
+    if (!booking.correo) {
+      throw new Error('La reserva no tiene correo del cliente');
+    }
+
+    const reference = booking.reference || bookingId;
+    const checkinUrl = `https://fincasya.com/checkin/${encodeURIComponent(reference)}`;
+
+    const fecha = new Intl.DateTimeFormat('es-CO', {
+      weekday: 'long',
+      day: 'numeric',
+      month: 'long',
+      year: 'numeric',
+      timeZone: 'America/Bogota',
+    }).format(new Date(booking.fechaEntrada));
+    const fechaCap = fecha.charAt(0).toUpperCase() + fecha.slice(1);
+
+    await this.brevoEmailService.sendCheckinInvitationToClient({
+      clientEmail: booking.correo,
+      clientName: booking.nombreCompleto || 'huésped',
+      propertyTitle: booking.property?.title || 'tu finca',
+      checkInDate: fechaCap,
+      checkInTime: this.formatHoraIngreso(
+        booking.horaEntrada,
+        booking.fechaEntrada,
+      ),
+      reference,
+      checkinUrl,
+    });
+
+    return { ok: true, to: booking.correo };
+  }
 }
