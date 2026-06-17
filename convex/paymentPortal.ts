@@ -98,6 +98,7 @@ type ContractPayload = {
     imageUrl?: string;
     imageUrls?: string[];
     qrOnly?: boolean;
+    brebKey?: boolean;
   }>;
   paymentMedia?: Array<{
     id: string;
@@ -145,6 +146,7 @@ function resolvePortalAccounts(
         imageUrl: images[0] ?? null,
         imageUrls: images,
         qrOnly: a.qrOnly ?? false,
+        brebKey: a.brebKey ?? false,
       };
     });
 
