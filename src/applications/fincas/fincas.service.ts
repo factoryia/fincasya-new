@@ -1458,6 +1458,9 @@ Al confirmar tu pago, recibirás el *soporte oficial* junto con todos los detall
               ...(account.accountType?.trim()
                 ? { accountType: account.accountType.trim() }
                 : {}),
+              ...(account.accountHolderName?.trim()
+                ? { accountHolderName: account.accountHolderName.trim() }
+                : {}),
             }))
             .filter(
               (account) =>

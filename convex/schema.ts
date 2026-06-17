@@ -957,6 +957,8 @@ export default defineSchema({
           bankName: v.string(),
           accountNumber: v.string(),
           accountType: v.optional(v.string()),
+          /** Persona titular de la cuenta (puede ser distinta al propietario de la finca). */
+          accountHolderName: v.optional(v.string()),
         }),
       ),
     ),

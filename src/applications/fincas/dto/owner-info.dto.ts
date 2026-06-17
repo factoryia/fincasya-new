@@ -6,6 +6,7 @@ export type OwnerBankAccountInput = {
   bankName: string;
   accountNumber: string;
   accountType?: string;
+  accountHolderName?: string;
 };
 
 export class UpdateOwnerInfoDto {
@@ -52,6 +53,13 @@ export class UpdateOwnerInfoDto {
           ).trim(),
           accountType: String(
             row.accountType ?? row.AccountType ?? '',
+          ).trim(),
+          accountHolderName: String(
+            row.accountHolderName ??
+              row.AccountHolderName ??
+              row.ownerName ??
+              row.OwnerName ??
+              '',
           ).trim(),
         };
       })

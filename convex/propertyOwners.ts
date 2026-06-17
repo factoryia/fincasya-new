@@ -59,6 +59,7 @@ export const upsert = mutation({
           bankName: v.string(),
           accountNumber: v.string(),
           accountType: v.optional(v.string()),
+          accountHolderName: v.optional(v.string()),
         }),
       ),
     ),
