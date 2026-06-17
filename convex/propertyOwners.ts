@@ -69,6 +69,8 @@ export const upsert = mutation({
     propietarioCedula: v.optional(v.string()),
     propietarioCorreo: v.optional(v.string()),
     checkinUbicacionUrl: v.optional(v.string()),
+    checkinIndicacionesLlegada: v.optional(v.string()),
+    checkinUbicacionImageUrl: v.optional(v.string()),
     bankCertificationUrl: v.optional(v.string()),
     idCopyUrl: v.optional(v.string()),
     rntPdfUrl: v.optional(v.string()),

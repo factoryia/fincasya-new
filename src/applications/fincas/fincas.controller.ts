@@ -434,6 +434,7 @@ export class FincasController {
         { name: 'idCopy', maxCount: 1 },
         { name: 'rntPdf', maxCount: 1 },
         { name: 'chamberOfCommerce', maxCount: 1 },
+        { name: 'checkinUbicacionImage', maxCount: 1 },
       ],
       {
         storage: memoryStorage(),
@@ -450,6 +451,7 @@ export class FincasController {
       idCopy?: Express.Multer.File[];
       rntPdf?: Express.Multer.File[];
       chamberOfCommerce?: Express.Multer.File[];
+      checkinUbicacionImage?: Express.Multer.File[];
     },
   ) {
     return this.fincasService.upsertOwnerInfo(id, dto, {
@@ -457,6 +459,7 @@ export class FincasController {
       idCopy: files?.idCopy?.[0],
       rntPdf: files?.rntPdf?.[0],
       chamberOfCommerce: files?.chamberOfCommerce?.[0],
+      checkinUbicacionImage: files?.checkinUbicacionImage?.[0],
     });
   }
 

@@ -675,24 +675,30 @@ export const getCheckinLink = query({
     link: string;
     reference: string;
     checkinUbicacionUrl?: string;
+    checkinIndicacionesLlegada?: string;
+    checkinUbicacionImageUrl?: string;
   }> => {
     const b = await ctx.db.get(args.bookingId);
     if (!b) throw new Error("Reserva no encontrada");
     const cr = ((b as { reference?: string }).reference ||
       (b._id as string)) as string;
 
-    let checkinUbicacionUrl: string | undefined;
     const ownerInfo = await ctx.db
       .query("propertyOwnerInfo")
       .withIndex("by_property", (q) => q.eq("propertyId", b.propertyId))
       .unique();
     const mapsUrl = String(ownerInfo?.checkinUbicacionUrl ?? "").trim();
-    if (mapsUrl) checkinUbicacionUrl = mapsUrl;
+    const indicaciones = String(
+      ownerInfo?.checkinIndicacionesLlegada ?? "",
+    ).trim();
+    const imageUrl = String(ownerInfo?.checkinUbicacionImageUrl ?? "").trim();
 
     return {
       link: `${checkinPortalBase()}/${cr}`,
       reference: cr,
-      ...(checkinUbicacionUrl ? { checkinUbicacionUrl } : {}),
+      ...(mapsUrl ? { checkinUbicacionUrl: mapsUrl } : {}),
+      ...(indicaciones ? { checkinIndicacionesLlegada: indicaciones } : {}),
+      ...(imageUrl ? { checkinUbicacionImageUrl: imageUrl } : {}),
     };
   },
 });

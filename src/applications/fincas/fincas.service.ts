@@ -1446,6 +1446,7 @@ Al confirmar tu pago, recibirás el *soporte oficial* junto con todos los detall
       idCopy?: Express.Multer.File;
       rntPdf?: Express.Multer.File;
       chamberOfCommerce?: Express.Multer.File;
+      checkinUbicacionImage?: Express.Multer.File;
     },
   ) {
     try {
@@ -1495,6 +1496,14 @@ Al confirmar tu pago, recibirás el *soporte oficial* junto con todos los detall
         ...(dto.checkinUbicacionUrl !== undefined
           ? { checkinUbicacionUrl: dto.checkinUbicacionUrl.trim() }
           : {}),
+        ...(dto.checkinIndicacionesLlegada !== undefined
+          ? {
+              checkinIndicacionesLlegada: dto.checkinIndicacionesLlegada.trim(),
+            }
+          : {}),
+        ...(dto.checkinUbicacionImageUrl !== undefined
+          ? { checkinUbicacionImageUrl: dto.checkinUbicacionImageUrl }
+          : {}),
         ...(dto.bankCertificationUrl !== undefined
           ? { bankCertificationUrl: dto.bankCertificationUrl }
           : {}),
@@ -1528,6 +1537,12 @@ Al confirmar tu pago, recibirás el *soporte oficial* junto con todos los detall
           updateData.chamberOfCommerceUrl = await this.s3Service.uploadFile(
             files.chamberOfCommerce,
             'owners/chamber-of-commerce',
+          );
+        }
+        if (files.checkinUbicacionImage) {
+          updateData.checkinUbicacionImageUrl = await this.s3Service.uploadFile(
+            files.checkinUbicacionImage,
+            'owners/checkin-location-images',
           );
         }
       }

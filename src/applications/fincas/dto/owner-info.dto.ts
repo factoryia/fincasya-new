@@ -106,4 +106,12 @@ export class UpdateOwnerInfoDto {
   @IsOptional()
   @IsString()
   checkinUbicacionUrl?: string;
+
+  @IsOptional()
+  @IsString()
+  checkinIndicacionesLlegada?: string;
+
+  @IsOptional()
+  @IsString()
+  checkinUbicacionImageUrl?: string;
 }

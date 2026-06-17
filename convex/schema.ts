@@ -406,6 +406,8 @@ export default defineSchema({
     checkinAceptaDatos: v.optional(v.boolean()),
     /** Última vez que el turista guardó avance o envió su check-in. */
     checkinUpdatedAt: v.optional(v.number()),
+    /** Cuándo el equipo envió manualmente el link de check-in al huésped. */
+    checkinSentManualAt: v.optional(v.number()),
     /**
      * Portal público de pago (`/pago/:reference`): cuentas seleccionadas por el
      * equipo para mostrar al cliente en el link compartido.
@@ -970,6 +972,10 @@ export default defineSchema({
     propietarioCorreo: v.optional(v.string()),
     /** Link de Maps (Google/Apple) — solo check-in; no se usa en catálogo ni GPS público. */
     checkinUbicacionUrl: v.optional(v.string()),
+    /** Indicaciones textuales de llegada (colores, portón, referencias). Solo check-in. */
+    checkinIndicacionesLlegada: v.optional(v.string()),
+    /** Foto/mapa de referencia para llegada. Solo check-in. */
+    checkinUbicacionImageUrl: v.optional(v.string()),
     /** URLs de documentos cargados (PDF) */
     bankCertificationUrl: v.optional(v.string()),
     idCopyUrl: v.optional(v.string()),

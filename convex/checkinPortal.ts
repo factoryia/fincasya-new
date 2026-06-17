@@ -125,16 +125,30 @@ async function findBooking(
   return null;
 }
 
-async function loadCheckinUbicacionUrl(
+async function loadCheckinLocationInfo(
   ctx: { db: any },
   propertyId: Id<'properties'>,
-): Promise<string | null> {
+): Promise<{
+  checkinUbicacionUrl: string | null;
+  checkinIndicacionesLlegada: string | null;
+  checkinUbicacionImageUrl: string | null;
+}> {
   const ownerInfo = await ctx.db
     .query('propertyOwnerInfo')
     .withIndex('by_property', (q: any) => q.eq('propertyId', propertyId))
     .unique();
-  const url = String(ownerInfo?.checkinUbicacionUrl ?? '').trim();
-  return url || null;
+  const checkinUbicacionUrl = String(ownerInfo?.checkinUbicacionUrl ?? '').trim();
+  const checkinIndicacionesLlegada = String(
+    ownerInfo?.checkinIndicacionesLlegada ?? '',
+  ).trim();
+  const checkinUbicacionImageUrl = String(
+    ownerInfo?.checkinUbicacionImageUrl ?? '',
+  ).trim();
+  return {
+    checkinUbicacionUrl: checkinUbicacionUrl || null,
+    checkinIndicacionesLlegada: checkinIndicacionesLlegada || null,
+    checkinUbicacionImageUrl: checkinUbicacionImageUrl || null,
+  };
 }
 
 /** Resumen seguro (sin datos sensibles) + lo ya guardado, para precargar el portal. */
@@ -153,7 +167,7 @@ export const getForPortal = internalQuery({
     const pagoTotal = netPaidFromPayments(payments);
     const precioTotal = Number(booking.precioTotal) || 0;
     const pagoPendiente = pendingFromTotal(precioTotal, pagoTotal);
-    const checkinUbicacionUrl = await loadCheckinUbicacionUrl(
+    const checkinLocation = await loadCheckinLocationInfo(
       ctx,
       booking.propertyId,
     );
@@ -184,7 +198,9 @@ export const getForPortal = internalQuery({
       pagoTotal,
       pagoPendiente,
       pagoCompleto: pagoPendiente <= 0,
-      checkinUbicacionUrl,
+      checkinUbicacionUrl: checkinLocation.checkinUbicacionUrl,
+      checkinIndicacionesLlegada: checkinLocation.checkinIndicacionesLlegada,
+      checkinUbicacionImageUrl: checkinLocation.checkinUbicacionImageUrl,
     };
   },
 });
