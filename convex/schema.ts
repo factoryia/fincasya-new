@@ -412,8 +412,6 @@ export default defineSchema({
     checkinAceptaDatos: v.optional(v.boolean()),
     /** Última vez que el turista guardó avance o envió su check-in. */
     checkinUpdatedAt: v.optional(v.number()),
-    /** Cuándo el equipo envió manualmente el link de check-in al huésped. */
-    checkinSentManualAt: v.optional(v.number()),
     /**
      * Portal público de pago (`/pago/:reference`): cuentas seleccionadas por el
      * equipo para mostrar al cliente en el link compartido.
