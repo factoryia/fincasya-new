@@ -389,3 +389,71 @@ export const getReminderTemplate = (data: {
 
   return getBaseLayout({ logoUrl: data.logoUrl, preheader, content });
 };
+
+export const getCheckinInvitationTemplate = (data: {
+  logoUrl: string;
+  clientName: string;
+  propertyTitle: string;
+  checkInDate: string;
+  checkInTime: string;
+  reference: string;
+  checkinUrl: string;
+}) => {
+  const preheader = `Completa tu check-in para tu llegada a ${data.propertyTitle}.`;
+
+  const content = `
+    <div class="title">¡Falta poco para tu llegada a <span style="color: #f15a24">${data.propertyTitle}</span>! 🌴</div>
+
+    <div class="subtitle">
+      Hola <strong>${data.clientName}</strong>, para autorizar tu ingreso necesitamos
+      que completes tu check-in (lista de invitados con nombre y cédula de cada persona).
+    </div>
+
+    <div class="card">
+      <div style="font-size: 18px; font-weight: 700; margin-bottom: 20px; color: #1a202c; border-bottom: 2px solid #f15a24; padding-bottom: 8px; display: inline-block;">
+        DETALLES DE TU LLEGADA
+      </div>
+
+      <table class="detail-table">
+        <tr class="detail-row">
+          <td class="detail-label">Fecha de Entrada</td>
+          <td class="detail-value">${data.checkInDate}</td>
+        </tr>
+        <tr class="detail-row">
+          <td class="detail-label">Hora de Ingreso</td>
+          <td class="detail-value">${data.checkInTime}</td>
+        </tr>
+        <tr class="detail-row">
+          <td class="detail-label">Referencia</td>
+          <td class="detail-value">${data.reference}</td>
+        </tr>
+      </table>
+    </div>
+
+    <div style="text-align: center;">
+      <a href="${data.checkinUrl}" class="btn">Hacer mi check-in</a>
+    </div>
+
+    <div class="alert-box">
+      <strong>⚠️ Importante:</strong> el check-in debe completarse mínimo 36 horas antes
+      de tu llegada. Sin este proceso no podremos autorizar el ingreso a la propiedad.
+    </div>
+
+    <div style="margin-top: 20px;">
+      <div class="instruction-item">
+        <div class="icon-box">💾</div>
+        <div><strong>No tienes que hacerlo de una sola vez:</strong> guarda tu avance y vuelve a este mismo enlace cuando quieras.</div>
+      </div>
+      <div class="instruction-item">
+        <div class="icon-box">📍</div>
+        <div><strong>Ubicación:</strong> tras completar tu check-in te compartiremos la ubicación exacta y los detalles de acceso.</div>
+      </div>
+    </div>
+
+    <p style="text-align: center; color: #718096; font-size: 13px; margin-top: 30px;">
+      Si tienes alguna duda, contáctanos por nuestro soporte de WhatsApp.
+    </p>
+  `;
+
+  return getBaseLayout({ logoUrl: data.logoUrl, preheader, content });
+};
