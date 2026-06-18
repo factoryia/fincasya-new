@@ -978,8 +978,10 @@ export default defineSchema({
     checkinUbicacionUrl: v.optional(v.string()),
     /** Indicaciones textuales de llegada (colores, portón, referencias). Solo check-in. */
     checkinIndicacionesLlegada: v.optional(v.string()),
-    /** Foto/mapa de referencia para llegada. Solo check-in. */
+    /** Foto/mapa de referencia para llegada (legacy: primera imagen). Solo check-in. */
     checkinUbicacionImageUrl: v.optional(v.string()),
+    /** Fotos/mapas de referencia para llegada, en orden. Solo check-in. */
+    checkinUbicacionImageUrls: v.optional(v.array(v.string())),
     /** URLs de documentos cargados (PDF) */
     bankCertificationUrl: v.optional(v.string()),
     idCopyUrl: v.optional(v.string()),

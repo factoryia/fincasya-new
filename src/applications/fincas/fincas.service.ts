@@ -1447,6 +1447,7 @@ Al confirmar tu pago, recibirás el *soporte oficial* junto con todos los detall
       rntPdf?: Express.Multer.File;
       chamberOfCommerce?: Express.Multer.File;
       checkinUbicacionImage?: Express.Multer.File;
+      checkinUbicacionImages?: Express.Multer.File[];
     },
   ) {
     try {
@@ -1545,6 +1546,32 @@ Al confirmar tu pago, recibirás el *soporte oficial* junto con todos los detall
             'owners/checkin-location-images',
           );
         }
+      }
+
+      // Galería de fotos/mapas de referencia (varias, en orden).
+      // El frontend manda el orden final (URLs existentes + tokens "__new__")
+      // y los archivos nuevos en checkinUbicacionImages, en el mismo orden.
+      if (dto.checkinUbicacionImageOrder !== undefined) {
+        const order = dto.checkinUbicacionImageOrder;
+        const newFiles = files?.checkinUbicacionImages ?? [];
+        const uploadedUrls: string[] = [];
+        for (const file of newFiles) {
+          uploadedUrls.push(
+            await this.s3Service.uploadFile(
+              file,
+              'owners/checkin-location-images',
+            ),
+          );
+        }
+        let nextNew = 0;
+        const finalUrls = order
+          .map((token) =>
+            token === '__new__' ? (uploadedUrls[nextNew++] ?? '') : token,
+          )
+          .filter((url) => typeof url === 'string' && url.length > 0);
+        updateData.checkinUbicacionImageUrls = finalUrls;
+        // Espejo legacy: primera imagen para consumidores antiguos.
+        updateData.checkinUbicacionImageUrl = finalUrls[0] ?? '';
       }
 
       const result = await this.convexService.mutation(

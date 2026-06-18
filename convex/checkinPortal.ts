@@ -132,6 +132,7 @@ async function loadCheckinLocationInfo(
   checkinUbicacionUrl: string | null;
   checkinIndicacionesLlegada: string | null;
   checkinUbicacionImageUrl: string | null;
+  checkinUbicacionImageUrls: string[];
 }> {
   const ownerInfo = await ctx.db
     .query('propertyOwnerInfo')
@@ -144,10 +145,22 @@ async function loadCheckinLocationInfo(
   const checkinUbicacionImageUrl = String(
     ownerInfo?.checkinUbicacionImageUrl ?? '',
   ).trim();
+  // Galería: usa el array si existe; si no, cae al campo legacy (single).
+  const rawUrls = Array.isArray(ownerInfo?.checkinUbicacionImageUrls)
+    ? (ownerInfo.checkinUbicacionImageUrls as unknown[])
+    : [];
+  let checkinUbicacionImageUrls = rawUrls
+    .map((u) => String(u ?? '').trim())
+    .filter((u) => u.length > 0);
+  if (checkinUbicacionImageUrls.length === 0 && checkinUbicacionImageUrl) {
+    checkinUbicacionImageUrls = [checkinUbicacionImageUrl];
+  }
   return {
     checkinUbicacionUrl: checkinUbicacionUrl || null,
     checkinIndicacionesLlegada: checkinIndicacionesLlegada || null,
-    checkinUbicacionImageUrl: checkinUbicacionImageUrl || null,
+    checkinUbicacionImageUrl:
+      checkinUbicacionImageUrls[0] ?? (checkinUbicacionImageUrl || null),
+    checkinUbicacionImageUrls,
   };
 }
 
@@ -201,6 +214,7 @@ export const getForPortal = internalQuery({
       checkinUbicacionUrl: checkinLocation.checkinUbicacionUrl,
       checkinIndicacionesLlegada: checkinLocation.checkinIndicacionesLlegada,
       checkinUbicacionImageUrl: checkinLocation.checkinUbicacionImageUrl,
+      checkinUbicacionImageUrls: checkinLocation.checkinUbicacionImageUrls,
     };
   },
 });

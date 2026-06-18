@@ -114,4 +114,28 @@ export class UpdateOwnerInfoDto {
   @IsOptional()
   @IsString()
   checkinUbicacionImageUrl?: string;
+
+  /**
+   * Orden final de las imágenes de referencia. Cada token es una URL existente
+   * que se conserva, o el literal "__new__" que indica "tomar el siguiente
+   * archivo subido en checkinUbicacionImages". Llega como JSON string.
+   */
+  @IsOptional()
+  @IsArray()
+  @Transform(({ value }) => {
+    if (value === undefined || value === null) return undefined;
+    const raw =
+      typeof value === 'string'
+        ? (() => {
+            try {
+              return JSON.parse(value);
+            } catch {
+              return undefined;
+            }
+          })()
+        : value;
+    if (!Array.isArray(raw)) return undefined;
+    return raw.map((item) => String(item ?? '')).filter((s) => s.length > 0);
+  })
+  checkinUbicacionImageOrder?: string[];
 }
