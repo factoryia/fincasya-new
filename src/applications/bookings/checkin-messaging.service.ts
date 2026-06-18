@@ -272,6 +272,54 @@ export class CheckinMessagingService {
     });
   }
 
+  /** Vista pública para el propietario (por referencia, solo lectura). */
+  async getOwnerView(reference: string) {
+    const trimmed = String(reference ?? '').trim();
+    if (!trimmed) return null;
+    const booking: any = await this.convexService.query(
+      'bookings:getByReference',
+      { reference: trimmed },
+    );
+    if (!booking) return null;
+
+    const property = booking.property || {};
+    const allGuests = (booking.checkinGuests || []).filter(
+      (g: any) => !g.esMenor,
+    );
+    const maskCedula = (c?: string) => {
+      const d = String(c ?? '').replace(/\D/g, '');
+      return d.length >= 4 ? `••••${d.slice(-4)}` : d ? '••••' : '';
+    };
+    const empleada = booking.needsTeam
+      ? 'varias'
+      : booking.needsEmpleada
+        ? 'una'
+        : 'no';
+    const pdf = (booking.multimedia || []).find(
+      (m: any) =>
+        m.type === 'application/pdf' && /invitad|guest/i.test(m.name || ''),
+    );
+
+    return {
+      reference: booking.reference || trimmed,
+      propertyTitle: property.title || 'tu finca',
+      propertyLocation: property.location || null,
+      ownerName: property.propietarioNombre || null,
+      fechaEntrada: booking.fechaEntrada,
+      fechaSalida: booking.fechaSalida,
+      horaEntrada: booking.horaEntrada ?? null,
+      numeroPersonas: booking.numeroPersonas ?? null,
+      empleada, // 'no' | 'una' | 'varias'
+      checkinCompleted: Boolean(booking.checkinCompleted),
+      guestCount: allGuests.length,
+      guests: allGuests.map((g: any) => ({
+        nombre: g.nombreCompleto,
+        cedula: maskCedula(g.cedula),
+      })),
+      invitadosPdfUrl: pdf?.url || null,
+    };
+  }
+
   /** Guarda cuentas/imágenes visibles en el portal de pago. */
   async savePaymentPortalConfig(
     bookingId: string,

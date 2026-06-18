@@ -212,6 +212,19 @@ export class BookingsController {
     return this.checkinMessaging.markCheckinSent(id, body?.sent ?? true);
   }
 
+  /** Vista pública para el propietario (por referencia, solo lectura). */
+  @Get('owner/:ref')
+  async getOwnerView(@Param('ref') ref: string) {
+    const data = await this.checkinMessaging.getOwnerView(ref);
+    if (!data) {
+      throw new HttpException(
+        { error: 'not_found', message: 'No encontramos esta reserva.' },
+        HttpStatus.NOT_FOUND,
+      );
+    }
+    return { ok: true, ...data };
+  }
+
   /** Resumen de pago + imágenes por WhatsApp al cliente de la reserva. */
   @Post('checkin/:id/send-payment')
   @UseGuards(ConvexAuthGuard, RolesGuard)
