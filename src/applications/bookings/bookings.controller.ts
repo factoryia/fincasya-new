@@ -12,10 +12,11 @@ import {
   UploadedFiles,
   UploadedFile,
   Req,
+  Res,
   HttpException,
   HttpStatus,
 } from '@nestjs/common';
-import type { Request } from 'express';
+import type { Request, Response } from 'express';
 import { FilesInterceptor, FileInterceptor } from '@nestjs/platform-express';
 import { BookingsSyncService } from './bookings-sync.service';
 import { BookingsRemindersService } from './bookings-reminders.service';
@@ -223,6 +224,27 @@ export class BookingsController {
       );
     }
     return { ok: true, ...data };
+  }
+
+  /** PDF del listado de invitados, generado al vuelo (público, para el propietario). */
+  @Get('owner/:ref/guests-pdf')
+  async getOwnerGuestsPdf(@Param('ref') ref: string, @Res() res: Response) {
+    const result = await this.checkinMessaging.getOwnerGuestsPdf(ref);
+    if (!result) {
+      throw new HttpException(
+        {
+          error: 'not_found',
+          message: 'Aún no hay listado de invitados para esta reserva.',
+        },
+        HttpStatus.NOT_FOUND,
+      );
+    }
+    res.set({
+      'Content-Type': 'application/pdf',
+      'Content-Disposition': `attachment; filename="${result.filename}"`,
+      'Content-Length': String(result.buffer.length),
+    });
+    res.send(result.buffer);
   }
 
   /** Resumen de pago + imágenes por WhatsApp al cliente de la reserva. */

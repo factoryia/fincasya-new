@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { ConvexService } from '../shared/services/convex.service';
 import { S3Service } from '../shared/services/s3.service';
+import { PdfService } from '../shared/services/pdf.service';
 import { addDays, startOfDay, endOfDay, getDay } from 'date-fns';
 
 /** Clave lógica de cada momento del timeline (debe coincidir con el catálogo Convex). */
@@ -58,6 +59,7 @@ export class CheckinMessagingService {
   constructor(
     private readonly convexService: ConvexService,
     private readonly s3Service: S3Service,
+    private readonly pdfService: PdfService,
   ) {}
 
   /** Cron diario: dispara cada momento del timeline cuyo día aplique hoy. */
@@ -318,6 +320,109 @@ export class CheckinMessagingService {
       })),
       invitadosPdfUrl: pdf?.url || null,
     };
+  }
+
+  /**
+   * Genera al vuelo el PDF del listado de invitados para el propietario,
+   * a partir del check-in del turista (no depende de multimedia).
+   * Devuelve null si la reserva no existe o no hay invitados diligenciados.
+   */
+  async getOwnerGuestsPdf(
+    reference: string,
+  ): Promise<{ buffer: Buffer; filename: string } | null> {
+    const trimmed = String(reference ?? '').trim();
+    if (!trimmed) return null;
+    const booking: any = await this.convexService.query(
+      'bookings:getByReference',
+      { reference: trimmed },
+    );
+    if (!booking) return null;
+
+    const guests = (booking.checkinGuests || []).filter((g: any) => !g.esMenor);
+    if (guests.length === 0) return null;
+
+    const property = booking.property || {};
+    const esc = (v: unknown) =>
+      String(v ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
+    const fmtFecha = (ms?: number) =>
+      ms
+        ? new Intl.DateTimeFormat('es-CO', {
+            day: 'numeric',
+            month: 'long',
+            year: 'numeric',
+            timeZone: 'America/Bogota',
+          }).format(new Date(ms))
+        : '—';
+
+    const metaPairs: Array<[string, string]> = [
+      ['Propiedad', property.title || 'Propiedad'],
+      ...(property.location
+        ? ([['Ubicación', property.location]] as Array<[string, string]>)
+        : []),
+      ['Titular de la reserva', booking.nombreCompleto || '—'],
+      ['Referencia', booking.reference || trimmed],
+      ['Entrada', fmtFecha(booking.fechaEntrada)],
+      ['Salida', fmtFecha(booking.fechaSalida)],
+      ['Personas', String(booking.numeroPersonas ?? guests.length)],
+    ];
+    const metaRows = metaPairs
+      .map(
+        ([k, v]) =>
+          `<tr><th style="border:1px solid #ddd;background:#f5f5f5;text-align:left;width:34%;padding:6px 10px;">${esc(
+            k,
+          )}</th><td style="border:1px solid #ddd;padding:6px 10px;">${esc(
+            v,
+          )}</td></tr>`,
+      )
+      .join('');
+
+    const guestRows = guests
+      .map(
+        (g: any, i: number) =>
+          `<tr><td style="border:1px solid #ddd;text-align:center;width:36px;padding:6px 10px;">${
+            i + 1
+          }</td><td style="border:1px solid #ddd;padding:6px 10px;">${esc(
+            g.nombreCompleto || '—',
+          )}</td><td style="border:1px solid #ddd;padding:6px 10px;">${esc(
+            g.cedula?.trim() || 'Sin cédula',
+          )}</td></tr>`,
+      )
+      .join('');
+
+    const html = `<!DOCTYPE html>
+<html lang="es"><head><meta charset="utf-8" />
+<style>
+  body { font-family: Arial, 'Segoe UI', sans-serif; color: #111; padding: 8px; }
+  h1 { font-size: 16pt; margin: 0 0 4pt; text-align: center; }
+  p.sub { text-align: center; color: #555; font-size: 10pt; margin: 0 0 16pt; }
+  h2 { font-size: 12pt; margin: 0 0 8pt; }
+  table { width: 100%; border-collapse: collapse; margin-bottom: 16pt; font-size: 11pt; }
+</style></head>
+<body>
+  <h1>Lista de invitados — Check-in</h1>
+  <p class="sub">Documento generado por Fincas Ya para el propietario.</p>
+  <table><tbody>${metaRows}</tbody></table>
+  <h2>Personas registradas (${guests.length})</h2>
+  <table>
+    <thead><tr>
+      <th style="border:1px solid #ddd;background:#f5f5f5;padding:6px 10px;width:36px;">#</th>
+      <th style="border:1px solid #ddd;background:#f5f5f5;text-align:left;padding:6px 10px;">Nombre completo</th>
+      <th style="border:1px solid #ddd;background:#f5f5f5;text-align:left;padding:6px 10px;">Documento</th>
+    </tr></thead>
+    <tbody>${guestRows}</tbody>
+  </table>
+</body></html>`;
+
+    const buffer = await this.pdfService.htmlToPdf(html);
+    const safeRef = String(booking.reference || trimmed).replace(
+      /[^a-zA-Z0-9_-]/g,
+      '_',
+    );
+    return { buffer, filename: `Invitados-${safeRef}.pdf` };
   }
 
   /** Guarda cuentas/imágenes visibles en el portal de pago. */
