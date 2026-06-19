@@ -1438,6 +1438,15 @@ Al confirmar tu pago, recibirás el *soporte oficial* junto con todos los detall
     }
   }
 
+  /** Propietarios con cuentas guardadas (+ finca), para el buscador del check-in. */
+  async listOwnerAccounts() {
+    try {
+      return await this.convexService.query('propertyOwners:listWithAccounts', {});
+    } catch (error) {
+      throw new BadRequestException(error.message);
+    }
+  }
+
   async upsertOwnerInfo(
     propertyId: string,
     dto: UpdateOwnerInfoDto,

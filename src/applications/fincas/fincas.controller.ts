@@ -411,6 +411,13 @@ export class FincasController {
 
 
 
+  /** Propietarios con cuentas guardadas (+ finca) para el buscador del check-in. */
+  @Get('owner-accounts')
+  @UseGuards(ConvexAuthGuard, AdminGuard)
+  async listOwnerAccounts() {
+    return this.fincasService.listOwnerAccounts();
+  }
+
   @Get(':id')
   async getById(
     @Param('id') id: string,
