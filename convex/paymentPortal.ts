@@ -120,7 +120,9 @@ function resolvePortalAccounts(
   payload: ContractPayload,
   config: Doc<'bookings'>['paymentPortalConfig'],
 ) {
-  const allAccounts = payload.bankAccounts ?? [];
+  // Catálogo global + cuentas propias de esta reserva (importadas de un propietario).
+  const extraAccounts = config?.extraBankAccounts ?? [];
+  const allAccounts = [...(payload.bankAccounts ?? []), ...extraAccounts];
   let ids: string[];
 
   if (config != null) {
@@ -193,6 +195,22 @@ export const savePaymentPortalConfig = mutation({
     bookingId: v.id('bookings'),
     bankAccountIds: v.array(v.string()),
     paymentMediaIds: v.optional(v.array(v.string())),
+    extraBankAccounts: v.optional(
+      v.array(
+        v.object({
+          id: v.string(),
+          bankName: v.string(),
+          accountType: v.optional(v.string()),
+          accountNumber: v.string(),
+          ownerName: v.string(),
+          ownerCedula: v.optional(v.string()),
+          imageUrl: v.optional(v.string()),
+          imageUrls: v.optional(v.array(v.string())),
+          qrOnly: v.optional(v.boolean()),
+          brebKey: v.optional(v.boolean()),
+        }),
+      ),
+    ),
     boldLink: v.optional(v.string()),
     boldSurcharge: v.optional(v.number()),
   },
@@ -201,11 +219,18 @@ export const savePaymentPortalConfig = mutation({
     if (!booking) throw new Error('Reserva no encontrada');
 
     const boldLink = args.boldLink?.trim();
+    // Solo conservar las cuentas extra que sigan marcadas para esta reserva.
+    const selectedIds = new Set(args.bankAccountIds);
+    const extraBankAccounts = (args.extraBankAccounts ?? []).filter((a) =>
+      selectedIds.has(a.id),
+    );
 
     await ctx.db.patch(args.bookingId, {
       paymentPortalConfig: {
         bankAccountIds: args.bankAccountIds,
         paymentMediaIds: args.paymentMediaIds ?? [],
+        extraBankAccounts:
+          extraBankAccounts.length > 0 ? extraBankAccounts : undefined,
         boldLink: boldLink || undefined,
         boldSurcharge: boldLink ? args.boldSurcharge : undefined,
         updatedAt: Date.now(),

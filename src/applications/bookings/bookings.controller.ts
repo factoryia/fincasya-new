@@ -23,6 +23,7 @@ import { BookingsRemindersService } from './bookings-reminders.service';
 import {
   CheckinMessagingService,
   type CheckinMomentKey,
+  type PortalExtraBankAccount,
 } from './checkin-messaging.service';
 import { ConvexAuthGuard } from '../shared/guards/convex-auth.guard';
 import { AdminGuard } from '../shared/guards/admin.guard';
@@ -334,6 +335,7 @@ export class BookingsController {
     body: {
       bankAccountIds: string[];
       paymentMediaIds?: string[];
+      extraBankAccounts?: PortalExtraBankAccount[];
       boldLink?: string;
       boldSurcharge?: number;
     },
@@ -347,6 +349,7 @@ export class BookingsController {
     return this.checkinMessaging.savePaymentPortalConfig(id, {
       bankAccountIds: body.bankAccountIds,
       paymentMediaIds: body.paymentMediaIds,
+      extraBankAccounts: body.extraBankAccounts,
       boldLink: body.boldLink,
       boldSurcharge: body.boldSurcharge,
     });

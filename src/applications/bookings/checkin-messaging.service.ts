@@ -14,6 +14,20 @@ export type CheckinMomentKey =
   | 'owner_arrival_tomorrow'
   | 'tourist_departure';
 
+/** Cuenta propia de una reserva (importada de un propietario), no del catálogo global. */
+export type PortalExtraBankAccount = {
+  id: string;
+  bankName: string;
+  accountType?: string;
+  accountNumber: string;
+  ownerName: string;
+  ownerCedula?: string;
+  imageUrl?: string;
+  imageUrls?: string[];
+  qrOnly?: boolean;
+  brebKey?: boolean;
+};
+
 type MomentWindow = {
   key: CheckinMomentKey;
   minDate: number;
@@ -431,14 +445,34 @@ export class CheckinMessagingService {
     payload: {
       bankAccountIds: string[];
       paymentMediaIds?: string[];
+      extraBankAccounts?: PortalExtraBankAccount[];
       boldLink?: string;
       boldSurcharge?: number;
     },
   ) {
+    const extraBankAccounts = (payload.extraBankAccounts ?? [])
+      .filter((a) => a && a.id)
+      .map((a) => ({
+        id: String(a.id),
+        bankName: String(a.bankName ?? ''),
+        accountType: a.accountType != null ? String(a.accountType) : undefined,
+        accountNumber: String(a.accountNumber ?? ''),
+        ownerName: String(a.ownerName ?? ''),
+        ownerCedula: a.ownerCedula != null ? String(a.ownerCedula) : undefined,
+        imageUrl: a.imageUrl != null ? String(a.imageUrl) : undefined,
+        imageUrls: Array.isArray(a.imageUrls)
+          ? a.imageUrls.map((u) => String(u))
+          : undefined,
+        qrOnly: a.qrOnly != null ? Boolean(a.qrOnly) : undefined,
+        brebKey: a.brebKey != null ? Boolean(a.brebKey) : undefined,
+      }));
+
     return this.convexService.mutation('paymentPortal:savePaymentPortalConfig', {
       bookingId,
       bankAccountIds: payload.bankAccountIds,
       paymentMediaIds: payload.paymentMediaIds ?? [],
+      extraBankAccounts:
+        extraBankAccounts.length > 0 ? extraBankAccounts : undefined,
       boldLink: payload.boldLink,
       boldSurcharge: payload.boldSurcharge,
     });

@@ -420,6 +420,27 @@ export default defineSchema({
       v.object({
         bankAccountIds: v.array(v.string()),
         paymentMediaIds: v.optional(v.array(v.string())),
+        /**
+         * Cuentas propias de ESTA reserva (importadas de un propietario). No están en
+         * el catálogo global; solo afectan a esta reserva. Se resuelven junto al
+         * catálogo global filtrando por bankAccountIds.
+         */
+        extraBankAccounts: v.optional(
+          v.array(
+            v.object({
+              id: v.string(),
+              bankName: v.string(),
+              accountType: v.optional(v.string()),
+              accountNumber: v.string(),
+              ownerName: v.string(),
+              ownerCedula: v.optional(v.string()),
+              imageUrl: v.optional(v.string()),
+              imageUrls: v.optional(v.array(v.string())),
+              qrOnly: v.optional(v.boolean()),
+              brebKey: v.optional(v.boolean()),
+            }),
+          ),
+        ),
         /** Link de pago Bold (tarjeta de crédito) para esta reserva. */
         boldLink: v.optional(v.string()),
         /** Recargo % informativo junto al link de Bold (ej. 5). */
