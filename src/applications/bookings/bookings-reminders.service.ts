@@ -40,13 +40,18 @@ export class BookingsRemindersService {
         try {
           this.logger.log(`Enviando recordatorio para reserva ${booking._id} (${booking.correo})...`);
           
+          const ref = booking.reference || booking._id;
           await this.brevoEmailService.sendReservationReminder({
             clientEmail: booking.correo,
             clientName: booking.nombreCompleto,
             propertyTitle: (booking).propertyTitle,
             checkInDate: new Date(booking.fechaEntrada).toLocaleDateString('es-CO'),
-            checkInTime: booking.horaEntrada || '03:00 PM',
+            checkInTime: this.formatHoraIngreso(
+              booking.horaEntrada,
+              booking.fechaEntrada,
+            ),
             reference: booking.reference || booking._id.slice(-6),
+            checkinUrl: `https://fincasya.com/checkin/${encodeURIComponent(ref)}`,
           });
 
           // Marcar como enviado en Convex

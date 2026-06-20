@@ -327,29 +327,33 @@ export const getReminderTemplate = (data: {
   checkInDate: string;
   checkInTime: string;
   reference: string;
+  checkinUrl?: string;
 }) => {
-  const preheader = `¡Faltan 3 días para tu reserva en ${data.propertyTitle}! Revisa los detalles de llegada.`;
+  const preheader = `Completa tu check-in para tu llegada a ${data.propertyTitle} — asegura tu ingreso.`;
+  const checkinUrl =
+    data.checkinUrl ||
+    `https://fincasya.com/checkin/${encodeURIComponent(data.reference)}`;
 
   const content = `
-    <div class="title">¡Tu aventura en <span style="color: #f15a24">${data.propertyTitle}</span> comienza pronto! 🏡</div>
-    
+    <div class="title">Tu llegada a <span style="color: #f15a24">${data.propertyTitle}</span> se acerca — te falta un paso 🏡</div>
+
     <div class="subtitle">
-      Hola <strong>${data.clientName}</strong>, falta muy poco para tu llegada. 
-      Queremos asegurarnos de que tengas todo listo para una experiencia inolvidable.
+      Hola <strong>${data.clientName}</strong>, para que tu ingreso sea rápido y sin
+      contratiempos, completa tu <strong>check-in</strong> antes de viajar. Toma 2 minutos.
     </div>
-    
+
     <div class="card">
       <div style="font-size: 18px; font-weight: 700; margin-bottom: 20px; color: #1a202c; border-bottom: 2px solid #f15a24; padding-bottom: 8px; display: inline-block;">
         DETALLES DE TU LLEGADA
       </div>
-      
+
       <table class="detail-table">
         <tr class="detail-row">
           <td class="detail-label">Fecha de Entrada</td>
           <td class="detail-value">${data.checkInDate}</td>
         </tr>
         <tr class="detail-row">
-          <td class="detail-label">Hora de Entrada</td>
+          <td class="detail-label">Hora de Ingreso</td>
           <td class="detail-value">${data.checkInTime}</td>
         </tr>
         <tr class="detail-row">
@@ -357,33 +361,34 @@ export const getReminderTemplate = (data: {
           <td class="detail-value">${data.reference}</td>
         </tr>
       </table>
-      
+
       <div style="margin-top: 20px;">
         <div class="instruction-item">
-          <div class="icon-box">📍</div>
-          <div><strong>Ubicación:</strong> Puedes encontrar la ubicación exacta en la sección "Mis Viajes" de nuestra plataforma.</div>
+          <div class="icon-box">✅</div>
+          <div><strong>Asegura tu ingreso:</strong> sin check-in no podemos autorizar la entrada a la finca.</div>
         </div>
         <div class="instruction-item">
-          <div class="icon-box">🔑</div>
-          <div><strong>Acceso:</strong> El encargado de la finca te recibirá en la hora acordada. No olvides tener tu documento de identidad a la mano.</div>
+          <div class="icon-box">👥</div>
+          <div><strong>Registra a quienes te acompañan</strong> (nombre y cédula) y cuéntanos si necesitas empleada o team.</div>
         </div>
         <div class="instruction-item">
-          <div class="icon-box">📶</div>
-          <div><strong>WiFi:</strong> Las credenciales de acceso estarán disponibles dentro de la propiedad.</div>
+          <div class="icon-box">💾</div>
+          <div><strong>A tu ritmo:</strong> guarda tu avance y continúa cuando quieras desde el mismo enlace.</div>
         </div>
       </div>
     </div>
 
     <div style="text-align: center;">
-      <a href="https://fincasya.com" class="btn">Ir a Mis Viajes</a>
+      <a href="${checkinUrl}" class="btn">Hacer mi check-in</a>
     </div>
 
     <div class="alert-box">
-      <strong>⚠️ Recordatorio:</strong> Si aún no has subido tu contrato firmado o la foto de tu cédula, por favor hazlo hoy mismo para evitar retrasos en tu ingreso.
+      <strong>⏰ Hazlo mínimo 36 horas antes</strong> de tu llegada. Así dejamos todo
+      listo para recibirte sin demoras.
     </div>
-    
+
     <p style="text-align: center; color: #718096; font-size: 13px; margin-top: 30px;">
-      Si tienes alguna duda, contáctanos a través de nuestro soporte por WhatsApp.
+      Si tienes alguna duda, contáctanos por nuestro soporte de WhatsApp.
     </p>
   `;
 

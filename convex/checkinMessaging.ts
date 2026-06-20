@@ -677,6 +677,7 @@ export const getCheckinLink = query({
     checkinUbicacionUrl?: string;
     checkinIndicacionesLlegada?: string;
     checkinUbicacionImageUrl?: string;
+    checkinUbicacionImageUrls?: string[];
   }> => {
     const b = await ctx.db.get(args.bookingId);
     if (!b) throw new Error("Reserva no encontrada");
@@ -691,7 +692,17 @@ export const getCheckinLink = query({
     const indicaciones = String(
       ownerInfo?.checkinIndicacionesLlegada ?? "",
     ).trim();
-    const imageUrl = String(ownerInfo?.checkinUbicacionImageUrl ?? "").trim();
+    const legacyImage = String(
+      ownerInfo?.checkinUbicacionImageUrl ?? "",
+    ).trim();
+    const rawUrls = Array.isArray(ownerInfo?.checkinUbicacionImageUrls)
+      ? (ownerInfo.checkinUbicacionImageUrls as unknown[])
+      : [];
+    let imageUrls = rawUrls
+      .map((u) => String(u ?? "").trim())
+      .filter((u) => u.length > 0);
+    if (imageUrls.length === 0 && legacyImage) imageUrls = [legacyImage];
+    const imageUrl = imageUrls[0] ?? "";
 
     return {
       link: `${checkinPortalBase()}/${cr}`,
@@ -699,6 +710,7 @@ export const getCheckinLink = query({
       ...(mapsUrl ? { checkinUbicacionUrl: mapsUrl } : {}),
       ...(indicaciones ? { checkinIndicacionesLlegada: indicaciones } : {}),
       ...(imageUrl ? { checkinUbicacionImageUrl: imageUrl } : {}),
+      ...(imageUrls.length ? { checkinUbicacionImageUrls: imageUrls } : {}),
     };
   },
 });

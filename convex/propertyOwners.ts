@@ -43,6 +43,57 @@ export const getOwnedProperties = query({
 });
 
 /**
+ * Lista todos los propietarios que tienen al menos una cuenta bancaria guardada,
+ * junto con el título/código de su finca. Para el buscador "agregar cuenta de un
+ * propietario" en la configuración de medios de pago del check-in.
+ */
+export const listWithAccounts = query({
+  args: {},
+  handler: async (ctx) => {
+    const infos = await ctx.db.query('propertyOwnerInfo').collect();
+    const result: Array<{
+      propertyId: string;
+      propertyTitle: string;
+      propertyCode: string | null;
+      propietarioNombre: string;
+      propietarioCedula: string;
+      bankAccounts: Array<{
+        bankName: string;
+        accountNumber: string;
+        accountType: string;
+        accountHolderName: string;
+      }>;
+    }> = [];
+
+    for (const info of infos) {
+      const accounts = Array.isArray(info.bankAccounts) ? info.bankAccounts : [];
+      const cleaned = accounts
+        .map((a: any) => ({
+          bankName: String(a?.bankName ?? '').trim(),
+          accountNumber: String(a?.accountNumber ?? '').trim(),
+          accountType: String(a?.accountType ?? '').trim(),
+          accountHolderName: String(a?.accountHolderName ?? '').trim(),
+        }))
+        .filter((a) => a.bankName || a.accountNumber);
+      if (cleaned.length === 0) continue;
+
+      const prop = await ctx.db.get(info.propertyId);
+      result.push({
+        propertyId: info.propertyId as unknown as string,
+        propertyTitle:
+          (prop as { title?: string } | null)?.title ?? 'Sin nombre',
+        propertyCode: (prop as { code?: string } | null)?.code ?? null,
+        propietarioNombre: String(info.propietarioNombre ?? '').trim(),
+        propietarioCedula: String(info.propietarioCedula ?? '').trim(),
+        bankAccounts: cleaned,
+      });
+    }
+
+    return result;
+  },
+});
+
+/**
  * Upsert owner information for a property
  */
 export const upsert = mutation({
@@ -71,6 +122,7 @@ export const upsert = mutation({
     checkinUbicacionUrl: v.optional(v.string()),
     checkinIndicacionesLlegada: v.optional(v.string()),
     checkinUbicacionImageUrl: v.optional(v.string()),
+    checkinUbicacionImageUrls: v.optional(v.array(v.string())),
     bankCertificationUrl: v.optional(v.string()),
     idCopyUrl: v.optional(v.string()),
     rntPdfUrl: v.optional(v.string()),

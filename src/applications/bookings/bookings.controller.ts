@@ -12,16 +12,18 @@ import {
   UploadedFiles,
   UploadedFile,
   Req,
+  Res,
   HttpException,
   HttpStatus,
 } from '@nestjs/common';
-import type { Request } from 'express';
+import type { Request, Response } from 'express';
 import { FilesInterceptor, FileInterceptor } from '@nestjs/platform-express';
 import { BookingsSyncService } from './bookings-sync.service';
 import { BookingsRemindersService } from './bookings-reminders.service';
 import {
   CheckinMessagingService,
   type CheckinMomentKey,
+  type PortalExtraBankAccount,
 } from './checkin-messaging.service';
 import { ConvexAuthGuard } from '../shared/guards/convex-auth.guard';
 import { AdminGuard } from '../shared/guards/admin.guard';
@@ -212,6 +214,40 @@ export class BookingsController {
     return this.checkinMessaging.markCheckinSent(id, body?.sent ?? true);
   }
 
+  /** Vista pública para el propietario (por referencia, solo lectura). */
+  @Get('owner/:ref')
+  async getOwnerView(@Param('ref') ref: string) {
+    const data = await this.checkinMessaging.getOwnerView(ref);
+    if (!data) {
+      throw new HttpException(
+        { error: 'not_found', message: 'No encontramos esta reserva.' },
+        HttpStatus.NOT_FOUND,
+      );
+    }
+    return { ok: true, ...data };
+  }
+
+  /** PDF del listado de invitados, generado al vuelo (público, para el propietario). */
+  @Get('owner/:ref/guests-pdf')
+  async getOwnerGuestsPdf(@Param('ref') ref: string, @Res() res: Response) {
+    const result = await this.checkinMessaging.getOwnerGuestsPdf(ref);
+    if (!result) {
+      throw new HttpException(
+        {
+          error: 'not_found',
+          message: 'Aún no hay listado de invitados para esta reserva.',
+        },
+        HttpStatus.NOT_FOUND,
+      );
+    }
+    res.set({
+      'Content-Type': 'application/pdf',
+      'Content-Disposition': `attachment; filename="${result.filename}"`,
+      'Content-Length': String(result.buffer.length),
+    });
+    res.send(result.buffer);
+  }
+
   /** Resumen de pago + imágenes por WhatsApp al cliente de la reserva. */
   @Post('checkin/:id/send-payment')
   @UseGuards(ConvexAuthGuard, RolesGuard)
@@ -299,6 +335,7 @@ export class BookingsController {
     body: {
       bankAccountIds: string[];
       paymentMediaIds?: string[];
+      extraBankAccounts?: PortalExtraBankAccount[];
       boldLink?: string;
       boldSurcharge?: number;
     },
@@ -312,6 +349,7 @@ export class BookingsController {
     return this.checkinMessaging.savePaymentPortalConfig(id, {
       bankAccountIds: body.bankAccountIds,
       paymentMediaIds: body.paymentMediaIds,
+      extraBankAccounts: body.extraBankAccounts,
       boldLink: body.boldLink,
       boldSurcharge: body.boldSurcharge,
     });

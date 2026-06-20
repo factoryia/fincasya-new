@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { ConvexService } from '../shared/services/convex.service';
 import { S3Service } from '../shared/services/s3.service';
+import { PdfService } from '../shared/services/pdf.service';
 import { addDays, startOfDay, endOfDay, getDay } from 'date-fns';
 
 /** Clave lógica de cada momento del timeline (debe coincidir con el catálogo Convex). */
@@ -12,6 +13,20 @@ export type CheckinMomentKey =
   | 'tourist_travel_tomorrow'
   | 'owner_arrival_tomorrow'
   | 'tourist_departure';
+
+/** Cuenta propia de una reserva (importada de un propietario), no del catálogo global. */
+export type PortalExtraBankAccount = {
+  id: string;
+  bankName: string;
+  accountType?: string;
+  accountNumber: string;
+  ownerName: string;
+  ownerCedula?: string;
+  imageUrl?: string;
+  imageUrls?: string[];
+  qrOnly?: boolean;
+  brebKey?: boolean;
+};
 
 type MomentWindow = {
   key: CheckinMomentKey;
@@ -58,6 +73,7 @@ export class CheckinMessagingService {
   constructor(
     private readonly convexService: ConvexService,
     private readonly s3Service: S3Service,
+    private readonly pdfService: PdfService,
   ) {}
 
   /** Cron diario: dispara cada momento del timeline cuyo día aplique hoy. */
@@ -272,20 +288,191 @@ export class CheckinMessagingService {
     });
   }
 
+  /** Vista pública para el propietario (por referencia, solo lectura). */
+  async getOwnerView(reference: string) {
+    const trimmed = String(reference ?? '').trim();
+    if (!trimmed) return null;
+    const booking: any = await this.convexService.query(
+      'bookings:getByReference',
+      { reference: trimmed },
+    );
+    if (!booking) return null;
+
+    const property = booking.property || {};
+    const allGuests = (booking.checkinGuests || []).filter(
+      (g: any) => !g.esMenor,
+    );
+    const maskCedula = (c?: string) => {
+      const d = String(c ?? '').replace(/\D/g, '');
+      return d.length >= 4 ? `••••${d.slice(-4)}` : d ? '••••' : '';
+    };
+    const empleada = booking.needsTeam
+      ? 'varias'
+      : booking.needsEmpleada
+        ? 'una'
+        : 'no';
+    const pdf = (booking.multimedia || []).find(
+      (m: any) =>
+        m.type === 'application/pdf' && /invitad|guest/i.test(m.name || ''),
+    );
+
+    return {
+      reference: booking.reference || trimmed,
+      propertyTitle: property.title || 'tu finca',
+      propertyLocation: property.location || null,
+      ownerName: property.propietarioNombre || null,
+      fechaEntrada: booking.fechaEntrada,
+      fechaSalida: booking.fechaSalida,
+      horaEntrada: booking.horaEntrada ?? null,
+      numeroPersonas: booking.numeroPersonas ?? null,
+      empleada, // 'no' | 'una' | 'varias'
+      checkinCompleted: Boolean(booking.checkinCompleted),
+      guestCount: allGuests.length,
+      guests: allGuests.map((g: any) => ({
+        nombre: g.nombreCompleto,
+        cedula: maskCedula(g.cedula),
+      })),
+      invitadosPdfUrl: pdf?.url || null,
+    };
+  }
+
+  /**
+   * Genera al vuelo el PDF del listado de invitados para el propietario,
+   * a partir del check-in del turista (no depende de multimedia).
+   * Devuelve null si la reserva no existe o no hay invitados diligenciados.
+   */
+  async getOwnerGuestsPdf(
+    reference: string,
+  ): Promise<{ buffer: Buffer; filename: string } | null> {
+    const trimmed = String(reference ?? '').trim();
+    if (!trimmed) return null;
+    const booking: any = await this.convexService.query(
+      'bookings:getByReference',
+      { reference: trimmed },
+    );
+    if (!booking) return null;
+
+    const guests = (booking.checkinGuests || []).filter((g: any) => !g.esMenor);
+    if (guests.length === 0) return null;
+
+    const property = booking.property || {};
+    const esc = (v: unknown) =>
+      String(v ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
+    const fmtFecha = (ms?: number) =>
+      ms
+        ? new Intl.DateTimeFormat('es-CO', {
+            day: 'numeric',
+            month: 'long',
+            year: 'numeric',
+            timeZone: 'America/Bogota',
+          }).format(new Date(ms))
+        : '—';
+
+    const metaPairs: Array<[string, string]> = [
+      ['Propiedad', property.title || 'Propiedad'],
+      ...(property.location
+        ? ([['Ubicación', property.location]] as Array<[string, string]>)
+        : []),
+      ['Titular de la reserva', booking.nombreCompleto || '—'],
+      ['Referencia', booking.reference || trimmed],
+      ['Entrada', fmtFecha(booking.fechaEntrada)],
+      ['Salida', fmtFecha(booking.fechaSalida)],
+      ['Personas', String(booking.numeroPersonas ?? guests.length)],
+    ];
+    const metaRows = metaPairs
+      .map(
+        ([k, v]) =>
+          `<tr><th style="border:1px solid #ddd;background:#f5f5f5;text-align:left;width:34%;padding:6px 10px;">${esc(
+            k,
+          )}</th><td style="border:1px solid #ddd;padding:6px 10px;">${esc(
+            v,
+          )}</td></tr>`,
+      )
+      .join('');
+
+    const guestRows = guests
+      .map(
+        (g: any, i: number) =>
+          `<tr><td style="border:1px solid #ddd;text-align:center;width:36px;padding:6px 10px;">${
+            i + 1
+          }</td><td style="border:1px solid #ddd;padding:6px 10px;">${esc(
+            g.nombreCompleto || '—',
+          )}</td><td style="border:1px solid #ddd;padding:6px 10px;">${esc(
+            g.cedula?.trim() || 'Sin cédula',
+          )}</td></tr>`,
+      )
+      .join('');
+
+    const html = `<!DOCTYPE html>
+<html lang="es"><head><meta charset="utf-8" />
+<style>
+  body { font-family: Arial, 'Segoe UI', sans-serif; color: #111; padding: 8px; }
+  h1 { font-size: 16pt; margin: 0 0 4pt; text-align: center; }
+  p.sub { text-align: center; color: #555; font-size: 10pt; margin: 0 0 16pt; }
+  h2 { font-size: 12pt; margin: 0 0 8pt; }
+  table { width: 100%; border-collapse: collapse; margin-bottom: 16pt; font-size: 11pt; }
+</style></head>
+<body>
+  <h1>Lista de invitados — Check-in</h1>
+  <p class="sub">Documento generado por Fincas Ya para el propietario.</p>
+  <table><tbody>${metaRows}</tbody></table>
+  <h2>Personas registradas (${guests.length})</h2>
+  <table>
+    <thead><tr>
+      <th style="border:1px solid #ddd;background:#f5f5f5;padding:6px 10px;width:36px;">#</th>
+      <th style="border:1px solid #ddd;background:#f5f5f5;text-align:left;padding:6px 10px;">Nombre completo</th>
+      <th style="border:1px solid #ddd;background:#f5f5f5;text-align:left;padding:6px 10px;">Documento</th>
+    </tr></thead>
+    <tbody>${guestRows}</tbody>
+  </table>
+</body></html>`;
+
+    const buffer = await this.pdfService.htmlToPdf(html);
+    const safeRef = String(booking.reference || trimmed).replace(
+      /[^a-zA-Z0-9_-]/g,
+      '_',
+    );
+    return { buffer, filename: `Invitados-${safeRef}.pdf` };
+  }
+
   /** Guarda cuentas/imágenes visibles en el portal de pago. */
   async savePaymentPortalConfig(
     bookingId: string,
     payload: {
       bankAccountIds: string[];
       paymentMediaIds?: string[];
+      extraBankAccounts?: PortalExtraBankAccount[];
       boldLink?: string;
       boldSurcharge?: number;
     },
   ) {
+    const extraBankAccounts = (payload.extraBankAccounts ?? [])
+      .filter((a) => a && a.id)
+      .map((a) => ({
+        id: String(a.id),
+        bankName: String(a.bankName ?? ''),
+        accountType: a.accountType != null ? String(a.accountType) : undefined,
+        accountNumber: String(a.accountNumber ?? ''),
+        ownerName: String(a.ownerName ?? ''),
+        ownerCedula: a.ownerCedula != null ? String(a.ownerCedula) : undefined,
+        imageUrl: a.imageUrl != null ? String(a.imageUrl) : undefined,
+        imageUrls: Array.isArray(a.imageUrls)
+          ? a.imageUrls.map((u) => String(u))
+          : undefined,
+        qrOnly: a.qrOnly != null ? Boolean(a.qrOnly) : undefined,
+        brebKey: a.brebKey != null ? Boolean(a.brebKey) : undefined,
+      }));
+
     return this.convexService.mutation('paymentPortal:savePaymentPortalConfig', {
       bookingId,
       bankAccountIds: payload.bankAccountIds,
       paymentMediaIds: payload.paymentMediaIds ?? [],
+      extraBankAccounts:
+        extraBankAccounts.length > 0 ? extraBankAccounts : undefined,
       boldLink: payload.boldLink,
       boldSurcharge: payload.boldSurcharge,
     });

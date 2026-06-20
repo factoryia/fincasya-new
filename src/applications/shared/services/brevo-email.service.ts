@@ -167,6 +167,7 @@ export class BrevoEmailService {
     checkInDate: string;
     checkInTime: string;
     reference: string;
+    checkinUrl?: string;
   }) {
     const htmlContent = getReminderTemplate({
       logoUrl: this.logoUrl,
@@ -175,6 +176,7 @@ export class BrevoEmailService {
       checkInDate: data.checkInDate,
       checkInTime: data.checkInTime,
       reference: data.reference,
+      checkinUrl: data.checkinUrl,
     });
 
     try {
@@ -187,7 +189,7 @@ export class BrevoEmailService {
         body: JSON.stringify({
           sender: { name: this.senderName, email: this.senderEmail },
           to: [{ email: data.clientEmail, name: data.clientName }],
-          subject: `⏰ Recordatorio: Tu reserva en ${data.propertyTitle} es en 3 días`,
+          subject: `📋 Completa tu check-in para ${data.propertyTitle} — tu llegada se acerca`,
           htmlContent: htmlContent,
         }),
       });
