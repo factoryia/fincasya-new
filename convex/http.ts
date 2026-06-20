@@ -1255,6 +1255,7 @@ http.route({
       const statusMap: Record<string, number> = {
         not_found: 404,
         count_mismatch: 422,
+        missing_guests: 422,
         missing_name: 422,
         missing_cedula: 422,
         missing_data_consent: 422,

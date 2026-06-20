@@ -16,8 +16,9 @@ import {
  *
  * Soporta GUARDADO PARCIAL: el turista puede registrar algunos invitados hoy y
  * el resto otro día con el mismo link (no expira). El check-in solo se marca
- * como completado cuando la lista coincide con el total de personas de la
- * reserva (validación estricta en `submitCheckin`).
+ * como completado cuando hay al menos un invitado registrado y no se supera el
+ * cupo contratado (validación en `submitCheckin`). Pueden registrarse menos
+ * personas si parte del grupo ya no asiste.
  */
 
 /** Forma del invitado tal como llega del portal / se guarda en la reserva. */
@@ -240,9 +241,8 @@ export const saveDraft = internalMutation({
 });
 
 /**
- * ENVÍO FINAL del check-in (validación estricta): la cantidad de invitados debe
- * coincidir con el total de personas de la reserva, y cada mayor de 2 años debe
- * tener nombre completo + cédula. Marca `checkinCompleted`.
+ * ENVÍO FINAL del check-in: al menos un invitado, no más que el cupo contratado.
+ * Cada mayor de 2 años debe tener nombre completo + cédula. Marca `checkinCompleted`.
  */
 export const submitCheckin = internalMutation({
   args: {
@@ -264,7 +264,11 @@ export const submitCheckin = internalMutation({
     const { guests } = normalizeGuests(args.guests);
     const expected = expectedGuestCount(booking);
 
-    if (expected > 0 && guests.length !== expected) {
+    if (guests.length < 1) {
+      return { ok: false as const, reason: 'missing_guests' };
+    }
+
+    if (expected > 0 && guests.length > expected) {
       return {
         ok: false as const,
         reason: 'count_mismatch',
@@ -284,11 +288,18 @@ export const submitCheckin = internalMutation({
       }
     }
 
+    let observaciones = args.observaciones?.trim() || '';
+    if (expected > 0 && guests.length < expected) {
+      const note = `Personas que ingresan según check-in: ${guests.length} de ${expected} contratadas.`;
+      observaciones = observaciones ? `${observaciones}\n${note}` : note;
+    }
+
     const now = Date.now();
     await ctx.db.patch(booking._id, {
       checkinGuests: guests,
       ...buildCheckinExtrasPatch({
         ...args,
+        observaciones,
         aceptaTratamientoDatos: true,
       }),
       checkinCompleted: true,
