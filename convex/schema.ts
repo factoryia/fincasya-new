@@ -392,6 +392,8 @@ export default defineSchema({
         v.object({
           nombreCompleto: v.string(),
           cedula: v.optional(v.string()),
+          /** Tipo de documento: CC, TI, CE, PA (pasaporte), RC (registro civil). */
+          tipoDocumento: v.optional(v.string()),
           esMenor: v.optional(v.boolean()),
         }),
       ),

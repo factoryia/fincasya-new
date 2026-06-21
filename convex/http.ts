@@ -1206,6 +1206,7 @@ http.route({
       guests?: Array<{
         nombreCompleto?: string;
         cedula?: string;
+        tipoDocumento?: string;
         esMenor?: boolean;
       }>;
       needsEmpleada?: boolean;
@@ -1225,6 +1226,8 @@ http.route({
     const guests = (Array.isArray(body?.guests) ? body.guests : []).map((g) => ({
       nombreCompleto: String(g?.nombreCompleto ?? '').trim(),
       cedula: String(g?.cedula ?? '').trim() || undefined,
+      tipoDocumento:
+        String(g?.tipoDocumento ?? '').trim().toUpperCase() || undefined,
       esMenor: Boolean(g?.esMenor) || undefined,
     }));
     const payload = {

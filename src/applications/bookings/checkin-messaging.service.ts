@@ -356,6 +356,16 @@ export class CheckinMessagingService {
     if (guests.length === 0) return null;
 
     const property = booking.property || {};
+    const docLabel = (t?: string) => {
+      const map: Record<string, string> = {
+        CC: 'C.C.',
+        TI: 'T.I.',
+        CE: 'C.E.',
+        PA: 'Pasaporte',
+        RC: 'R.C.',
+      };
+      return map[String(t ?? '').toUpperCase()] || 'C.C.';
+    };
     const esc = (v: unknown) =>
       String(v ?? '')
         .replace(/&/g, '&amp;')
@@ -401,8 +411,10 @@ export class CheckinMessagingService {
             i + 1
           }</td><td style="border:1px solid #ddd;padding:6px 10px;">${esc(
             g.nombreCompleto || '—',
+          )}</td><td style="border:1px solid #ddd;padding:6px 10px;white-space:nowrap;">${esc(
+            docLabel(g.tipoDocumento),
           )}</td><td style="border:1px solid #ddd;padding:6px 10px;">${esc(
-            g.cedula?.trim() || 'Sin cédula',
+            g.cedula?.trim() || 'Sin documento',
           )}</td></tr>`,
       )
       .join('');
@@ -425,6 +437,7 @@ export class CheckinMessagingService {
     <thead><tr>
       <th style="border:1px solid #ddd;background:#f5f5f5;padding:6px 10px;width:36px;">#</th>
       <th style="border:1px solid #ddd;background:#f5f5f5;text-align:left;padding:6px 10px;">Nombre completo</th>
+      <th style="border:1px solid #ddd;background:#f5f5f5;text-align:left;padding:6px 10px;">Tipo</th>
       <th style="border:1px solid #ddd;background:#f5f5f5;text-align:left;padding:6px 10px;">Documento</th>
     </tr></thead>
     <tbody>${guestRows}</tbody>

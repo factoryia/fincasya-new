@@ -25,12 +25,14 @@ import {
 const guestValidator = v.object({
   nombreCompleto: v.string(),
   cedula: v.optional(v.string()),
+  tipoDocumento: v.optional(v.string()),
   esMenor: v.optional(v.boolean()),
 });
 
 type Guest = {
   nombreCompleto: string;
   cedula?: string;
+  tipoDocumento?: string;
   esMenor?: boolean;
 };
 
@@ -88,12 +90,14 @@ function normalizeGuests(raw: unknown): { guests: Guest[]; error?: string } {
     const obj = item as Record<string, unknown>;
     const nombreCompleto = String(obj.nombreCompleto ?? '').trim();
     const cedula = String(obj.cedula ?? '').trim();
+    const tipoDocumento = String(obj.tipoDocumento ?? '').trim().toUpperCase();
     const esMenor = Boolean(obj.esMenor);
     // Filas completamente vacías se ignoran (el turista deja un renglón en blanco).
     if (!nombreCompleto && !cedula && !esMenor) continue;
     guests.push({
       nombreCompleto,
       cedula: cedula || undefined,
+      tipoDocumento: tipoDocumento || undefined,
       esMenor: esMenor || undefined,
     });
   }
