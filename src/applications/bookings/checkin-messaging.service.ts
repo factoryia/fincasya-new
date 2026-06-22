@@ -331,6 +331,7 @@ export class CheckinMessagingService {
       guests: allGuests.map((g: any) => ({
         nombre: g.nombreCompleto,
         cedula: maskCedula(g.cedula),
+        tipoDocumento: String(g.tipoDocumento ?? 'CC').trim().toUpperCase() || 'CC',
       })),
       invitadosPdfUrl: pdf?.url || null,
     };
@@ -402,7 +403,11 @@ export class CheckinMessagingService {
           }</td><td style="border:1px solid #ddd;padding:6px 10px;">${esc(
             g.nombreCompleto || '—',
           )}</td><td style="border:1px solid #ddd;padding:6px 10px;">${esc(
-            g.cedula?.trim() || 'Sin cédula',
+            g.esMenor
+              ? 'Menor de 2 años'
+              : g.cedula?.trim()
+                ? `${String(g.tipoDocumento ?? 'CC').trim().toUpperCase() || 'CC'} ${g.cedula.trim()}`
+                : 'Sin documento',
           )}</td></tr>`,
       )
       .join('');

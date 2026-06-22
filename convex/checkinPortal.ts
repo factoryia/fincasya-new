@@ -22,17 +22,28 @@ import {
  */
 
 /** Forma del invitado tal como llega del portal / se guarda en la reserva. */
+const GUEST_DOCUMENT_TYPES = new Set(['CC', 'TI', 'RC', 'CE', 'PA']);
+
 const guestValidator = v.object({
   nombreCompleto: v.string(),
   cedula: v.optional(v.string()),
+  tipoDocumento: v.optional(v.string()),
   esMenor: v.optional(v.boolean()),
 });
 
 type Guest = {
   nombreCompleto: string;
   cedula?: string;
+  tipoDocumento?: string;
   esMenor?: boolean;
 };
+
+function normalizeGuestDocumentType(value: unknown): string {
+  const upper = String(value ?? '')
+    .trim()
+    .toUpperCase();
+  return GUEST_DOCUMENT_TYPES.has(upper) ? upper : 'CC';
+}
 
 const checkinExtrasValidator = {
   menoresDe2: v.optional(v.number()),
@@ -88,12 +99,14 @@ function normalizeGuests(raw: unknown): { guests: Guest[]; error?: string } {
     const obj = item as Record<string, unknown>;
     const nombreCompleto = String(obj.nombreCompleto ?? '').trim();
     const cedula = String(obj.cedula ?? '').trim();
+    const tipoDocumento = normalizeGuestDocumentType(obj.tipoDocumento);
     const esMenor = Boolean(obj.esMenor);
     // Filas completamente vacías se ignoran (el turista deja un renglón en blanco).
     if (!nombreCompleto && !cedula && !esMenor) continue;
     guests.push({
       nombreCompleto,
       cedula: cedula || undefined,
+      tipoDocumento: cedula ? tipoDocumento : undefined,
       esMenor: esMenor || undefined,
     });
   }
@@ -298,7 +311,7 @@ export const submitCheckin = internalMutation({
         return { ok: false as const, reason: 'missing_name', index: i };
       }
       if (!g.esMenor && !g.cedula) {
-        return { ok: false as const, reason: 'missing_cedula', index: i };
+        return { ok: false as const, reason: 'missing_document', index: i };
       }
     }
 
