@@ -111,6 +111,8 @@ export default defineSchema({
     propietarioCorreo: v.optional(v.string()),
     encargadoNombre: v.optional(v.string()),
     encargadoTelefono: v.optional(v.string()),
+    /** Reglas de salida (check-out) específicas de esta finca. Override del texto global. */
+    checkoutRulesText: v.optional(v.string()),
     /**
      * Etiquetas de filtros del sitio (pestañas del home): luxury, eventos, cerca-bogota, melgar, etc.
      * Si el campo falta, la web usa reglas legacy por ubicación/texto. Si existe (puede ser []), aplica modo explícito.
@@ -436,6 +438,36 @@ export default defineSchema({
         fecha: v.optional(v.string()),
         medio: v.optional(v.string()),
         comprobanteUrl: v.optional(v.string()),
+        updatedAt: v.optional(v.number()),
+        log: v.optional(
+          v.array(
+            v.object({
+              accion: v.string(),
+              actor: v.string(),
+              ts: v.number(),
+            }),
+          ),
+        ),
+      }),
+    ),
+    /**
+     * Check-out del cliente (Fase 2+): devolución del depósito. Estado de la
+     * validación + cuenta bancaria registrada por el cliente para la devolución.
+     */
+    depositReturn: v.optional(
+      v.object({
+        // pendiente_validacion | aprobado | rechazado | en_revision (Fase 3)
+        estado: v.optional(v.string()),
+        cuenta: v.optional(
+          v.object({
+            titular: v.optional(v.string()),
+            tipo: v.optional(v.string()),
+            numero: v.optional(v.string()),
+            banco: v.optional(v.string()),
+            documento: v.optional(v.string()),
+            observaciones: v.optional(v.string()),
+          }),
+        ),
         updatedAt: v.optional(v.number()),
         log: v.optional(
           v.array(

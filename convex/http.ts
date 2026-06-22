@@ -1292,6 +1292,102 @@ http.route({
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Portal público de check-out del cliente (`/checkout/:reference`).
+// Reglas de salida + estado del depósito + captura de cuenta para la devolución.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** GET /api/checkout/:reference → reglas, depósito y cuenta ya registrada. */
+http.route({
+  pathPrefix: '/api/checkout/',
+  method: 'GET',
+  handler: httpAction(async (ctx, request) => {
+    const url = new URL(request.url);
+    const key = decodeURIComponent(
+      url.pathname.replace('/api/checkout/', ''),
+    ).trim();
+    if (!key) return jsonResponse({ error: 'Referencia inválida' }, 400, CHECKIN_CORS);
+
+    const data = await ctx.runQuery(internal.checkoutPortal.getForPortal, {
+      key,
+    });
+    if (!data) {
+      return jsonResponse(
+        { error: 'not_found', message: 'No encontramos esta reserva.' },
+        404,
+        CHECKIN_CORS,
+      );
+    }
+    return jsonResponse({ ok: true, ...data }, 200, CHECKIN_CORS);
+  }),
+});
+
+/** POST /api/checkout/:reference → guarda la cuenta bancaria para la devolución. */
+http.route({
+  pathPrefix: '/api/checkout/',
+  method: 'POST',
+  handler: httpAction(async (ctx, request) => {
+    const url = new URL(request.url);
+    const key = decodeURIComponent(
+      url.pathname.replace('/api/checkout/', ''),
+    ).trim();
+    if (!key) return jsonResponse({ error: 'Referencia inválida' }, 400, CHECKIN_CORS);
+
+    let body: {
+      cuenta?: {
+        titular?: string;
+        tipo?: string;
+        numero?: string;
+        banco?: string;
+        documento?: string;
+        observaciones?: string;
+      };
+    };
+    try {
+      body = (await request.json()) as typeof body;
+    } catch {
+      return jsonResponse({ error: 'Body JSON inválido' }, 400, CHECKIN_CORS);
+    }
+
+    const c = body?.cuenta ?? {};
+    const result = await ctx.runMutation(
+      internal.checkoutPortal.saveDepositAccount,
+      {
+        key,
+        cuenta: {
+          titular: c.titular,
+          tipo: c.tipo,
+          numero: c.numero,
+          banco: c.banco,
+          documento: c.documento,
+          observaciones: c.observaciones,
+        },
+      },
+    );
+    if (!result.ok) {
+      return jsonResponse({ error: result.reason ?? 'error' }, 404, CHECKIN_CORS);
+    }
+    return jsonResponse({ ok: true }, 200, CHECKIN_CORS);
+  }),
+});
+
+/** OPTIONS preflight (CORS) para el portal de check-out. */
+http.route({
+  pathPrefix: '/api/checkout/',
+  method: 'OPTIONS',
+  handler: httpAction(async () => {
+    return new Response(null, {
+      status: 204,
+      headers: {
+        'Access-Control-Allow-Origin': '*',
+        'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+        'Access-Control-Allow-Headers': 'Content-Type',
+        'Access-Control-Max-Age': '86400',
+      },
+    });
+  }),
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Portal público de pago del turista (`/pago/:reference`).
 // ─────────────────────────────────────────────────────────────────────────────
 
