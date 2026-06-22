@@ -1071,6 +1071,77 @@ export const markCheckinSent = mutation({
   },
 });
 
+/** Check-out propietario (Fase 1): guarda/edita las observaciones del cliente con log. */
+export const saveClientObservaciones = mutation({
+  args: {
+    id: v.id('bookings'),
+    valor: v.string(),
+    actor: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    const booking = await ctx.db.get(args.id);
+    if (!booking) throw new Error('Reserva no encontrada');
+    const valor = args.valor.trim();
+    const actor = (args.actor ?? '').trim() || 'Equipo';
+    const ts = Date.now();
+    const prevLog = Array.isArray(booking.clientObservacionesLog)
+      ? booking.clientObservacionesLog
+      : [];
+    // Solo agrega al log si el texto cambió.
+    const log =
+      valor !== String(booking.clientObservaciones ?? '')
+        ? [...prevLog, { valor, actor, ts }].slice(-30)
+        : prevLog;
+    await ctx.db.patch(args.id, {
+      clientObservaciones: valor,
+      clientObservacionesUpdatedAt: ts,
+      clientObservacionesLog: log,
+      updatedAt: ts,
+    });
+    return { ok: true };
+  },
+});
+
+/** Check-out propietario (Fase 1): registra/edita el pago al propietario con log. */
+export const saveOwnerPayout = mutation({
+  args: {
+    id: v.id('bookings'),
+    valor: v.optional(v.number()),
+    fecha: v.optional(v.string()),
+    medio: v.optional(v.string()),
+    comprobanteUrl: v.optional(v.string()),
+    actor: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    const booking = await ctx.db.get(args.id);
+    if (!booking) throw new Error('Reserva no encontrada');
+    const actor = (args.actor ?? '').trim() || 'Equipo';
+    const ts = Date.now();
+    const prev = (booking.ownerPayout ?? {}) as {
+      valor?: number;
+      fecha?: string;
+      medio?: string;
+      comprobanteUrl?: string;
+      log?: Array<{ accion: string; actor: string; ts: number }>;
+    };
+    const prevLog = Array.isArray(prev.log) ? prev.log : [];
+    const accion = prevLog.length === 0 ? 'Pago registrado' : 'Pago actualizado';
+    await ctx.db.patch(args.id, {
+      ownerPayout: {
+        valor: args.valor ?? prev.valor,
+        fecha: args.fecha ?? prev.fecha,
+        medio: args.medio ?? prev.medio,
+        // Conserva el comprobante anterior si no se sube uno nuevo.
+        comprobanteUrl: args.comprobanteUrl ?? prev.comprobanteUrl,
+        updatedAt: ts,
+        log: [...prevLog, { accion, actor, ts }].slice(-30),
+      },
+      updatedAt: ts,
+    });
+    return { ok: true };
+  },
+});
+
 /**
  * Busca una reserva por número de contrato.
  * Coincidencias: texto en `observaciones` (p. ej. "Contrato: FY-2005"), `reference`, sin depender

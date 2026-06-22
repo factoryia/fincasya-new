@@ -415,6 +415,40 @@ export default defineSchema({
     /** Última vez que el turista guardó avance o envió su check-in. */
     checkinUpdatedAt: v.optional(v.number()),
     /**
+     * Check-out propietario (Fase 1). Observaciones/peticiones del cliente que el
+     * equipo edita y comparte con el propietario; con log de cambios (quién/cuándo).
+     */
+    clientObservaciones: v.optional(v.string()),
+    clientObservacionesUpdatedAt: v.optional(v.number()),
+    clientObservacionesLog: v.optional(
+      v.array(
+        v.object({
+          valor: v.string(),
+          actor: v.string(),
+          ts: v.number(),
+        }),
+      ),
+    ),
+    /** Pago al propietario (check-out del propietario). */
+    ownerPayout: v.optional(
+      v.object({
+        valor: v.optional(v.number()),
+        fecha: v.optional(v.string()),
+        medio: v.optional(v.string()),
+        comprobanteUrl: v.optional(v.string()),
+        updatedAt: v.optional(v.number()),
+        log: v.optional(
+          v.array(
+            v.object({
+              accion: v.string(),
+              actor: v.string(),
+              ts: v.number(),
+            }),
+          ),
+        ),
+      }),
+    ),
+    /**
      * Portal público de pago (`/pago/:reference`): cuentas seleccionadas por el
      * equipo para mostrar al cliente en el link compartido.
      */
