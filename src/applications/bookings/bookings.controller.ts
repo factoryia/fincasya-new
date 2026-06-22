@@ -324,6 +324,25 @@ export class BookingsController {
     return { ok: true };
   }
 
+  /** Persona que recibe a los turistas: la diligencia el propietario desde su enlace. */
+  @Post('owner/:ref/receiver')
+  async saveOwnerReceiver(
+    @Param('ref') ref: string,
+    @Body() body: { nombre?: string; contacto?: string },
+  ) {
+    const result = await this.checkinMessaging.saveOwnerReceiverByRef(ref, {
+      nombre: body?.nombre,
+      contacto: body?.contacto,
+    });
+    if (!result.ok) {
+      throw new HttpException(
+        { error: 'not_found', message: 'No encontramos esta reserva.' },
+        HttpStatus.NOT_FOUND,
+      );
+    }
+    return { ok: true };
+  }
+
   /** Check-out cliente (Fase 3): registra el pago de devolución (+ comprobante). */
   @Post(':id/deposit-refund')
   @UseGuards(ConvexAuthGuard, RolesGuard)

@@ -1102,6 +1102,29 @@ export const saveClientObservaciones = mutation({
   },
 });
 
+/** Persona que recibe a los turistas: la diligencia el propietario desde su enlace. */
+export const saveOwnerReceiver = mutation({
+  args: {
+    id: v.id('bookings'),
+    nombre: v.optional(v.string()),
+    contacto: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    const booking = await ctx.db.get(args.id);
+    if (!booking) throw new Error('Reserva no encontrada');
+    const ts = Date.now();
+    await ctx.db.patch(args.id, {
+      ownerReceiver: {
+        nombre: (args.nombre ?? '').trim() || undefined,
+        contacto: (args.contacto ?? '').trim() || undefined,
+        updatedAt: ts,
+      },
+      updatedAt: ts,
+    });
+    return { ok: true };
+  },
+});
+
 /** Check-out propietario (Fase 1): registra/edita el pago al propietario con log. */
 export const saveOwnerPayout = mutation({
   args: {

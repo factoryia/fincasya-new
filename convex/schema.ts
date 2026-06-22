@@ -432,6 +432,17 @@ export default defineSchema({
         }),
       ),
     ),
+    /**
+     * Persona que recibe a los turistas el día de la llegada. La diligencia el
+     * propietario desde su enlace público; el equipo la ve en el panel.
+     */
+    ownerReceiver: v.optional(
+      v.object({
+        nombre: v.optional(v.string()),
+        contacto: v.optional(v.string()),
+        updatedAt: v.optional(v.number()),
+      }),
+    ),
     /** Pago al propietario (check-out del propietario). */
     ownerPayout: v.optional(
       v.object({

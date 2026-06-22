@@ -335,6 +335,13 @@ export class CheckinMessagingService {
       })),
       invitadosPdfUrl: pdf?.url || null,
       clientObservaciones: String(booking.clientObservaciones ?? '').trim() || null,
+      ownerReceiver: booking.ownerReceiver
+        ? {
+            nombre: String(booking.ownerReceiver.nombre ?? '').trim() || null,
+            contacto:
+              String(booking.ownerReceiver.contacto ?? '').trim() || null,
+          }
+        : null,
       ownerPayout: booking.ownerPayout
         ? {
             valor:
@@ -449,6 +456,26 @@ export class CheckinMessagingService {
     );
     if (!booking?._id) return { ok: false as const, reason: 'not_found' };
     await this.saveDepositApproval(booking._id, { ...payload, por: 'propietario' });
+    return { ok: true as const };
+  }
+
+  /** Persona que recibe a los turistas: guardada por el propietario desde su enlace. */
+  async saveOwnerReceiverByRef(
+    reference: string,
+    payload: { nombre?: string; contacto?: string },
+  ) {
+    const trimmed = String(reference ?? '').trim();
+    if (!trimmed) return { ok: false as const, reason: 'not_found' };
+    const booking: any = await this.convexService.query(
+      'bookings:getByReference',
+      { reference: trimmed },
+    );
+    if (!booking?._id) return { ok: false as const, reason: 'not_found' };
+    await this.convexService.mutation('bookings:saveOwnerReceiver', {
+      id: booking._id,
+      nombre: payload.nombre?.trim() || undefined,
+      contacto: payload.contacto?.trim() || undefined,
+    });
     return { ok: true as const };
   }
 
