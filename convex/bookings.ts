@@ -1129,6 +1129,8 @@ export const saveOwnerReceiver = mutation({
 export const saveOwnerPayout = mutation({
   args: {
     id: v.id('bookings'),
+    valorAcordado: v.optional(v.number()),
+    abono: v.optional(v.number()),
     valor: v.optional(v.number()),
     fecha: v.optional(v.string()),
     medio: v.optional(v.string()),
@@ -1141,6 +1143,8 @@ export const saveOwnerPayout = mutation({
     const actor = (args.actor ?? '').trim() || 'Equipo';
     const ts = Date.now();
     const prev = (booking.ownerPayout ?? {}) as {
+      valorAcordado?: number;
+      abono?: number;
       valor?: number;
       fecha?: string;
       medio?: string;
@@ -1151,6 +1155,8 @@ export const saveOwnerPayout = mutation({
     const accion = prevLog.length === 0 ? 'Pago registrado' : 'Pago actualizado';
     await ctx.db.patch(args.id, {
       ownerPayout: {
+        valorAcordado: args.valorAcordado ?? prev.valorAcordado,
+        abono: args.abono ?? prev.abono,
         valor: args.valor ?? prev.valor,
         fecha: args.fecha ?? prev.fecha,
         medio: args.medio ?? prev.medio,

@@ -384,6 +384,8 @@ export class CheckinMessagingService {
   async saveOwnerPayout(
     bookingId: string,
     payload: {
+      valorAcordado?: number;
+      abono?: number;
       valor?: number;
       fecha?: string;
       medio?: string;
@@ -398,12 +400,13 @@ export class CheckinMessagingService {
         'owners/payouts',
       );
     }
+    const num = (v?: number) =>
+      v !== undefined && Number.isFinite(v) ? v : undefined;
     return this.convexService.mutation('bookings:saveOwnerPayout', {
       id: bookingId,
-      valor:
-        payload.valor !== undefined && Number.isFinite(payload.valor)
-          ? payload.valor
-          : undefined,
+      valorAcordado: num(payload.valorAcordado),
+      abono: num(payload.abono),
+      valor: num(payload.valor),
       fecha: payload.fecha?.trim() || undefined,
       medio: payload.medio?.trim() || undefined,
       comprobanteUrl,

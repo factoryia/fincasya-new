@@ -93,6 +93,10 @@ export class UpdateOwnerInfoDto {
 
   @IsOptional()
   @IsString()
+  propietarioTratamiento?: string;
+
+  @IsOptional()
+  @IsString()
   propietarioTelefono?: string;
 
   @IsOptional()

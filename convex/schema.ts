@@ -106,6 +106,8 @@ export default defineSchema({
      * comunicaciones (recordatorios de llegada). Teléfonos en formato E.164.
      */
     propietarioNombre: v.optional(v.string()),
+    /** Tratamiento para el saludo en mensajes: 'Sr' | 'Sra'. */
+    propietarioTratamiento: v.optional(v.string()),
     propietarioTelefono: v.optional(v.string()),
     propietarioCedula: v.optional(v.string()),
     propietarioCorreo: v.optional(v.string()),
@@ -446,6 +448,10 @@ export default defineSchema({
     /** Pago al propietario (check-out del propietario). */
     ownerPayout: v.optional(
       v.object({
+        /** Valor total acordado con el propietario por esta reserva. */
+        valorAcordado: v.optional(v.number()),
+        /** Abono ya pagado al propietario. El saldo = valorAcordado - abono. */
+        abono: v.optional(v.number()),
         valor: v.optional(v.number()),
         fecha: v.optional(v.string()),
         medio: v.optional(v.string()),
@@ -1102,6 +1108,8 @@ export default defineSchema({
     rntNumber: v.string(),
     /** Datos de contacto del propietario (registro manual, sin usuario vinculado) */
     propietarioNombre: v.optional(v.string()),
+    /** Tratamiento para el saludo en mensajes: 'Sr' | 'Sra'. */
+    propietarioTratamiento: v.optional(v.string()),
     propietarioTelefono: v.optional(v.string()),
     propietarioCedula: v.optional(v.string()),
     propietarioCorreo: v.optional(v.string()),

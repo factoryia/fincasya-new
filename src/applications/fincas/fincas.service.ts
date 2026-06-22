@@ -1494,6 +1494,9 @@ Al confirmar tu pago, recibirás el *soporte oficial* junto con todos los detall
         ...(dto.propietarioNombre !== undefined
           ? { propietarioNombre: dto.propietarioNombre.trim() }
           : {}),
+        ...(dto.propietarioTratamiento !== undefined
+          ? { propietarioTratamiento: dto.propietarioTratamiento.trim() }
+          : {}),
         ...(dto.propietarioTelefono !== undefined
           ? { propietarioTelefono: dto.propietarioTelefono.trim() }
           : {}),

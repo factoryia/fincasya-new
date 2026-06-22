@@ -243,17 +243,26 @@ export class BookingsController {
   async saveOwnerPayout(
     @Param('id') id: string,
     @Body()
-    body: { valor?: string; fecha?: string; medio?: string; actor?: string },
+    body: {
+      valorAcordado?: string;
+      abono?: string;
+      valor?: string;
+      fecha?: string;
+      medio?: string;
+      actor?: string;
+    },
     @UploadedFile() comprobante?: Express.Multer.File,
   ) {
-    const valorNum =
-      body?.valor !== undefined && body.valor !== ''
-        ? Number(String(body.valor).replace(/[^\d.-]/g, ''))
+    const toNum = (v?: string) =>
+      v !== undefined && v !== ''
+        ? Number(String(v).replace(/[^\d.-]/g, ''))
         : undefined;
     return this.checkinMessaging.saveOwnerPayout(
       id,
       {
-        valor: valorNum,
+        valorAcordado: toNum(body?.valorAcordado),
+        abono: toNum(body?.abono),
+        valor: toNum(body?.valor),
         fecha: body?.fecha,
         medio: body?.medio,
         actor: body?.actor,
