@@ -18,6 +18,7 @@ import {
 } from '@nestjs/common';
 import type { Request, Response } from 'express';
 import { FilesInterceptor, FileInterceptor } from '@nestjs/platform-express';
+import { memoryStorage } from 'multer';
 import { BookingsSyncService } from './bookings-sync.service';
 import { BookingsRemindersService } from './bookings-reminders.service';
 import {
@@ -212,6 +213,53 @@ export class BookingsController {
     @Body() body: { sent?: boolean },
   ) {
     return this.checkinMessaging.markCheckinSent(id, body?.sent ?? true);
+  }
+
+  /** Check-out propietario (Fase 1): guarda las observaciones del cliente (editable + log). */
+  @Post(':id/client-observaciones')
+  @UseGuards(ConvexAuthGuard, RolesGuard)
+  @Roles(UserRole.ADMIN, UserRole.ASSISTANT)
+  async saveClientObservaciones(
+    @Param('id') id: string,
+    @Body() body: { valor?: string; actor?: string },
+  ) {
+    return this.checkinMessaging.saveClientObservaciones(
+      id,
+      String(body?.valor ?? ''),
+      body?.actor,
+    );
+  }
+
+  /** Check-out propietario (Fase 1): registra/edita el pago al propietario (+ comprobante). */
+  @Post(':id/owner-payout')
+  @UseGuards(ConvexAuthGuard, RolesGuard)
+  @Roles(UserRole.ADMIN, UserRole.ASSISTANT)
+  @UseInterceptors(
+    FileInterceptor('comprobante', {
+      storage: memoryStorage(),
+      limits: { fileSize: 50 * 1024 * 1024 },
+    }),
+  )
+  async saveOwnerPayout(
+    @Param('id') id: string,
+    @Body()
+    body: { valor?: string; fecha?: string; medio?: string; actor?: string },
+    @UploadedFile() comprobante?: Express.Multer.File,
+  ) {
+    const valorNum =
+      body?.valor !== undefined && body.valor !== ''
+        ? Number(String(body.valor).replace(/[^\d.-]/g, ''))
+        : undefined;
+    return this.checkinMessaging.saveOwnerPayout(
+      id,
+      {
+        valor: valorNum,
+        fecha: body?.fecha,
+        medio: body?.medio,
+        actor: body?.actor,
+      },
+      comprobante,
+    );
   }
 
   /** Vista pública para el propietario (por referencia, solo lectura). */

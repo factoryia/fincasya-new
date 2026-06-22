@@ -334,7 +334,63 @@ export class CheckinMessagingService {
         tipoDocumento: String(g.tipoDocumento ?? 'CC').trim().toUpperCase() || 'CC',
       })),
       invitadosPdfUrl: pdf?.url || null,
+      clientObservaciones: String(booking.clientObservaciones ?? '').trim() || null,
+      ownerPayout: booking.ownerPayout
+        ? {
+            valor:
+              typeof booking.ownerPayout.valor === 'number'
+                ? booking.ownerPayout.valor
+                : null,
+            fecha: booking.ownerPayout.fecha ?? null,
+            medio: booking.ownerPayout.medio ?? null,
+            comprobanteUrl: booking.ownerPayout.comprobanteUrl ?? null,
+          }
+        : null,
     };
+  }
+
+  /** Check-out propietario (Fase 1): guarda observaciones del cliente (con log). */
+  async saveClientObservaciones(
+    bookingId: string,
+    valor: string,
+    actor?: string,
+  ) {
+    return this.convexService.mutation('bookings:saveClientObservaciones', {
+      id: bookingId,
+      valor: String(valor ?? ''),
+      actor: actor?.trim() || undefined,
+    });
+  }
+
+  /** Check-out propietario (Fase 1): registra/edita el pago al propietario. */
+  async saveOwnerPayout(
+    bookingId: string,
+    payload: {
+      valor?: number;
+      fecha?: string;
+      medio?: string;
+      actor?: string;
+    },
+    comprobante?: Express.Multer.File,
+  ) {
+    let comprobanteUrl: string | undefined;
+    if (comprobante) {
+      comprobanteUrl = await this.s3Service.uploadFile(
+        comprobante,
+        'owners/payouts',
+      );
+    }
+    return this.convexService.mutation('bookings:saveOwnerPayout', {
+      id: bookingId,
+      valor:
+        payload.valor !== undefined && Number.isFinite(payload.valor)
+          ? payload.valor
+          : undefined,
+      fecha: payload.fecha?.trim() || undefined,
+      medio: payload.medio?.trim() || undefined,
+      comprobanteUrl,
+      actor: payload.actor?.trim() || undefined,
+    });
   }
 
   /**
@@ -357,6 +413,16 @@ export class CheckinMessagingService {
     if (guests.length === 0) return null;
 
     const property = booking.property || {};
+    const docLabel = (t?: string) => {
+      const map: Record<string, string> = {
+        CC: 'C.C.',
+        TI: 'T.I.',
+        CE: 'C.E.',
+        PA: 'Pasaporte',
+        RC: 'R.C.',
+      };
+      return map[String(t ?? '').toUpperCase()] || 'C.C.';
+    };
     const esc = (v: unknown) =>
       String(v ?? '')
         .replace(/&/g, '&amp;')
@@ -402,6 +468,8 @@ export class CheckinMessagingService {
             i + 1
           }</td><td style="border:1px solid #ddd;padding:6px 10px;">${esc(
             g.nombreCompleto || '—',
+          )}</td><td style="border:1px solid #ddd;padding:6px 10px;white-space:nowrap;">${esc(
+            docLabel(g.tipoDocumento),
           )}</td><td style="border:1px solid #ddd;padding:6px 10px;">${esc(
             g.esMenor
               ? 'Menor de 2 años'
@@ -430,6 +498,7 @@ export class CheckinMessagingService {
     <thead><tr>
       <th style="border:1px solid #ddd;background:#f5f5f5;padding:6px 10px;width:36px;">#</th>
       <th style="border:1px solid #ddd;background:#f5f5f5;text-align:left;padding:6px 10px;">Nombre completo</th>
+      <th style="border:1px solid #ddd;background:#f5f5f5;text-align:left;padding:6px 10px;">Tipo</th>
       <th style="border:1px solid #ddd;background:#f5f5f5;text-align:left;padding:6px 10px;">Documento</th>
     </tr></thead>
     <tbody>${guestRows}</tbody>

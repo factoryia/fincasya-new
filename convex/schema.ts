@@ -111,6 +111,8 @@ export default defineSchema({
     propietarioCorreo: v.optional(v.string()),
     encargadoNombre: v.optional(v.string()),
     encargadoTelefono: v.optional(v.string()),
+    /** Reglas de salida (check-out) específicas de esta finca. Override del texto global. */
+    checkoutRulesText: v.optional(v.string()),
     /**
      * Etiquetas de filtros del sitio (pestañas del home): luxury, eventos, cerca-bogota, melgar, etc.
      * Si el campo falta, la web usa reglas legacy por ubicación/texto. Si existe (puede ser []), aplica modo explícito.
@@ -393,7 +395,7 @@ export default defineSchema({
           nombreCompleto: v.string(),
           /** Número de documento (cédula, TI, pasaporte, etc.). */
           cedula: v.optional(v.string()),
-          /** CC, TI, RC, CE o PA. Por defecto CC en datos antiguos. */
+          /** Tipo de documento: CC, TI, RC, CE o PA. Por defecto CC en datos antiguos. */
           tipoDocumento: v.optional(v.string()),
           esMenor: v.optional(v.boolean()),
         }),
@@ -415,6 +417,70 @@ export default defineSchema({
     checkinAceptaDatos: v.optional(v.boolean()),
     /** Última vez que el turista guardó avance o envió su check-in. */
     checkinUpdatedAt: v.optional(v.number()),
+    /**
+     * Check-out propietario (Fase 1). Observaciones/peticiones del cliente que el
+     * equipo edita y comparte con el propietario; con log de cambios (quién/cuándo).
+     */
+    clientObservaciones: v.optional(v.string()),
+    clientObservacionesUpdatedAt: v.optional(v.number()),
+    clientObservacionesLog: v.optional(
+      v.array(
+        v.object({
+          valor: v.string(),
+          actor: v.string(),
+          ts: v.number(),
+        }),
+      ),
+    ),
+    /** Pago al propietario (check-out del propietario). */
+    ownerPayout: v.optional(
+      v.object({
+        valor: v.optional(v.number()),
+        fecha: v.optional(v.string()),
+        medio: v.optional(v.string()),
+        comprobanteUrl: v.optional(v.string()),
+        updatedAt: v.optional(v.number()),
+        log: v.optional(
+          v.array(
+            v.object({
+              accion: v.string(),
+              actor: v.string(),
+              ts: v.number(),
+            }),
+          ),
+        ),
+      }),
+    ),
+    /**
+     * Check-out del cliente (Fase 2+): devolución del depósito. Estado de la
+     * validación + cuenta bancaria registrada por el cliente para la devolución.
+     */
+    depositReturn: v.optional(
+      v.object({
+        // pendiente_validacion | aprobado | rechazado | en_revision (Fase 3)
+        estado: v.optional(v.string()),
+        cuenta: v.optional(
+          v.object({
+            titular: v.optional(v.string()),
+            tipo: v.optional(v.string()),
+            numero: v.optional(v.string()),
+            banco: v.optional(v.string()),
+            documento: v.optional(v.string()),
+            observaciones: v.optional(v.string()),
+          }),
+        ),
+        updatedAt: v.optional(v.number()),
+        log: v.optional(
+          v.array(
+            v.object({
+              accion: v.string(),
+              actor: v.string(),
+              ts: v.number(),
+            }),
+          ),
+        ),
+      }),
+    ),
     /**
      * Portal público de pago (`/pago/:reference`): cuentas seleccionadas por el
      * equipo para mostrar al cliente en el link compartido.
