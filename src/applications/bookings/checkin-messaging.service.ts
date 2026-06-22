@@ -345,6 +345,17 @@ export class CheckinMessagingService {
             comprobanteUrl: booking.ownerPayout.comprobanteUrl ?? null,
           }
         : null,
+      // Devolución del depósito (Fase 3): estado para que el propietario valide.
+      depositoGarantia: Number(booking.depositoGarantia) || 0,
+      depositReturn: booking.depositReturn
+        ? {
+            estado: booking.depositReturn.estado ?? 'pendiente_validacion',
+            devuelto:
+              typeof booking.depositReturn.devolucion?.valor === 'number'
+                ? booking.depositReturn.devolucion.valor
+                : null,
+          }
+        : null,
     };
   }
 
@@ -389,6 +400,106 @@ export class CheckinMessagingService {
       medio: payload.medio?.trim() || undefined,
       comprobanteUrl,
       actor: payload.actor?.trim() || undefined,
+    });
+  }
+
+  /** Check-out cliente (Fase 3): validación del propietario sobre la devolución. */
+  async saveDepositApproval(
+    bookingId: string,
+    payload: {
+      estado: string;
+      por?: string;
+      nombre?: string;
+      motivo?: string;
+      obsPropietario?: string;
+      valorRetenido?: number;
+    },
+  ) {
+    return this.convexService.mutation('bookings:saveDepositApproval', {
+      id: bookingId,
+      estado: payload.estado,
+      por: payload.por?.trim() || undefined,
+      nombre: payload.nombre?.trim() || undefined,
+      motivo: payload.motivo?.trim() || undefined,
+      obsPropietario: payload.obsPropietario?.trim() || undefined,
+      valorRetenido:
+        payload.valorRetenido != null && Number.isFinite(payload.valorRetenido)
+          ? payload.valorRetenido
+          : undefined,
+    });
+  }
+
+  /** Validación del propietario por su enlace público (resuelve ref → id). */
+  async saveDepositApprovalByRef(
+    reference: string,
+    payload: {
+      estado: string;
+      nombre?: string;
+      motivo?: string;
+      obsPropietario?: string;
+      valorRetenido?: number;
+    },
+  ) {
+    const trimmed = String(reference ?? '').trim();
+    if (!trimmed) return { ok: false as const, reason: 'not_found' };
+    const booking: any = await this.convexService.query(
+      'bookings:getByReference',
+      { reference: trimmed },
+    );
+    if (!booking?._id) return { ok: false as const, reason: 'not_found' };
+    await this.saveDepositApproval(booking._id, { ...payload, por: 'propietario' });
+    return { ok: true as const };
+  }
+
+  /** Check-out cliente (Fase 3): registra el pago de devolución (+ comprobante a S3). */
+  async saveDepositRefund(
+    bookingId: string,
+    payload: {
+      valor?: number;
+      fecha?: string;
+      medio?: string;
+      numTransaccion?: string;
+      observaciones?: string;
+      actor?: string;
+    },
+    comprobante?: Express.Multer.File,
+  ) {
+    let comprobanteUrl: string | undefined;
+    if (comprobante) {
+      comprobanteUrl = await this.s3Service.uploadFile(
+        comprobante,
+        'deposits/refunds',
+      );
+    }
+    return this.convexService.mutation('bookings:saveDepositRefund', {
+      id: bookingId,
+      valor:
+        payload.valor != null && Number.isFinite(payload.valor)
+          ? payload.valor
+          : undefined,
+      fecha: payload.fecha?.trim() || undefined,
+      medio: payload.medio?.trim() || undefined,
+      numTransaccion: payload.numTransaccion?.trim() || undefined,
+      observaciones: payload.observaciones?.trim() || undefined,
+      comprobanteUrl,
+      actor: payload.actor?.trim() || undefined,
+    });
+  }
+
+  /** Check-out cliente (Fase 3): sube evidencias de retención (daños/novedades) a S3. */
+  async addDepositEvidencias(
+    bookingId: string,
+    files?: Express.Multer.File[],
+  ) {
+    const list = Array.isArray(files) ? files : [];
+    if (list.length === 0) return { ok: false as const, reason: 'no_files' };
+    const urls: string[] = [];
+    for (const f of list) {
+      urls.push(await this.s3Service.uploadFile(f, 'deposits/evidencias'));
+    }
+    return this.convexService.mutation('bookings:addDepositEvidencias', {
+      id: bookingId,
+      urls,
     });
   }
 

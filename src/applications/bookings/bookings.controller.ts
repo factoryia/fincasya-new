@@ -262,6 +262,126 @@ export class BookingsController {
     );
   }
 
+  /** Check-out cliente (Fase 3): validación del propietario por el equipo admin. */
+  @Post(':id/deposit-approval')
+  @UseGuards(ConvexAuthGuard, RolesGuard)
+  @Roles(UserRole.ADMIN, UserRole.ASSISTANT)
+  async saveDepositApproval(
+    @Param('id') id: string,
+    @Body()
+    body: {
+      estado: string;
+      nombre?: string;
+      motivo?: string;
+      obsPropietario?: string;
+      valorRetenido?: number | string;
+    },
+  ) {
+    if (!body?.estado) {
+      throw new HttpException('estado es requerido', HttpStatus.BAD_REQUEST);
+    }
+    const vr =
+      body.valorRetenido != null && body.valorRetenido !== ''
+        ? Number(String(body.valorRetenido).replace(/[^\d.-]/g, ''))
+        : undefined;
+    return this.checkinMessaging.saveDepositApproval(id, {
+      estado: body.estado,
+      por: 'admin',
+      nombre: body.nombre,
+      motivo: body.motivo,
+      obsPropietario: body.obsPropietario,
+      valorRetenido: vr,
+    });
+  }
+
+  /** Validación del propietario desde su enlace público (sin login, por referencia). */
+  @Post('owner/:ref/deposit-approval')
+  async saveDepositApprovalByOwner(
+    @Param('ref') ref: string,
+    @Body()
+    body: {
+      estado: string;
+      nombre?: string;
+      motivo?: string;
+      obsPropietario?: string;
+    },
+  ) {
+    if (!body?.estado) {
+      throw new HttpException('estado es requerido', HttpStatus.BAD_REQUEST);
+    }
+    const result = await this.checkinMessaging.saveDepositApprovalByRef(ref, {
+      estado: body.estado,
+      nombre: body.nombre,
+      motivo: body.motivo,
+      obsPropietario: body.obsPropietario,
+    });
+    if (!result.ok) {
+      throw new HttpException(
+        { error: 'not_found', message: 'No encontramos esta reserva.' },
+        HttpStatus.NOT_FOUND,
+      );
+    }
+    return { ok: true };
+  }
+
+  /** Check-out cliente (Fase 3): registra el pago de devolución (+ comprobante). */
+  @Post(':id/deposit-refund')
+  @UseGuards(ConvexAuthGuard, RolesGuard)
+  @Roles(UserRole.ADMIN, UserRole.ASSISTANT)
+  @UseInterceptors(
+    FileInterceptor('comprobante', {
+      storage: memoryStorage(),
+      limits: { fileSize: 50 * 1024 * 1024 },
+    }),
+  )
+  async saveDepositRefund(
+    @Param('id') id: string,
+    @Body()
+    body: {
+      valor?: string;
+      fecha?: string;
+      medio?: string;
+      numTransaccion?: string;
+      observaciones?: string;
+      actor?: string;
+    },
+    @UploadedFile() comprobante?: Express.Multer.File,
+  ) {
+    const valorNum =
+      body?.valor != null && body.valor !== ''
+        ? Number(String(body.valor).replace(/[^\d.-]/g, ''))
+        : undefined;
+    return this.checkinMessaging.saveDepositRefund(
+      id,
+      {
+        valor: valorNum,
+        fecha: body?.fecha,
+        medio: body?.medio,
+        numTransaccion: body?.numTransaccion,
+        observaciones: body?.observaciones,
+        actor: body?.actor,
+      },
+      comprobante,
+    );
+  }
+
+  /** Check-out cliente (Fase 3): sube evidencias de retención (daños/novedades). */
+  @Post(':id/deposit-evidencias')
+  @UseGuards(ConvexAuthGuard, RolesGuard)
+  @Roles(UserRole.ADMIN, UserRole.ASSISTANT)
+  @UseInterceptors(
+    FilesInterceptor('evidencias', 10, {
+      storage: memoryStorage(),
+      limits: { fileSize: 50 * 1024 * 1024 },
+    }),
+  )
+  async addDepositEvidencias(
+    @Param('id') id: string,
+    @UploadedFiles() evidencias?: Express.Multer.File[],
+  ) {
+    return this.checkinMessaging.addDepositEvidencias(id, evidencias);
+  }
+
   /** Vista pública para el propietario (por referencia, solo lectura). */
   @Get('owner/:ref')
   async getOwnerView(@Param('ref') ref: string) {

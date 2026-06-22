@@ -77,6 +77,23 @@ export const getForPortal = internalQuery({
       depositoEstadoLabel: ESTADO_LABELS[estado] || ESTADO_LABELS.pendiente_validacion,
       // Cuenta ya registrada (para precargar el formulario).
       cuenta: dr?.cuenta ?? null,
+      // Devolución (Fase 3) — lo que el cliente puede ver.
+      devolucion: dr?.devolucion
+        ? {
+            valor:
+              typeof dr.devolucion.valor === 'number'
+                ? dr.devolucion.valor
+                : null,
+            fecha: dr.devolucion.fecha ?? null,
+            medio: dr.devolucion.medio ?? null,
+            comprobanteUrl: dr.devolucion.comprobanteUrl ?? null,
+            observaciones: dr.devolucion.observaciones ?? null,
+          }
+        : null,
+      valorRetenido:
+        typeof dr?.retencion?.valorRetenido === 'number'
+          ? dr.retencion.valorRetenido
+          : null,
     };
   },
 });

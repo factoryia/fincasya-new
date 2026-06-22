@@ -1142,6 +1142,139 @@ export const saveOwnerPayout = mutation({
   },
 });
 
+/** Check-out cliente (Fase 3): validación del propietario sobre la devolución del depósito. */
+export const saveDepositApproval = mutation({
+  args: {
+    id: v.id('bookings'),
+    estado: v.string(), // aprobado | rechazado | en_revision | pendiente_validacion
+    por: v.optional(v.string()), // 'admin' | 'propietario'
+    nombre: v.optional(v.string()),
+    motivo: v.optional(v.string()),
+    obsPropietario: v.optional(v.string()),
+    valorRetenido: v.optional(v.number()),
+  },
+  handler: async (ctx, args) => {
+    const booking = await ctx.db.get(args.id);
+    if (!booking) throw new Error('Reserva no encontrada');
+    const ts = Date.now();
+    const prev = (booking.depositReturn ?? {}) as NonNullable<
+      typeof booking.depositReturn
+    >;
+    const por = (args.por ?? 'admin').trim();
+    const nombre = (args.nombre ?? '').trim() || (por === 'propietario' ? 'Propietario' : 'Equipo');
+    const prevLog = Array.isArray(prev.log) ? prev.log : [];
+
+    const next: NonNullable<typeof booking.depositReturn> = {
+      ...prev,
+      estado: args.estado,
+      aprobacion: { por, nombre, ts },
+      updatedAt: ts,
+    };
+    if (args.estado === 'rechazado' || args.estado === 'en_revision') {
+      next.retencion = {
+        motivo: args.motivo?.trim() || prev.retencion?.motivo,
+        obsPropietario:
+          args.obsPropietario?.trim() || prev.retencion?.obsPropietario,
+        valorRetenido:
+          args.valorRetenido != null
+            ? args.valorRetenido
+            : prev.retencion?.valorRetenido,
+        evidencias: prev.retencion?.evidencias,
+      };
+    }
+    const accionMap: Record<string, string> = {
+      aprobado: 'Propietario aprobó la devolución',
+      rechazado: 'Propietario reportó novedades',
+      en_revision: 'Devolución en revisión',
+      pendiente_validacion: 'Reinicio a pendiente de validación',
+    };
+    next.log = [
+      ...prevLog,
+      { accion: accionMap[args.estado] || `Estado: ${args.estado}`, actor: nombre, ts },
+    ].slice(-30);
+
+    await ctx.db.patch(args.id, { depositReturn: next, updatedAt: ts });
+    return { ok: true };
+  },
+});
+
+/** Check-out cliente (Fase 3): adjunta evidencias de retención (urls ya subidas a S3). */
+export const addDepositEvidencias = mutation({
+  args: { id: v.id('bookings'), urls: v.array(v.string()) },
+  handler: async (ctx, args) => {
+    const booking = await ctx.db.get(args.id);
+    if (!booking) throw new Error('Reserva no encontrada');
+    const ts = Date.now();
+    const prev = (booking.depositReturn ?? {}) as NonNullable<
+      typeof booking.depositReturn
+    >;
+    const evid = [
+      ...(prev.retencion?.evidencias ?? []),
+      ...args.urls.filter(Boolean),
+    ];
+    await ctx.db.patch(args.id, {
+      depositReturn: {
+        ...prev,
+        retencion: { ...(prev.retencion ?? {}), evidencias: evid },
+        updatedAt: ts,
+      },
+      updatedAt: ts,
+    });
+    return { ok: true };
+  },
+});
+
+/** Check-out cliente (Fase 3): registra el pago de devolución al cliente. */
+export const saveDepositRefund = mutation({
+  args: {
+    id: v.id('bookings'),
+    valor: v.optional(v.number()),
+    fecha: v.optional(v.string()),
+    medio: v.optional(v.string()),
+    numTransaccion: v.optional(v.string()),
+    observaciones: v.optional(v.string()),
+    comprobanteUrl: v.optional(v.string()),
+    actor: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    const booking = await ctx.db.get(args.id);
+    if (!booking) throw new Error('Reserva no encontrada');
+    const ts = Date.now();
+    const actor = (args.actor ?? '').trim() || 'Equipo';
+    const prev = (booking.depositReturn ?? {}) as NonNullable<
+      typeof booking.depositReturn
+    >;
+    const prevDev = prev.devolucion ?? {};
+    const prevLog = Array.isArray(prev.log) ? prev.log : [];
+    const accion = prevDev.ts ? 'Devolución actualizada' : 'Devolución registrada';
+
+    await ctx.db.patch(args.id, {
+      depositReturn: {
+        ...prev,
+        // Marca como devuelto cuando ya está aprobado; si no, conserva el estado.
+        estado:
+          prev.estado === 'aprobado' || prev.estado === 'devuelto'
+            ? 'devuelto'
+            : prev.estado || 'aprobado',
+        devolucion: {
+          valor: args.valor ?? prevDev.valor,
+          fecha: args.fecha ?? prevDev.fecha,
+          medio: args.medio ?? prevDev.medio,
+          numTransaccion: args.numTransaccion ?? prevDev.numTransaccion,
+          observaciones: args.observaciones ?? prevDev.observaciones,
+          comprobanteUrl: args.comprobanteUrl ?? prevDev.comprobanteUrl,
+          registradoPor: actor,
+          ts,
+        },
+        updatedAt: ts,
+        log: [...prevLog, { accion, actor, ts }].slice(-30),
+      },
+      updatedAt: ts,
+    });
+    return { ok: true };
+  },
+});
+
 /**
  * Busca una reserva por número de contrato.
  * Coincidencias: texto en `observaciones` (p. ej. "Contrato: FY-2005"), `reference`, sin depender

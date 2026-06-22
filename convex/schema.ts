@@ -456,7 +456,7 @@ export default defineSchema({
      */
     depositReturn: v.optional(
       v.object({
-        // pendiente_validacion | aprobado | rechazado | en_revision (Fase 3)
+        // pendiente_validacion | aprobado | rechazado | en_revision | devuelto
         estado: v.optional(v.string()),
         cuenta: v.optional(
           v.object({
@@ -466,6 +466,36 @@ export default defineSchema({
             banco: v.optional(v.string()),
             documento: v.optional(v.string()),
             observaciones: v.optional(v.string()),
+          }),
+        ),
+        /** Validación del propietario (admin en su nombre o el propietario por su enlace). */
+        aprobacion: v.optional(
+          v.object({
+            por: v.optional(v.string()), // 'admin' | 'propietario'
+            nombre: v.optional(v.string()),
+            ts: v.optional(v.number()),
+          }),
+        ),
+        /** Retención (rechazo o devolución parcial). */
+        retencion: v.optional(
+          v.object({
+            motivo: v.optional(v.string()),
+            obsPropietario: v.optional(v.string()),
+            valorRetenido: v.optional(v.number()),
+            evidencias: v.optional(v.array(v.string())),
+          }),
+        ),
+        /** Registro del pago de devolución al cliente. */
+        devolucion: v.optional(
+          v.object({
+            valor: v.optional(v.number()),
+            fecha: v.optional(v.string()),
+            medio: v.optional(v.string()),
+            numTransaccion: v.optional(v.string()),
+            observaciones: v.optional(v.string()),
+            comprobanteUrl: v.optional(v.string()),
+            registradoPor: v.optional(v.string()),
+            ts: v.optional(v.number()),
           }),
         ),
         updatedAt: v.optional(v.number()),
