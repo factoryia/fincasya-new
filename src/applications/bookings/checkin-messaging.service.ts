@@ -336,6 +336,8 @@ export class CheckinMessagingService {
         tipoDocumento: String(g.tipoDocumento ?? 'CC').trim().toUpperCase() || 'CC',
       })),
       invitadosPdfUrl: pdf?.url || null,
+      checkinObservaciones:
+        String(booking.checkinObservaciones ?? '').trim() || null,
       clientObservaciones: String(booking.clientObservaciones ?? '').trim() || null,
       ownerReceiver: booking.ownerReceiver
         ? {
