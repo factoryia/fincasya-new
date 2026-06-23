@@ -580,6 +580,12 @@ export class CheckinMessagingService {
           }).format(new Date(ms))
         : '—';
 
+    const empleadaLabel = booking.needsTeam
+      ? 'Sí (varias)'
+      : booking.needsEmpleada
+        ? 'Sí'
+        : 'No';
+    const placas = String(booking.checkinPlacas ?? '').trim();
     const metaPairs: Array<[string, string]> = [
       ['Propiedad', property.title || 'Propiedad'],
       ...(property.location
@@ -590,6 +596,10 @@ export class CheckinMessagingService {
       ['Entrada', fmtFecha(booking.fechaEntrada)],
       ['Salida', fmtFecha(booking.fechaSalida)],
       ['Personas', String(booking.numeroPersonas ?? guests.length)],
+      ['Empleada de servicio', empleadaLabel],
+      ...(placas
+        ? ([['Placas vehiculares', placas]] as Array<[string, string]>)
+        : []),
     ];
     const metaRows = metaPairs
       .map(
@@ -612,11 +622,17 @@ export class CheckinMessagingService {
           )}</td><td style="border:1px solid #ddd;padding:6px 10px;white-space:nowrap;">${esc(
             docLabel(g.tipoDocumento),
           )}</td><td style="border:1px solid #ddd;padding:6px 10px;">${esc(
-            g.esMenor
-              ? 'Menor de 2 años'
-              : g.cedula?.trim()
-                ? `${String(g.tipoDocumento ?? 'CC').trim().toUpperCase() || 'CC'} ${g.cedula.trim()}`
-                : 'Sin documento',
+            (() => {
+              if (g.esMenor) return 'Menor de 2 años';
+              const tipo = String(g.tipoDocumento ?? 'CC')
+                .trim()
+                .toUpperCase();
+              const esMenorEdad = tipo === 'TI' || tipo === 'RC';
+              const base = g.cedula?.trim()
+                ? `${tipo || 'CC'} ${g.cedula.trim()}`
+                : 'Sin documento';
+              return esMenorEdad ? `${base} · Menor de edad` : base;
+            })(),
           )}</td></tr>`,
       )
       .join('');
