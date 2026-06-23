@@ -232,6 +232,16 @@ export class ContractLinkService {
     dto.securityDepositLabel = settings.adminSettings?.securityDeposit;
     dto.extraPersonFeeLabel = settings.adminSettings?.extraPersonFee;
     dto.petDepositLabel = settings.adminSettings?.petDeposit;
+    // Firmante elegido en el admin (override del global) que viaja en el draft.
+    const d = draft as Record<string, unknown>;
+    if (typeof d.adminName === 'string' && d.adminName.trim())
+      dto.adminName = d.adminName.trim();
+    if (typeof d.adminCedula === 'string' && d.adminCedula.trim())
+      dto.adminCedula = d.adminCedula.trim();
+    if (typeof d.adminCity === 'string' && d.adminCity.trim())
+      dto.adminCity = d.adminCity.trim();
+    if (typeof d.firmaArrendadorUrl === 'string' && d.firmaArrendadorUrl.trim())
+      dto.firmaArrendadorUrl = d.firmaArrendadorUrl.trim();
     return dto;
   }
 

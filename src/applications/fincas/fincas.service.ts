@@ -1938,9 +1938,10 @@ Al confirmar tu pago, recibirás el *soporte oficial* junto con todos los detall
         nombrePropietario,
         cedulaPropietario,
         ciudadCedulaPropietario,
-        adminNombre: (contractAdmin.adminName ?? '').trim(),
-        adminCedula: (contractAdmin.adminCedula ?? '').trim(),
-        adminCiudad: (contractAdmin.adminCity ?? '').trim(),
+        // Firmante por contrato (selector Hernán/esposa) tiene prioridad sobre el global.
+        adminNombre: (dto.adminName?.trim() || contractAdmin.adminName || '').trim(),
+        adminCedula: (dto.adminCedula?.trim() || contractAdmin.adminCedula || '').trim(),
+        adminCiudad: (dto.adminCity?.trim() || contractAdmin.adminCity || '').trim(),
         capacidad: String(finca.capacity || 0),
       };
 
