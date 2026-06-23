@@ -321,6 +321,7 @@ export class CheckinMessagingService {
       propertyTitle: property.title || 'tu finca',
       propertyLocation: property.location || null,
       ownerName: property.propietarioNombre || null,
+      ownerTratamiento: property.propietarioTratamiento || null,
       fechaEntrada: booking.fechaEntrada,
       fechaSalida: booking.fechaSalida,
       horaEntrada: booking.horaEntrada ?? null,
