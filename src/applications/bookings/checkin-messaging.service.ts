@@ -343,6 +343,7 @@ export class CheckinMessagingService {
       invitadosPdfUrl: pdf?.url || null,
       checkinObservaciones:
         String(booking.checkinObservaciones ?? '').trim() || null,
+      serviciosNota: String(booking.checkinServiciosNota ?? '').trim() || null,
       clientObservaciones: String(booking.clientObservaciones ?? '').trim() || null,
       ownerReceiver: booking.ownerReceiver
         ? {
