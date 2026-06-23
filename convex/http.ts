@@ -1214,6 +1214,7 @@ http.route({
       serviciosNota?: string;
       menoresDe2?: number;
       placas?: string;
+      mascotas?: number;
       observaciones?: string;
       aceptaTratamientoDatos?: boolean;
     };
@@ -1238,6 +1239,10 @@ http.route({
           ? undefined
           : Math.max(0, Math.floor(Number(body.menoresDe2) || 0)),
       placas: body?.placas?.trim() || undefined,
+      mascotas:
+        body?.mascotas === undefined
+          ? undefined
+          : Math.max(0, Math.floor(Number(body.mascotas) || 0)),
       observaciones: body?.observaciones?.trim() || undefined,
       aceptaTratamientoDatos:
         body?.aceptaTratamientoDatos === undefined

@@ -328,6 +328,11 @@ export class CheckinMessagingService {
       numeroPersonas: booking.numeroPersonas ?? null,
       empleada, // 'no' | 'una' | 'varias'
       placas: String(booking.checkinPlacas ?? '').trim() || null,
+      allowsPets: (property as { allowsPets?: boolean })?.allowsPets === true,
+      mascotas:
+        typeof booking.checkinMascotas === 'number'
+          ? booking.checkinMascotas
+          : Number(booking.numeroMascotas) || 0,
       checkinCompleted: Boolean(booking.checkinCompleted),
       guestCount: allGuests.length,
       guests: allGuests.map((g: any) => ({
@@ -590,6 +595,12 @@ export class CheckinMessagingService {
         ? 'Sí'
         : 'No';
     const placas = String(booking.checkinPlacas ?? '').trim();
+    const nMascotas =
+      typeof booking.checkinMascotas === 'number'
+        ? booking.checkinMascotas
+        : Number(booking.numeroMascotas) || 0;
+    const mascotasLabel =
+      nMascotas > 0 ? `Sí (${nMascotas})` : 'No van mascotas';
     const metaPairs: Array<[string, string]> = [
       ['Propiedad', property.title || 'Propiedad'],
       ...(property.location
@@ -601,6 +612,7 @@ export class CheckinMessagingService {
       ['Salida', fmtFecha(booking.fechaSalida)],
       ['Personas', String(booking.numeroPersonas ?? guests.length)],
       ['Empleada de servicio', empleadaLabel],
+      ['Mascotas', mascotasLabel],
       ...(placas
         ? ([['Placas vehiculares', placas]] as Array<[string, string]>)
         : []),

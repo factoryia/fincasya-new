@@ -413,6 +413,8 @@ export default defineSchema({
     checkinMenoresDe2: v.optional(v.number()),
     /** Placas de vehículos indicadas en el portal de check-in. */
     checkinPlacas: v.optional(v.string()),
+    /** Mascotas confirmadas por el huésped en el check-in (0 = no van). */
+    checkinMascotas: v.optional(v.number()),
     /** Solicitudes especiales del huésped en el portal de check-in. */
     checkinObservaciones: v.optional(v.string()),
     /** Consentimiento habeas data (Ley 1581) en el envío final del check-in. */
