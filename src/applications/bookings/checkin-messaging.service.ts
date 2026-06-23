@@ -326,6 +326,7 @@ export class CheckinMessagingService {
       horaEntrada: booking.horaEntrada ?? null,
       numeroPersonas: booking.numeroPersonas ?? null,
       empleada, // 'no' | 'una' | 'varias'
+      placas: String(booking.checkinPlacas ?? '').trim() || null,
       checkinCompleted: Boolean(booking.checkinCompleted),
       guestCount: allGuests.length,
       guests: allGuests.map((g: any) => ({
