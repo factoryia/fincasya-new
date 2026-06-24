@@ -2578,6 +2578,7 @@ Al confirmar tu pago, recibirás el *soporte oficial* junto con todos los detall
         url: publicUrl,
         filename: finalFilename,
         mimeType: finalMimeType,
+        fileBase64: finalBuffer.toString('base64'),
         message: 'Contrato generado y enviado exitosamente.',
       };
     } catch (error) {

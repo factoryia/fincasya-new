@@ -752,16 +752,20 @@ export class BookingsSyncService {
   async listContracts(params: {
     estado?: string;
     origen?: string;
+    tipo?: string;
     propertyId?: string;
     search?: string;
+    cr?: string;
     limit?: number;
     page?: number;
   }) {
     return this.convexService.query('contracts:list', {
       estado: params.estado,
       origen: params.origen,
+      tipo: params.tipo,
       propertyId: params.propertyId as any,
       search: params.search,
+      cr: params.cr,
       limit: params.limit,
       page: params.page,
     });
@@ -770,6 +774,86 @@ export class BookingsSyncService {
   /** Gestor de Contratos: detalle por número de contrato. */
   async getContract(contractNumber: string) {
     return this.convexService.query('contracts:get', { contractNumber });
+  }
+
+  /** Gestor de Contratos: detalle enriquecido (fotos, link, CR). */
+  async getContractDetail(contractNumber: string) {
+    return this.convexService.query('contracts:getDetail', { contractNumber });
+  }
+
+  /** Gestor de Contratos: elimina un registro del gestor. */
+  async deleteContract(contractNumber: string) {
+    return this.convexService.mutation('contracts:remove', { contractNumber });
+  }
+
+  /** Gestor de Contratos: sube fotos de cédula y actualiza el fill token. */
+  async uploadContractCedulaPhotos(
+    contractNumber: string,
+    files: Express.Multer.File[],
+  ) {
+    const detail: any = await this.getContractDetail(contractNumber);
+    if (!detail?.fillToken?._id) {
+      throw new BadRequestException('Este contrato no tiene fotos de cédula asociadas');
+    }
+    if (!files?.length) {
+      throw new BadRequestException('Adjunta al menos una foto');
+    }
+    if (files.length > 2) {
+      throw new BadRequestException('Máximo 2 fotos de cédula');
+    }
+
+    const existing: string[] =
+      detail.fillToken.filledData?.cedulaPhotoUrls ?? [];
+    const room = Math.max(0, 2 - existing.length);
+    if (room <= 0) {
+      throw new BadRequestException('Ya hay 2 fotos. Elimina una antes de agregar otra.');
+    }
+
+    const token = String(detail.fillToken.token ?? '');
+    const newUrls: string[] = [];
+    for (const file of files.slice(0, room)) {
+      if (!file.mimetype?.startsWith('image/')) {
+        throw new BadRequestException('Solo se permiten imágenes');
+      }
+      if (file.size > 8 * 1024 * 1024) {
+        throw new BadRequestException('Cada imagen debe pesar menos de 8 MB');
+      }
+      const ext = file.originalname?.split('.').pop() || 'jpg';
+      const safeName = `cedula_${Date.now()}_${newUrls.length + 1}.${ext}`;
+      const url = await this.s3Service.uploadFile(
+        file,
+        `contracts/cedula/${token || contractNumber}`,
+        safeName,
+      );
+      newUrls.push(url);
+    }
+
+    const merged = [...existing, ...newUrls].slice(0, 2);
+    await this.convexService.mutation('contractFillTokens:updateCedulaPhotos', {
+      fillTokenId: detail.fillToken._id,
+      cedulaPhotoUrls: merged,
+    });
+    return { ok: true, urls: merged };
+  }
+
+  /** Gestor de Contratos: reemplaza el listado de fotos de cédula. */
+  async updateContractCedulaPhotos(
+    contractNumber: string,
+    cedulaPhotoUrls: string[],
+  ) {
+    const detail: any = await this.getContractDetail(contractNumber);
+    if (!detail?.fillToken?._id) {
+      throw new BadRequestException('Este contrato no tiene fotos de cédula asociadas');
+    }
+    const urls = (cedulaPhotoUrls ?? [])
+      .map((u) => String(u ?? '').trim())
+      .filter(Boolean)
+      .slice(0, 2);
+    await this.convexService.mutation('contractFillTokens:updateCedulaPhotos', {
+      fillTokenId: detail.fillToken._id,
+      cedulaPhotoUrls: urls,
+    });
+    return { ok: true, urls };
   }
 
   /** Gestor de Contratos: reconstruye la tabla desde las fuentes históricas. */

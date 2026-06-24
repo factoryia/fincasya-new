@@ -164,12 +164,96 @@ export const get = query({
   },
 });
 
+/** Detalle enriquecido: contrato + link de llenado + CR de reserva. */
+export const getDetail = query({
+  args: { contractNumber: v.string() },
+  handler: async (ctx, args) => {
+    const contract = await ctx.db
+      .query('contracts')
+      .withIndex('by_contract_number', (q) =>
+        q.eq('contractNumber', args.contractNumber.trim()),
+      )
+      .first();
+    if (!contract) return null;
+
+    let fillToken: {
+      _id: Id<'contractFillTokens'>;
+      token: string;
+      status: string;
+      source?: string;
+      filledData?: {
+        nombre: string;
+        cedula: string;
+        email: string;
+        telefono: string;
+        direccion: string;
+        ciudad?: string;
+        cedulaPhotoUrls?: string[];
+        filledAt: number;
+      };
+      propertyTitle?: string;
+      propertyLocation?: string;
+      fechaEntrada?: string;
+      fechaSalida?: string;
+      precioTotal?: number;
+    } | null = null;
+
+    if (contract.fillTokenId) {
+      const row = await ctx.db.get(contract.fillTokenId);
+      if (row) {
+        fillToken = {
+          _id: row._id,
+          token: row.token,
+          status: row.status,
+          source: row.source,
+          filledData: row.filledData,
+          propertyTitle: row.propertyTitle,
+          propertyLocation: row.propertyLocation,
+          fechaEntrada: row.fechaEntrada,
+          fechaSalida: row.fechaSalida,
+          precioTotal: row.precioTotal,
+        };
+      }
+    }
+
+    let bookingReference: string | undefined;
+    if (contract.bookingId) {
+      const booking = await ctx.db.get(contract.bookingId);
+      bookingReference = booking?.reference ?? undefined;
+    }
+
+    return { contract, fillToken, bookingReference };
+  },
+});
+
+export const remove = mutation({
+  args: { contractNumber: v.string() },
+  handler: async (ctx, args) => {
+    const existing = await ctx.db
+      .query('contracts')
+      .withIndex('by_contract_number', (q) =>
+        q.eq('contractNumber', args.contractNumber.trim()),
+      )
+      .first();
+    if (!existing) return { ok: false };
+    await ctx.db.delete(existing._id);
+    return { ok: true };
+  },
+});
+
+const CONTRATO_ORIGENES = new Set(['link', 'inbox']);
+const CONFIRMACION_ORIGEN = 'confirmacion';
+
 export const list = query({
   args: {
     estado: v.optional(v.string()),
     origen: v.optional(v.string()),
+    /** contrato = links (inbox/admin); confirmacion = módulo Contratos y Confirmación */
+    tipo: v.optional(v.string()),
     propertyId: v.optional(v.id('properties')),
     search: v.optional(v.string()),
+    /** Código de reserva (CR) */
+    cr: v.optional(v.string()),
     limit: v.optional(v.number()),
     page: v.optional(v.number()),
   },
@@ -177,6 +261,7 @@ export const list = query({
     const limit = Math.min(Math.max(args.limit ?? 20, 1), 100);
     const page = Math.max(args.page ?? 1, 1);
     const search = (args.search ?? '').trim().toLowerCase();
+    const cr = (args.cr ?? '').trim().toLowerCase();
 
     let all = await ctx.db
       .query('contracts')
@@ -188,8 +273,26 @@ export const list = query({
       all = all.filter((c) => c.estado === args.estado);
     }
     if (args.origen) all = all.filter((c) => c.origen === args.origen);
+    if (args.tipo === 'contrato') {
+      all = all.filter((c) => CONTRATO_ORIGENES.has(String(c.origen ?? '')));
+    } else if (args.tipo === 'confirmacion') {
+      all = all.filter((c) => c.origen === CONFIRMACION_ORIGEN);
+    }
     if (args.propertyId)
       all = all.filter((c) => c.propertyId === args.propertyId);
+    if (cr) {
+      const bookingIds = new Set<string>();
+      const bookings = await ctx.db.query('bookings').take(5000);
+      for (const b of bookings) {
+        const ref = String(b.reference ?? '').trim().toLowerCase();
+        if (ref && ref.includes(cr)) bookingIds.add(String(b._id));
+      }
+      all = all.filter((c) => {
+        if (c.contractNumber.toLowerCase().includes(cr)) return true;
+        if (c.bookingId && bookingIds.has(String(c.bookingId))) return true;
+        return false;
+      });
+    }
     if (search) {
       all = all.filter(
         (c) =>

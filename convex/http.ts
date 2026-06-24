@@ -940,6 +940,8 @@ http.route({
 // La seguridad viene del token UUID de un solo uso con TTL 48 h.
 // ─────────────────────────────────────────────────────────────────────────────
 
+const CONTRACT_FILL_CORS = { 'Access-Control-Allow-Origin': '*' } as const;
+
 /** GET /api/contract-fill/:token → devuelve datos del deal para precargar el form. */
 http.route({
   pathPrefix: '/api/contract-fill/',
@@ -949,31 +951,54 @@ http.route({
     const token = url.pathname.replace('/api/contract-fill/', '').trim();
 
     if (!token || token.length < 8) {
-      return jsonResponse({ error: 'Token inválido' }, 400);
+      return jsonResponse({ error: 'Token inválido' }, 400, CONTRACT_FILL_CORS);
     }
 
-    const row = await ctx.runQuery(internal.contractFillTokens.getByToken, { token });
-
-    if (!row) return jsonResponse({ error: 'Link no encontrado' }, 404);
-    if (row.status === 'filled') return jsonResponse({ error: 'already_filled', message: 'Este link ya fue utilizado.' }, 409);
-    if (row.status === 'expired' || row.expiresAt < Date.now()) {
-      return jsonResponse({ error: 'expired', message: 'Este link ha expirado. Solicita uno nuevo al asesor.' }, 410);
-    }
-
-    return jsonResponse({
-      ok: true,
-      source: row.source ?? 'inbox',
-      deal: {
-        propertyTitle: row.propertyTitle ?? null,
-        propertyLocation: row.propertyLocation ?? null,
-        fechaEntrada: row.fechaEntrada ?? null,
-        fechaSalida: row.fechaSalida ?? null,
-        cupo: row.cupo ?? null,
-        precioTotal: row.precioTotal ?? null,
-      },
-    }, 200, {
-      'Access-Control-Allow-Origin': '*',
+    const payload = await ctx.runQuery(internal.contractFillTokens.getPublicDealByToken, {
+      token,
     });
+
+    if (!payload) {
+      return jsonResponse({ error: 'Link no encontrado' }, 404, CONTRACT_FILL_CORS);
+    }
+
+    const publicContext = {
+      source: payload.source,
+      deal: payload.deal,
+      propertyImages: payload.propertyImages,
+    };
+
+    if (payload.status === 'filled') {
+      return jsonResponse(
+        {
+          error: 'already_filled',
+          message: 'Este link ya fue utilizado.',
+          ...publicContext,
+        },
+        409,
+        CONTRACT_FILL_CORS,
+      );
+    }
+    if (payload.status === 'expired' || payload.expiresAt < Date.now()) {
+      return jsonResponse(
+        {
+          error: 'expired',
+          message: 'Este link ha expirado. Solicita uno nuevo al asesor.',
+          ...publicContext,
+        },
+        410,
+        CONTRACT_FILL_CORS,
+      );
+    }
+
+    return jsonResponse(
+      {
+        ok: true,
+        ...publicContext,
+      },
+      200,
+      CONTRACT_FILL_CORS,
+    );
   }),
 });
 
@@ -986,7 +1011,7 @@ http.route({
     const token = url.pathname.replace('/api/contract-fill/', '').trim();
 
     if (!token || token.length < 8) {
-      return jsonResponse({ error: 'Token inválido' }, 400);
+      return jsonResponse({ error: 'Token inválido' }, 400, CONTRACT_FILL_CORS);
     }
 
     let body: {
@@ -1001,7 +1026,7 @@ http.route({
     try {
       body = (await request.json()) as typeof body;
     } catch {
-      return jsonResponse({ error: 'Body JSON inválido' }, 400);
+      return jsonResponse({ error: 'Body JSON inválido' }, 400, CONTRACT_FILL_CORS);
     }
 
     const nombre = String(body?.nombre ?? '').trim();
@@ -1015,6 +1040,7 @@ http.route({
       return jsonResponse(
         { error: 'Todos los campos son requeridos: nombre, cedula, email, telefono, direccion' },
         400,
+        CONTRACT_FILL_CORS,
       );
     }
 
@@ -1044,14 +1070,14 @@ http.route({
         expired: 410,
       };
       const reason = (result as { reason?: string }).reason ?? 'error';
-      return jsonResponse({ error: reason }, statusMap[reason] ?? 400, {
-        'Access-Control-Allow-Origin': '*',
-      });
+      return jsonResponse({ error: reason }, statusMap[reason] ?? 400, CONTRACT_FILL_CORS);
     }
 
-    return jsonResponse({ ok: true, message: '¡Datos recibidos! Tu asesor los revisará muy pronto.' }, 200, {
-      'Access-Control-Allow-Origin': '*',
-    });
+    return jsonResponse(
+      { ok: true, message: '¡Datos recibidos! Tu asesor los revisará muy pronto.' },
+      200,
+      CONTRACT_FILL_CORS,
+    );
   }),
 });
 

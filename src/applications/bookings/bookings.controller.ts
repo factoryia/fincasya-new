@@ -628,8 +628,10 @@ export class BookingsController {
   async listContracts(
     @Query('estado') estado?: string,
     @Query('origen') origen?: string,
+    @Query('tipo') tipo?: string,
     @Query('propertyId') propertyId?: string,
     @Query('search') search?: string,
+    @Query('cr') cr?: string,
     @Query('limit') limit?: string,
     @Query('page') page?: string,
   ) {
@@ -638,8 +640,10 @@ export class BookingsController {
     return this.bookingsSyncService.listContracts({
       estado: estado?.trim() || undefined,
       origen: origen?.trim() || undefined,
+      tipo: tipo?.trim() || undefined,
       propertyId: propertyId?.trim() || undefined,
       search: search?.trim() || undefined,
+      cr: cr?.trim() || undefined,
       limit: Number.isFinite(parsedLimit) ? parsedLimit : undefined,
       page: Number.isFinite(parsedPage) ? parsedPage : undefined,
     });
@@ -649,6 +653,48 @@ export class BookingsController {
   @UseGuards(ConvexAuthGuard, AdminGuard)
   async backfillContracts() {
     return this.bookingsSyncService.backfillContracts();
+  }
+
+  @Get('contracts/:contractNumber/detail')
+  @UseGuards(ConvexAuthGuard, AdminGuard)
+  async getContractDetail(@Param('contractNumber') contractNumber: string) {
+    return this.bookingsSyncService.getContractDetail(contractNumber);
+  }
+
+  @Delete('contracts/:contractNumber')
+  @UseGuards(ConvexAuthGuard, AdminGuard)
+  async deleteContract(@Param('contractNumber') contractNumber: string) {
+    return this.bookingsSyncService.deleteContract(contractNumber);
+  }
+
+  @Post('contracts/:contractNumber/cedula-photos')
+  @UseGuards(ConvexAuthGuard, AdminGuard)
+  @UseInterceptors(
+    FilesInterceptor('photos', 2, {
+      storage: memoryStorage(),
+      limits: { fileSize: 8 * 1024 * 1024 },
+    }),
+  )
+  async uploadContractCedulaPhotos(
+    @Param('contractNumber') contractNumber: string,
+    @UploadedFiles() files: Express.Multer.File[],
+  ) {
+    return this.bookingsSyncService.uploadContractCedulaPhotos(
+      contractNumber,
+      files ?? [],
+    );
+  }
+
+  @Put('contracts/:contractNumber/cedula-photos')
+  @UseGuards(ConvexAuthGuard, AdminGuard)
+  async updateContractCedulaPhotos(
+    @Param('contractNumber') contractNumber: string,
+    @Body() body: { cedulaPhotoUrls?: string[] },
+  ) {
+    return this.bookingsSyncService.updateContractCedulaPhotos(
+      contractNumber,
+      body?.cedulaPhotoUrls ?? [],
+    );
   }
 
   @Get('contracts/:contractNumber')

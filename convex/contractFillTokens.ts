@@ -1,5 +1,68 @@
 import { v } from 'convex/values';
-import { internalMutation, internalQuery } from './_generated/server';
+import type { Id } from './_generated/dataModel';
+import type { QueryCtx } from './_generated/server';
+import { internalMutation, internalQuery, mutation } from './_generated/server';
+
+const MAX_PROPERTY_IMAGES = 12;
+
+async function resolvePropertyId(
+  ctx: QueryCtx,
+  row: {
+    contractDraftJson?: string;
+    conversationId?: Id<'conversations'>;
+    propertyTitle?: string;
+  },
+): Promise<Id<'properties'> | null> {
+  if (row.contractDraftJson) {
+    try {
+      const draft = JSON.parse(row.contractDraftJson) as { propertyId?: string };
+      if (draft.propertyId) {
+        return draft.propertyId as Id<'properties'>;
+      }
+    } catch {
+      // ignore malformed draft
+    }
+  }
+
+  if (row.conversationId) {
+    const conv = await ctx.db.get(row.conversationId);
+    const catalogIds = (conv as { lastSentCatalogPropertyIds?: Id<'properties'>[] } | null)
+      ?.lastSentCatalogPropertyIds;
+    if (catalogIds?.length) {
+      return catalogIds[0];
+    }
+  }
+
+  const title = row.propertyTitle?.trim().toLowerCase();
+  if (title) {
+    const properties = await ctx.db.query('properties').collect();
+    const exact = properties.find((p) => p.title?.trim().toLowerCase() === title);
+    if (exact) return exact._id;
+    const partial = properties.find((p) => {
+      const pt = p.title?.trim().toLowerCase() ?? '';
+      return pt.includes(title) || title.includes(pt);
+    });
+    if (partial) return partial._id;
+  }
+
+  return null;
+}
+
+async function getPropertyImageUrls(
+  ctx: QueryCtx,
+  propertyId: Id<'properties'>,
+): Promise<string[]> {
+  const images = await ctx.db
+    .query('propertyImages')
+    .withIndex('by_property', (q) => q.eq('propertyId', propertyId))
+    .collect();
+
+  return images
+    .sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
+    .map((img) => img.url?.trim())
+    .filter((url): url is string => !!url)
+    .slice(0, MAX_PROPERTY_IMAGES);
+}
 
 const TTL_MS = 48 * 60 * 60 * 1000; // 48 horas
 
@@ -71,6 +134,39 @@ export const getByToken = internalQuery({
       .query('contractFillTokens')
       .withIndex('by_token', (q) => q.eq('token', args.token))
       .unique();
+  },
+});
+
+/** Deal público + fotos de la finca para el formulario de contrato. */
+export const getPublicDealByToken = internalQuery({
+  args: { token: v.string() },
+  handler: async (ctx, args) => {
+    const row = await ctx.db
+      .query('contractFillTokens')
+      .withIndex('by_token', (q) => q.eq('token', args.token))
+      .unique();
+
+    if (!row) return null;
+
+    const propertyId = await resolvePropertyId(ctx, row);
+    const propertyImages = propertyId
+      ? await getPropertyImageUrls(ctx, propertyId)
+      : [];
+
+    return {
+      source: row.source ?? 'inbox',
+      deal: {
+        propertyTitle: row.propertyTitle ?? null,
+        propertyLocation: row.propertyLocation ?? null,
+        fechaEntrada: row.fechaEntrada ?? null,
+        fechaSalida: row.fechaSalida ?? null,
+        cupo: row.cupo ?? null,
+        precioTotal: row.precioTotal ?? null,
+      },
+      propertyImages,
+      status: row.status,
+      expiresAt: row.expiresAt,
+    };
   },
 });
 
@@ -160,5 +256,28 @@ export const createAdminToken = internalMutation({
     });
 
     return { token };
+  },
+});
+
+/** Admin: actualiza las fotos de cédula de un link ya completado. */
+export const updateCedulaPhotos = mutation({
+  args: {
+    fillTokenId: v.id('contractFillTokens'),
+    cedulaPhotoUrls: v.array(v.string()),
+  },
+  handler: async (ctx, args) => {
+    const row = await ctx.db.get(args.fillTokenId);
+    if (!row?.filledData) return { ok: false, reason: 'no_filled_data' as const };
+    const urls = args.cedulaPhotoUrls
+      .map((u) => String(u ?? '').trim())
+      .filter(Boolean)
+      .slice(0, 2);
+    await ctx.db.patch(args.fillTokenId, {
+      filledData: {
+        ...row.filledData,
+        cedulaPhotoUrls: urls.length ? urls : undefined,
+      },
+    });
+    return { ok: true };
   },
 });
