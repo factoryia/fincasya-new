@@ -23,6 +23,18 @@ export class BrevoEmailService {
     this.adminEmail = process.env.ADMIN_EMAIL || '';
   }
 
+  /** Por ahora desactivado con DISABLE_EMAIL_SENDING=true en .env */
+  private isEmailSendingDisabled(): boolean {
+    const flag = (process.env.DISABLE_EMAIL_SENDING ?? '').toLowerCase();
+    return flag === 'true' || flag === '1' || flag === 'yes';
+  }
+
+  private logEmailSkipped(kind: string, to?: string) {
+    this.logger.log(
+      `[email] Envío deshabilitado (${kind}${to ? ` → ${to}` : ''}).`,
+    );
+  }
+
   async sendBookingConfirmationToClient(data: {
     clientEmail: string;
     clientName: string;
@@ -31,6 +43,11 @@ export class BrevoEmailService {
     contractUrl: string;
     confirmationUrl?: string;
   }) {
+    if (this.isEmailSendingDisabled()) {
+      this.logEmailSkipped('confirmación cliente', data.clientEmail);
+      return;
+    }
+
     const htmlContent = getClientConfirmationTemplate({
       logoUrl: this.logoUrl,
       clientName: data.clientName,
@@ -103,6 +120,11 @@ export class BrevoEmailService {
     contractUrl?: string;
     confirmationUrl?: string;
   }) {
+    if (this.isEmailSendingDisabled()) {
+      this.logEmailSkipped('alerta admin', this.adminEmail);
+      return;
+    }
+
     const adminEmail = this.adminEmail;
 
     const htmlContent = getAdminNotificationTemplate({
@@ -169,6 +191,11 @@ export class BrevoEmailService {
     reference: string;
     checkinUrl?: string;
   }) {
+    if (this.isEmailSendingDisabled()) {
+      this.logEmailSkipped('recordatorio reserva', data.clientEmail);
+      return;
+    }
+
     const htmlContent = getReminderTemplate({
       logoUrl: this.logoUrl,
       clientName: data.clientName,
@@ -223,6 +250,11 @@ export class BrevoEmailService {
     if (!data.clientEmail) {
       throw new Error('La reserva no tiene correo del cliente');
     }
+    if (this.isEmailSendingDisabled()) {
+      this.logEmailSkipped('invitación check-in', data.clientEmail);
+      return;
+    }
+
     const htmlContent = getCheckinInvitationTemplate({
       logoUrl: this.logoUrl,
       clientName: data.clientName,
@@ -278,6 +310,11 @@ export class BrevoEmailService {
       process.env.HABEAS_DATA_EMAIL ||
       this.adminEmail ||
       'comercial@fincasya.com';
+
+    if (this.isEmailSendingDisabled()) {
+      this.logEmailSkipped('habeas data admin', to);
+      return;
+    }
 
     const esc = (s: string | undefined) =>
       (s ?? '')

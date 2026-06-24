@@ -67,12 +67,13 @@ function escapeWordPlainText(rawVal: string): string {
 function buildWordLeftAlignedParagraphs(
   lines: string[],
   bold = false,
+  paragraphPr = '<w:pPr><w:jc w:val="left"/></w:pPr>',
 ): string {
   const rPr = bold ? '<w:rPr><w:b/><w:bCs/></w:rPr>' : '';
   return lines
     .map((line) => {
       const t = escapeWordPlainText(line);
-      return `<w:p><w:pPr><w:jc w:val="left"/></w:pPr><w:r>${rPr}<w:t xml:space="preserve">${t}</w:t></w:r></w:p>`;
+      return `<w:p>${paragraphPr}<w:r>${rPr}<w:t xml:space="preserve">${t}</w:t></w:r></w:p>`;
     })
     .join('');
 }
@@ -82,32 +83,87 @@ function findEnclosingWordParagraph(
   innerStart: number,
   innerEnd: number,
 ): { start: number; end: number } | null {
-  const pStart = xml.lastIndexOf('<w:p', innerStart);
+  let pos = innerStart;
+  let pStart = -1;
+  while (pos > 0) {
+    const idx = xml.lastIndexOf('<w:p', pos);
+    if (idx === -1) break;
+    const next = xml.charAt(idx + 4);
+    // `<w:pPr>` también empieza por `<w:p`; solo aceptar apertura real de párrafo.
+    if (next === '>' || next === ' ' || next === '/') {
+      pStart = idx;
+      break;
+    }
+    pos = idx - 1;
+  }
   if (pStart === -1) return null;
   const pEnd = xml.indexOf('</w:p>', innerEnd);
   if (pEnd === -1) return null;
   return { start: pStart, end: pEnd + '</w:p>'.length };
 }
 
-function buildWordBankAccountsInlineXml(lines: string[]): string {
-  return lines
-    .map((line, i) => {
-      const t = escapeWordPlainText(line);
-      const br = i > 0 ? '<w:r><w:br/></w:r>' : '';
-      return `${br}<w:r><w:t xml:space="preserve">${t}</w:t></w:r>`;
-    })
-    .join('');
+function buildWordTemplateRun(text: string, bold = false): string {
+  const t = escapeWordPlainText(text);
+  const rPr = bold ? '<w:rPr><w:b/><w:bCs/></w:rPr>' : '';
+  return `<w:r>${rPr}<w:t xml:space="preserve">${t}</w:t></w:r>`;
+}
+
+type WordBankAccountSnippet = {
+  accountNumber?: string;
+  bankName?: string;
+};
+
+/**
+ * Varias cuentas en una línea (formato QUINTA OLAYA):
+ * **36471108604** de **Bancolombia** o 096080555020 del banco Davivienda a nombre de…
+ */
+function buildWordBankAccountsClusterXml(
+  accounts: WordBankAccountSnippet[],
+  ownerName: string,
+  ownerCedula: string,
+): string {
+  const valid = accounts.filter(
+    (a) => (a.accountNumber ?? '').trim() || (a.bankName ?? '').trim(),
+  );
+  if (valid.length === 0) return '';
+
+  let xml = '';
+  valid.forEach((acc, i) => {
+    const num = (acc.accountNumber ?? '').trim();
+    const bank = (acc.bankName ?? '').trim();
+    if (i === 0) {
+      if (num) xml += buildWordTemplateRun(num, true);
+      xml += buildWordTemplateRun(' de ', false);
+      if (bank) xml += buildWordTemplateRun(bank, true);
+      return;
+    }
+    const extra = ` o ${num}${bank ? ` del banco ${bank}` : ''}`;
+    xml += buildWordTemplateRun(extra, false);
+  });
+
+  const holder = ownerName.trim();
+  const cedula = ownerCedula.trim();
+  if (holder) {
+    xml += buildWordTemplateRun(' a nombre de ', false);
+    xml += buildWordTemplateRun(holder, false);
+  }
+  if (cedula) {
+    xml += buildWordTemplateRun(' con la cédula N° ', false);
+    xml += buildWordTemplateRun(cedula, false);
+  }
+  return xml;
 }
 
 /**
- * Sustituye el bloque {{cuentaNumero}}…{{titularCedula}} por varias cuentas
- * (salto de línea entre cada una) cuando hay 2+ cuentas en el contrato.
+ * Sustituye el bloque {{cuentaNumero}}…{{titularCedula}} cuando hay 2+ cuentas.
  */
 function replaceWordBankAccountPlaceholderCluster(
   xml: string,
-  lines: string[],
+  accounts: WordBankAccountSnippet[],
+  ownerName: string,
+  ownerCedula: string,
 ): string {
-  if (lines.length <= 1) return xml;
+  if (accounts.length <= 1) return xml;
   const gap = WORD_TEMPLATE_GAP;
   const cuentaKey = Array.from('cuentaNumero')
     .map((ch) => escapeRegExp(ch))
@@ -118,7 +174,11 @@ function replaceWordBankAccountPlaceholderCluster(
   const re = new RegExp(
     `(\\{${gap}\\{${gap}${cuentaKey}${gap}\\}${gap}\\}|\\{\\{${gap}${cuentaKey}${gap}\\}\\})[\\s\\S]*?(\\{${gap}\\{${gap}${titularKey}${gap}\\}${gap}\\}|\\{\\{${gap}${titularKey}${gap}\\}\\})`,
   );
-  const inline = buildWordBankAccountsInlineXml(lines);
+  const inline = buildWordBankAccountsClusterXml(
+    accounts,
+    ownerName,
+    ownerCedula,
+  );
   return xml.replace(re, inline);
 }
 
@@ -140,22 +200,31 @@ function replaceWordListPlaceholderWithLeftAlign(
   const match = re.exec(xml);
   if (!match) return xml;
 
-  const lines = (rawVal ?? '')
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .filter(Boolean);
-  const replacement = lines.length
-    ? buildWordLeftAlignedParagraphs(lines, true)
-    : '';
-
   const para = findEnclosingWordParagraph(
     xml,
     match.index,
     match.index + match[0].length,
   );
+
+  const lines = (rawVal ?? '')
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+
   if (!para) {
     return xml.replace(re, escapeWordTemplateValue(rawVal));
   }
+
+  const paraXml = xml.slice(para.start, para.end);
+  const pPrMatch = paraXml.match(/<w:pPr>[\s\S]*?<\/w:pPr>/);
+  const paragraphPr =
+    pPrMatch?.[0] ?? '<w:pPr><w:ind w:left="550"/></w:pPr>';
+  const bold = /<w:b\s*\/>/.test(paraXml);
+
+  const replacement = lines.length
+    ? buildWordLeftAlignedParagraphs(lines, bold, paragraphPr)
+    : '';
+
   return xml.slice(0, para.start) + replacement + xml.slice(para.end);
 }
 
@@ -270,6 +339,7 @@ import {
   buildBankAccountsPlainSnippet,
   buildBankAccountsWordLines,
   formatFincaFeaturesPlain,
+  formatSpanishContractStayDate,
   parseContractSettingsPayload,
   resolveContractMoneyLabel,
 } from './contract-template-values';
@@ -1700,8 +1770,8 @@ Al confirmar tu pago, recibirás el *soporte oficial* junto con todos los detall
 
       if (dto.checkInDate && dto.checkOutDate) {
         try {
-          const start = new Date(dto.checkInDate);
-          const end = new Date(dto.checkOutDate);
+          const start = new Date(`${dto.checkInDate}T12:00:00`);
+          const end = new Date(`${dto.checkOutDate}T12:00:00`);
           const diffTime = Math.abs(end.getTime() - start.getTime());
           totalNights = Math.max(
             1,
@@ -1709,14 +1779,8 @@ Al confirmar tu pago, recibirás el *soporte oficial* junto con todos los detall
           );
           totalDays = totalNights;
 
-          const formatMini = (d: Date) => {
-            const day = String(d.getUTCDate()).padStart(2, '0');
-            const month = String(d.getUTCMonth() + 1).padStart(2, '0');
-            const year = d.getUTCFullYear();
-            return `${day}/${month}/${year}`;
-          };
-          checkInMini = formatMini(start);
-          checkOutMini = formatMini(end);
+          checkInMini = formatSpanishContractStayDate(dto.checkInDate);
+          checkOutMini = formatSpanishContractStayDate(dto.checkOutDate);
         } catch (e) {
           console.error('Error calculating duration:', e);
         }
@@ -1876,6 +1940,13 @@ Al confirmar tu pago, recibirás el *soporte oficial* junto con todos los detall
             .filter(Boolean)
             .join(' ')
         : (valuesMapping[mappingKeys.bankName] ?? '');
+      const contractBankNameOnly =
+        contractBankAccount?.bankName?.trim() ||
+        contractBankLabel.replace(
+          /^(cuenta\s+de\s+ahorros|ahorros|corriente)\s+/i,
+          '',
+        ).trim() ||
+        contractBankLabel;
       const contractAccountNumber =
         contractBankAccount?.accountNumber ??
         valuesMapping[mappingKeys.accountNumber] ??
@@ -1894,7 +1965,7 @@ Al confirmar tu pago, recibirás el *soporte oficial* junto con todos los detall
         fechaGeneracion: valuesMapping[mappingKeys.date] ?? '',
         precioLetras: valuesMapping[mappingKeys.priceText] ?? '',
         precioNumerico: valuesMapping[mappingKeys.priceNumeric] ?? '',
-        bancoNombre: contractBankLabel,
+        bancoNombre: contractBankNameOnly,
         cuentaNumero: contractAccountNumber,
         titularNombre: contractAccountHolder,
         titularCedula: contractAccountCedula,
@@ -1933,6 +2004,7 @@ Al confirmar tu pago, recibirás el *soporte oficial* junto con todos los detall
         nombreFinca: finca.title || '',
         municipioFinca: finca.location || '',
         capacidadDePersonas: String(finca.capacity || 0),
+        capacidad: String(finca.capacity || 0),
         característicasDeFinca: caracteristicasPlain,
         caracteristicasDeFinca: caracteristicasPlain,
         nombrePropietario,
@@ -1942,7 +2014,6 @@ Al confirmar tu pago, recibirás el *soporte oficial* junto con todos los detall
         adminNombre: (dto.adminName?.trim() || contractAdmin.adminName || '').trim(),
         adminCedula: (dto.adminCedula?.trim() || contractAdmin.adminCedula || '').trim(),
         adminCiudad: (dto.adminCity?.trim() || contractAdmin.adminCity || '').trim(),
-        capacidad: String(finca.capacity || 0),
       };
 
       const cleaningFeeCop = Number(dto.cleaningFee) || 0;
@@ -2001,8 +2072,11 @@ Al confirmar tu pago, recibirás el *soporte oficial* junto con todos los detall
 
       const incomingCustomHtml =
         typeof dto.customHtml === 'string' ? dto.customHtml.trim() : '';
+      let templateBytes: Buffer | null = await loadDefaultContractTemplateBytes();
       const useCustomHtml =
-        incomingCustomHtml.length > 0 && incomingCustomHtml.length <= 400_000;
+        incomingCustomHtml.length > 0 &&
+        incomingCustomHtml.length <= 400_000 &&
+        !templateBytes;
 
       if (useCustomHtml) {
         console.log(
@@ -2030,7 +2104,6 @@ Al confirmar tu pago, recibirás el *soporte oficial* junto con todos los detall
         finalMimeType = 'application/pdf';
       } else {
       // Plantilla maestra única (formato QUINTA OLAYA): mismos estilos para todas las fincas.
-      let templateBytes: Buffer | null = await loadDefaultContractTemplateBytes();
       if (!templateBytes) {
         throw new BadRequestException(
           'No se encontró la plantilla maestra del contrato (assets/contracts/default-contract-template.docx o docs/QUINTA OLAYA.docx).',
@@ -2101,10 +2174,12 @@ Al confirmar tu pago, recibirás el *soporte oficial* junto con todos los detall
               );
             }
           }
-          if (bankWordLines.length > 1) {
+          if (selectedBankAccounts.length > 1) {
             processed = replaceWordBankAccountPlaceholderCluster(
               processed,
-              bankWordLines,
+              selectedBankAccounts,
+              contractAccountHolder,
+              contractAccountCedula,
             );
             for (const key of ['cuentasBancarias', 'cuentasBancariasContrato']) {
               processed = replaceWordListPlaceholderWithLeftAlign(
@@ -2199,10 +2274,10 @@ Al confirmar tu pago, recibirás el *soporte oficial* junto con todos los detall
                       }
                     }
                     // Relación de imagen en document.xml.rels.
-                    const relId = 'rIdFirmaArr';
+                    const relId = 'rId15';
                     let rels =
                       zip.file('word/_rels/document.xml.rels')?.asText() ?? '';
-                    if (rels && !rels.includes(relId)) {
+                    if (rels && !rels.includes(`Id="${relId}"`)) {
                       rels = rels.replace(
                         '</Relationships>',
                         `<Relationship Id="${relId}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="media/firma_arrendador.${ext}"/></Relationships>`,
@@ -2220,10 +2295,10 @@ Al confirmar tu pago, recibirás el *soporte oficial* junto con todos los detall
                       `<pic:blipFill><a:blip r:embed="${relId}"/><a:stretch><a:fillRect/></a:stretch></pic:blipFill>` +
                       `<pic:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="1524000" cy="571500"/></a:xfrm>` +
                       `<a:prstGeom prst="rect"><a:avLst/></a:prstGeom></pic:spPr></pic:pic></a:graphicData></a:graphic></wp:inline></w:drawing>`;
-                    // Reemplaza el texto de la PRIMERA línea de subrayado por la imagen.
+                    // Sustituye el run de subrayado completo por la imagen (OOXML válido).
                     docXml = docXml.replace(
-                      /<w:t xml:space="preserve">_{5,}[^<]*<\/w:t>/,
-                      `<w:t xml:space="preserve"></w:t></w:r><w:r>${drawing}`,
+                      /<w:r>(\s*<w:rPr>[\s\S]*?<\/w:rPr>)?\s*<w:t xml:space="preserve">_{5,}[^<]*<\/w:t>\s*<\/w:r>/,
+                      `<w:r>$1${drawing}</w:r>`,
                     );
                   }
                 } catch (imgErr) {
@@ -2255,35 +2330,24 @@ Al confirmar tu pago, recibirás el *soporte oficial* junto con todos los detall
         finalMimeType =
           'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
 
-        // Intentamos convertir el Word resultante a PDF seguro.
-        // Si el servicio no esta disponible, dejamos el .docx para no romper el flujo.
+        // Intentamos convertir el Word resultante a PDF (misma plantilla QUINTA OLAYA).
+        // Si falla, entregamos el .docx — nunca un PDF HTML alternativo.
         if (finalBuffer) {
           console.log(
-            `[api] Convirtiendo contrato Word a PDF (${dto.conversationId === 'direct-reservation' ? 'Reserva Directa' : 'ConversaciÃ³n ' + dto.conversationId})...`,
+            `[api] Convirtiendo contrato Word a PDF (${dto.conversationId === 'direct-reservation' ? 'Reserva Directa' : 'Conversación ' + dto.conversationId})...`,
           );
           try {
-            const pdfBuffer = await this.convertDocxToPdf(
-              finalBuffer,
-              finalFilename,
-            );
+            const pdfBuffer = await this.convertDocxToPdf(finalBuffer);
             finalBuffer = pdfBuffer;
             finalFilename = finalFilename.replace('.docx', '.pdf');
             finalMimeType = 'application/pdf';
-            console.log('[api] Conversión a PDF completada con iLovePDF.');
-          } catch (e: any) {
-            console.error('[api] Error en conversión iLovePDF:', e.message || e);
-            console.log('[api] Intentando fallback puppeteer para PDF…');
-            try {
-              const fallbackHtml = this.buildContractFallbackHtml(wordValues, finca as { title?: string; location?: string });
-              const pdfBuffer = await this.pdfService.htmlToPdf(fallbackHtml);
-              finalBuffer = pdfBuffer;
-              finalFilename = finalFilename.replace('.docx', '.pdf');
-              finalMimeType = 'application/pdf';
-              console.log('[api] Conversión a PDF completada con puppeteer (fallback).');
-            } catch (puppeteerErr: any) {
-              console.error('[api] Puppeteer fallback también falló:', puppeteerErr.message || puppeteerErr);
-              console.warn('[api] Entregando contrato en formato Word.');
-            }
+            console.log('[api] Conversión a PDF completada.');
+          } catch (e: unknown) {
+            const msg = e instanceof Error ? e.message : String(e);
+            console.error('[api] No se pudo convertir .docx a PDF:', msg);
+            console.warn(
+              '[api] Se entrega el contrato en Word (.docx) para conservar el formato de la plantilla.',
+            );
           }
         }
       } else {
@@ -2498,7 +2562,7 @@ Al confirmar tu pago, recibirás el *soporte oficial* junto con todos los detall
                 url: publicUrl,
                 name: finalFilename,
                 size: generatedFile.size || 0,
-                type: 'application/pdf',
+                type: finalMimeType,
                 uploadedAt: Date.now()
               }
             });
@@ -2513,6 +2577,7 @@ Al confirmar tu pago, recibirás el *soporte oficial* junto con todos los detall
         success: true,
         url: publicUrl,
         filename: finalFilename,
+        mimeType: finalMimeType,
         message: 'Contrato generado y enviado exitosamente.',
       };
     } catch (error) {
@@ -3000,11 +3065,26 @@ ${trimmed}
   }
 
   /**
-   * Convierte un buffer de Word (.docx) a PDF usando iLovePDF.
+   * Convierte un buffer de Word (.docx) a PDF.
+   * Orden: iLovePDF → LibreOffice (si está instalado) → error (el caller entrega .docx).
    */
-  private async convertDocxToPdf(
+  private async convertDocxToPdf(docxBuffer: Buffer): Promise<Buffer> {
+    if (!docxBuffer?.length || docxBuffer.slice(0, 2).toString() !== 'PK') {
+      throw new Error('Buffer .docx inválido para conversión a PDF');
+    }
+
+    try {
+      return await this.convertDocxToPdfWithILovePdf(docxBuffer);
+    } catch (iloveErr: unknown) {
+      const iloveMsg =
+        iloveErr instanceof Error ? iloveErr.message : String(iloveErr);
+      console.warn('[api] iLovePDF no convirtió el .docx:', iloveMsg);
+      return this.convertDocxToPdfWithLibreOffice(docxBuffer);
+    }
+  }
+
+  private async convertDocxToPdfWithILovePdf(
     docxBuffer: Buffer,
-    filename: string,
   ): Promise<Buffer> {
     const publicKey = process.env.ILOVEPDF_PUBLIC_KEY;
     const secretKey = process.env.ILOVEPDF_SECRET_KEY;
@@ -3018,11 +3098,10 @@ ${trimmed}
 
     await task.start();
 
-    // Crear un archivo temporal para el SDK (es lo mÃ¡s seguro para este SDK)
     const tmp = require('os').tmpdir();
     const fs = require('fs');
     const path = require('path');
-    const tmpFilePath = path.join(tmp, `${Date.now()}_${filename}`);
+    const tmpFilePath = path.join(tmp, `fincasya_contract_${Date.now()}.docx`);
 
     fs.writeFileSync(tmpFilePath, docxBuffer);
 
@@ -3031,12 +3110,81 @@ ${trimmed}
       await task.addFile(file);
       await task.process();
       const pdfBuffer = await task.download();
-
       return pdfBuffer as Buffer;
+    } catch (error: unknown) {
+      const axiosData =
+        error &&
+        typeof error === 'object' &&
+        'response' in error &&
+        (error as { response?: { data?: unknown; status?: number } }).response
+          ? (error as { response: { data?: unknown; status?: number } }).response
+          : null;
+      if (axiosData) {
+        console.error(
+          '[api] iLovePDF respuesta:',
+          axiosData.status,
+          typeof axiosData.data === 'string'
+            ? axiosData.data.slice(0, 400)
+            : JSON.stringify(axiosData.data).slice(0, 400),
+        );
+      }
+      throw error instanceof Error ? error : new Error(String(error));
     } finally {
-      // Limpiar archivo temporal
       if (fs.existsSync(tmpFilePath)) {
         fs.unlinkSync(tmpFilePath);
+      }
+    }
+  }
+
+  private async convertDocxToPdfWithLibreOffice(
+    docxBuffer: Buffer,
+  ): Promise<Buffer> {
+    const { execFile } = require('child_process');
+    const { promisify } = require('util');
+    const execFileAsync = promisify(execFile);
+    const fs = require('fs');
+    const os = require('os');
+    const path = require('path');
+
+    const soffice =
+      process.env.LIBREOFFICE_PATH?.trim() ||
+      process.env.SOFFICE_PATH?.trim() ||
+      'soffice';
+
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'fincasya-contract-'));
+    const inputPath = path.join(tmpDir, 'contract.docx');
+    const outputPath = path.join(tmpDir, 'contract.pdf');
+
+    fs.writeFileSync(inputPath, docxBuffer);
+
+    try {
+      await execFileAsync(
+        soffice,
+        [
+          '--headless',
+          '--nologo',
+          '--nofirststartwizard',
+          '--convert-to',
+          'pdf',
+          '--outdir',
+          tmpDir,
+          inputPath,
+        ],
+        { timeout: 120_000 },
+      );
+      if (!fs.existsSync(outputPath)) {
+        throw new Error('LibreOffice no generó el PDF');
+      }
+      console.log('[api] Conversión a PDF completada con LibreOffice.');
+      return fs.readFileSync(outputPath);
+    } catch (error: unknown) {
+      const msg = error instanceof Error ? error.message : String(error);
+      throw new Error(`LibreOffice no disponible o falló la conversión: ${msg}`);
+    } finally {
+      try {
+        fs.rmSync(tmpDir, { recursive: true, force: true });
+      } catch {
+        // ignorar limpieza
       }
     }
   }

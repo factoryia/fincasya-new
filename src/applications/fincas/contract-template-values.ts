@@ -203,3 +203,51 @@ export function buildBankAccountsPlainSnippet(
   if (selected.length === 0) return '';
   return buildBankAccountsWordLines(bankAccounts, selectedIds).join('\n');
 }
+
+const MONTHS_ES_CONTRACT = [
+  'enero',
+  'febrero',
+  'marzo',
+  'abril',
+  'mayo',
+  'junio',
+  'julio',
+  'agosto',
+  'septiembre',
+  'octubre',
+  'noviembre',
+  'diciembre',
+] as const;
+
+/** Fecha de estadía en contrato: «27 de mayo del 2026». */
+export function formatSpanishContractStayDate(dateLike: string | Date): string {
+  let year = 0;
+  let month = 0;
+  let day = 0;
+
+  if (dateLike instanceof Date) {
+    if (Number.isNaN(dateLike.getTime())) return '';
+    year = dateLike.getFullYear();
+    month = dateLike.getMonth();
+    day = dateLike.getDate();
+  } else {
+    const raw = String(dateLike ?? '').trim();
+    if (!raw) return '';
+    const iso = raw.match(/^(\d{4})-(\d{2})-(\d{2})/);
+    if (iso) {
+      year = Number(iso[1]);
+      month = Number(iso[2]) - 1;
+      day = Number(iso[3]);
+    } else {
+      const d = new Date(`${raw}T12:00:00`);
+      if (Number.isNaN(d.getTime())) return '';
+      year = d.getFullYear();
+      month = d.getMonth();
+      day = d.getDate();
+    }
+  }
+
+  const monthName = MONTHS_ES_CONTRACT[month];
+  if (!monthName || !year || !day) return '';
+  return `${day} de ${monthName} del ${year}`;
+}

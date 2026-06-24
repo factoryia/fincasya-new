@@ -287,11 +287,6 @@ export class ContractLinkService {
       dto.adminCity = d.adminCity.trim();
     if (typeof d.firmaArrendadorUrl === 'string' && d.firmaArrendadorUrl.trim())
       dto.firmaArrendadorUrl = d.firmaArrendadorUrl.trim();
-    // Vista previa del contrato (cláusulas + firmante + firma) guardada al crear
-    // el link. Se usa como customHtml para generar el MISMO contrato completo que
-    // en "Confirmación"; los placeholders del cliente se rellenan en el servicio.
-    if (typeof d.previewHtml === 'string' && d.previewHtml.trim())
-      dto.customHtml = d.previewHtml;
     return dto;
   }
 

@@ -490,11 +490,7 @@ export class FincasController {
   ) {
     // Generate the contract
     const result = await this.fincasService.generateContract(id, dto);
-    
-    // Simulate/Log Email Notification to jamesrgal@gmail.com as requested
-    console.log(`[NOTIFICATION] Direct reservation received for property ${id}.`);
-    console.log(`[NOTIFICATION] Sending contract to client ${dto.clientEmail} and support to jamesrgal@gmail.com`);
-    
+
     return result;
   }
 
