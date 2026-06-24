@@ -128,6 +128,11 @@ export default defineSchema({
     zoneOrder: v.optional(v.array(v.string())),
     /** Si true, la finca permite mascotas. */
     allowsPets: v.optional(v.boolean()),
+    /**
+     * Si true (por defecto), el check-in exige listado de invitados para el
+     * propietario y el turista. Algunas fincas no requieren ese listado.
+     */
+    requiresGuestList: v.optional(v.boolean()),
     /** Si true, se permite bafles, sonido profesional o decoración para eventos. */
     allowsEventsContent: v.optional(v.boolean()),
     /** Si true, la finca solo permite estadías exclusivamente para descanso familiar. */

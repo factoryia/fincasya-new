@@ -262,6 +262,15 @@ export class CreateFincaDto {
       ? undefined
       : value === true || value === 'true' || value === 1,
   )
+  requiresGuestList?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  @Transform(({ value }) =>
+    value === undefined || value === null
+      ? undefined
+      : value === true || value === 'true' || value === 1,
+  )
   allowsEventsContent?: boolean;
 
   /** Máximo de invitados para evento (puede ser mayor que `capacity` de hospedaje). */

@@ -329,6 +329,9 @@ export class CheckinMessagingService {
       empleada, // 'no' | 'una' | 'varias'
       placas: String(booking.checkinPlacas ?? '').trim() || null,
       allowsPets: (property as { allowsPets?: boolean })?.allowsPets === true,
+      requiresGuestList:
+        (property as { requiresGuestList?: boolean })?.requiresGuestList !==
+        false,
       mascotas:
         typeof booking.checkinMascotas === 'number'
           ? booking.checkinMascotas

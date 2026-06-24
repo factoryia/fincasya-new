@@ -225,6 +225,9 @@ export const getForPortal = internalQuery({
       // Mascotas: la finca debe permitirlas; precarga lo confirmado o lo de la cotización.
       allowsPets:
         (property as { allowsPets?: boolean } | null)?.allowsPets === true,
+      requiresGuestList:
+        (property as { requiresGuestList?: boolean } | null)?.requiresGuestList !==
+        false,
       mascotas:
         booking.checkinMascotas ??
         (Number(booking.numeroMascotas) || 0),
@@ -296,6 +299,11 @@ export const submitCheckin = internalMutation({
     const booking = await findBooking(ctx, args.key);
     if (!booking) return { ok: false as const, reason: 'not_found' };
 
+    const property = await ctx.db.get(booking.propertyId);
+    const requiresGuestList =
+      (property as { requiresGuestList?: boolean } | null)?.requiresGuestList !==
+      false;
+
     if (args.aceptaTratamientoDatos !== true) {
       return { ok: false as const, reason: 'missing_data_consent' };
     }
@@ -303,7 +311,7 @@ export const submitCheckin = internalMutation({
     const { guests } = normalizeGuests(args.guests);
     const expected = expectedGuestCount(booking);
 
-    if (guests.length < 1) {
+    if (requiresGuestList && guests.length < 1) {
       return { ok: false as const, reason: 'missing_guests' };
     }
 
