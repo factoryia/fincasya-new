@@ -703,6 +703,12 @@ export class BookingsController {
     return this.bookingsSyncService.getContract(contractNumber);
   }
 
+  @Post(':id/receipts/review')
+  @UseGuards(ConvexAuthGuard, AdminGuard)
+  async reviewReceipts(@Param('id') id: string) {
+    return this.bookingsSyncService.markPaymentReceiptsReviewed(id);
+  }
+
   @Post('check-availability')
   @UseGuards(ConvexAuthGuard, AdminGuard)
   async checkAvailability(
