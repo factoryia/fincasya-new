@@ -226,6 +226,34 @@ export const list = query({
 });
 
 /**
+ * Marca como revisados (approved) los soportes de pago pendientes de una reserva.
+ * Al no quedar 'pending', la reserva sale del color naranja del semáforo.
+ */
+export const markPaymentReceiptsReviewed = mutation({
+  args: { bookingId: v.id('bookings') },
+  handler: async (ctx, args) => {
+    const booking = await ctx.db.get(args.bookingId);
+    if (!booking) return { ok: false as const, reason: 'not_found' };
+    const receipts = booking.paymentPortalReceipts ?? [];
+    let updated = 0;
+    const next = receipts.map((r) => {
+      if (r.status === 'pending') {
+        updated++;
+        return { ...r, status: 'approved' as const };
+      }
+      return r;
+    });
+    if (updated > 0) {
+      await ctx.db.patch(args.bookingId, {
+        paymentPortalReceipts: next,
+        updatedAt: Date.now(),
+      });
+    }
+    return { ok: true as const, updated };
+  },
+});
+
+/**
  * Contar todas las reservas existentes para generación de IDs secuenciales
  */
 export const countAll = query({

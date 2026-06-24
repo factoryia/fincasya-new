@@ -709,6 +709,19 @@ export class BookingsController {
     return this.bookingsSyncService.markPaymentReceiptsReviewed(id);
   }
 
+  @Get('notification-settings')
+  @UseGuards(ConvexAuthGuard, AdminGuard)
+  async getNotificationSettings() {
+    return this.bookingsSyncService.getNotificationSettings();
+  }
+
+  @Put('notification-settings/payment-receipt-emails')
+  @UseGuards(ConvexAuthGuard, AdminGuard)
+  async setPaymentReceiptEmails(@Body() body: { emails?: string[] }) {
+    const emails = Array.isArray(body?.emails) ? body.emails : [];
+    return this.bookingsSyncService.setPaymentReceiptEmails(emails);
+  }
+
   @Post('check-availability')
   @UseGuards(ConvexAuthGuard, AdminGuard)
   async checkAvailability(

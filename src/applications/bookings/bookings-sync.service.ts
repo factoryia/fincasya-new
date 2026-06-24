@@ -863,6 +863,18 @@ export class BookingsSyncService {
     );
   }
 
+  /** Ajustes de notificaciones (correos de alerta de soportes de pago). */
+  async getNotificationSettings() {
+    return this.convexService.query('notificationSettings:get', {});
+  }
+
+  async setPaymentReceiptEmails(emails: string[]) {
+    return this.convexService.mutation(
+      'notificationSettings:setPaymentReceiptEmails',
+      { emails },
+    );
+  }
+
   async listContractCodes(params: {
     propertyId?: string;
     search?: string;

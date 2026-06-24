@@ -3,6 +3,7 @@ import { Cron, CronExpression } from '@nestjs/schedule';
 import { ConvexService } from '../shared/services/convex.service';
 import { S3Service } from '../shared/services/s3.service';
 import { PdfService } from '../shared/services/pdf.service';
+import { BrevoEmailService } from '../shared/services/brevo-email.service';
 import { addDays, startOfDay, endOfDay, getDay } from 'date-fns';
 
 /** Clave lógica de cada momento del timeline (debe coincidir con el catálogo Convex). */
@@ -74,6 +75,7 @@ export class CheckinMessagingService {
     private readonly convexService: ConvexService,
     private readonly s3Service: S3Service,
     private readonly pdfService: PdfService,
+    private readonly brevoEmail: BrevoEmailService,
   ) {}
 
   /** Cron diario: dispara cada momento del timeline cuyo día aplique hoy. */
@@ -820,6 +822,47 @@ export class CheckinMessagingService {
           typeof (body as { error: unknown }).error === 'string'
           ? (body as { error: string }).error
           : 'No se pudo enviar el comprobante',
+      );
+    }
+
+    // Avisar a comercial que hay un soporte por revisar. No bloquea la subida.
+    try {
+      const portal = (await this.getPaymentPortalByReference(trimmed)) as {
+        reference?: string;
+        propertyTitle?: string;
+        nombreTitular?: string;
+        precioTotal?: number;
+        pagoPendiente?: number;
+      } | null;
+      // Correos destino configurados en el admin (fallback a los por defecto).
+      const settings = (await this.convexService
+        .query('notificationSettings:get', {})
+        .catch(() => null)) as { paymentReceiptEmails?: string[] } | null;
+      const emails = Array.isArray(settings?.paymentReceiptEmails)
+        ? settings!.paymentReceiptEmails
+        : undefined;
+      await this.brevoEmail.sendPaymentReceiptAlert({
+        emails,
+        reference: portal?.reference || trimmed,
+        propertyTitle: portal?.propertyTitle || 'tu finca',
+        clientName: portal?.nombreTitular || '',
+        amount: payload.amount,
+        bankName: payload.bankName,
+        receiptUrl,
+        precioTotal:
+          typeof portal?.precioTotal === 'number'
+            ? portal.precioTotal
+            : undefined,
+        pagoPendiente:
+          typeof portal?.pagoPendiente === 'number'
+            ? portal.pagoPendiente
+            : undefined,
+        adminUrl: 'https://fincasya.com/admin/reservations',
+      });
+    } catch (mailErr) {
+      console.warn(
+        '[api] No se pudo enviar la alerta de soporte de pago:',
+        (mailErr as Error)?.message,
       );
     }
 
