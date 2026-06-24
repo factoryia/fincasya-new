@@ -182,6 +182,84 @@ export class BrevoEmailService {
     }
   }
 
+  /**
+   * Alerta a comercial cuando un turista sube un soporte de pago en el portal,
+   * para que un asesor entre a revisarlo. Va siempre a los dos correos del área.
+   */
+  async sendPaymentReceiptAlert(data: {
+    reference: string;
+    propertyTitle: string;
+    clientName: string;
+    amount?: number;
+    bankName?: string;
+    receiptUrl: string;
+    precioTotal?: number;
+    pagoPendiente?: number;
+    adminUrl?: string;
+  }) {
+    const recipients = [
+      { email: 'comercial@fincasya.com' },
+      { email: 'fincasecoturisticasdelllano@gmail.com' },
+    ];
+    if (this.isEmailSendingDisabled()) {
+      this.logEmailSkipped('alerta soporte de pago', recipients.map((r) => r.email).join(', '));
+      return;
+    }
+    const fmt = (n?: number) =>
+      typeof n === 'number'
+        ? new Intl.NumberFormat('es-CO', {
+            style: 'currency',
+            currency: 'COP',
+            minimumFractionDigits: 0,
+          }).format(n)
+        : '—';
+    const row = (label: string, value: string) =>
+      `<tr><td style="padding:6px 0;color:#666;">${label}</td><td style="padding:6px 0;font-weight:600;text-align:right;">${value}</td></tr>`;
+    const htmlContent = `
+      <div style="font-family:Arial,sans-serif;max-width:560px;margin:0 auto;color:#1a1a1a;">
+        <h2 style="font-size:18px;margin:0 0 4px;">💸 Soporte de pago recibido</h2>
+        <p style="color:#666;margin:0 0 16px;">Un turista subió un comprobante en el portal de pago. Por favor revísalo.</p>
+        <table style="width:100%;border-collapse:collapse;font-size:14px;">
+          ${row('Reserva', data.reference)}
+          ${row('Finca', data.propertyTitle)}
+          ${row('Cliente', data.clientName || '—')}
+          ${row('Monto reportado', fmt(data.amount))}
+          ${data.bankName ? row('Banco', data.bankName) : ''}
+          ${typeof data.precioTotal === 'number' ? row('Total reserva', fmt(data.precioTotal)) : ''}
+          ${typeof data.pagoPendiente === 'number' ? row('Saldo pendiente', fmt(data.pagoPendiente)) : ''}
+        </table>
+        <div style="margin:18px 0;">
+          <a href="${data.receiptUrl}" style="display:inline-block;background:#111;color:#fff;text-decoration:none;padding:10px 16px;border-radius:8px;font-size:14px;margin-right:8px;">Ver comprobante</a>
+          ${data.adminUrl ? `<a href="${data.adminUrl}" style="display:inline-block;background:#f97316;color:#fff;text-decoration:none;padding:10px 16px;border-radius:8px;font-size:14px;">Revisar en el admin</a>` : ''}
+        </div>
+        <p style="color:#999;font-size:12px;margin-top:24px;">FincasYa · Notificación automática del portal de pago.</p>
+      </div>`;
+
+    try {
+      const response = await fetch('https://api.brevo.com/v3/smtp/email', {
+        method: 'POST',
+        headers: { 'api-key': this.apiKey, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          sender: { name: 'FincasYa System', email: this.senderEmail },
+          to: recipients,
+          subject: `💸 Soporte de pago — ${data.propertyTitle} (${data.reference})`,
+          htmlContent,
+        }),
+      });
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.message || 'Error desconocido');
+      }
+      this.logger.log(
+        `Alerta de soporte de pago enviada (reserva ${data.reference}).`,
+      );
+    } catch (error) {
+      this.logger.error(
+        `Error enviando alerta de soporte de pago: ${(error as Error).message}`,
+      );
+    }
+  }
+
   async sendReservationReminder(data: {
     clientEmail: string;
     clientName: string;
