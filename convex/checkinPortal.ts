@@ -48,6 +48,7 @@ function normalizeGuestDocumentType(value: unknown): string {
 const checkinExtrasValidator = {
   menoresDe2: v.optional(v.number()),
   placas: v.optional(v.string()),
+  mascotas: v.optional(v.number()),
   observaciones: v.optional(v.string()),
   aceptaTratamientoDatos: v.optional(v.boolean()),
 };
@@ -55,6 +56,7 @@ const checkinExtrasValidator = {
 type CheckinExtrasArgs = {
   menoresDe2?: number;
   placas?: string;
+  mascotas?: number;
   observaciones?: string;
   aceptaTratamientoDatos?: boolean;
   needsEmpleada?: boolean;
@@ -76,6 +78,10 @@ function buildCheckinExtrasPatch(args: CheckinExtrasArgs) {
     checkinServiciosNota: args.serviciosNota?.trim() || undefined,
     checkinMenoresDe2: parseMenoresDe2(args.menoresDe2),
     checkinPlacas: args.placas?.trim() || undefined,
+    checkinMascotas:
+      args.mascotas === undefined
+        ? undefined
+        : Math.max(0, Math.floor(Number(args.mascotas) || 0)),
     checkinObservaciones: args.observaciones?.trim() || undefined,
     checkinAceptaDatos:
       args.aceptaTratamientoDatos === undefined
@@ -216,6 +222,12 @@ export const getForPortal = internalQuery({
       guests: (booking.checkinGuests ?? []) as Guest[],
       menoresDe2: booking.checkinMenoresDe2 ?? 0,
       placas: booking.checkinPlacas ?? '',
+      // Mascotas: la finca debe permitirlas; precarga lo confirmado o lo de la cotización.
+      allowsPets:
+        (property as { allowsPets?: boolean } | null)?.allowsPets === true,
+      mascotas:
+        booking.checkinMascotas ??
+        (Number(booking.numeroMascotas) || 0),
       observaciones: booking.checkinObservaciones ?? '',
       aceptaTratamientoDatos: booking.checkinAceptaDatos === true,
       needsEmpleada: booking.checkinNeedsEmpleada === true,

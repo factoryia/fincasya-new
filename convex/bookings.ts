@@ -151,6 +151,9 @@ export const list = query({
       bookingsToReturn.map(async (booking: (typeof allBookings)[number]) => {
         const property = await ctx.db.get(booking.propertyId);
         let firstImage = null;
+        let ownerNombre: string | null = null;
+        let ownerTelefono: string | null = null;
+        let ownerTratamiento: string | null = null;
         if (property) {
           const images = await ctx.db
             .query('propertyImages')
@@ -160,6 +163,34 @@ export const list = query({
             firstImage = images.sort(
               (a, b) => (a.order || 0) - (b.order || 0),
             )[0]?.url;
+          }
+          // Datos del propietario para el mensaje al propietario (saludo Sr/Sra,
+          // teléfono). Preferimos `properties`; si falta, caemos a propertyOwnerInfo.
+          const p = property as any;
+          ownerNombre = String(p.propietarioNombre ?? '').trim() || null;
+          ownerTelefono = String(p.propietarioTelefono ?? '').trim() || null;
+          ownerTratamiento = String(p.propietarioTratamiento ?? '').trim() || null;
+          if (!ownerNombre || !ownerTelefono || !ownerTratamiento) {
+            const ownerInfo: any = await ctx.db
+              .query('propertyOwnerInfo')
+              .withIndex('by_property', (q) =>
+                q.eq('propertyId', property._id),
+              )
+              .unique();
+            if (ownerInfo) {
+              ownerNombre =
+                ownerNombre ||
+                String(ownerInfo.propietarioNombre ?? '').trim() ||
+                null;
+              ownerTelefono =
+                ownerTelefono ||
+                String(ownerInfo.propietarioTelefono ?? '').trim() ||
+                null;
+              ownerTratamiento =
+                ownerTratamiento ||
+                String(ownerInfo.propietarioTratamiento ?? '').trim() ||
+                null;
+            }
           }
         }
 
@@ -171,6 +202,9 @@ export const list = query({
                 title: property.title,
                 location: property.location,
                 image: firstImage,
+                propietarioNombre: ownerNombre,
+                propietarioTelefono: ownerTelefono,
+                propietarioTratamiento: ownerTratamiento,
               }
             : null,
         };
@@ -248,9 +282,43 @@ export const getByReference = query({
       .withIndex('by_booking', (q) => q.eq('bookingId', booking._id))
       .collect();
 
+    // Respaldo de datos del propietario desde propertyOwnerInfo (para el saludo
+    // Sr/Sra y el teléfono en /anfitrion y el mensaje al propietario).
+    let propertyEnriched = property as any;
+    if (property) {
+      const p = property as any;
+      if (
+        !String(p.propietarioNombre ?? '').trim() ||
+        !String(p.propietarioTelefono ?? '').trim() ||
+        !String(p.propietarioTratamiento ?? '').trim()
+      ) {
+        const ownerInfo: any = await ctx.db
+          .query('propertyOwnerInfo')
+          .withIndex('by_property', (q) => q.eq('propertyId', property._id))
+          .unique();
+        if (ownerInfo) {
+          propertyEnriched = {
+            ...p,
+            propietarioNombre:
+              String(p.propietarioNombre ?? '').trim() ||
+              ownerInfo.propietarioNombre ||
+              undefined,
+            propietarioTelefono:
+              String(p.propietarioTelefono ?? '').trim() ||
+              ownerInfo.propietarioTelefono ||
+              undefined,
+            propietarioTratamiento:
+              String(p.propietarioTratamiento ?? '').trim() ||
+              ownerInfo.propietarioTratamiento ||
+              undefined,
+          };
+        }
+      }
+    }
+
     return {
       ...booking,
-      property,
+      property: propertyEnriched,
       payments,
     };
   },
@@ -1132,10 +1200,35 @@ export const saveClientObservaciones = mutation({
   },
 });
 
+/** Persona que recibe a los turistas: la diligencia el propietario desde su enlace. */
+export const saveOwnerReceiver = mutation({
+  args: {
+    id: v.id('bookings'),
+    nombre: v.optional(v.string()),
+    contacto: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    const booking = await ctx.db.get(args.id);
+    if (!booking) throw new Error('Reserva no encontrada');
+    const ts = Date.now();
+    await ctx.db.patch(args.id, {
+      ownerReceiver: {
+        nombre: (args.nombre ?? '').trim() || undefined,
+        contacto: (args.contacto ?? '').trim() || undefined,
+        updatedAt: ts,
+      },
+      updatedAt: ts,
+    });
+    return { ok: true };
+  },
+});
+
 /** Check-out propietario (Fase 1): registra/edita el pago al propietario con log. */
 export const saveOwnerPayout = mutation({
   args: {
     id: v.id('bookings'),
+    valorAcordado: v.optional(v.number()),
+    abono: v.optional(v.number()),
     valor: v.optional(v.number()),
     fecha: v.optional(v.string()),
     medio: v.optional(v.string()),
@@ -1148,6 +1241,8 @@ export const saveOwnerPayout = mutation({
     const actor = (args.actor ?? '').trim() || 'Equipo';
     const ts = Date.now();
     const prev = (booking.ownerPayout ?? {}) as {
+      valorAcordado?: number;
+      abono?: number;
       valor?: number;
       fecha?: string;
       medio?: string;
@@ -1158,6 +1253,8 @@ export const saveOwnerPayout = mutation({
     const accion = prevLog.length === 0 ? 'Pago registrado' : 'Pago actualizado';
     await ctx.db.patch(args.id, {
       ownerPayout: {
+        valorAcordado: args.valorAcordado ?? prev.valorAcordado,
+        abono: args.abono ?? prev.abono,
         valor: args.valor ?? prev.valor,
         fecha: args.fecha ?? prev.fecha,
         medio: args.medio ?? prev.medio,

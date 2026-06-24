@@ -116,6 +116,7 @@ export const upsert = mutation({
     ),
     rntNumber: v.string(),
     propietarioNombre: v.optional(v.string()),
+    propietarioTratamiento: v.optional(v.string()),
     propietarioTelefono: v.optional(v.string()),
     propietarioCedula: v.optional(v.string()),
     propietarioCorreo: v.optional(v.string()),
@@ -135,6 +136,20 @@ export const upsert = mutation({
       .unique();
 
     const timestamp = Date.now();
+
+    // El mensaje al propietario y la vista /anfitrion leen de la tabla `properties`
+    // (booking.property). Reflejamos ahí el tratamiento (y nombre/teléfono) para que
+    // el saludo "Sr./Sra." quede disponible en esos flujos.
+    const propertyPatch: Record<string, unknown> = {};
+    if (args.propietarioTratamiento !== undefined)
+      propertyPatch.propietarioTratamiento = args.propietarioTratamiento;
+    if (args.propietarioNombre !== undefined)
+      propertyPatch.propietarioNombre = args.propietarioNombre;
+    if (args.propietarioTelefono !== undefined)
+      propertyPatch.propietarioTelefono = args.propietarioTelefono;
+    if (Object.keys(propertyPatch).length > 0) {
+      await ctx.db.patch(args.propertyId, propertyPatch);
+    }
 
     if (existing) {
       await ctx.db.patch(existing._id, {

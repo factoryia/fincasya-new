@@ -104,6 +104,27 @@ export class PdfService {
         waitUntil: 'domcontentloaded',
         timeout: 60_000,
       });
+      // Esperar a que carguen las imágenes (firma del contrato, logos remotos)
+      // con un tope de 5s para no colgarse si alguna no responde.
+      try {
+        await page.evaluate(async () => {
+          const pending = Array.from(document.images)
+            .filter((img) => !img.complete)
+            .map(
+              (img) =>
+                new Promise<void>((resolve) => {
+                  img.addEventListener('load', () => resolve(), { once: true });
+                  img.addEventListener('error', () => resolve(), { once: true });
+                }),
+            );
+          const timeout = new Promise<void>((resolve) =>
+            setTimeout(resolve, 5000),
+          );
+          await Promise.race([Promise.all(pending), timeout]);
+        });
+      } catch {
+        // Si la espera falla, seguimos: el contrato igual se genera.
+      }
       const pdfBytes = await page.pdf({
         format: 'A4',
         printBackground: true,

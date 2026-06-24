@@ -86,6 +86,24 @@ export class GenerateContractDto {
   @IsOptional()
   signature?: string;
 
+  /** Firmante de Fincas Ya (override por contrato): nombre, cédula, ciudad e imagen de firma. */
+  @IsString()
+  @IsOptional()
+  adminName?: string;
+
+  @IsString()
+  @IsOptional()
+  adminCedula?: string;
+
+  @IsString()
+  @IsOptional()
+  adminCity?: string;
+
+  /** URL de la imagen de la firma del firmante (Fincas Ya) para incrustar en el PDF. */
+  @IsString()
+  @IsOptional()
+  firmaArrendadorUrl?: string;
+
   @IsOptional()
   petCount?: number;
 

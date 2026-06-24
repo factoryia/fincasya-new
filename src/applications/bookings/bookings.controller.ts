@@ -243,17 +243,26 @@ export class BookingsController {
   async saveOwnerPayout(
     @Param('id') id: string,
     @Body()
-    body: { valor?: string; fecha?: string; medio?: string; actor?: string },
+    body: {
+      valorAcordado?: string;
+      abono?: string;
+      valor?: string;
+      fecha?: string;
+      medio?: string;
+      actor?: string;
+    },
     @UploadedFile() comprobante?: Express.Multer.File,
   ) {
-    const valorNum =
-      body?.valor !== undefined && body.valor !== ''
-        ? Number(String(body.valor).replace(/[^\d.-]/g, ''))
+    const toNum = (v?: string) =>
+      v !== undefined && v !== ''
+        ? Number(String(v).replace(/[^\d.-]/g, ''))
         : undefined;
     return this.checkinMessaging.saveOwnerPayout(
       id,
       {
-        valor: valorNum,
+        valorAcordado: toNum(body?.valorAcordado),
+        abono: toNum(body?.abono),
+        valor: toNum(body?.valor),
         fecha: body?.fecha,
         medio: body?.medio,
         actor: body?.actor,
@@ -314,6 +323,25 @@ export class BookingsController {
       nombre: body.nombre,
       motivo: body.motivo,
       obsPropietario: body.obsPropietario,
+    });
+    if (!result.ok) {
+      throw new HttpException(
+        { error: 'not_found', message: 'No encontramos esta reserva.' },
+        HttpStatus.NOT_FOUND,
+      );
+    }
+    return { ok: true };
+  }
+
+  /** Persona que recibe a los turistas: la diligencia el propietario desde su enlace. */
+  @Post('owner/:ref/receiver')
+  async saveOwnerReceiver(
+    @Param('ref') ref: string,
+    @Body() body: { nombre?: string; contacto?: string },
+  ) {
+    const result = await this.checkinMessaging.saveOwnerReceiverByRef(ref, {
+      nombre: body?.nombre,
+      contacto: body?.contacto,
     });
     if (!result.ok) {
       throw new HttpException(
@@ -593,6 +621,40 @@ export class BookingsController {
       limit: Number.isFinite(parsedLimit) ? parsedLimit : undefined,
       page: Number.isFinite(parsedPage) ? parsedPage : undefined,
     });
+  }
+
+  @Get('contracts')
+  @UseGuards(ConvexAuthGuard, AdminGuard)
+  async listContracts(
+    @Query('estado') estado?: string,
+    @Query('origen') origen?: string,
+    @Query('propertyId') propertyId?: string,
+    @Query('search') search?: string,
+    @Query('limit') limit?: string,
+    @Query('page') page?: string,
+  ) {
+    const parsedLimit = limit ? parseInt(limit, 10) : undefined;
+    const parsedPage = page ? parseInt(page, 10) : undefined;
+    return this.bookingsSyncService.listContracts({
+      estado: estado?.trim() || undefined,
+      origen: origen?.trim() || undefined,
+      propertyId: propertyId?.trim() || undefined,
+      search: search?.trim() || undefined,
+      limit: Number.isFinite(parsedLimit) ? parsedLimit : undefined,
+      page: Number.isFinite(parsedPage) ? parsedPage : undefined,
+    });
+  }
+
+  @Post('contracts/backfill')
+  @UseGuards(ConvexAuthGuard, AdminGuard)
+  async backfillContracts() {
+    return this.bookingsSyncService.backfillContracts();
+  }
+
+  @Get('contracts/:contractNumber')
+  @UseGuards(ConvexAuthGuard, AdminGuard)
+  async getContract(@Param('contractNumber') contractNumber: string) {
+    return this.bookingsSyncService.getContract(contractNumber);
   }
 
   @Post('check-availability')

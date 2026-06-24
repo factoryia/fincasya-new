@@ -106,6 +106,8 @@ export default defineSchema({
      * comunicaciones (recordatorios de llegada). Teléfonos en formato E.164.
      */
     propietarioNombre: v.optional(v.string()),
+    /** Tratamiento para el saludo en mensajes: 'Sr' | 'Sra'. */
+    propietarioTratamiento: v.optional(v.string()),
     propietarioTelefono: v.optional(v.string()),
     propietarioCedula: v.optional(v.string()),
     propietarioCorreo: v.optional(v.string()),
@@ -432,6 +434,8 @@ export default defineSchema({
     checkinMascotas: v.optional(v.number()),
     /** Placas de vehículos indicadas en el portal de check-in. */
     checkinPlacas: v.optional(v.string()),
+    /** Mascotas confirmadas por el huésped en el check-in (0 = no van). */
+    checkinMascotas: v.optional(v.number()),
     /** Solicitudes especiales del huésped en el portal de check-in. */
     checkinObservaciones: v.optional(v.string()),
     /** Consentimiento habeas data (Ley 1581) en el envío final del check-in. */
@@ -453,9 +457,24 @@ export default defineSchema({
         }),
       ),
     ),
+    /**
+     * Persona que recibe a los turistas el día de la llegada. La diligencia el
+     * propietario desde su enlace público; el equipo la ve en el panel.
+     */
+    ownerReceiver: v.optional(
+      v.object({
+        nombre: v.optional(v.string()),
+        contacto: v.optional(v.string()),
+        updatedAt: v.optional(v.number()),
+      }),
+    ),
     /** Pago al propietario (check-out del propietario). */
     ownerPayout: v.optional(
       v.object({
+        /** Valor total acordado con el propietario por esta reserva. */
+        valorAcordado: v.optional(v.number()),
+        /** Abono ya pagado al propietario. El saldo = valorAcordado - abono. */
+        abono: v.optional(v.number()),
         valor: v.optional(v.number()),
         fecha: v.optional(v.string()),
         medio: v.optional(v.string()),
@@ -648,6 +667,45 @@ export default defineSchema({
     payload: v.any(),
     updatedAt: v.number(),
   }).index('by_scope', ['scope']),
+
+  /**
+   * Registro unificado de contratos (Gestor de Contratos). Una fila por
+   * `contractNumber`. Se hace upsert al generar/avanzar el contrato y se puede
+   * reconstruir con `contracts:backfill` a partir de las fuentes históricas.
+   */
+  contracts: defineTable({
+    contractNumber: v.string(),
+    propertyId: v.optional(v.id('properties')),
+    propertyTitle: v.optional(v.string()),
+    propertyLocation: v.optional(v.string()),
+    clienteNombre: v.optional(v.string()),
+    clienteCedula: v.optional(v.string()),
+    clienteEmail: v.optional(v.string()),
+    clienteTelefono: v.optional(v.string()),
+    clienteCiudad: v.optional(v.string()),
+    clienteDireccion: v.optional(v.string()),
+    firmanteNombre: v.optional(v.string()),
+    firmanteCedula: v.optional(v.string()),
+    valorTotal: v.optional(v.number()),
+    fechaEntrada: v.optional(v.string()),
+    fechaSalida: v.optional(v.string()),
+    pdfUrl: v.optional(v.string()),
+    pdfFilename: v.optional(v.string()),
+    /** borrador | generado | enviado | completado | pagado | expirado | anulado */
+    estado: v.string(),
+    /** confirmacion | link | inbox */
+    origen: v.optional(v.string()),
+    bookingId: v.optional(v.id('bookings')),
+    fillTokenId: v.optional(v.id('contractFillTokens')),
+    /** Datos del contrato (form) serializados, para reabrir/editar. */
+    draftJson: v.optional(v.string()),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index('by_contract_number', ['contractNumber'])
+    .index('by_status', ['estado'])
+    .index('by_created', ['createdAt'])
+    .index('by_property', ['propertyId']),
 
   /** Ajustes globales de plataforma (p. ej. interruptor maestro de IA). */
   platformSettings: defineTable({
@@ -1122,6 +1180,8 @@ export default defineSchema({
     rntNumber: v.string(),
     /** Datos de contacto del propietario (registro manual, sin usuario vinculado) */
     propietarioNombre: v.optional(v.string()),
+    /** Tratamiento para el saludo en mensajes: 'Sr' | 'Sra'. */
+    propietarioTratamiento: v.optional(v.string()),
     propietarioTelefono: v.optional(v.string()),
     propietarioCedula: v.optional(v.string()),
     propietarioCorreo: v.optional(v.string()),

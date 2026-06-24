@@ -1494,6 +1494,9 @@ Al confirmar tu pago, recibirás el *soporte oficial* junto con todos los detall
         ...(dto.propietarioNombre !== undefined
           ? { propietarioNombre: dto.propietarioNombre.trim() }
           : {}),
+        ...(dto.propietarioTratamiento !== undefined
+          ? { propietarioTratamiento: dto.propietarioTratamiento.trim() }
+          : {}),
         ...(dto.propietarioTelefono !== undefined
           ? { propietarioTelefono: dto.propietarioTelefono.trim() }
           : {}),
@@ -1935,9 +1938,10 @@ Al confirmar tu pago, recibirás el *soporte oficial* junto con todos los detall
         nombrePropietario,
         cedulaPropietario,
         ciudadCedulaPropietario,
-        adminNombre: (contractAdmin.adminName ?? '').trim(),
-        adminCedula: (contractAdmin.adminCedula ?? '').trim(),
-        adminCiudad: (contractAdmin.adminCity ?? '').trim(),
+        // Firmante por contrato (selector Hernán/esposa) tiene prioridad sobre el global.
+        adminNombre: (dto.adminName?.trim() || contractAdmin.adminName || '').trim(),
+        adminCedula: (dto.adminCedula?.trim() || contractAdmin.adminCedula || '').trim(),
+        adminCiudad: (dto.adminCity?.trim() || contractAdmin.adminCity || '').trim(),
         capacidad: String(finca.capacity || 0),
       };
 
@@ -2004,8 +2008,20 @@ Al confirmar tu pago, recibirás el *soporte oficial* junto con todos los detall
         console.log(
           `[api] Contrato desde HTML de vista previa (${incomingCustomHtml.length} chars).`,
         );
+        // Rellenar los placeholders {{...}} que pudieran quedar. En el flujo de
+        // "Confirmación" la vista previa ya viene completa (no-op). En el flujo
+        // de "Link", la vista previa se guardó SIN los datos del cliente; aquí se
+        // completan con los valores reales (cliente, fechas, etc.).
+        let filledCustomHtml = incomingCustomHtml;
+        for (const [key, val] of Object.entries(wordValues)) {
+          const regex = new RegExp(
+            `\\{\\{\\s*(?:<[^>]*>)*\\s*${key}\\s*(?:<[^>]*>)*\\s*\\}\\}`,
+            'g',
+          );
+          filledCustomHtml = filledCustomHtml.replace(regex, String(val ?? ''));
+        }
         const fullHtml = await this.wrapContractFragmentHtml(
-          incomingCustomHtml,
+          filledCustomHtml,
           finca as { title?: string; location?: string },
           resolvedContractNumber,
         );
@@ -2121,6 +2137,111 @@ Al confirmar tu pago, recibirás el *soporte oficial* junto con todos los detall
               (zip).file(fileName, processXml(raw));
             }
           }
+
+          // --- FIRMA DEL CONTRATO (ARRENDADOR): firmante elegido + imagen ---
+          // El bloque de firma en la plantilla QUINTA OLAYA está hardcodeado con el
+          // nombre/cédula por defecto; aquí lo reemplazamos por el firmante elegido y,
+          // si tiene imagen de firma, la incrustamos sobre la línea. Todo defensivo:
+          // si algo falla, el contrato igual se genera (con el fallback a PDF por HTML).
+          try {
+            const firmaName = (dto.adminName ?? '').trim();
+            const firmaCedula = (dto.adminCedula ?? '').trim();
+            const firmaCiudad = (dto.adminCity ?? '').trim();
+            const firmaUrl = (dto.firmaArrendadorUrl ?? '').trim();
+            const docFile = zip.file('word/document.xml');
+            if (docFile) {
+              let docXml = docFile.asText();
+              const escXml = (s: string) =>
+                s
+                  .replace(/&/g, '&amp;')
+                  .replace(/</g, '&lt;')
+                  .replace(/>/g, '&gt;');
+              // (a) Nombre del firmante en el bloque de firma (texto contiguo, 1 sola vez).
+              if (firmaName && firmaName.toUpperCase() !== 'HERNÁN AGUILERA GÓMEZ') {
+                docXml = docXml.replace(
+                  'HERNÁN AGUILERA GÓMEZ',
+                  escXml(firmaName.toUpperCase()),
+                );
+              }
+              // (b) Cédula y ciudad del firmante en el bloque de firma.
+              if (firmaCedula || firmaCiudad) {
+                const ced = firmaCedula || '81.720.077';
+                const ciu = firmaCiudad || 'Chía';
+                docXml = docXml.replace(
+                  'C.C. N° 81.720.077 de Chía',
+                  escXml(`C.C. N° ${ced} de ${ciu}`),
+                );
+              }
+              // (c) Imagen de la firma sobre la primera línea de subrayado (ARRENDADOR).
+              if (firmaUrl) {
+                try {
+                  const imgRes = await fetch(firmaUrl);
+                  if (imgRes.ok) {
+                    const imgBuf = Buffer.from(await imgRes.arrayBuffer());
+                    const lower = firmaUrl.toLowerCase();
+                    const ext =
+                      lower.includes('.jpg') || lower.includes('.jpeg')
+                        ? 'jpg'
+                        : 'png';
+                    zip.file(`word/media/firma_arrendador.${ext}`, imgBuf);
+                    // Content types (png ya está declarado; agregamos jpg si hace falta).
+                    if (ext === 'jpg') {
+                      let ct = zip.file('[Content_Types].xml')?.asText() ?? '';
+                      if (
+                        !ct.includes('Extension="jpg"') &&
+                        !ct.includes('Extension="jpeg"')
+                      ) {
+                        ct = ct.replace(
+                          '</Types>',
+                          '<Default Extension="jpg" ContentType="image/jpeg"/></Types>',
+                        );
+                        zip.file('[Content_Types].xml', ct);
+                      }
+                    }
+                    // Relación de imagen en document.xml.rels.
+                    const relId = 'rIdFirmaArr';
+                    let rels =
+                      zip.file('word/_rels/document.xml.rels')?.asText() ?? '';
+                    if (rels && !rels.includes(relId)) {
+                      rels = rels.replace(
+                        '</Relationships>',
+                        `<Relationship Id="${relId}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="media/firma_arrendador.${ext}"/></Relationships>`,
+                      );
+                      zip.file('word/_rels/document.xml.rels', rels);
+                    }
+                    const drawing =
+                      `<w:drawing><wp:inline distT="0" distB="0" distL="0" distR="0">` +
+                      `<wp:extent cx="1524000" cy="571500"/><wp:effectExtent l="0" t="0" r="0" b="0"/>` +
+                      `<wp:docPr id="9001" name="FirmaArrendador"/>` +
+                      `<wp:cNvGraphicFramePr><a:graphicFrameLocks xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" noChangeAspect="1"/></wp:cNvGraphicFramePr>` +
+                      `<a:graphic xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/picture">` +
+                      `<pic:pic xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture">` +
+                      `<pic:nvPicPr><pic:cNvPr id="9001" name="FirmaArrendador"/><pic:cNvPicPr/></pic:nvPicPr>` +
+                      `<pic:blipFill><a:blip r:embed="${relId}"/><a:stretch><a:fillRect/></a:stretch></pic:blipFill>` +
+                      `<pic:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="1524000" cy="571500"/></a:xfrm>` +
+                      `<a:prstGeom prst="rect"><a:avLst/></a:prstGeom></pic:spPr></pic:pic></a:graphicData></a:graphic></wp:inline></w:drawing>`;
+                    // Reemplaza el texto de la PRIMERA línea de subrayado por la imagen.
+                    docXml = docXml.replace(
+                      /<w:t xml:space="preserve">_{5,}[^<]*<\/w:t>/,
+                      `<w:t xml:space="preserve"></w:t></w:r><w:r>${drawing}`,
+                    );
+                  }
+                } catch (imgErr) {
+                  console.warn(
+                    '[api] No se pudo incrustar la firma del arrendador:',
+                    (imgErr as Error)?.message,
+                  );
+                }
+              }
+              zip.file('word/document.xml', docXml);
+            }
+          } catch (firmaErr) {
+            console.warn(
+              '[api] Personalización de firma del contrato omitida:',
+              (firmaErr as Error)?.message,
+            );
+          }
+
           finalBuffer = zip.generate({ type: 'nodebuffer', compression: 'DEFLATE' });
           console.log('[api] Contrato Word generado correctamente.');
         } catch (error: unknown) {
@@ -2265,6 +2386,43 @@ Al confirmar tu pago, recibirás el *soporte oficial* junto con todos los detall
         'contracts/generated',
         finalFilename,
       );
+
+      // 4.b Registrar/actualizar el contrato en el Gestor de Contratos. Defensivo:
+      // si falla, no rompe la generación del contrato.
+      try {
+        const origen =
+          dto.conversationId === 'contract-link'
+            ? 'link'
+            : dto.conversationId === 'direct-reservation' || !dto.conversationId
+              ? 'confirmacion'
+              : 'inbox';
+        await this.convexService.mutation('contracts:upsert', {
+          contractNumber: resolvedContractNumber,
+          propertyId: dto.propertyId as any,
+          propertyTitle: finca.title || undefined,
+          propertyLocation: finca.location || undefined,
+          clienteNombre: dto.clientName || undefined,
+          clienteCedula: dto.clientId || undefined,
+          clienteEmail: dto.clientEmail || undefined,
+          clienteTelefono: dto.clientPhone || undefined,
+          clienteCiudad: dto.clientCity || undefined,
+          clienteDireccion: dto.clientAddress || undefined,
+          firmanteNombre: dto.adminName || undefined,
+          firmanteCedula: dto.adminCedula || undefined,
+          valorTotal: Math.floor(Number(dto.totalPrice) || 0) || undefined,
+          fechaEntrada: dto.checkInDate || undefined,
+          fechaSalida: dto.checkOutDate || undefined,
+          pdfUrl: publicUrl,
+          pdfFilename: finalFilename,
+          estado: 'generado',
+          origen,
+        });
+      } catch (regErr) {
+        console.warn(
+          '[api] No se pudo registrar el contrato en el gestor:',
+          (regErr as Error)?.message,
+        );
+      }
 
       // 5. Enviar mensaje a la conversaciÃ³n (solo si es una conversaciÃ³n vÃ¡lida)
       if (dto.conversationId && dto.conversationId !== 'direct-reservation') {

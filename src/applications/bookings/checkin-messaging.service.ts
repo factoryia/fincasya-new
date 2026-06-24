@@ -321,11 +321,18 @@ export class CheckinMessagingService {
       propertyTitle: property.title || 'tu finca',
       propertyLocation: property.location || null,
       ownerName: property.propietarioNombre || null,
+      ownerTratamiento: property.propietarioTratamiento || null,
       fechaEntrada: booking.fechaEntrada,
       fechaSalida: booking.fechaSalida,
       horaEntrada: booking.horaEntrada ?? null,
       numeroPersonas: booking.numeroPersonas ?? null,
       empleada, // 'no' | 'una' | 'varias'
+      placas: String(booking.checkinPlacas ?? '').trim() || null,
+      allowsPets: (property as { allowsPets?: boolean })?.allowsPets === true,
+      mascotas:
+        typeof booking.checkinMascotas === 'number'
+          ? booking.checkinMascotas
+          : Number(booking.numeroMascotas) || 0,
       checkinCompleted: Boolean(booking.checkinCompleted),
       guestCount: allGuests.length,
       guests: allGuests.map((g: any) => ({
@@ -334,7 +341,17 @@ export class CheckinMessagingService {
         tipoDocumento: String(g.tipoDocumento ?? 'CC').trim().toUpperCase() || 'CC',
       })),
       invitadosPdfUrl: pdf?.url || null,
+      checkinObservaciones:
+        String(booking.checkinObservaciones ?? '').trim() || null,
+      serviciosNota: String(booking.checkinServiciosNota ?? '').trim() || null,
       clientObservaciones: String(booking.clientObservaciones ?? '').trim() || null,
+      ownerReceiver: booking.ownerReceiver
+        ? {
+            nombre: String(booking.ownerReceiver.nombre ?? '').trim() || null,
+            contacto:
+              String(booking.ownerReceiver.contacto ?? '').trim() || null,
+          }
+        : null,
       ownerPayout: booking.ownerPayout
         ? {
             valor:
@@ -377,6 +394,8 @@ export class CheckinMessagingService {
   async saveOwnerPayout(
     bookingId: string,
     payload: {
+      valorAcordado?: number;
+      abono?: number;
       valor?: number;
       fecha?: string;
       medio?: string;
@@ -391,12 +410,13 @@ export class CheckinMessagingService {
         'owners/payouts',
       );
     }
+    const num = (v?: number) =>
+      v !== undefined && Number.isFinite(v) ? v : undefined;
     return this.convexService.mutation('bookings:saveOwnerPayout', {
       id: bookingId,
-      valor:
-        payload.valor !== undefined && Number.isFinite(payload.valor)
-          ? payload.valor
-          : undefined,
+      valorAcordado: num(payload.valorAcordado),
+      abono: num(payload.abono),
+      valor: num(payload.valor),
       fecha: payload.fecha?.trim() || undefined,
       medio: payload.medio?.trim() || undefined,
       comprobanteUrl,
@@ -449,6 +469,26 @@ export class CheckinMessagingService {
     );
     if (!booking?._id) return { ok: false as const, reason: 'not_found' };
     await this.saveDepositApproval(booking._id, { ...payload, por: 'propietario' });
+    return { ok: true as const };
+  }
+
+  /** Persona que recibe a los turistas: guardada por el propietario desde su enlace. */
+  async saveOwnerReceiverByRef(
+    reference: string,
+    payload: { nombre?: string; contacto?: string },
+  ) {
+    const trimmed = String(reference ?? '').trim();
+    if (!trimmed) return { ok: false as const, reason: 'not_found' };
+    const booking: any = await this.convexService.query(
+      'bookings:getByReference',
+      { reference: trimmed },
+    );
+    if (!booking?._id) return { ok: false as const, reason: 'not_found' };
+    await this.convexService.mutation('bookings:saveOwnerReceiver', {
+      id: booking._id,
+      nombre: payload.nombre?.trim() || undefined,
+      contacto: payload.contacto?.trim() || undefined,
+    });
     return { ok: true as const };
   }
 
@@ -550,6 +590,18 @@ export class CheckinMessagingService {
           }).format(new Date(ms))
         : '—';
 
+    const empleadaLabel = booking.needsTeam
+      ? 'Sí (varias)'
+      : booking.needsEmpleada
+        ? 'Sí'
+        : 'No';
+    const placas = String(booking.checkinPlacas ?? '').trim();
+    const nMascotas =
+      typeof booking.checkinMascotas === 'number'
+        ? booking.checkinMascotas
+        : Number(booking.numeroMascotas) || 0;
+    const mascotasLabel =
+      nMascotas > 0 ? `Sí (${nMascotas})` : 'No van mascotas';
     const metaPairs: Array<[string, string]> = [
       ['Propiedad', property.title || 'Propiedad'],
       ...(property.location
@@ -560,6 +612,11 @@ export class CheckinMessagingService {
       ['Entrada', fmtFecha(booking.fechaEntrada)],
       ['Salida', fmtFecha(booking.fechaSalida)],
       ['Personas', String(booking.numeroPersonas ?? guests.length)],
+      ['Empleada de servicio', empleadaLabel],
+      ['Mascotas', mascotasLabel],
+      ...(placas
+        ? ([['Placas vehiculares', placas]] as Array<[string, string]>)
+        : []),
     ];
     const metaRows = metaPairs
       .map(
@@ -582,11 +639,17 @@ export class CheckinMessagingService {
           )}</td><td style="border:1px solid #ddd;padding:6px 10px;white-space:nowrap;">${esc(
             docLabel(g.tipoDocumento),
           )}</td><td style="border:1px solid #ddd;padding:6px 10px;">${esc(
-            g.esMenor
-              ? 'Menor de 2 años'
-              : g.cedula?.trim()
-                ? `${String(g.tipoDocumento ?? 'CC').trim().toUpperCase() || 'CC'} ${g.cedula.trim()}`
-                : 'Sin documento',
+            (() => {
+              if (g.esMenor) return 'Menor de 2 años';
+              const tipo = String(g.tipoDocumento ?? 'CC')
+                .trim()
+                .toUpperCase();
+              const esMenorEdad = tipo === 'TI' || tipo === 'RC';
+              const base = g.cedula?.trim()
+                ? `${tipo || 'CC'} ${g.cedula.trim()}`
+                : 'Sin documento';
+              return esMenorEdad ? `${base} · Menor de edad` : base;
+            })(),
           )}</td></tr>`,
       )
       .join('');
