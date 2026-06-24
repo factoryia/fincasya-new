@@ -11,6 +11,9 @@ import { promises as fs } from 'fs';
 import { ConvexService } from '../shared/services/convex.service';
 import { S3Service } from '../shared/services/s3.service';
 import { BookingsSyncService } from '../bookings/bookings-sync.service';
+import { FincasService } from '../fincas/fincas.service';
+import { mergeClientDataFromContractDetail } from '../bookings/resolve-contract-client-data';
+import { computeConfirmationFinancials } from '../fincas/confirmation-financials';
 import { PdfService, ReservationConfirmationData, ReservationPaymentMethod } from '../shared/services/pdf.service';
 
 
@@ -33,6 +36,8 @@ export class InboxService {
     private readonly pdfService: PdfService,
     @Inject(forwardRef(() => BookingsSyncService))
     private readonly bookingsSyncService: BookingsSyncService,
+    @Inject(forwardRef(() => FincasService))
+    private readonly fincasService: FincasService,
   ) {}
 
   /**
@@ -935,21 +940,63 @@ export class InboxService {
     conversationId: string,
     payload: any,
   ) {
+    const persistConfirmation = Boolean(payload?.persistConfirmation);
     const prepared = await this.prepareReservationConfirmationData(
       conversationId,
       payload,
     );
-    const pdfBuffer = await this.pdfService.generateReservationConfirmationPdfBuffer(prepared);
-    const safeContract = (prepared.contractNumber || String(Date.now())).replace(
-      /[^a-zA-Z0-9_-]/g,
-      '',
-    );
-    const filename = `Confirmacion_Reserva_${safeContract}.pdf`;
+    const generated =
+      await this.fincasService.generateReservationConfirmationBuffer(prepared);
+
+    if (persistConfirmation && prepared.contractNumber?.trim()) {
+      try {
+        const file: Express.Multer.File = {
+          fieldname: 'file',
+          originalname: generated.filename,
+          encoding: '7bit',
+          mimetype: generated.mimeType,
+          buffer: generated.buffer,
+          size: generated.buffer.byteLength,
+          stream: null as any,
+          destination: '',
+          filename: '',
+          path: '',
+        };
+        const s3Url = await this.s3Service.uploadFile(
+          file,
+          'confirmations',
+          generated.filename,
+        );
+        await this.convexService.mutation('contracts:upsert', {
+          contractNumber: prepared.contractNumber.trim(),
+          propertyId: prepared.propertyId as any,
+          propertyTitle: prepared.propertyName,
+          propertyLocation: prepared.propertyLocation,
+          clienteNombre: prepared.clientName,
+          clienteCedula: prepared.clientId,
+          clienteEmail: prepared.clientEmail,
+          clienteTelefono: prepared.clientPhone,
+          valorTotal: prepared.totalAmount || undefined,
+          fechaEntrada: prepared.checkInDate,
+          fechaSalida: prepared.checkOutDate,
+          confirmationPdfUrl: s3Url,
+          confirmationPdfFilename: generated.filename,
+          estado: prepared.paymentStatus === 'paid' ? 'pagado' : 'generado',
+          origen: 'confirmacion',
+        });
+      } catch (persistErr) {
+        console.warn(
+          '[inbox] Confirmación generada pero no se pudo guardar en S3/gestor:',
+          persistErr instanceof Error ? persistErr.message : String(persistErr),
+        );
+      }
+    }
 
     return {
       success: true,
-      buffer: Buffer.from(pdfBuffer),
-      filename,
+      buffer: generated.buffer,
+      filename: generated.filename,
+      mimeType: generated.mimeType,
       message: 'Previsualizacion generada correctamente',
     };
   }
@@ -1085,19 +1132,20 @@ export class InboxService {
       /[^a-zA-Z0-9_-]/g,
       '',
     );
-    const filename = `Confirmacion_Reserva_${safeContract}.pdf`;
 
     let generatedFile: Express.Multer.File;
+    let outputFilename = `Confirmacion_Reserva_${safeContract}.pdf`;
     try {
-      const pdfBuffer =
-        await this.pdfService.generateReservationConfirmationPdfBuffer(prepared);
+      const generated =
+        await this.fincasService.generateReservationConfirmationBuffer(prepared);
+      outputFilename = generated.filename;
       generatedFile = {
         fieldname: 'file',
-        originalname: filename,
+        originalname: outputFilename,
         encoding: '7bit',
-        mimetype: 'application/pdf',
-        buffer: Buffer.from(pdfBuffer),
-        size: pdfBuffer.byteLength,
+        mimetype: generated.mimeType,
+        buffer: generated.buffer,
+        size: generated.buffer.byteLength,
         stream: null as any,
         destination: '',
         filename: '',
@@ -1108,7 +1156,7 @@ export class InboxService {
         type: 'document',
         text: `Hola ${prepared.clientName}, aqui tienes tu confirmacion de reserva No. ${prepared.contractNumber}.`,
         file: generatedFile,
-        filename,
+        filename: outputFilename,
         metadata: {
           kind: 'reservation_confirmation',
           reservationConfirmationData: prepared,
@@ -1144,8 +1192,8 @@ export class InboxService {
         bookingId: bookingId as any,
         file: {
           url: confirmationUrl,
-          name: filename,
-          type: 'application/pdf',
+          name: outputFilename,
+          type: generatedFile.mimetype,
           size: generatedFile.size,
           uploadedAt: Date.now(),
         },
@@ -1159,7 +1207,7 @@ export class InboxService {
 
     return {
       success: true,
-      filename,
+      filename: outputFilename,
       bookingId,
       message: bookingId && !createdInThisRequest
         ? 'Confirmacion reenviada (la reserva ya existia en el calendario)'
@@ -1218,14 +1266,34 @@ export class InboxService {
       this.pdfService.toNumber(safePayload.nights) ||
       this.pdfService.calculateNights(checkInDate, checkOutDate);
 
-    const payloadTotal = this.pdfService.toNumber(safePayload.totalAmount);
-    const rentAmount = this.pdfService.toNumber(safePayload.rentAmount);
-    const cleaningFee = this.pdfService.toNumber(safePayload.cleaningFee);
-    const petCleaningFee = this.pdfService.toNumber(safePayload.petCleaningFee);
-    const refundableDeposit = this.pdfService.toNumber(safePayload.refundableDeposit);
-    const computedTotal =
-      payloadTotal ||
-      rentAmount + cleaningFee + petCleaningFee + refundableDeposit;
+    const precioContrato = this.pdfService.toNumber(
+      safePayload.precioTotal ?? safePayload.rentAmount,
+    );
+    let damageDeposit = this.pdfService.toNumber(
+      safePayload.damageDeposit ?? safePayload.refundableDeposit,
+    );
+    if (damageDeposit <= 0 && property?.depositoDanosReembolsable != null) {
+      damageDeposit = this.pdfService.toNumber(property.depositoDanosReembolsable);
+    }
+    const petCount = this.pdfService.toNumber(
+      safePayload.petCount ?? safePayload.numeroMascotas,
+    );
+    const depositoMascotas = this.pdfService.toNumber(safePayload.depositoMascotas);
+    const petSurcharge = this.pdfService.toNumber(
+      safePayload.costoMascotas ?? safePayload.petSurcharge,
+    );
+
+    const financials = computeConfirmationFinancials({
+      precioTotal: precioContrato,
+      subtotal: this.pdfService.toNumber(safePayload.subtotal),
+      petSurcharge: petSurcharge > 0 ? petSurcharge : undefined,
+      cleaningFee: 0,
+      damageDeposit,
+      petCount,
+      depositoMascotas: depositoMascotas > 0 ? depositoMascotas : undefined,
+    });
+
+    const computedTotal = financials.totalAmount;
 
     const prepared: ReservationConfirmationData = {
       propertyId,
@@ -1250,10 +1318,10 @@ export class InboxService {
       depositDate: this.pdfService.toIsoDate(safePayload.depositDate || new Date()),
       balanceAmount: this.pdfService.toNumber(safePayload.balanceAmount),
       balanceDate: this.pdfService.toIsoDate(safePayload.balanceDate || checkInDate),
-      rentAmount,
-      cleaningFee,
-      petCleaningFee,
-      refundableDeposit,
+      rentAmount: financials.rentAmount,
+      cleaningFee: financials.cleaningFee,
+      petCleaningFee: financials.petCleaningFee,
+      refundableDeposit: financials.refundableDeposit,
       totalAmount: computedTotal,
       paymentMethod: this.pdfService.normalizePaymentMethod(safePayload.paymentMethod),
       paymentStatus:
@@ -1264,13 +1332,41 @@ export class InboxService {
     if (g) prepared.groupType = g;
     if (p) prepared.purpose = p;
 
+    const contractNumber = prepared.contractNumber.trim();
+    if (contractNumber) {
+      try {
+        const detail = await this.convexService.query('contracts:getDetail', {
+          contractNumber,
+        });
+        const merged = mergeClientDataFromContractDetail(
+          {
+            nombreCompleto: prepared.clientName,
+            cedula: prepared.clientId,
+            correo: prepared.clientEmail,
+            celular: prepared.clientPhone,
+            address: prepared.clientAddress,
+          },
+          detail as any,
+        );
+        if (merged.nombreCompleto) {
+          prepared.clientName = String(merged.nombreCompleto);
+        }
+        if (merged.cedula) prepared.clientId = String(merged.cedula);
+        if (merged.correo) prepared.clientEmail = String(merged.correo);
+        if (merged.celular) prepared.clientPhone = String(merged.celular);
+        if (merged.address) prepared.clientAddress = String(merged.address);
+      } catch {
+        // Sin gestor de contratos: se usa el payload del admin.
+      }
+    }
+
     if (!prepared.clientName || !prepared.checkInDate || !prepared.checkOutDate) {
       throw new BadRequestException(
         'Faltan datos obligatorios para generar la confirmacion de reserva',
       );
     }
 
-    // Keep balance in sync when admin only enters total and deposit.
+    // Saldo = resto del contrato (abono es 50% del total del contrato).
     if (!prepared.balanceAmount && prepared.totalAmount) {
       prepared.balanceAmount = Math.max(
         prepared.totalAmount - prepared.depositAmount,

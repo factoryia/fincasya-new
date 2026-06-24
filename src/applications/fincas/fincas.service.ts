@@ -335,6 +335,7 @@ import {
 import { UpdateOwnerInfoDto } from './dto/owner-info.dto';
 import { GenerateContractDto } from './dto/generate-contract.dto';
 import { loadDefaultContractTemplateBytes } from './contract-default-template';
+import { loadDefaultConfirmationTemplateBytes } from './confirmation-default-template';
 import {
   buildBankAccountsPlainSnippet,
   buildBankAccountsWordLines,
@@ -343,6 +344,8 @@ import {
   parseContractSettingsPayload,
   resolveContractMoneyLabel,
 } from './contract-template-values';
+import { buildConfirmationWordValues } from './confirmation-template-values';
+import { postProcessConfirmationWordXml } from './confirmation-word-postprocess';
 import { buildCatalogProductDescription } from './catalog-description';
 import { buildCatalogPriceFields } from './catalog-price';
 import {
@@ -2621,6 +2624,99 @@ Al confirmar tu pago, recibirás el *soporte oficial* junto con todos los detall
   }
 
   /**
+   * Genera confirmación de reserva desde plantilla Word (formato VILLA TRIANA) y la
+   * convierte a PDF. Si no hay plantilla .docx, usa el HTML de respaldo.
+   */
+  async generateReservationConfirmationBuffer(
+    data: ReservationConfirmationData,
+  ): Promise<{ buffer: Buffer; filename: string; mimeType: string }> {
+    const safeContract = (data.contractNumber || String(Date.now())).replace(
+      /[^a-zA-Z0-9_-]/g,
+      '',
+    );
+    const baseFilename = `Confirmacion_Reserva_${safeContract || 'reserva'}`;
+
+    const templateBytes = await loadDefaultConfirmationTemplateBytes();
+    if (templateBytes && templateBytes.slice(0, 2).toString() === 'PK') {
+      console.log('[api] Plantilla Word de confirmación + datos de reserva.');
+      const wordValues = buildConfirmationWordValues(data, this.pdfService);
+      try {
+        const zip = new PizZip(templateBytes);
+        const xmlTargets = Object.keys(zip.files).filter(
+          (name) =>
+            !zip.files[name].dir &&
+            (name === 'word/document.xml' ||
+              /^word\/header\d+\.xml$/.test(name) ||
+              /^word\/footer\d+\.xml$/.test(name) ||
+              name === 'word/footnotes.xml' ||
+              name === 'word/endnotes.xml'),
+        );
+        for (const fileName of xmlTargets) {
+          const raw = zip.file(fileName)?.asText();
+          if (raw) {
+            let processed = applyWordTemplateReplacements(raw, wordValues);
+            if (fileName === 'word/document.xml') {
+              const checkInCheckOut = `${this.pdfService.formatTimeDisplayPublic(data.checkInTime)} / ${this.pdfService.formatTimeDisplayPublic(data.checkOutTime)}`;
+              processed = postProcessConfirmationWordXml(processed, {
+                checkInCheckOut,
+                paymentMethod: this.pdfService.normalizePaymentMethod(
+                  String(data.paymentMethod || ''),
+                ),
+              });
+            }
+            zip.file(fileName, processed);
+          }
+        }
+        let docxBuffer: Buffer = zip.generate({
+          type: 'nodebuffer',
+          compression: 'DEFLATE',
+        });
+        let finalBuffer: Buffer = docxBuffer;
+        let finalFilename = `${baseFilename}.docx`;
+        let finalMimeType =
+          'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+
+        try {
+          finalBuffer = await this.convertDocxToPdf(docxBuffer);
+          finalFilename = `${baseFilename}.pdf`;
+          finalMimeType = 'application/pdf';
+          console.log('[api] Confirmación Word → PDF completada.');
+        } catch (e: unknown) {
+          const msg = e instanceof Error ? e.message : String(e);
+          console.warn(
+            '[api] No se pudo convertir confirmación .docx a PDF:',
+            msg,
+          );
+          console.warn('[api] Se entrega la confirmación en Word (.docx).');
+        }
+
+        return {
+          buffer: finalBuffer,
+          filename: finalFilename,
+          mimeType: finalMimeType,
+        };
+      } catch (error: unknown) {
+        const msg = (error as Error)?.message ?? String(error);
+        console.error('[api] Error al procesar plantilla de confirmación:', msg);
+        throw new BadRequestException(
+          `Error al procesar la plantilla de confirmación: ${msg}`,
+        );
+      }
+    }
+
+    console.warn(
+      '[api] Sin plantilla Word de confirmación; usando HTML de respaldo.',
+    );
+    const pdfBuffer =
+      await this.pdfService.generateReservationConfirmationPdfBuffer(data);
+    return {
+      buffer: Buffer.from(pdfBuffer),
+      filename: `${baseFilename}.pdf`,
+      mimeType: 'application/pdf',
+    };
+  }
+
+  /**
    * Genera el PDF de confirmación de reserva para una reserva existente,
    * lo sube a S3 y lo enlaza a la reserva en Convex.
    */
@@ -2704,17 +2800,16 @@ Al confirmar tu pago, recibirás el *soporte oficial* junto con todos los detall
       })),
     };
 
-    const pdfBuffer =
-      await this.pdfService.generateReservationConfirmationPdfBuffer(pdfData);
-    const filename = `Confirmacion_Reserva_${pdfData.contractNumber}.pdf`;
+    const generated = await this.generateReservationConfirmationBuffer(pdfData);
+    const filename = generated.filename;
 
     const file: Express.Multer.File = {
       fieldname: 'file',
       originalname: filename,
       encoding: '7bit',
-      mimetype: 'application/pdf',
-      buffer: Buffer.from(pdfBuffer),
-      size: pdfBuffer.byteLength,
+      mimetype: generated.mimeType,
+      buffer: generated.buffer,
+      size: generated.buffer.byteLength,
       stream: null as any,
       destination: '',
       filename: '',
@@ -2729,8 +2824,8 @@ Al confirmar tu pago, recibirás el *soporte oficial* junto con todos los detall
       file: {
         url: s3Url,
         name: filename,
-        type: 'application/pdf',
-        size: pdfBuffer.byteLength,
+        type: generated.mimeType,
+        size: generated.buffer.byteLength,
         uploadedAt: Date.now(),
       },
     });

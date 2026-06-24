@@ -1019,6 +1019,94 @@ export const createPayment = mutation({
   },
 });
 
+const MANUAL_ABONO_TYPES = new Set(['ABONO_50', 'SALDO_50', 'COMPLETO']);
+
+function isGatewayPayment(payment: Doc<'payments'>): boolean {
+  return !!(
+    payment.wompiData ||
+    payment.boldData ||
+    (payment.transactionId && payment.transactionId.trim())
+  );
+}
+
+/** Reemplaza abonos manuales al editar una reserva desde el modal admin. */
+export const syncReservationAbono = mutation({
+  args: {
+    bookingId: v.id('bookings'),
+    paymentStatus: v.optional(v.string()),
+    abono: v.optional(
+      v.object({
+        type: v.union(v.literal('ABONO_50'), v.literal('COMPLETO')),
+        amount: v.number(),
+        paymentMethod: v.optional(v.string()),
+        notes: v.optional(v.string()),
+      }),
+    ),
+  },
+  handler: async (ctx, args) => {
+    const booking = await ctx.db.get(args.bookingId);
+    if (!booking) throw new Error('Reserva no encontrada');
+
+    const now = Date.now();
+    const payments = await ctx.db
+      .query('payments')
+      .withIndex('by_booking', (q) => q.eq('bookingId', args.bookingId))
+      .collect();
+
+    for (const payment of payments) {
+      if (
+        MANUAL_ABONO_TYPES.has(payment.type) &&
+        !isGatewayPayment(payment)
+      ) {
+        await ctx.db.delete(payment._id);
+      }
+    }
+
+    const abono = args.abono;
+    if (abono && abono.amount > 0) {
+      await ctx.db.insert('payments', {
+        bookingId: args.bookingId,
+        type: abono.type,
+        amount: Math.floor(abono.amount),
+        currency: 'COP',
+        paymentMethod: abono.paymentMethod?.trim() || 'Manual',
+        status: 'PAID',
+        notes: abono.notes?.trim() || undefined,
+        createdAt: now,
+        updatedAt: now,
+      });
+    }
+
+    const updatedPayments = await ctx.db
+      .query('payments')
+      .withIndex('by_booking', (q) => q.eq('bookingId', args.bookingId))
+      .collect();
+
+    const netPaid = netPaidFromPayments(updatedPayments);
+    const paymentStatus = deriveBookingPaymentStatus(
+      booking.precioTotal,
+      netPaid,
+    );
+
+    await ctx.db.patch(args.bookingId, {
+      paymentStatus,
+      updatedAt: now,
+      ...(paymentStatus === 'PAID' && booking.status !== 'CANCELLED'
+        ? { status: 'PAID' as const }
+        : {}),
+    });
+
+    return {
+      bookingId: args.bookingId,
+      precioTotal: booking.precioTotal,
+      paymentStatus,
+      netPaid,
+      pending: pendingFromTotal(booking.precioTotal, netPaid),
+      payments: updatedPayments.sort((a, b) => b.createdAt - a.createdAt),
+    };
+  },
+});
+
 /**
  * Eliminar una reserva y sus pagos
  */

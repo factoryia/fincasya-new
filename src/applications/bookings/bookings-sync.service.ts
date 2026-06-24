@@ -10,6 +10,7 @@ import { ConvexService } from '../shared/services/convex.service';
 import { S3Service } from '../shared/services/s3.service';
 import { FincasService } from '../fincas/fincas.service';
 import { BrevoEmailService } from '../shared/services/brevo-email.service';
+import { mergeClientDataFromContractDetail } from './resolve-contract-client-data';
 import * as crypto from 'crypto';
 
 const DAY_MS = 1000 * 60 * 60 * 24;
@@ -117,7 +118,7 @@ export class BookingsSyncService {
       multimediaLinks?:
         | string
         | Array<{ url: string; name?: string; type?: string }>;
-      /** Si true, no genera contrato en S3 (p. ej. confirmación desde inbox con contrato ya firmado). */
+      /** Reservado por compatibilidad; ya no se genera contrato al crear reserva. */
       skipAutoContract?: boolean | string;
     },
     multimediaFiles?: Express.Multer.File[],
@@ -173,9 +174,6 @@ export class BookingsSyncService {
     })();
     const isDirectBool = parseBool(params.isDirect);
     const isEventoBool = parseBool(params.isEvento);
-    const skipAutoContractBool =
-      params.skipAutoContract === true ||
-      String(params.skipAutoContract).toLowerCase() === 'true';
     const normalizedStatus =
       typeof params.status === 'string' ? params.status.trim().toUpperCase() : undefined;
     const allowedStatuses = new Set([
@@ -289,50 +287,8 @@ export class BookingsSyncService {
       detallesEvento: params.detallesEvento ?? undefined,
       status: bookingStatus,
     });
-    
-    // 4. Generar contrato automáticamente para reservas directas (o todas si se desea)
-    // El usuario solicitó que "una vez creada la reserva, crea también el contrato"
-    if (!skipAutoContractBool) {
-      try {
-        console.log(`[api] Generando contrato automático para la reserva ${bookingId}...`);
 
-        const checkInDateStr = params.fechaEntrada ? (typeof params.fechaEntrada === 'number' ? new Date(params.fechaEntrada).toISOString().split('T')[0] : String(params.fechaEntrada)) : '';
-        const checkOutDateStr = params.fechaSalida ? (typeof params.fechaSalida === 'number' ? new Date(params.fechaSalida).toISOString().split('T')[0] : String(params.fechaSalida)) : '';
-
-        await this.fincasService.generateContract(propertyId, {
-          propertyId,
-          bookingId,
-          clientName: params.nombreCompleto,
-          clientId: params.cedula,
-          clientEmail: params.correo,
-          clientPhone: params.celular,
-          idNumber: params.cedula,
-          clientCity: params.city || '',
-          clientAddress: params.address || '',
-          checkInDate: checkInDateStr,
-          checkOutDate: checkOutDateStr,
-          checkInTime: params.horaEntrada || '03:00 PM',
-          checkOutTime: params.horaSalida || '01:00 PM',
-          nightlyPrice: String(precioTotalNum / calendarNights(fechaEntradaNum, fechaSalidaNum)),
-          totalPrice: String(precioTotalNum),
-          contractNumber: params.reference || `REC-${bookingId.slice(-6)}`,
-          bankName: 'Bold/FincasYa',
-          accountNumber: 'N/A',
-          accountHolder: 'FincasYa',
-          conversationId: isDirectBool ? 'direct-reservation' : 'internal-booking',
-          petCount: numeroMascotasNum,
-          petDeposit: depositoMascotasNum,
-          petSurcharge: sobrecargoMascotasNum,
-          serviceStaffFee: costoPersonalServicioNum,
-        });
-        console.log(`[api] Contrato automático generado para ${bookingId}`);
-      } catch (contractErr) {
-        console.error(`[api] Error generando contrato automático para ${bookingId}:`, contractErr.message);
-        // No lanzamos error para no romper el flujo de creación de la reserva
-      }
-    }
-
-    // 5. Generar firma de integridad para Bold...
+    // 4. Generar firma de integridad para Bold...
     let integritySignature = null;
     const boldSecret = process.env.BOLD_SHARED_SECRET;
 
@@ -737,15 +693,53 @@ export class BookingsSyncService {
     return this.getBookingPayments(bookingId);
   }
 
+  async syncReservationAbono(
+    bookingId: string,
+    body: {
+      paymentStatus?: string;
+      abono?: {
+        type: 'ABONO_50' | 'COMPLETO';
+        amount: number;
+        paymentMethod?: string;
+        notes?: string;
+      };
+    },
+  ) {
+    return this.convexService.mutation('bookings:syncReservationAbono', {
+      bookingId: bookingId as any,
+      paymentStatus: body.paymentStatus,
+      abono: body.abono,
+    });
+  }
+
   async getBookingByContractNumber(contractNumber: string) {
     const booking = await this.convexService.query(
       'bookings:getByContractNumber',
       { contractNumber },
     );
-    if (booking) return { ...booking, isContractSnapshot: false };
-    return this.convexService.query('adminContractSnapshots:getByContractNumber', {
-      contractNumber,
-    });
+    let row: Record<string, unknown> | null = booking
+      ? { ...(booking as Record<string, unknown>), isContractSnapshot: false }
+      : null;
+    if (!row) {
+      const snap = await this.convexService.query(
+        'adminContractSnapshots:getByContractNumber',
+        { contractNumber },
+      );
+      if (snap) {
+        row = { ...(snap as Record<string, unknown>), isContractSnapshot: true };
+      }
+    }
+    if (!row) return null;
+
+    try {
+      const detail = await this.convexService.query('contracts:getDetail', {
+        contractNumber: contractNumber.trim(),
+      });
+      row = mergeClientDataFromContractDetail(row, detail as any);
+    } catch {
+      // Sin registro en gestor: se usa el borrador/reserva tal cual.
+    }
+    return row;
   }
 
   /** Gestor de Contratos: lista paginada con filtros. */

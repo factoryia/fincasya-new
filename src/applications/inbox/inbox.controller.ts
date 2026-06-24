@@ -507,7 +507,7 @@ export class InboxController {
       conversationId,
       body,
     );
-    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Type', result.mimeType || 'application/pdf');
     res.setHeader(
       'Content-Disposition',
       `attachment; filename="${result.filename}"`,

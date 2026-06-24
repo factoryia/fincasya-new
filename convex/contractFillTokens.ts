@@ -209,6 +209,40 @@ export const fillToken = internalMutation({
       },
     });
 
+    // Si hay borrador admin pendiente, actualizar con el nombre completo del link.
+    if (row.contractDraftJson) {
+      try {
+        const draft = JSON.parse(row.contractDraftJson) as {
+          contractNumber?: string;
+        };
+        const code = String(draft.contractNumber ?? '').trim();
+        if (code) {
+          const snapshots = await ctx.db
+            .query('adminContractSnapshots')
+            .withIndex('by_contract_number', (q) =>
+              q.eq('contractNumber', code),
+            )
+            .collect();
+          for (const snap of snapshots) {
+            const p = (snap.payload ?? {}) as Record<string, unknown>;
+            await ctx.db.patch(snap._id, {
+              payload: {
+                ...p,
+                nombreCompleto: args.nombre,
+                cedula: args.cedula,
+                correo: args.email,
+                celular: args.telefono,
+                address: args.direccion,
+                ...(args.ciudad ? { city: args.ciudad } : {}),
+              },
+            });
+          }
+        }
+      } catch {
+        // Borrador sin JSON válido: no bloquea el fill.
+      }
+    }
+
     return {
       ok: true,
       conversationId: row.conversationId,

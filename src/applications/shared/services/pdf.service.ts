@@ -608,6 +608,7 @@ export class PdfService {
     const normalized = String(value || '')
       .toLowerCase()
       .replace(/\s+/g, '_');
+    if (normalized === 'transferencia') return 'bancolombia';
     const allowed: ReservationPaymentMethod[] = [
       'bbva',
       'bancolombia',
@@ -619,6 +620,22 @@ export class PdfService {
     return allowed.includes(normalized as ReservationPaymentMethod)
       ? (normalized as ReservationPaymentMethod)
       : 'bancolombia';
+  }
+
+  formatTimeDisplayPublic(time: string): string {
+    return this.formatTimeDisplay(time);
+  }
+
+  formatDateDisplayPublic(dateLike: string): string {
+    return this.formatDateDisplay(dateLike);
+  }
+
+  formatDateLongPublic(dateLike: string): string {
+    return this.formatDateLong(dateLike);
+  }
+
+  formatCurrencyPublic(value: number): string {
+    return this.formatCurrency(value);
   }
 
   /** Convierte WebP y otros formatos no soportados por WhatsApp a JPEG */

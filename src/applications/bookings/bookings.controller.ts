@@ -871,6 +871,25 @@ export class BookingsController {
     return this.bookingsSyncService.createManualPayment(id, body);
   }
 
+  @Post(':id/payments/sync')
+  @UseGuards(ConvexAuthGuard, RolesGuard)
+  @Roles(UserRole.ADMIN, UserRole.ASSISTANT, UserRole.VENDEDOR)
+  async syncReservationAbono(
+    @Param('id') id: string,
+    @Body()
+    body: {
+      paymentStatus?: string;
+      abono?: {
+        type: 'ABONO_50' | 'COMPLETO';
+        amount: number;
+        paymentMethod?: string;
+        notes?: string;
+      };
+    },
+  ) {
+    return this.bookingsSyncService.syncReservationAbono(id, body ?? {});
+  }
+
   @Delete(':id')
   @UseGuards(ConvexAuthGuard, AdminGuard)
   async remove(@Param('id') id: string) {

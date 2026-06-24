@@ -4,9 +4,15 @@ import { InboxService } from './inbox.service';
 import { SharedModule } from '../shared/shared.module';
 import { AuthModule } from '../auth/auth.module';
 import { BookingsModule } from '../bookings/bookings.module';
+import { FincasModule } from '../fincas/fincas.module';
 
 @Module({
-  imports: [SharedModule, AuthModule, forwardRef(() => BookingsModule)],
+  imports: [
+    SharedModule,
+    AuthModule,
+    forwardRef(() => BookingsModule),
+    forwardRef(() => FincasModule),
+  ],
   controllers: [InboxController],
   providers: [InboxService],
   exports: [InboxService],
