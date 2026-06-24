@@ -430,12 +430,10 @@ export default defineSchema({
     checkinServiciosNota: v.optional(v.string()),
     /** Menores de 2 años (no cuentan para cupo ni van en `checkinGuests`). */
     checkinMenoresDe2: v.optional(v.number()),
-    /** Mascotas indicadas en el portal de check-in. */
+    /** Mascotas indicadas/confirmadas por el huésped en el portal de check-in (0 = no van). */
     checkinMascotas: v.optional(v.number()),
     /** Placas de vehículos indicadas en el portal de check-in. */
     checkinPlacas: v.optional(v.string()),
-    /** Mascotas confirmadas por el huésped en el check-in (0 = no van). */
-    checkinMascotas: v.optional(v.number()),
     /** Solicitudes especiales del huésped en el portal de check-in. */
     checkinObservaciones: v.optional(v.string()),
     /** Consentimiento habeas data (Ley 1581) en el envío final del check-in. */
@@ -489,14 +487,6 @@ export default defineSchema({
             }),
           ),
         ),
-      }),
-    ),
-    /** Contacto alternativo del receptor del pago al propietario. */
-    ownerReceiver: v.optional(
-      v.object({
-        nombre: v.optional(v.string()),
-        contacto: v.optional(v.string()),
-        updatedAt: v.optional(v.number()),
       }),
     ),
     /**
