@@ -81,6 +81,11 @@ export type ReservationConfirmationData = {
   /** Passthrough al crear reserva desde inbox (no se imprimen en el PDF actual). */
   groupType?: string;
   purpose?: string;
+  economicAdjustments?: Array<{
+    description: string;
+    amount: number;
+    type: 'INCREMENT' | 'DISCOUNT';
+  }>;
 };
 
 @Injectable()
@@ -388,6 +393,18 @@ export class PdfService {
           <td class="value-cell">${this.escapeHtml(this.formatCurrency(data.petCleaningFee ?? 0))}</td>
         </tr>`
             : ''
+        }
+        ${
+          (data.economicAdjustments ?? [])
+            .map(
+              (item) => `<tr>
+          <td class="peach"></td>
+          <td class="value-cell"></td>
+          <td colspan="2" class="peach right-align">${this.escapeHtml(item.type === 'INCREMENT' ? `Ajuste: ${item.description}` : `Descuento: ${item.description}`)}</td>
+          <td class="value-cell">${this.escapeHtml(this.formatCurrency(item.type === 'INCREMENT' ? item.amount : -item.amount))}</td>
+        </tr>`,
+            )
+            .join('') || ''
         }
         <tr>
           <td class="peach">Valor Saldo</td>

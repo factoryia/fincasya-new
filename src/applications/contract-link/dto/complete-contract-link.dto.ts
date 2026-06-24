@@ -24,4 +24,7 @@ export class CompleteContractLinkDto {
   @IsString()
   @IsOptional()
   ciudad?: string;
+
+  @IsOptional()
+  cedulaPhotoUrls?: string[];
 }

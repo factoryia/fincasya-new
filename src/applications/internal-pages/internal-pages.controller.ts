@@ -54,5 +54,17 @@ export class InternalPagesController {
   async uploadVideo(@UploadedFile() file: Express.Multer.File) {
     return await this.internalPagesService.uploadVideo(file);
   }
+
+  @Post('document')
+  @UseGuards(ConvexAuthGuard, AdminGuard)
+  @UseInterceptors(
+    FileInterceptor('document', {
+      storage: memoryStorage(),
+      limits: { fileSize: 20 * 1024 * 1024 },
+    }),
+  )
+  async uploadDocument(@UploadedFile() file: Express.Multer.File) {
+    return await this.internalPagesService.uploadDocument(file);
+  }
 }
 

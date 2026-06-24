@@ -241,4 +241,15 @@ export class InternalPagesService {
       throw new BadRequestException(error.message);
     }
   }
+
+  async uploadDocument(file: Express.Multer.File) {
+    try {
+      if (!file) {
+        throw new BadRequestException('No document provided');
+      }
+      return await this.s3Service.uploadDocument(file);
+    } catch (error) {
+      throw new BadRequestException(error.message);
+    }
+  }
 }

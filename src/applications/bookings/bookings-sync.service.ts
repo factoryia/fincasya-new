@@ -101,6 +101,18 @@ export class BookingsSyncService {
       depositoAseo?: number | string;
       discountAmount?: number | string;
       subtotal?: number | string;
+      issueDate?: string;
+      economicAdjustments?:
+        | string
+        | Array<{
+            id: string;
+            date: string;
+            description: string;
+            amount: number;
+            type: 'INCREMENT' | 'DISCOUNT';
+            createdBy?: string;
+            createdAt: number;
+          }>;
       tieneMascotas?: boolean | string;
       multimediaLinks?:
         | string
@@ -142,6 +154,23 @@ export class BookingsSyncService {
     const discountAmountNum = parseNum(params.discountAmount);
     const subtotalNum = parseNum(params.subtotal);
     const tieneMascotasBool = parseBool(params.tieneMascotas);
+    const issueDate =
+      typeof params.issueDate === 'string' && params.issueDate.trim()
+        ? params.issueDate.trim()
+        : undefined;
+    const economicAdjustments = (() => {
+      const raw = params.economicAdjustments;
+      if (!raw) return undefined;
+      if (typeof raw === 'string') {
+        try {
+          const parsed = JSON.parse(raw);
+          return Array.isArray(parsed) ? parsed : undefined;
+        } catch {
+          return undefined;
+        }
+      }
+      return Array.isArray(raw) ? raw : undefined;
+    })();
     const isDirectBool = parseBool(params.isDirect);
     const isEventoBool = parseBool(params.isEvento);
     const skipAutoContractBool =
@@ -251,6 +280,8 @@ export class BookingsSyncService {
       depositoGarantia: depositoGarantiaNum,
       depositoAseo: depositoAseoNum,
       discountAmount: discountAmountNum,
+      issueDate,
+      economicAdjustments,
       tieneMascotas: tieneMascotasBool,
       isDirect: isDirectBool,
       groupType: params.groupType,
@@ -356,6 +387,18 @@ export class BookingsSyncService {
       depositoAseo?: number | string;
       discountAmount?: number | string;
       subtotal?: number | string;
+      issueDate?: string;
+      economicAdjustments?:
+        | string
+        | Array<{
+            id: string;
+            date: string;
+            description: string;
+            amount: number;
+            type: 'INCREMENT' | 'DISCOUNT';
+            createdBy?: string;
+            createdAt: number;
+          }>;
       tieneMascotas?: boolean | string;
       multimediaLinks?:
         | string
@@ -392,6 +435,23 @@ export class BookingsSyncService {
     const discountAmountNum = parseNum(params.discountAmount);
     const subtotalNum = parseNum(params.subtotal);
     const tieneMascotasBool = parseBool(params.tieneMascotas);
+    const issueDate =
+      typeof params.issueDate === 'string' && params.issueDate.trim()
+        ? params.issueDate.trim()
+        : undefined;
+    const economicAdjustments = (() => {
+      const raw = params.economicAdjustments;
+      if (!raw) return undefined;
+      if (typeof raw === 'string') {
+        try {
+          const parsed = JSON.parse(raw);
+          return Array.isArray(parsed) ? parsed : undefined;
+        } catch {
+          return undefined;
+        }
+      }
+      return Array.isArray(raw) ? raw : undefined;
+    })();
 
     const normalizedStatus =
       typeof params.status === 'string' ? params.status.trim().toUpperCase() : undefined;
@@ -494,6 +554,8 @@ export class BookingsSyncService {
       depositoGarantia: depositoGarantiaNum,
       depositoAseo: depositoAseoNum,
       discountAmount: discountAmountNum,
+      issueDate,
+      economicAdjustments,
       precioTotal: precioTotalNum,
       temporada: params.temporada,
       observaciones: params.observaciones,

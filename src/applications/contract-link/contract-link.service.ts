@@ -8,6 +8,7 @@ import {
 } from '@nestjs/common';
 import type { Response } from 'express';
 import { ConvexSiteProxyService } from '../shared/services/convex-site-proxy.service';
+import { S3Service } from '../shared/services/s3.service';
 import { FincasService } from '../fincas/fincas.service';
 import { GenerateContractDto } from '../fincas/dto/generate-contract.dto';
 import type { CompleteContractLinkDto } from './dto/complete-contract-link.dto';
@@ -67,7 +68,51 @@ export class ContractLinkService {
   constructor(
     private readonly convexProxy: ConvexSiteProxyService,
     private readonly fincasService: FincasService,
+    private readonly s3Service: S3Service,
   ) {}
+
+  async uploadCedulaPhotos(
+    token: string,
+    files: Express.Multer.File[],
+  ): Promise<{ urls: string[] }> {
+    if (!token || token.length < 8) {
+      throw new BadRequestException('Token inválido');
+    }
+    if (!files?.length) {
+      throw new BadRequestException('Adjunta al menos una foto de la cédula');
+    }
+    if (files.length > 2) {
+      throw new BadRequestException('Máximo 2 fotos de cédula');
+    }
+
+    const row = await this.fetchContractLinkRow(token);
+    if (row.status === 'filled') {
+      throw new ConflictException('already_filled');
+    }
+    if (row.status === 'expired') {
+      throw new GoneException('expired');
+    }
+
+    const urls: string[] = [];
+    for (const file of files) {
+      if (!file.mimetype?.startsWith('image/')) {
+        throw new BadRequestException('Solo se permiten imágenes');
+      }
+      if (file.size > 8 * 1024 * 1024) {
+        throw new BadRequestException('Cada imagen debe pesar menos de 8 MB');
+      }
+      const ext = file.originalname?.split('.').pop() || 'jpg';
+      const safeName = `cedula_${Date.now()}_${urls.length + 1}.${ext}`;
+      const url = await this.s3Service.uploadFile(
+        file,
+        `contracts/cedula/${token}`,
+        safeName,
+      );
+      urls.push(url);
+    }
+
+    return { urls };
+  }
 
   /**
    * Completa el link de contrato: valida token, genera PDF y registra datos en Convex.
@@ -246,7 +291,15 @@ export class ContractLinkService {
     const fillRes = await fetch(`${baseUrl}/api/contract-fill/${encodeURIComponent(token)}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
+      body: JSON.stringify({
+        nombre: body.nombre,
+        cedula: body.cedula,
+        email: body.email,
+        telefono: body.telefono,
+        direccion: body.direccion,
+        ciudad: body.ciudad,
+        cedulaPhotoUrls: body.cedulaPhotoUrls,
+      }),
     });
 
     if (fillRes.status === 409) {

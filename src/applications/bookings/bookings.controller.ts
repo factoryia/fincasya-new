@@ -694,7 +694,12 @@ export class BookingsController {
 
   @Post()
   @UseGuards(ConvexAuthGuard, AdminGuard)
-  @UseInterceptors(FilesInterceptor('multimedia'))
+  @UseInterceptors(
+    FilesInterceptor('multimedia', 10, {
+      storage: memoryStorage(),
+      limits: { fileSize: 50 * 1024 * 1024 },
+    }),
+  )
   async create(
     @Body() body: any,
     @UploadedFiles() files?: Express.Multer.File[],
@@ -704,7 +709,12 @@ export class BookingsController {
 
   @Put(':id')
   @UseGuards(ConvexAuthGuard, AdminGuard)
-  @UseInterceptors(FilesInterceptor('multimedia'))
+  @UseInterceptors(
+    FilesInterceptor('multimedia', 10, {
+      storage: memoryStorage(),
+      limits: { fileSize: 50 * 1024 * 1024 },
+    }),
+  )
   async update(
     @Param('id') id: string,
     @Body() body: any,

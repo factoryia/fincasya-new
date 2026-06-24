@@ -91,6 +91,7 @@ export const processFillSubmit = internalAction({
     telefono: v.string(),
     direccion: v.string(),
     ciudad: v.optional(v.string()),
+    cedulaPhotoUrls: v.optional(v.array(v.string())),
   },
   handler: async (ctx, args): Promise<ProcessFillSubmitResult> => {
     const result = (await ctx.runMutation(internal.contractFillTokens.fillToken, {
@@ -101,9 +102,21 @@ export const processFillSubmit = internalAction({
       telefono: args.telefono,
       direccion: args.direccion,
       ciudad: args.ciudad,
+      cedulaPhotoUrls: args.cedulaPhotoUrls,
     })) as FillTokenResult;
 
     if (!result.ok) return result;
+
+    await ctx.runMutation(internal.contacts.upsertFromContractFillForm, {
+      conversationId: result.conversationId,
+      nombre: args.nombre,
+      cedula: args.cedula,
+      email: args.email,
+      telefono: args.telefono,
+      direccion: args.direccion,
+      ciudad: args.ciudad,
+      cedulaPhotoUrls: args.cedulaPhotoUrls,
+    });
 
     if (result.conversationId) {
       // Notifica al asesor en el inbox con los datos listos
@@ -112,6 +125,9 @@ export const processFillSubmit = internalAction({
         `👤 ${args.nombre} · CC ${args.cedula}`,
         `📧 ${args.email} · 📱 ${args.telefono}`,
         `🏠 ${args.direccion}${args.ciudad ? `, ${args.ciudad}` : ''}`,
+        ...(args.cedulaPhotoUrls?.length
+          ? [`🪪 Fotos cédula: ${args.cedulaPhotoUrls.join('\n')}`]
+          : []),
         ``,
         `✅ Datos listos para generar el contrato desde el panel.`,
       ].join('\n');

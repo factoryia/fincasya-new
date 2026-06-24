@@ -2415,35 +2415,69 @@ Al confirmar tu pago, recibirás el *soporte oficial* junto con todos los detall
     const checkInDate = this.pdfService.toIsoDate(booking.fechaEntrada);
     const checkOutDate = this.pdfService.toIsoDate(booking.fechaSalida);
     const totalAmount = this.pdfService.toNumber(booking.precioTotal);
+    const rentAmount = this.pdfService.toNumber(booking.subtotal);
+    const cleaningFee = this.pdfService.toNumber(booking.depositoAseo);
+    const refundableDeposit = this.pdfService.toNumber(booking.depositoGarantia);
 
-    // Mapear datos al formato de PDF
+    let depositAmount = Math.round(totalAmount * 0.5);
+    let balanceAmount = Math.max(0, totalAmount - depositAmount);
+    let depositDate = booking.issueDate || this.pdfService.toIsoDate(new Date());
+
+    try {
+      const payments = await this.convexService.query(
+        'bookings:getPaymentsByBooking',
+        { bookingId: bookingId as any },
+      );
+      if (payments?.netPaid > 0) {
+        depositAmount = payments.netPaid;
+        balanceAmount = payments.pending;
+        const primary = payments.payments?.[0];
+        const noteMatch = String(primary?.notes ?? '').match(
+          /Fecha abono:\s*([^·]+)/i,
+        );
+        if (noteMatch?.[1]) {
+          depositDate = this.pdfService.toIsoDate(noteMatch[1].trim());
+        }
+      }
+    } catch {
+      // Mantener defaults si no hay pagos registrados.
+    }
+
     const pdfData: ReservationConfirmationData = {
       propertyId: booking.propertyId,
-      contractNumber: booking.contractNumber || String(Date.now()).slice(-6),
+      contractNumber: booking.reference || String(Date.now()).slice(-6),
       clientName: booking.nombreCompleto || 'Cliente',
       clientId: booking.cedula || '',
       clientEmail: booking.correo || '',
-      issueDate: this.pdfService.toIsoDate(new Date()),
+      issueDate: booking.issueDate || this.pdfService.toIsoDate(new Date()),
       clientPhone: booking.celular || '',
-      clientAddress: '', // No siempre disponible en booking
+      clientAddress: booking.address || '',
       propertyName: finca?.title || booking.fincaName || 'Propiedad',
       propertyLocation: finca?.location || '',
       checkInDate,
       checkOutDate,
-      checkInTime: '10:00', // Default
-      checkOutTime: '15:00', // Default
+      checkInTime: booking.horaEntrada || '10:00',
+      checkOutTime: booking.horaSalida || '15:00',
       guests: this.pdfService.toNumber(booking.numeroPersonas) || 1,
       nights: this.pdfService.calculateNights(checkInDate, checkOutDate),
-      depositAmount: Math.round(totalAmount * 0.5), // Default behavior
-      depositDate: this.pdfService.toIsoDate(new Date()),
-      balanceAmount: Math.round(totalAmount * 0.5),
+      depositAmount,
+      depositDate,
+      balanceAmount,
       balanceDate: checkInDate,
-      rentAmount: totalAmount,
-      cleaningFee: 0,
-      refundableDeposit: 0,
+      rentAmount,
+      cleaningFee,
+      refundableDeposit,
       totalAmount,
-      paymentMethod: 'bancolombia', // Default
-      paymentStatus: booking.status === 'PAID' ? 'paid' : 'pending',
+      paymentMethod: 'bancolombia',
+      paymentStatus:
+        booking.paymentStatus === 'PAID' || booking.status === 'PAID'
+          ? 'paid'
+          : 'pending',
+      economicAdjustments: (booking.economicAdjustments ?? []).map((item) => ({
+        description: item.description,
+        amount: item.amount,
+        type: item.type,
+      })),
     };
 
     const pdfBuffer =

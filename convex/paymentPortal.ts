@@ -10,6 +10,7 @@ import {
   netPaidFromPayments,
   pendingFromTotal,
 } from './lib/bookingPayments';
+import { economicAdjustmentBreakdownRows } from './lib/economicAdjustments';
 
 function paymentPortalBase(): string {
   return (
@@ -42,13 +43,20 @@ function computeBreakdown(booking: Doc<'bookings'>): BreakdownRow[] {
     },
   ].filter((row) => row.amount !== 0);
 
+  const adjustmentRows = economicAdjustmentBreakdownRows(
+    booking.economicAdjustments,
+  );
+  if (adjustmentRows.length > 0) {
+    rows.push(...adjustmentRows);
+  }
+
   const sum = rows.reduce((acc, row) => acc + row.amount, 0);
   const diff = (Number(booking.precioTotal) || 0) - sum;
   const hasDeposit = rows.some((row) =>
     row.label.toLowerCase().includes('depósito reembolsable'),
   );
 
-  if (diff !== 0) {
+  if (diff !== 0 && adjustmentRows.length === 0) {
     if (!hasDeposit && diff > 0) {
       rows.push({
         label: 'Valor depósito reembolsable',

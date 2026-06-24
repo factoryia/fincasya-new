@@ -310,6 +310,25 @@ export default defineSchema({
     depositoAseo: v.optional(v.number()),
     discountCode: v.optional(v.string()),
     discountAmount: v.optional(v.number()),
+    /** Fecha de emisión del contrato / confirmación (yyyy-MM-dd). */
+    issueDate: v.optional(v.string()),
+    /**
+     * Novedades económicas: incrementos o descuentos sobre el valor base
+     * (alquiler + limpieza + depósito). precioTotal = base + ajustes.
+     */
+    economicAdjustments: v.optional(
+      v.array(
+        v.object({
+          id: v.string(),
+          date: v.string(),
+          description: v.string(),
+          amount: v.number(),
+          type: v.union(v.literal('INCREMENT'), v.literal('DISCOUNT')),
+          createdBy: v.optional(v.string()),
+          createdAt: v.number(),
+        }),
+      ),
+    ),
     precioTotal: v.number(),
     currency: v.optional(v.string()),
     temporada: v.string(),
@@ -409,6 +428,8 @@ export default defineSchema({
     checkinServiciosNota: v.optional(v.string()),
     /** Menores de 2 años (no cuentan para cupo ni van en `checkinGuests`). */
     checkinMenoresDe2: v.optional(v.number()),
+    /** Mascotas indicadas en el portal de check-in. */
+    checkinMascotas: v.optional(v.number()),
     /** Placas de vehículos indicadas en el portal de check-in. */
     checkinPlacas: v.optional(v.string()),
     /** Solicitudes especiales del huésped en el portal de check-in. */
@@ -449,6 +470,14 @@ export default defineSchema({
             }),
           ),
         ),
+      }),
+    ),
+    /** Contacto alternativo del receptor del pago al propietario. */
+    ownerReceiver: v.optional(
+      v.object({
+        nombre: v.optional(v.string()),
+        contacto: v.optional(v.string()),
+        updatedAt: v.optional(v.number()),
       }),
     ),
     /**
@@ -774,6 +803,8 @@ export default defineSchema({
      * limpia y `crmType` pasa a 'client'.
      */
     dealLabel: v.optional(v.string()),
+    /** Fotos de cédula subidas desde el link de contrato (frente/reverso). */
+    cedulaPhotoUrls: v.optional(v.array(v.string())),
     createdAt: v.number(),
     updatedAt: v.optional(v.number()),
   })
@@ -1304,6 +1335,7 @@ export default defineSchema({
         telefono: v.string(),
         direccion: v.string(),
         ciudad: v.optional(v.string()),
+        cedulaPhotoUrls: v.optional(v.array(v.string())),
         filledAt: v.number(),
       }),
     ),

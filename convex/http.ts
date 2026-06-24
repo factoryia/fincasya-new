@@ -996,6 +996,7 @@ http.route({
       telefono?: string;
       direccion?: string;
       ciudad?: string;
+      cedulaPhotoUrls?: string[];
     };
     try {
       body = (await request.json()) as typeof body;
@@ -1019,7 +1020,21 @@ http.route({
 
     const result = await ctx.runAction(
       internal.contractFillTokensAction.processFillSubmit,
-      { token, nombre, cedula, email, telefono, direccion, ciudad },
+      {
+        token,
+        nombre,
+        cedula,
+        email,
+        telefono,
+        direccion,
+        ciudad,
+        cedulaPhotoUrls: Array.isArray(body?.cedulaPhotoUrls)
+          ? body.cedulaPhotoUrls
+              .map((u) => String(u ?? "").trim())
+              .filter((u) => u.length > 0)
+              .slice(0, 2)
+          : undefined,
+      },
     );
 
     if (!result.ok) {

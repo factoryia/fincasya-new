@@ -84,6 +84,7 @@ export const fillToken = internalMutation({
     telefono: v.string(),
     direccion: v.string(),
     ciudad: v.optional(v.string()),
+    cedulaPhotoUrls: v.optional(v.array(v.string())),
   },
   handler: async (ctx, args) => {
     const row = await ctx.db
@@ -107,6 +108,7 @@ export const fillToken = internalMutation({
         telefono: args.telefono,
         direccion: args.direccion,
         ciudad: args.ciudad,
+        cedulaPhotoUrls: args.cedulaPhotoUrls,
         filledAt: Date.now(),
       },
     });

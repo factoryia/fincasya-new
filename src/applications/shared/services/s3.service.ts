@@ -26,6 +26,7 @@ export class S3Service {
     file: Express.Multer.File,
     folder: string = 'uploads',
     customFileName?: string,
+    options?: { contentDisposition?: 'inline' | 'attachment' },
   ): Promise<string> {
     if (!file || !file.buffer) {
       throw new BadRequestException('No file provided');
@@ -34,6 +35,8 @@ export class S3Service {
     const fileName = customFileName
       ? `${folder}/${customFileName}`
       : `${folder}/${randomUUID()}.${ext}`;
+    const disposition = options?.contentDisposition ?? 'attachment';
+    const downloadName = customFileName || file.originalname || 'download';
 
     try {
       const command = new PutObjectCommand({
@@ -41,7 +44,7 @@ export class S3Service {
         Key: fileName,
         Body: file.buffer,
         ContentType: file.mimetype || 'application/octet-stream',
-        ContentDisposition: `attachment; filename="${customFileName || file.originalname || 'download.pdf'}"`,
+        ContentDisposition: `${disposition}; filename="${downloadName}"`,
       });
 
       await this.s3Client.send(command);
@@ -126,5 +129,25 @@ export class S3Service {
     }
 
     return this.uploadMultipleFiles(files, 'images');
+  }
+
+  async uploadDocument(file: Express.Multer.File): Promise<string> {
+    const ext = file?.originalname?.toLowerCase().split('.').pop();
+    const docExts = ['pdf', 'doc', 'docx'];
+    const docMimes = new Set([
+      'application/pdf',
+      'application/msword',
+      'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    ]);
+    const isDocument =
+      (ext && docExts.includes(ext)) ||
+      (file?.mimetype && docMimes.has(file.mimetype));
+    if (!isDocument) {
+      throw new BadRequestException('File must be a PDF or Word document (pdf, doc, docx)');
+    }
+    const isPdf = file.mimetype === 'application/pdf' || ext === 'pdf';
+    return this.uploadFile(file, 'documents', undefined, {
+      contentDisposition: isPdf ? 'inline' : 'attachment',
+    });
   }
 }

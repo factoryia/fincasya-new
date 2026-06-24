@@ -121,6 +121,159 @@ export const setLeadDealLabel = internalMutation({
  *
  * Idempotente: si nada cambió, no escribe.
  */
+/** E.164; asume móvil colombiano de 10 dígitos si el usuario no puso código país. */
+function normalizeContractPhone(raw: string): string {
+  const s = String(raw ?? "").trim().replace(/\s/g, "");
+  if (!s) return "";
+  const digits = s.replace(/^\+/, "").replace(/\D/g, "");
+  if (!digits) return "";
+  if (digits.length === 10 && digits.startsWith("3")) {
+    return `+57${digits}`;
+  }
+  return `+${digits}`;
+}
+
+function mergeCedulaPhotoUrls(
+  existing: string[] | undefined,
+  incoming: string[] | undefined,
+): string[] | undefined {
+  if (!incoming?.length) return existing;
+  const merged = [...(existing ?? []), ...incoming];
+  const unique: string[] = [];
+  const seen = new Set<string>();
+  for (const url of merged) {
+    const trimmed = String(url ?? "").trim();
+    if (!trimmed || seen.has(trimmed)) continue;
+    seen.add(trimmed);
+    unique.push(trimmed);
+    if (unique.length >= 2) break;
+  }
+  return unique.length > 0 ? unique : undefined;
+}
+
+async function findContactByPhone(ctx: QueryCtx, raw: string) {
+  const candidates = new Set<string>();
+  const trimmed = String(raw ?? "").trim();
+  if (trimmed) candidates.add(trimmed);
+  const normalized = normalizeContractPhone(raw);
+  if (normalized) candidates.add(normalized);
+  for (const phone of candidates) {
+    const found = await ctx.db
+      .query("contacts")
+      .withIndex("by_phone", (q) => q.eq("phone", phone))
+      .first();
+    if (found) return found;
+  }
+  return null;
+}
+
+/**
+ * Crea o actualiza el contacto CRM cuando el cliente completa el link de contrato.
+ * Enlaza por conversación (inbox), teléfono, cédula o correo; guarda fotos de cédula.
+ */
+export const upsertFromContractFillForm = internalMutation({
+  args: {
+    conversationId: v.optional(v.id("conversations")),
+    nombre: v.string(),
+    cedula: v.string(),
+    email: v.string(),
+    telefono: v.string(),
+    direccion: v.string(),
+    ciudad: v.optional(v.string()),
+    cedulaPhotoUrls: v.optional(v.array(v.string())),
+  },
+  handler: async (ctx, args) => {
+    const now = Date.now();
+    const nombre = args.nombre.trim();
+    const cedula = args.cedula.trim();
+    const email = args.email.trim();
+    const direccion = args.direccion.trim();
+    const ciudad = args.ciudad?.trim() || undefined;
+    const phone =
+      normalizeContractPhone(args.telefono) || args.telefono.trim();
+
+    let contactId: Id<"contacts"> | null = null;
+
+    if (args.conversationId) {
+      const conv = await ctx.db.get(args.conversationId);
+      if (conv) contactId = conv.contactId;
+    }
+
+    if (!contactId && phone) {
+      const byPhone = await findContactByPhone(ctx, args.telefono);
+      if (byPhone) contactId = byPhone._id;
+    }
+
+    if (!contactId && cedula) {
+      const byCedula = await ctx.db
+        .query("contacts")
+        .withIndex("by_cedula", (q) => q.eq("cedula", cedula))
+        .first();
+      if (byCedula) contactId = byCedula._id;
+    }
+
+    if (!contactId && email) {
+      const byEmail = await ctx.db
+        .query("contacts")
+        .filter((q) => q.eq(q.field("email"), email))
+        .first();
+      if (byEmail) contactId = byEmail._id;
+    }
+
+    const photoUrls = mergeCedulaPhotoUrls(undefined, args.cedulaPhotoUrls);
+
+    if (contactId) {
+      const contact = await ctx.db.get(contactId);
+      if (!contact) return { contactId: null, created: false };
+
+      const mergedPhotos = mergeCedulaPhotoUrls(
+        contact.cedulaPhotoUrls,
+        args.cedulaPhotoUrls,
+      );
+      const baseName = nombre;
+      const displayName =
+        contact.dealLabel && contact.dealLabel.length > 0
+          ? `${baseName} · ${contact.dealLabel}`
+          : baseName;
+
+      await ctx.db.patch(contactId, {
+        name: displayName,
+        baseName,
+        phone: phone || contact.phone,
+        cedula: cedula || contact.cedula,
+        email: email || contact.email,
+        address: direccion || contact.address,
+        city: ciudad || contact.city,
+        ...(mergedPhotos ? { cedulaPhotoUrls: mergedPhotos } : {}),
+        ...(contact.crmType === "client" ? {} : { crmType: "lead" as const }),
+        updatedAt: now,
+      });
+
+      return { contactId, created: false };
+    }
+
+    if (!phone) {
+      return { contactId: null, created: false };
+    }
+
+    const newId = await ctx.db.insert("contacts", {
+      phone,
+      name: nombre,
+      baseName: nombre,
+      cedula,
+      email,
+      address: direccion,
+      city: ciudad,
+      ...(photoUrls ? { cedulaPhotoUrls: photoUrls } : {}),
+      crmType: "lead",
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    return { contactId: newId, created: true };
+  },
+});
+
 export const upsertFromContractData = internalMutation({
   args: {
     contactId: v.id("contacts"),
