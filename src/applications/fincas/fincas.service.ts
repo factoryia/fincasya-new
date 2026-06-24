@@ -2387,6 +2387,43 @@ Al confirmar tu pago, recibirás el *soporte oficial* junto con todos los detall
         finalFilename,
       );
 
+      // 4.b Registrar/actualizar el contrato en el Gestor de Contratos. Defensivo:
+      // si falla, no rompe la generación del contrato.
+      try {
+        const origen =
+          dto.conversationId === 'contract-link'
+            ? 'link'
+            : dto.conversationId === 'direct-reservation' || !dto.conversationId
+              ? 'confirmacion'
+              : 'inbox';
+        await this.convexService.mutation('contracts:upsert', {
+          contractNumber: resolvedContractNumber,
+          propertyId: dto.propertyId as any,
+          propertyTitle: finca.title || undefined,
+          propertyLocation: finca.location || undefined,
+          clienteNombre: dto.clientName || undefined,
+          clienteCedula: dto.clientId || undefined,
+          clienteEmail: dto.clientEmail || undefined,
+          clienteTelefono: dto.clientPhone || undefined,
+          clienteCiudad: dto.clientCity || undefined,
+          clienteDireccion: dto.clientAddress || undefined,
+          firmanteNombre: dto.adminName || undefined,
+          firmanteCedula: dto.adminCedula || undefined,
+          valorTotal: Math.floor(Number(dto.totalPrice) || 0) || undefined,
+          fechaEntrada: dto.checkInDate || undefined,
+          fechaSalida: dto.checkOutDate || undefined,
+          pdfUrl: publicUrl,
+          pdfFilename: finalFilename,
+          estado: 'generado',
+          origen,
+        });
+      } catch (regErr) {
+        console.warn(
+          '[api] No se pudo registrar el contrato en el gestor:',
+          (regErr as Error)?.message,
+        );
+      }
+
       // 5. Enviar mensaje a la conversaciÃ³n (solo si es una conversaciÃ³n vÃ¡lida)
       if (dto.conversationId && dto.conversationId !== 'direct-reservation') {
         try {

@@ -639,6 +639,45 @@ export default defineSchema({
     updatedAt: v.number(),
   }).index('by_scope', ['scope']),
 
+  /**
+   * Registro unificado de contratos (Gestor de Contratos). Una fila por
+   * `contractNumber`. Se hace upsert al generar/avanzar el contrato y se puede
+   * reconstruir con `contracts:backfill` a partir de las fuentes históricas.
+   */
+  contracts: defineTable({
+    contractNumber: v.string(),
+    propertyId: v.optional(v.id('properties')),
+    propertyTitle: v.optional(v.string()),
+    propertyLocation: v.optional(v.string()),
+    clienteNombre: v.optional(v.string()),
+    clienteCedula: v.optional(v.string()),
+    clienteEmail: v.optional(v.string()),
+    clienteTelefono: v.optional(v.string()),
+    clienteCiudad: v.optional(v.string()),
+    clienteDireccion: v.optional(v.string()),
+    firmanteNombre: v.optional(v.string()),
+    firmanteCedula: v.optional(v.string()),
+    valorTotal: v.optional(v.number()),
+    fechaEntrada: v.optional(v.string()),
+    fechaSalida: v.optional(v.string()),
+    pdfUrl: v.optional(v.string()),
+    pdfFilename: v.optional(v.string()),
+    /** borrador | generado | enviado | completado | pagado | expirado | anulado */
+    estado: v.string(),
+    /** confirmacion | link | inbox */
+    origen: v.optional(v.string()),
+    bookingId: v.optional(v.id('bookings')),
+    fillTokenId: v.optional(v.id('contractFillTokens')),
+    /** Datos del contrato (form) serializados, para reabrir/editar. */
+    draftJson: v.optional(v.string()),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index('by_contract_number', ['contractNumber'])
+    .index('by_status', ['estado'])
+    .index('by_created', ['createdAt'])
+    .index('by_property', ['propertyId']),
+
   /** Ajustes globales de plataforma (p. ej. interruptor maestro de IA). */
   platformSettings: defineTable({
     scope: v.literal('global'),

@@ -686,6 +686,35 @@ export class BookingsSyncService {
     });
   }
 
+  /** Gestor de Contratos: lista paginada con filtros. */
+  async listContracts(params: {
+    estado?: string;
+    origen?: string;
+    propertyId?: string;
+    search?: string;
+    limit?: number;
+    page?: number;
+  }) {
+    return this.convexService.query('contracts:list', {
+      estado: params.estado,
+      origen: params.origen,
+      propertyId: params.propertyId as any,
+      search: params.search,
+      limit: params.limit,
+      page: params.page,
+    });
+  }
+
+  /** Gestor de Contratos: detalle por número de contrato. */
+  async getContract(contractNumber: string) {
+    return this.convexService.query('contracts:get', { contractNumber });
+  }
+
+  /** Gestor de Contratos: reconstruye la tabla desde las fuentes históricas. */
+  async backfillContracts() {
+    return this.convexService.mutation('contracts:backfill', {});
+  }
+
   async listContractCodes(params: {
     propertyId?: string;
     search?: string;

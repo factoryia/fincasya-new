@@ -623,6 +623,40 @@ export class BookingsController {
     });
   }
 
+  @Get('contracts')
+  @UseGuards(ConvexAuthGuard, AdminGuard)
+  async listContracts(
+    @Query('estado') estado?: string,
+    @Query('origen') origen?: string,
+    @Query('propertyId') propertyId?: string,
+    @Query('search') search?: string,
+    @Query('limit') limit?: string,
+    @Query('page') page?: string,
+  ) {
+    const parsedLimit = limit ? parseInt(limit, 10) : undefined;
+    const parsedPage = page ? parseInt(page, 10) : undefined;
+    return this.bookingsSyncService.listContracts({
+      estado: estado?.trim() || undefined,
+      origen: origen?.trim() || undefined,
+      propertyId: propertyId?.trim() || undefined,
+      search: search?.trim() || undefined,
+      limit: Number.isFinite(parsedLimit) ? parsedLimit : undefined,
+      page: Number.isFinite(parsedPage) ? parsedPage : undefined,
+    });
+  }
+
+  @Post('contracts/backfill')
+  @UseGuards(ConvexAuthGuard, AdminGuard)
+  async backfillContracts() {
+    return this.bookingsSyncService.backfillContracts();
+  }
+
+  @Get('contracts/:contractNumber')
+  @UseGuards(ConvexAuthGuard, AdminGuard)
+  async getContract(@Param('contractNumber') contractNumber: string) {
+    return this.bookingsSyncService.getContract(contractNumber);
+  }
+
   @Post('check-availability')
   @UseGuards(ConvexAuthGuard, AdminGuard)
   async checkAvailability(
