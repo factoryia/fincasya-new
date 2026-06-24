@@ -686,9 +686,12 @@ export default defineSchema({
     fechaSalida: v.optional(v.string()),
     pdfUrl: v.optional(v.string()),
     pdfFilename: v.optional(v.string()),
+    /** PDF de confirmación de reserva (solo tras confirmar pago). */
+    confirmationPdfUrl: v.optional(v.string()),
+    confirmationPdfFilename: v.optional(v.string()),
     /** borrador | generado | enviado | completado | pagado | expirado | anulado */
     estado: v.string(),
-    /** confirmacion | link | inbox */
+    /** admin = Contratos y Confirmación (solo contrato); link | inbox; confirmacion = pago confirmado */
     origen: v.optional(v.string()),
     bookingId: v.optional(v.id('bookings')),
     fillTokenId: v.optional(v.id('contractFillTokens')),

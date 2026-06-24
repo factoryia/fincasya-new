@@ -2458,7 +2458,7 @@ Al confirmar tu pago, recibirás el *soporte oficial* junto con todos los detall
           dto.conversationId === 'contract-link'
             ? 'link'
             : dto.conversationId === 'direct-reservation' || !dto.conversationId
-              ? 'confirmacion'
+              ? 'admin'
               : 'inbox';
         await this.convexService.mutation('contracts:upsert', {
           contractNumber: resolvedContractNumber,
@@ -2734,6 +2734,40 @@ Al confirmar tu pago, recibirás el *soporte oficial* junto con todos los detall
         uploadedAt: Date.now(),
       },
     });
+
+    const contractNumber = String(
+      pdfData.contractNumber ||
+        (booking.observaciones ?? '').replace(/^contrato\s*:\s*/i, '').trim() ||
+        booking.reference ||
+        '',
+    ).trim();
+    if (contractNumber) {
+      try {
+        await this.convexService.mutation('contracts:upsert', {
+          contractNumber,
+          propertyId: booking.propertyId as any,
+          propertyTitle: finca?.title,
+          propertyLocation: finca?.location,
+          clienteNombre: booking.nombreCompleto,
+          clienteCedula: booking.cedula,
+          clienteEmail: booking.correo,
+          clienteTelefono: booking.celular,
+          valorTotal: Number(booking.precioTotal) || undefined,
+          fechaEntrada: checkInDate,
+          fechaSalida: checkOutDate,
+          confirmationPdfUrl: s3Url,
+          confirmationPdfFilename: filename,
+          estado: 'pagado',
+          origen: 'confirmacion',
+          bookingId: bookingId as any,
+        });
+      } catch (regErr) {
+        console.warn(
+          '[api] No se pudo registrar confirmación en gestor:',
+          (regErr as Error)?.message,
+        );
+      }
+    }
 
     return {
       url: s3Url,

@@ -35,6 +35,8 @@ type ContractFields = {
   fechaSalida?: string;
   pdfUrl?: string;
   pdfFilename?: string;
+  confirmationPdfUrl?: string;
+  confirmationPdfFilename?: string;
   estado?: string;
   origen?: string;
   bookingId?: Id<'bookings'>;
@@ -42,7 +44,50 @@ type ContractFields = {
   draftJson?: string;
 };
 
-/** Extrae { code, url } del contrato adjunto en la multimedia de una reserva. */
+/** Extrae PDF de confirmación de reserva en multimedia. */
+function extractConfirmationPdfFromMultimedia(
+  multimedia?: Array<{ name?: string; url?: string; type?: string }> | null,
+): { url?: string; filename?: string } | null {
+  for (const m of multimedia ?? []) {
+    const name = String(m.name ?? '').toLowerCase();
+    if (
+      name.includes('confirmacion') ||
+      name.includes('confirmation') ||
+      name.includes('confirmación')
+    ) {
+      const url = String(m.url ?? '').trim();
+      if (url) {
+        return { url, filename: m.name ?? undefined };
+      }
+    }
+  }
+  return null;
+}
+
+/** Solo archivos Contrato_* del borrador admin. */
+function extractContractFromDraftJson(draftJson?: string | null): {
+  url?: string;
+  filename?: string;
+} {
+  if (!draftJson) return {};
+  try {
+    const draft = JSON.parse(draftJson) as {
+      multimediaLinks?: Array<{ url?: string; name?: string }>;
+    };
+    for (const m of draft.multimediaLinks ?? []) {
+      const name = String(m?.name ?? '');
+      const url = String(m?.url ?? '').trim();
+      if (!url) continue;
+      if (/^contrato[_\s-]/i.test(name) || name.toLowerCase().includes('contrato')) {
+        return { url, filename: name || undefined };
+      }
+    }
+  } catch {
+    /* ignore */
+  }
+  return {};
+}
+
 function extractContractPdfFromMultimedia(
   multimedia?: Array<{ name?: string; url?: string }> | null,
 ): { code: string; url?: string } | null {
@@ -122,6 +167,8 @@ export const upsert = mutation({
     fechaSalida: v.optional(v.string()),
     pdfUrl: v.optional(v.string()),
     pdfFilename: v.optional(v.string()),
+    confirmationPdfUrl: v.optional(v.string()),
+    confirmationPdfFilename: v.optional(v.string()),
     estado: v.optional(v.string()),
     origen: v.optional(v.string()),
     bookingId: v.optional(v.id('bookings')),
@@ -217,12 +264,46 @@ export const getDetail = query({
     }
 
     let bookingReference: string | undefined;
+    let bookingMultimedia: Array<{ name?: string; url?: string; type?: string }> | undefined;
     if (contract.bookingId) {
       const booking = await ctx.db.get(contract.bookingId);
       bookingReference = booking?.reference ?? undefined;
+      bookingMultimedia = booking?.multimedia;
     }
 
-    return { contract, fillToken, bookingReference };
+    let pdfUrl = contract.pdfUrl;
+    let pdfFilename = contract.pdfFilename;
+    if (!pdfUrl) {
+      const fromDraft = extractContractFromDraftJson(contract.draftJson);
+      pdfUrl = fromDraft.url;
+      pdfFilename = fromDraft.filename;
+    }
+    if (!pdfUrl && bookingMultimedia) {
+      const fromBooking = extractContractPdfFromMultimedia(bookingMultimedia);
+      pdfUrl = fromBooking?.url;
+      pdfFilename = fromBooking
+        ? `Contrato_${fromBooking.code}.pdf`
+        : undefined;
+    }
+
+    let confirmationPdfUrl = contract.confirmationPdfUrl;
+    let confirmationPdfFilename = contract.confirmationPdfFilename;
+    if (!confirmationPdfUrl && bookingMultimedia) {
+      const conf = extractConfirmationPdfFromMultimedia(bookingMultimedia);
+      confirmationPdfUrl = conf?.url;
+      confirmationPdfFilename = conf?.filename;
+    }
+
+    return {
+      contract,
+      fillToken,
+      bookingReference,
+      pdfUrl,
+      pdfFilename,
+      confirmationPdfUrl,
+      confirmationPdfFilename,
+      hasConfirmation: !!confirmationPdfUrl,
+    };
   },
 });
 
@@ -241,14 +322,13 @@ export const remove = mutation({
   },
 });
 
-const CONTRATO_ORIGENES = new Set(['link', 'inbox']);
-const CONFIRMACION_ORIGEN = 'confirmacion';
+const CONTRATO_ORIGENES = new Set(['link', 'inbox', 'admin']);
 
 export const list = query({
   args: {
     estado: v.optional(v.string()),
     origen: v.optional(v.string()),
-    /** contrato = links (inbox/admin); confirmacion = módulo Contratos y Confirmación */
+    /** contrato = sin confirmación de pago; confirmacion = con PDF de confirmación */
     tipo: v.optional(v.string()),
     propertyId: v.optional(v.id('properties')),
     search: v.optional(v.string()),
@@ -269,14 +349,22 @@ export const list = query({
       .order('desc')
       .take(5000);
 
+    all.sort((a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0));
+
+    const summaryCounts: Record<string, number> = {};
+    for (const c of all) {
+      summaryCounts[c.estado] = (summaryCounts[c.estado] ?? 0) + 1;
+    }
+    const summaryTotal = all.length;
+
     if (args.estado && args.estado !== 'todos') {
       all = all.filter((c) => c.estado === args.estado);
     }
     if (args.origen) all = all.filter((c) => c.origen === args.origen);
     if (args.tipo === 'contrato') {
-      all = all.filter((c) => CONTRATO_ORIGENES.has(String(c.origen ?? '')));
+      all = all.filter((c) => !c.confirmationPdfUrl);
     } else if (args.tipo === 'confirmacion') {
-      all = all.filter((c) => c.origen === CONFIRMACION_ORIGEN);
+      all = all.filter((c) => !!c.confirmationPdfUrl);
     }
     if (args.propertyId)
       all = all.filter((c) => c.propertyId === args.propertyId);
@@ -302,8 +390,6 @@ export const list = query({
       );
     }
 
-    all.sort((a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0));
-
     const counts: Record<string, number> = {};
     for (const c of all) counts[c.estado] = (counts[c.estado] ?? 0) + 1;
 
@@ -319,6 +405,8 @@ export const list = query({
       limit,
       totalPages,
       counts,
+      summaryTotal,
+      summaryCounts,
     };
   },
 });
@@ -355,6 +443,19 @@ export const backfill = mutation({
     for (const s of snapshots) {
       const prop = await getProp(s.propertyId);
       const p = (s.payload ?? {}) as Record<string, any>;
+      let pdfUrl: string | undefined;
+      let pdfFilename: string | undefined;
+      const links = p.multimediaLinks;
+      if (Array.isArray(links)) {
+        for (const m of links) {
+          const url = String(m?.url ?? '').trim();
+          if (url) {
+            pdfUrl = url;
+            pdfFilename = String(m?.name ?? '').trim() || undefined;
+            break;
+          }
+        }
+      }
       await upsertContract(ctx, {
         contractNumber: s.contractNumber,
         propertyId: s.propertyId,
@@ -367,8 +468,10 @@ export const backfill = mutation({
         valorTotal: Number(p.precioTotal) || undefined,
         fechaEntrada: p.fechaEntrada ? String(p.fechaEntrada) : undefined,
         fechaSalida: p.fechaSalida ? String(p.fechaSalida) : undefined,
+        pdfUrl,
+        pdfFilename,
         estado: 'generado',
-        origen: 'confirmacion',
+        origen: 'admin',
         draftJson: JSON.stringify(p),
       });
       procesados++;
@@ -423,6 +526,7 @@ export const backfill = mutation({
     const bookings = await ctx.db.query('bookings').order('desc').take(3000);
     for (const b of bookings) {
       const pdf = extractContractPdfFromMultimedia(b.multimedia);
+      const confirmation = extractConfirmationPdfFromMultimedia(b.multimedia);
       const code = (pdf?.code || (b.reference ?? '').trim()).trim();
       if (!code) continue;
       const prop = await getProp(b.propertyId ?? undefined);
@@ -440,8 +544,10 @@ export const backfill = mutation({
         fechaSalida: b.fechaSalida ? String(b.fechaSalida) : undefined,
         pdfUrl: pdf?.url,
         pdfFilename: pdf ? `Contrato_${pdf.code}.pdf` : undefined,
-        estado: 'pagado',
-        origen: 'confirmacion',
+        confirmationPdfUrl: confirmation?.url,
+        confirmationPdfFilename: confirmation?.filename,
+        estado: confirmation ? 'pagado' : 'generado',
+        origen: confirmation ? 'confirmacion' : 'admin',
         bookingId: b._id,
       });
       procesados++;
