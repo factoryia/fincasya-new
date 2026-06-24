@@ -861,6 +861,14 @@ export class BookingsSyncService {
     return this.convexService.mutation('contracts:backfill', {});
   }
 
+  /** Marca como revisados los soportes de pago pendientes de una reserva. */
+  async markPaymentReceiptsReviewed(bookingId: string) {
+    return this.convexService.mutation(
+      'bookings:markPaymentReceiptsReviewed',
+      { bookingId: bookingId as any },
+    );
+  }
+
   async listContractCodes(params: {
     propertyId?: string;
     search?: string;
