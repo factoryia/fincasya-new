@@ -834,7 +834,15 @@ export class CheckinMessagingService {
         precioTotal?: number;
         pagoPendiente?: number;
       } | null;
+      // Correos destino configurados en el admin (fallback a los por defecto).
+      const settings = (await this.convexService
+        .query('notificationSettings:get', {})
+        .catch(() => null)) as { paymentReceiptEmails?: string[] } | null;
+      const emails = Array.isArray(settings?.paymentReceiptEmails)
+        ? settings!.paymentReceiptEmails
+        : undefined;
       await this.brevoEmail.sendPaymentReceiptAlert({
+        emails,
         reference: portal?.reference || trimmed,
         propertyTitle: portal?.propertyTitle || 'tu finca',
         clientName: portal?.nombreTitular || '',

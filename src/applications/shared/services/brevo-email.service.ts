@@ -196,11 +196,14 @@ export class BrevoEmailService {
     precioTotal?: number;
     pagoPendiente?: number;
     adminUrl?: string;
+    /** Correos destino (configurables en el admin). */
+    emails?: string[];
   }) {
-    const recipients = [
-      { email: 'comercial@fincasya.com' },
-      { email: 'fincasecoturisticasdelllano@gmail.com' },
-    ];
+    const list =
+      Array.isArray(data.emails) && data.emails.length > 0
+        ? data.emails
+        : ['comercial@fincasya.com', 'fincasecoturisticasdelllano@gmail.com'];
+    const recipients = list.map((email) => ({ email }));
     if (this.isEmailSendingDisabled()) {
       this.logEmailSkipped('alerta soporte de pago', recipients.map((r) => r.email).join(', '));
       return;

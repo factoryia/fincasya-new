@@ -705,6 +705,18 @@ export default defineSchema({
     .index('by_created', ['createdAt'])
     .index('by_property', ['propertyId']),
 
+  /**
+   * Ajustes de notificaciones administrables desde el admin. Un documento por
+   * deployment (`scope === 'global'`). `payload` libre, p. ej.
+   * `{ paymentReceiptEmails: string[] }` (correos que reciben la alerta de
+   * soportes de pago).
+   */
+  notificationSettings: defineTable({
+    scope: v.literal('global'),
+    payload: v.any(),
+    updatedAt: v.number(),
+  }).index('by_scope', ['scope']),
+
   /** Ajustes globales de plataforma (p. ej. interruptor maestro de IA). */
   platformSettings: defineTable({
     scope: v.literal('global'),
