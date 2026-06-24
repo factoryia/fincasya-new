@@ -2008,8 +2008,20 @@ Al confirmar tu pago, recibirás el *soporte oficial* junto con todos los detall
         console.log(
           `[api] Contrato desde HTML de vista previa (${incomingCustomHtml.length} chars).`,
         );
+        // Rellenar los placeholders {{...}} que pudieran quedar. En el flujo de
+        // "Confirmación" la vista previa ya viene completa (no-op). En el flujo
+        // de "Link", la vista previa se guardó SIN los datos del cliente; aquí se
+        // completan con los valores reales (cliente, fechas, etc.).
+        let filledCustomHtml = incomingCustomHtml;
+        for (const [key, val] of Object.entries(wordValues)) {
+          const regex = new RegExp(
+            `\\{\\{\\s*(?:<[^>]*>)*\\s*${key}\\s*(?:<[^>]*>)*\\s*\\}\\}`,
+            'g',
+          );
+          filledCustomHtml = filledCustomHtml.replace(regex, String(val ?? ''));
+        }
         const fullHtml = await this.wrapContractFragmentHtml(
-          incomingCustomHtml,
+          filledCustomHtml,
           finca as { title?: string; location?: string },
           resolvedContractNumber,
         );
