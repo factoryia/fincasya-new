@@ -709,6 +709,43 @@ export class BookingsController {
     return this.bookingsSyncService.markPaymentReceiptsReviewed(id);
   }
 
+  @Get('payment-receipts/pending')
+  @UseGuards(ConvexAuthGuard, AdminGuard)
+  async listPendingPaymentReceipts() {
+    return this.bookingsSyncService.listPendingPaymentReceipts();
+  }
+
+  @Post(':id/receipts/:receiptId/approve')
+  @UseGuards(ConvexAuthGuard, AdminGuard)
+  async approvePaymentReceipt(
+    @Param('id') id: string,
+    @Param('receiptId') receiptId: string,
+    @Body() body: { amount?: number; paymentMethod?: string; reviewedBy?: string },
+  ) {
+    return this.bookingsSyncService.approvePaymentReceipt({
+      bookingId: id,
+      receiptId,
+      amount: Number(body?.amount) || 0,
+      paymentMethod: body?.paymentMethod,
+      reviewedBy: body?.reviewedBy,
+    });
+  }
+
+  @Post(':id/receipts/:receiptId/reject')
+  @UseGuards(ConvexAuthGuard, AdminGuard)
+  async rejectPaymentReceipt(
+    @Param('id') id: string,
+    @Param('receiptId') receiptId: string,
+    @Body() body: { motivo?: string; reviewedBy?: string },
+  ) {
+    return this.bookingsSyncService.rejectPaymentReceipt({
+      bookingId: id,
+      receiptId,
+      motivo: String(body?.motivo ?? '').trim(),
+      reviewedBy: body?.reviewedBy,
+    });
+  }
+
   @Get('notification-settings')
   @UseGuards(ConvexAuthGuard, AdminGuard)
   async getNotificationSettings() {
