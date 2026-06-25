@@ -617,7 +617,11 @@ export default defineSchema({
         }),
       ),
     ),
-    /** Denormalizado: hay al menos un soporte en `paymentPortalReceipts` con status pending. */
+    /**
+     * True si la reserva tiene algún soporte de pago PENDIENTE de revisar
+     * (`paymentPortalReceipts` con status pending). Indexado para listar la
+     * cola de revisión sin escanear toda la tabla.
+     */
     hasPendingReceipt: v.optional(v.boolean()),
     /**
      * Etiqueta libre para agrupar reservas en envíos en lote (spec §10),
@@ -640,12 +644,6 @@ export default defineSchema({
         }),
       ),
     ),
-    /**
-     * True si la reserva tiene algún soporte de pago PENDIENTE de revisar.
-     * Indexado para listar la cola de revisión sin escanear toda la tabla
-     * (evita el límite de lectura de Convex).
-     */
-    hasPendingReceipt: v.optional(v.boolean()),
   })
     .index('by_property', ['propertyId'])
     .index('by_status', ['status'])
