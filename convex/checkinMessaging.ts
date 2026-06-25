@@ -675,6 +675,7 @@ export const getCheckinLink = query({
     link: string;
     reference: string;
     checkinUbicacionUrl?: string;
+    checkinWazeUrl?: string;
     checkinIndicacionesLlegada?: string;
     checkinRecomendaciones?: string;
     checkinUbicacionImageUrl?: string;
@@ -690,6 +691,7 @@ export const getCheckinLink = query({
       .withIndex("by_property", (q) => q.eq("propertyId", b.propertyId))
       .unique();
     const mapsUrl = String(ownerInfo?.checkinUbicacionUrl ?? "").trim();
+    const wazeUrl = String(ownerInfo?.checkinWazeUrl ?? "").trim();
     const indicaciones = String(
       ownerInfo?.checkinIndicacionesLlegada ?? "",
     ).trim();
@@ -712,6 +714,7 @@ export const getCheckinLink = query({
       link: `${checkinPortalBase()}/${cr}`,
       reference: cr,
       ...(mapsUrl ? { checkinUbicacionUrl: mapsUrl } : {}),
+      ...(wazeUrl ? { checkinWazeUrl: wazeUrl } : {}),
       ...(indicaciones ? { checkinIndicacionesLlegada: indicaciones } : {}),
       ...(recomendaciones ? { checkinRecomendaciones: recomendaciones } : {}),
       ...(imageUrl ? { checkinUbicacionImageUrl: imageUrl } : {}),

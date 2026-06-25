@@ -1582,6 +1582,9 @@ Al confirmar tu pago, recibirás el *soporte oficial* junto con todos los detall
         ...(dto.checkinUbicacionUrl !== undefined
           ? { checkinUbicacionUrl: dto.checkinUbicacionUrl.trim() }
           : {}),
+        ...(dto.checkinWazeUrl !== undefined
+          ? { checkinWazeUrl: dto.checkinWazeUrl.trim() }
+          : {}),
         ...(dto.checkinIndicacionesLlegada !== undefined
           ? {
               checkinIndicacionesLlegada: dto.checkinIndicacionesLlegada.trim(),

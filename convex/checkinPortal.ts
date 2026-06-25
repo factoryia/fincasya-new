@@ -167,6 +167,7 @@ async function loadCheckinLocationInfo(
   propertyId: Id<'properties'>,
 ): Promise<{
   checkinUbicacionUrl: string | null;
+  checkinWazeUrl: string | null;
   checkinIndicacionesLlegada: string | null;
   checkinRecomendaciones: string | null;
   checkinUbicacionImageUrl: string | null;
@@ -177,6 +178,7 @@ async function loadCheckinLocationInfo(
     .withIndex('by_property', (q: any) => q.eq('propertyId', propertyId))
     .unique();
   const checkinUbicacionUrl = String(ownerInfo?.checkinUbicacionUrl ?? '').trim();
+  const checkinWazeUrl = String(ownerInfo?.checkinWazeUrl ?? '').trim();
   const checkinIndicacionesLlegada = String(
     ownerInfo?.checkinIndicacionesLlegada ?? '',
   ).trim();
@@ -198,6 +200,7 @@ async function loadCheckinLocationInfo(
   }
   return {
     checkinUbicacionUrl: checkinUbicacionUrl || null,
+    checkinWazeUrl: checkinWazeUrl || null,
     checkinIndicacionesLlegada: checkinIndicacionesLlegada || null,
     checkinRecomendaciones: checkinRecomendaciones || null,
     checkinUbicacionImageUrl:
@@ -268,6 +271,7 @@ export const getForPortal = internalQuery({
       pagoPendiente,
       pagoCompleto: pagoPendiente <= 0,
       checkinUbicacionUrl: checkinLocation.checkinUbicacionUrl,
+      checkinWazeUrl: checkinLocation.checkinWazeUrl,
       checkinIndicacionesLlegada: checkinLocation.checkinIndicacionesLlegada,
       checkinRecomendaciones: checkinLocation.checkinRecomendaciones,
       checkinUbicacionImageUrl: checkinLocation.checkinUbicacionImageUrl,

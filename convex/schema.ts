@@ -1209,8 +1209,10 @@ export default defineSchema({
     propietarioTelefono: v.optional(v.string()),
     propietarioCedula: v.optional(v.string()),
     propietarioCorreo: v.optional(v.string()),
-    /** Link de Maps (Google/Apple) — solo check-in; no se usa en catálogo ni GPS público. */
+    /** Link de Google Maps — solo check-in; no se usa en catálogo ni GPS público. */
     checkinUbicacionUrl: v.optional(v.string()),
+    /** Link de Waze — solo check-in; no se usa en catálogo ni GPS público. */
+    checkinWazeUrl: v.optional(v.string()),
     /** Indicaciones textuales de llegada (colores, portón, referencias). Solo check-in. */
     checkinIndicacionesLlegada: v.optional(v.string()),
     /** Recomendaciones de la finca (normas, cuidados, tips). Solo check-in. */

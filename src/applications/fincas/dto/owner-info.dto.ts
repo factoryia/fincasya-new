@@ -113,6 +113,10 @@ export class UpdateOwnerInfoDto {
 
   @IsOptional()
   @IsString()
+  checkinWazeUrl?: string;
+
+  @IsOptional()
+  @IsString()
   checkinIndicacionesLlegada?: string;
 
   @IsOptional()
