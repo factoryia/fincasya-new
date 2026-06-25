@@ -131,6 +131,22 @@ function formatFechaLlegada(ms: number): string {
   return `${diaCapitalizado} ${fecha}`;
 }
 
+/** Día del viaje en minúscula y sin año, para frases tipo "El {{x}} estarán viajando". Ej: "sábado 15 de junio". */
+function formatDiaViaje(ms: number): string {
+  if (!Number.isFinite(ms)) return "tu fecha de viaje";
+  const date = new Date(ms);
+  const dia = new Intl.DateTimeFormat("es-CO", {
+    weekday: "long",
+    timeZone: "America/Bogota",
+  }).format(date);
+  const fecha = new Intl.DateTimeFormat("es-CO", {
+    day: "numeric",
+    month: "long",
+    timeZone: "America/Bogota",
+  }).format(date);
+  return `${dia} ${fecha}`;
+}
+
 /**
  * Normaliza un teléfono a formato apto para YCloud (E.164 sin `+`, con
  * indicativo). Asume Colombia (57) para celulares locales de 10 dígitos.
@@ -425,8 +441,8 @@ type EnrichedBooking = {
   scheduledMessages?: Array<{ key: string; recipient: string }>;
   propertyTitle: string;
   propietarioNombre?: string;
-  propietarioTelefono?: string;
   propietarioTratamiento?: string;
+  propietarioTelefono?: string;
   encargadoNombre?: string;
   encargadoTelefono?: string;
 };
@@ -1014,6 +1030,7 @@ export const listBookingsForBatch = query({
         ),
         nombreFinca: finca,
         referenciaReserva: cr,
+        fechaViaje: formatDiaViaje(b.fechaEntrada),
         fechaLlegada: formatFechaLlegada(b.fechaEntrada),
         horaIngreso: formatHoraEntrada(b.horaEntrada, b.fechaEntrada),
         linkCheckin: `${portal}/${cr}`,
