@@ -997,6 +997,9 @@ export const createPayment = mutation({
     notes: v.optional(v.string()),
     wompiData: v.optional(v.any()),
     boldData: v.optional(v.any()),
+    receiptUrl: v.optional(v.string()),
+    verifiedBy: v.optional(v.string()),
+    verifiedAt: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
     const now = Date.now();
@@ -1018,6 +1021,9 @@ export const createPayment = mutation({
       notes: args.notes?.trim() || undefined,
       wompiData: args.wompiData,
       boldData: args.boldData,
+      receiptUrl: args.receiptUrl?.trim() || undefined,
+      verifiedBy: args.verifiedBy?.trim() || undefined,
+      verifiedAt: args.verifiedAt,
       createdAt: now,
       updatedAt: now,
     });

@@ -693,6 +693,44 @@ export class BookingsSyncService {
     return this.getBookingPayments(bookingId);
   }
 
+  /**
+   * "Validar pago": el equipo registra un abono con su soporte (que llegó por
+   * correo/WhatsApp). Sube el soporte a S3 y crea el pago como PAID. Al saldarse
+   * el total, createPayment marca la reserva como PAID (cambia de color).
+   */
+  async validatePayment(
+    bookingId: string,
+    body: {
+      amount: number;
+      paymentMethod?: string;
+      notes?: string;
+      actor?: string;
+    },
+    soporte?: Express.Multer.File,
+  ) {
+    const amount = Math.floor(Number(body.amount) || 0);
+    if (!Number.isFinite(amount) || amount <= 0) {
+      throw new BadRequestException('El monto debe ser mayor a cero.');
+    }
+    let receiptUrl: string | undefined;
+    if (soporte) {
+      receiptUrl = await this.s3Service.uploadFile(soporte, 'payments/soportes');
+    }
+    await this.convexService.mutation('bookings:createPayment', {
+      bookingId: bookingId as any,
+      type: 'ABONO_50',
+      amount,
+      paymentMethod: body.paymentMethod?.trim() || 'Manual',
+      notes: body.notes?.trim() || undefined,
+      status: 'PAID',
+      receiptUrl,
+      verifiedBy: body.actor?.trim() || undefined,
+      verifiedAt: Date.now(),
+    });
+
+    return this.getBookingPayments(bookingId);
+  }
+
   async syncReservationAbono(
     bookingId: string,
     body: {

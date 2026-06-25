@@ -927,6 +927,52 @@ export class BookingsController {
     return this.bookingsSyncService.createManualPayment(id, body);
   }
 
+  /**
+   * "Validar pago": registra un abono con su soporte (imagen/PDF) que llegó por
+   * correo/WhatsApp. Sube el soporte y crea el pago como PAID.
+   */
+  @Post(':id/validate-payment')
+  @UseGuards(ConvexAuthGuard, RolesGuard)
+  @Roles(UserRole.ADMIN, UserRole.ASSISTANT, UserRole.VENDEDOR)
+  @UseInterceptors(
+    FileInterceptor('soporte', {
+      storage: memoryStorage(),
+      limits: { fileSize: 50 * 1024 * 1024 },
+    }),
+  )
+  async validatePayment(
+    @Param('id') id: string,
+    @Body()
+    body: {
+      amount?: string;
+      paymentMethod?: string;
+      notes?: string;
+      actor?: string;
+    },
+    @UploadedFile() soporte?: Express.Multer.File,
+  ) {
+    const amount =
+      body?.amount !== undefined && body.amount !== ''
+        ? Number(String(body.amount).replace(/[^\d.-]/g, ''))
+        : 0;
+    if (!amount || amount <= 0) {
+      throw new HttpException(
+        'El monto del pago debe ser mayor a cero.',
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+    return this.bookingsSyncService.validatePayment(
+      id,
+      {
+        amount,
+        paymentMethod: body?.paymentMethod,
+        notes: body?.notes,
+        actor: body?.actor,
+      },
+      soporte,
+    );
+  }
+
   @Post(':id/payments/sync')
   @UseGuards(ConvexAuthGuard, RolesGuard)
   @Roles(UserRole.ADMIN, UserRole.ASSISTANT, UserRole.VENDEDOR)
