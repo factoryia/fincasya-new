@@ -24,6 +24,10 @@ import {
   type TemplateDef,
 } from "./lib/ycloud/templateCatalog";
 import { normalizeWhatsappPhone } from "./lib/ycloud/parseMessage";
+import {
+  ownerSalutationName,
+  resolveOwnerContactFields,
+} from "./lib/ownerSalutation";
 
 const YCLOUD_TEMPLATES_BASE = "https://api.ycloud.com/v2/whatsapp/templates";
 
@@ -31,6 +35,49 @@ function checkinPortalBase(): string {
   return (
     process.env.CHECKIN_PORTAL_BASE_URL || "https://fincasya.com/checkin"
   ).replace(/\/+$/, "");
+}
+
+function ownerPortalBase(): string {
+  return (
+    process.env.OWNER_PORTAL_BASE_URL || "https://fincasya.com/anfitrion"
+  ).replace(/\/+$/, "");
+}
+
+/** Fecha corta para aviso al propietario. Ej: "viernes 26 de junio". */
+function formatFechaLlegadaOwnerAviso(ms: number): string {
+  if (!Number.isFinite(ms)) return "próximamente";
+  const date = new Date(ms);
+  const dia = new Intl.DateTimeFormat("es-CO", {
+    weekday: "long",
+    timeZone: "America/Bogota",
+  }).format(date);
+  const dayMonth = new Intl.DateTimeFormat("es-CO", {
+    day: "numeric",
+    month: "long",
+    timeZone: "America/Bogota",
+  }).format(date);
+  return `${dia.toLowerCase()} ${dayMonth}`;
+}
+
+function ownerArrivalTemplateValues(
+  b: {
+    _id: string;
+    reference?: string;
+    fechaEntrada: number;
+    propietarioTratamiento?: string;
+    propietarioNombre?: string;
+  },
+  finca: string,
+  nombrePropietario?: string,
+): Record<string, string> {
+  const cr = (b.reference || b._id) as string;
+  return {
+    nombrePropietario:
+      nombrePropietario ?? ownerTemplateRecipientName(b),
+    fechaLlegada: formatFechaLlegadaOwnerAviso(b.fechaEntrada),
+    nombreFinca: finca,
+    linkAnfitrion: `${ownerPortalBase()}/${cr}`,
+  };
 }
 
 /** Primer nombre, para un saludo más natural en la plantilla. */
@@ -379,9 +426,20 @@ type EnrichedBooking = {
   propertyTitle: string;
   propietarioNombre?: string;
   propietarioTelefono?: string;
+  propietarioTratamiento?: string;
   encargadoNombre?: string;
   encargadoTelefono?: string;
 };
+
+function ownerTemplateRecipientName(b: {
+  propietarioTratamiento?: string;
+  propietarioNombre?: string;
+}): string {
+  return ownerSalutationName(
+    b.propietarioTratamiento,
+    b.propietarioNombre,
+  );
+}
 
 export const bookingsInWindow = internalQuery({
   args: {
@@ -404,6 +462,13 @@ export const bookingsInWindow = internalQuery({
     return await Promise.all(
       inWindow.map(async (b) => {
         const property = await ctx.db.get(b.propertyId);
+        const ownerContact = property
+          ? await resolveOwnerContactFields(
+              ctx,
+              property._id,
+              property as Record<string, unknown>,
+            )
+          : {};
         return {
           _id: b._id,
           nombreCompleto: b.nombreCompleto,
@@ -420,10 +485,9 @@ export const bookingsInWindow = internalQuery({
             recipient: m.recipient,
           })),
           propertyTitle: (property as { title?: string } | null)?.title || "tu finca",
-          propietarioNombre: (property as { propietarioNombre?: string } | null)
-            ?.propietarioNombre,
-          propietarioTelefono: (property as { propietarioTelefono?: string } | null)
-            ?.propietarioTelefono,
+          propietarioNombre: ownerContact.propietarioNombre,
+          propietarioTelefono: ownerContact.propietarioTelefono,
+          propietarioTratamiento: ownerContact.propietarioTratamiento,
           encargadoNombre: (property as { encargadoNombre?: string } | null)
             ?.encargadoNombre,
           encargadoTelefono: (property as { encargadoTelefono?: string } | null)
@@ -474,7 +538,7 @@ function planSendsForMoment(
             recipientName: b.propietarioNombre || "propietario",
             recipientType: "owner",
             bodyParams: buildBodyParams(def, {
-              nombrePropietario: firstName(b.propietarioNombre) || "propietario",
+              nombrePropietario: ownerTemplateRecipientName(b),
               nombreFinca: finca,
             }),
             logToInbox: false,
@@ -540,10 +604,10 @@ function planSendsForMoment(
             to: ownerTo,
             recipientName: b.propietarioNombre || "propietario",
             recipientType: "owner",
-            bodyParams: buildBodyParams(def, {
-              nombrePropietario: firstName(b.propietarioNombre) || "propietario",
-              nombreFinca: finca,
-            }),
+            bodyParams: buildBodyParams(
+              def,
+              ownerArrivalTemplateValues(b, finca),
+            ),
             logToInbox: false,
           });
         }
@@ -553,10 +617,14 @@ function planSendsForMoment(
             to: managerTo,
             recipientName: b.encargadoNombre || "encargado",
             recipientType: "manager",
-            bodyParams: buildBodyParams(def, {
-              nombrePropietario: firstName(b.encargadoNombre) || "encargado",
-              nombreFinca: finca,
-            }),
+            bodyParams: buildBodyParams(
+              def,
+              ownerArrivalTemplateValues(
+                b,
+                finca,
+                firstName(b.encargadoNombre) || "encargado",
+              ),
+            ),
             logToInbox: false,
           });
         }
@@ -592,6 +660,13 @@ export const getBookingForSend = internalQuery({
     const b = await ctx.db.get(args.bookingId);
     if (!b) return null;
     const property = await ctx.db.get(b.propertyId);
+    const ownerContact = property
+      ? await resolveOwnerContactFields(
+          ctx,
+          property._id,
+          property as Record<string, unknown>,
+        )
+      : {};
     return {
       _id: b._id,
       nombreCompleto: b.nombreCompleto,
@@ -608,10 +683,9 @@ export const getBookingForSend = internalQuery({
         recipient: m.recipient,
       })),
       propertyTitle: (property as { title?: string } | null)?.title || "tu finca",
-      propietarioNombre: (property as { propietarioNombre?: string } | null)
-        ?.propietarioNombre,
-      propietarioTelefono: (property as { propietarioTelefono?: string } | null)
-        ?.propietarioTelefono,
+      propietarioNombre: ownerContact.propietarioNombre,
+      propietarioTelefono: ownerContact.propietarioTelefono,
+      propietarioTratamiento: ownerContact.propietarioTratamiento,
       encargadoNombre: (property as { encargadoNombre?: string } | null)
         ?.encargadoNombre,
       encargadoTelefono: (property as { encargadoTelefono?: string } | null)
@@ -635,14 +709,18 @@ function resolveManualSend(
   if (isOwnerTemplate) {
     const to = normalizeOutboundPhone(b.propietarioTelefono);
     if (!to) return null;
+    const ownerValues =
+      key === "owner_arrival_tomorrow"
+        ? ownerArrivalTemplateValues(b, finca)
+        : {
+            nombrePropietario: ownerTemplateRecipientName(b),
+            nombreFinca: finca,
+          };
     return {
       to,
       recipientName: b.propietarioNombre || "propietario",
       recipientType: "owner",
-      bodyParams: buildBodyParams(def, {
-        nombrePropietario: firstName(b.propietarioNombre) || "propietario",
-        nombreFinca: finca,
-      }),
+      bodyParams: buildBodyParams(def, ownerValues),
     };
   }
 
@@ -911,6 +989,7 @@ export const listBookingsForBatch = query({
     const all = await ctx.db.query("bookings").collect();
 
     const portal = checkinPortalBase();
+    const ownerPortal = ownerPortalBase();
     const rows = [];
     for (const b of all) {
       const value = dateField === "fechaEntrada" ? b.fechaEntrada : b.fechaSalida;
@@ -918,18 +997,27 @@ export const listBookingsForBatch = query({
       if (b.status !== "CONFIRMED" && b.status !== "PAID") continue;
       if (args.tag && b.broadcastTag !== args.tag) continue;
       const property = await ctx.db.get(b.propertyId);
+      const ownerContact = property
+        ? await resolveOwnerContactFields(
+            ctx,
+            property._id,
+            property as Record<string, unknown>,
+          )
+        : {};
       const finca = (property as { title?: string } | null)?.title || "tu finca";
       const cr = (b.reference || b._id) as string;
       const defaults: Record<string, string> = {
         nombreTurista: firstName(b.nombreCompleto),
-        nombrePropietario: firstName(
-          (property as { propietarioNombre?: string } | null)?.propietarioNombre,
+        nombrePropietario: ownerSalutationName(
+          ownerContact.propietarioTratamiento,
+          ownerContact.propietarioNombre,
         ),
         nombreFinca: finca,
         referenciaReserva: cr,
         fechaLlegada: formatFechaLlegada(b.fechaEntrada),
         horaIngreso: formatHoraEntrada(b.horaEntrada, b.fechaEntrada),
         linkCheckin: `${portal}/${cr}`,
+        linkAnfitrion: `${ownerPortal}/${cr}`,
         horaSalida: b.horaSalida || "la hora acordada",
       };
       rows.push({

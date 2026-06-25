@@ -164,14 +164,26 @@ export const CHECKIN_TEMPLATES: Record<CheckinTemplateKey, TemplateDef> = {
   },
   owner_arrival_tomorrow: {
     key: "owner_arrival_tomorrow",
+    // v2 (jun 2026): aviso completo con fecha, finca y enlace /anfitrion.
+    // Si se reactiva el envío Meta debe re-aprobarse con este cuerpo.
     name: "aviso_llegada_propietario",
     language: "es",
     category: "UTILITY",
-    paramKeys: ["nombrePropietario", "nombreFinca"],
+    paramKeys: [
+      "nombrePropietario",
+      "fechaLlegada",
+      "nombreFinca",
+      "linkAnfitrion",
+    ],
     bodyText:
-      "Hola {{1}}, mañana estarán viajando nuestros turistas a tu finca {{2}}. Todo listo para recibirlos.",
+      "🏡 ¡Hola, {{1}}! Un gusto saludarte.\n📅 El {{2}} estarán viajando nuestros turistas a tu finca {{3}}. ✨ Todo está listo para recibirlos.\n📝 Te recordamos que en este enlace podrás consultar la lista de invitados y hacer seguimiento a medida que los turistas vayan completando su registro:\n👉 {{4}}\n🚗 El día del viaje te estaremos informando sobre los tiempos de desplazamiento para que todo esté debidamente coordinado.\n🤝 Si tienes alguna inquietud o se presenta alguna novedad, por favor háznoslo saber. ¡Estaremos atentos para apoyarte!\n✨ Muchas gracias, como siempre, por toda tu colaboración.",
     footer: "FincasYa",
-    exampleParams: ["Hernán", "Villa del Lago"],
+    exampleParams: [
+      "señor Hernán",
+      "viernes 26 de junio",
+      "ANAPOIMA HOME LUXURY HILLS 13PAX AN#003",
+      "https://fincasya.com/anfitrion/2656",
+    ],
   },
   tourist_departure: {
     key: "tourist_departure",

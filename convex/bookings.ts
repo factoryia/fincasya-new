@@ -8,6 +8,7 @@ import {
   netPaidFromPayments,
   pendingFromTotal,
 } from './lib/bookingPayments';
+import { resolveOwnerContactFields } from './lib/ownerSalutation';
 
 /** Fecha calendario YYYY-MM-DD en hora de Colombia (negocio). */
 function calendarDateColombia(ms: number): string {
@@ -151,9 +152,11 @@ export const list = query({
       bookingsToReturn.map(async (booking: (typeof allBookings)[number]) => {
         const property = await ctx.db.get(booking.propertyId);
         let firstImage = null;
-        let ownerNombre: string | null = null;
-        let ownerTelefono: string | null = null;
-        let ownerTratamiento: string | null = null;
+        let ownerContact: {
+          propietarioNombre?: string;
+          propietarioTelefono?: string;
+          propietarioTratamiento?: string;
+        } = {};
         if (property) {
           const images = await ctx.db
             .query('propertyImages')
@@ -164,34 +167,11 @@ export const list = query({
               (a, b) => (a.order || 0) - (b.order || 0),
             )[0]?.url;
           }
-          // Datos del propietario para el mensaje al propietario (saludo Sr/Sra,
-          // teléfono). Preferimos `properties`; si falta, caemos a propertyOwnerInfo.
-          const p = property as any;
-          ownerNombre = String(p.propietarioNombre ?? '').trim() || null;
-          ownerTelefono = String(p.propietarioTelefono ?? '').trim() || null;
-          ownerTratamiento = String(p.propietarioTratamiento ?? '').trim() || null;
-          if (!ownerNombre || !ownerTelefono || !ownerTratamiento) {
-            const ownerInfo: any = await ctx.db
-              .query('propertyOwnerInfo')
-              .withIndex('by_property', (q) =>
-                q.eq('propertyId', property._id),
-              )
-              .unique();
-            if (ownerInfo) {
-              ownerNombre =
-                ownerNombre ||
-                String(ownerInfo.propietarioNombre ?? '').trim() ||
-                null;
-              ownerTelefono =
-                ownerTelefono ||
-                String(ownerInfo.propietarioTelefono ?? '').trim() ||
-                null;
-              ownerTratamiento =
-                ownerTratamiento ||
-                String(ownerInfo.propietarioTratamiento ?? '').trim() ||
-                null;
-            }
-          }
+          ownerContact = await resolveOwnerContactFields(
+            ctx,
+            property._id,
+            property as Record<string, unknown>,
+          );
         }
 
         return {
@@ -202,9 +182,10 @@ export const list = query({
                 title: property.title,
                 location: property.location,
                 image: firstImage,
-                propietarioNombre: ownerNombre,
-                propietarioTelefono: ownerTelefono,
-                propietarioTratamiento: ownerTratamiento,
+                propietarioNombre: ownerContact.propietarioNombre ?? null,
+                propietarioTelefono: ownerContact.propietarioTelefono ?? null,
+                propietarioTratamiento:
+                  ownerContact.propietarioTratamiento ?? null,
               }
             : null,
         };
@@ -315,34 +296,15 @@ export const getByReference = query({
     // Sr/Sra y el teléfono en /anfitrion y el mensaje al propietario).
     let propertyEnriched = property as any;
     if (property) {
-      const p = property as any;
-      if (
-        !String(p.propietarioNombre ?? '').trim() ||
-        !String(p.propietarioTelefono ?? '').trim() ||
-        !String(p.propietarioTratamiento ?? '').trim()
-      ) {
-        const ownerInfo: any = await ctx.db
-          .query('propertyOwnerInfo')
-          .withIndex('by_property', (q) => q.eq('propertyId', property._id))
-          .unique();
-        if (ownerInfo) {
-          propertyEnriched = {
-            ...p,
-            propietarioNombre:
-              String(p.propietarioNombre ?? '').trim() ||
-              ownerInfo.propietarioNombre ||
-              undefined,
-            propietarioTelefono:
-              String(p.propietarioTelefono ?? '').trim() ||
-              ownerInfo.propietarioTelefono ||
-              undefined,
-            propietarioTratamiento:
-              String(p.propietarioTratamiento ?? '').trim() ||
-              ownerInfo.propietarioTratamiento ||
-              undefined,
-          };
-        }
-      }
+      const ownerContact = await resolveOwnerContactFields(
+        ctx,
+        property._id,
+        property as Record<string, unknown>,
+      );
+      propertyEnriched = {
+        ...(property as object),
+        ...ownerContact,
+      };
     }
 
     return {
