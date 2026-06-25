@@ -33,6 +33,11 @@ function checkinPortalBase(): string {
   ).replace(/\/+$/, "");
 }
 
+/** Portal del propietario (mismo origen que el check-in, ruta /anfitrion). */
+function ownerPortalBase(): string {
+  return checkinPortalBase().replace(/\/[^/]+$/, "/anfitrion");
+}
+
 /** Primer nombre, para un saludo más natural en la plantilla. */
 function firstName(full: string | undefined | null): string {
   const s = String(full ?? "").trim();
@@ -560,6 +565,7 @@ function planSendsForMoment(
               nombrePropietario: firstName(b.propietarioNombre) || "propietario",
               fechaViaje: formatDiaViaje(b.fechaEntrada),
               nombreFinca: finca,
+              linkAnfitrion: `${ownerPortalBase()}/${cr}`,
             }),
             logToInbox: false,
           });
@@ -574,6 +580,7 @@ function planSendsForMoment(
               nombrePropietario: firstName(b.encargadoNombre) || "encargado",
               fechaViaje: formatDiaViaje(b.fechaEntrada),
               nombreFinca: finca,
+              linkAnfitrion: `${ownerPortalBase()}/${cr}`,
             }),
             logToInbox: false,
           });
@@ -661,6 +668,7 @@ function resolveManualSend(
         nombrePropietario: firstName(b.propietarioNombre) || "propietario",
         fechaViaje: formatDiaViaje(b.fechaEntrada),
         nombreFinca: finca,
+        linkAnfitrion: `${ownerPortalBase()}/${cr}`,
       }),
     };
   }
@@ -950,6 +958,7 @@ export const listBookingsForBatch = query({
         fechaLlegada: formatFechaLlegada(b.fechaEntrada),
         horaIngreso: formatHoraEntrada(b.horaEntrada, b.fechaEntrada),
         linkCheckin: `${portal}/${cr}`,
+        linkAnfitrion: `${ownerPortalBase()}/${cr}`,
         horaSalida: b.horaSalida || "la hora acordada",
       };
       rows.push({
