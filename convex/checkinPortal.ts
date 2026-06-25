@@ -145,6 +145,22 @@ async function findBooking(
   return null;
 }
 
+async function loadPropertyCoverImageUrl(
+  ctx: { db: any },
+  propertyId: Id<'properties'>,
+): Promise<string | null> {
+  const images = await ctx.db
+    .query('propertyImages')
+    .withIndex('by_property', (q: any) => q.eq('propertyId', propertyId))
+    .collect();
+  if (images.length === 0) return null;
+  const sorted = images.sort(
+    (a, b) => (a.order ?? 0) - (b.order ?? 0),
+  );
+  const url = String(sorted[0]?.url ?? '').trim();
+  return url || null;
+}
+
 async function loadCheckinLocationInfo(
   ctx: { db: any },
   propertyId: Id<'properties'>,
@@ -204,11 +220,16 @@ export const getForPortal = internalQuery({
       ctx,
       booking.propertyId,
     );
+    const propertyCoverImageUrl = await loadPropertyCoverImageUrl(
+      ctx,
+      booking.propertyId,
+    );
 
     return {
       reference: booking.reference ?? booking._id,
       nombreTitular: booking.nombreCompleto,
       propertyTitle: (property as { title?: string } | null)?.title ?? 'tu finca',
+      propertyCoverImageUrl,
       propertyLocation:
         (property as { location?: string } | null)?.location ?? null,
       fechaEntrada: booking.fechaEntrada,
