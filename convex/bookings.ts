@@ -1285,6 +1285,43 @@ export const saveClientObservaciones = mutation({
   },
 });
 
+/** Visibilidad de datos en el portal del propietario (/anfitrion). */
+export const saveOwnerPortalShare = mutation({
+  args: {
+    id: v.id('bookings'),
+    showGuestList: v.optional(v.boolean()),
+    showPlates: v.optional(v.boolean()),
+    showEmpleada: v.optional(v.boolean()),
+    showInternalNotes: v.optional(v.boolean()),
+  },
+  handler: async (ctx, args) => {
+    const booking = await ctx.db.get(args.id);
+    if (!booking) throw new Error('Reserva no encontrada');
+    const prev = (booking.ownerPortalShare ?? {}) as Record<string, boolean | undefined>;
+    const ts = Date.now();
+    await ctx.db.patch(args.id, {
+      ownerPortalShare: {
+        showGuestList:
+          args.showGuestList !== undefined
+            ? args.showGuestList
+            : prev.showGuestList,
+        showPlates:
+          args.showPlates !== undefined ? args.showPlates : prev.showPlates,
+        showEmpleada:
+          args.showEmpleada !== undefined
+            ? args.showEmpleada
+            : prev.showEmpleada,
+        showInternalNotes:
+          args.showInternalNotes !== undefined
+            ? args.showInternalNotes
+            : prev.showInternalNotes,
+      },
+      updatedAt: ts,
+    });
+    return { ok: true };
+  },
+});
+
 /** Persona que recibe a los turistas: la diligencia el propietario desde su enlace. */
 export const saveOwnerReceiver = mutation({
   args: {

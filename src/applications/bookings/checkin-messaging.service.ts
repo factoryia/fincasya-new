@@ -29,6 +29,24 @@ export type PortalExtraBankAccount = {
   brebKey?: boolean;
 };
 
+export type OwnerPortalShareView = {
+  showGuestList: boolean;
+  showPlates: boolean;
+  showEmpleada: boolean;
+  showInternalNotes: boolean;
+};
+
+export function resolveOwnerPortalShare(
+  share?: Record<string, boolean | undefined> | null,
+): OwnerPortalShareView {
+  return {
+    showGuestList: share?.showGuestList !== false,
+    showPlates: share?.showPlates !== false,
+    showEmpleada: share?.showEmpleada !== false,
+    showInternalNotes: share?.showInternalNotes === true,
+  };
+}
+
 type MomentWindow = {
   key: CheckinMomentKey;
   minDate: number;
@@ -356,6 +374,9 @@ export class CheckinMessagingService {
           .trim() || null,
       serviciosNota: String(booking.checkinServiciosNota ?? '').trim() || null,
       clientObservaciones: String(booking.clientObservaciones ?? '').trim() || null,
+      ownerPortalShare: resolveOwnerPortalShare(
+        booking.ownerPortalShare as Record<string, boolean | undefined> | null,
+      ),
       ownerReceiver: booking.ownerReceiver
         ? {
             nombre: String(booking.ownerReceiver.nombre ?? '').trim() || null,
@@ -415,6 +436,22 @@ export class CheckinMessagingService {
       id: bookingId,
       valor: String(valor ?? ''),
       actor: actor?.trim() || undefined,
+    });
+  }
+
+  /** Qué información del check-in ve el propietario en /anfitrion. */
+  async saveOwnerPortalShare(
+    bookingId: string,
+    share: {
+      showGuestList?: boolean;
+      showPlates?: boolean;
+      showEmpleada?: boolean;
+      showInternalNotes?: boolean;
+    },
+  ) {
+    return this.convexService.mutation('bookings:saveOwnerPortalShare', {
+      id: bookingId,
+      ...share,
     });
   }
 

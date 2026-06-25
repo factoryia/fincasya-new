@@ -471,6 +471,15 @@ export default defineSchema({
         updatedAt: v.optional(v.number()),
       }),
     ),
+    /** Qué ve el propietario en /anfitrion/{ref} (lo configura el equipo admin). */
+    ownerPortalShare: v.optional(
+      v.object({
+        showGuestList: v.optional(v.boolean()),
+        showPlates: v.optional(v.boolean()),
+        showEmpleada: v.optional(v.boolean()),
+        showInternalNotes: v.optional(v.boolean()),
+      }),
+    ),
     /** Pago al propietario (check-out del propietario). */
     ownerPayout: v.optional(
       v.object({

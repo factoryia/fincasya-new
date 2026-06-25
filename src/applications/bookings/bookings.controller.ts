@@ -230,6 +230,23 @@ export class BookingsController {
     );
   }
 
+  /** Visibilidad de datos en el portal del propietario (/anfitrion). */
+  @Post(':id/owner-portal-share')
+  @UseGuards(ConvexAuthGuard, RolesGuard)
+  @Roles(UserRole.ADMIN, UserRole.ASSISTANT)
+  async saveOwnerPortalShare(
+    @Param('id') id: string,
+    @Body()
+    body: {
+      showGuestList?: boolean;
+      showPlates?: boolean;
+      showEmpleada?: boolean;
+      showInternalNotes?: boolean;
+    },
+  ) {
+    return this.checkinMessaging.saveOwnerPortalShare(id, body ?? {});
+  }
+
   /** Check-out propietario (Fase 1): registra/edita el pago al propietario (+ comprobante). */
   @Post(':id/owner-payout')
   @UseGuards(ConvexAuthGuard, RolesGuard)
