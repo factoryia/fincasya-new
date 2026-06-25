@@ -168,6 +168,7 @@ async function loadCheckinLocationInfo(
 ): Promise<{
   checkinUbicacionUrl: string | null;
   checkinIndicacionesLlegada: string | null;
+  checkinRecomendaciones: string | null;
   checkinUbicacionImageUrl: string | null;
   checkinUbicacionImageUrls: string[];
 }> {
@@ -178,6 +179,9 @@ async function loadCheckinLocationInfo(
   const checkinUbicacionUrl = String(ownerInfo?.checkinUbicacionUrl ?? '').trim();
   const checkinIndicacionesLlegada = String(
     ownerInfo?.checkinIndicacionesLlegada ?? '',
+  ).trim();
+  const checkinRecomendaciones = String(
+    ownerInfo?.checkinRecomendaciones ?? '',
   ).trim();
   const checkinUbicacionImageUrl = String(
     ownerInfo?.checkinUbicacionImageUrl ?? '',
@@ -195,6 +199,7 @@ async function loadCheckinLocationInfo(
   return {
     checkinUbicacionUrl: checkinUbicacionUrl || null,
     checkinIndicacionesLlegada: checkinIndicacionesLlegada || null,
+    checkinRecomendaciones: checkinRecomendaciones || null,
     checkinUbicacionImageUrl:
       checkinUbicacionImageUrls[0] ?? (checkinUbicacionImageUrl || null),
     checkinUbicacionImageUrls,
@@ -264,6 +269,7 @@ export const getForPortal = internalQuery({
       pagoCompleto: pagoPendiente <= 0,
       checkinUbicacionUrl: checkinLocation.checkinUbicacionUrl,
       checkinIndicacionesLlegada: checkinLocation.checkinIndicacionesLlegada,
+      checkinRecomendaciones: checkinLocation.checkinRecomendaciones,
       checkinUbicacionImageUrl: checkinLocation.checkinUbicacionImageUrl,
       checkinUbicacionImageUrls: checkinLocation.checkinUbicacionImageUrls,
     };

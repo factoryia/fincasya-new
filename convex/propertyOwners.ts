@@ -122,6 +122,7 @@ export const upsert = mutation({
     propietarioCorreo: v.optional(v.string()),
     checkinUbicacionUrl: v.optional(v.string()),
     checkinIndicacionesLlegada: v.optional(v.string()),
+    checkinRecomendaciones: v.optional(v.string()),
     checkinUbicacionImageUrl: v.optional(v.string()),
     checkinUbicacionImageUrls: v.optional(v.array(v.string())),
     bankCertificationUrl: v.optional(v.string()),

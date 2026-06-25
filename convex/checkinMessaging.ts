@@ -676,6 +676,7 @@ export const getCheckinLink = query({
     reference: string;
     checkinUbicacionUrl?: string;
     checkinIndicacionesLlegada?: string;
+    checkinRecomendaciones?: string;
     checkinUbicacionImageUrl?: string;
     checkinUbicacionImageUrls?: string[];
   }> => {
@@ -691,6 +692,9 @@ export const getCheckinLink = query({
     const mapsUrl = String(ownerInfo?.checkinUbicacionUrl ?? "").trim();
     const indicaciones = String(
       ownerInfo?.checkinIndicacionesLlegada ?? "",
+    ).trim();
+    const recomendaciones = String(
+      ownerInfo?.checkinRecomendaciones ?? "",
     ).trim();
     const legacyImage = String(
       ownerInfo?.checkinUbicacionImageUrl ?? "",
@@ -709,6 +713,7 @@ export const getCheckinLink = query({
       reference: cr,
       ...(mapsUrl ? { checkinUbicacionUrl: mapsUrl } : {}),
       ...(indicaciones ? { checkinIndicacionesLlegada: indicaciones } : {}),
+      ...(recomendaciones ? { checkinRecomendaciones: recomendaciones } : {}),
       ...(imageUrl ? { checkinUbicacionImageUrl: imageUrl } : {}),
       ...(imageUrls.length ? { checkinUbicacionImageUrls: imageUrls } : {}),
     };

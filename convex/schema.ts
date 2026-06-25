@@ -617,6 +617,8 @@ export default defineSchema({
         }),
       ),
     ),
+    /** Denormalizado: hay al menos un soporte en `paymentPortalReceipts` con status pending. */
+    hasPendingReceipt: v.optional(v.boolean()),
     /**
      * Etiqueta libre para agrupar reservas en envíos en lote (spec §10),
      * p. ej. "puente_festivo".
@@ -1206,6 +1208,8 @@ export default defineSchema({
     checkinUbicacionUrl: v.optional(v.string()),
     /** Indicaciones textuales de llegada (colores, portón, referencias). Solo check-in. */
     checkinIndicacionesLlegada: v.optional(v.string()),
+    /** Recomendaciones de la finca (normas, cuidados, tips). Solo check-in. */
+    checkinRecomendaciones: v.optional(v.string()),
     /** Foto/mapa de referencia para llegada (legacy: primera imagen). Solo check-in. */
     checkinUbicacionImageUrl: v.optional(v.string()),
     /** Fotos/mapas de referencia para llegada, en orden. Solo check-in. */
