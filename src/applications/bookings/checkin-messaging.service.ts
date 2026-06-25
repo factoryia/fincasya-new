@@ -358,15 +358,32 @@ export class CheckinMessagingService {
           }
         : null,
       ownerPayout: booking.ownerPayout
-        ? {
-            valor:
-              typeof booking.ownerPayout.valor === 'number'
-                ? booking.ownerPayout.valor
-                : null,
-            fecha: booking.ownerPayout.fecha ?? null,
-            medio: booking.ownerPayout.medio ?? null,
-            comprobanteUrl: booking.ownerPayout.comprobanteUrl ?? null,
-          }
+        ? (() => {
+            const op = booking.ownerPayout as {
+              valorAcordado?: number;
+              abono?: number;
+              valor?: number;
+              fecha?: string;
+              medio?: string;
+              comprobanteUrl?: string;
+            };
+            const valorAcordado =
+              typeof op.valorAcordado === 'number' ? op.valorAcordado : null;
+            const abono = typeof op.abono === 'number' ? op.abono : null;
+            const saldo =
+              valorAcordado != null
+                ? Math.max(0, valorAcordado - (abono ?? 0))
+                : null;
+            return {
+              valorAcordado,
+              abono,
+              saldo,
+              valor: typeof op.valor === 'number' ? op.valor : null,
+              fecha: op.fecha ?? null,
+              medio: op.medio ?? null,
+              comprobanteUrl: op.comprobanteUrl ?? null,
+            };
+          })()
         : null,
       // Devolución del depósito (Fase 3): estado para que el propietario valide.
       depositoGarantia: Number(booking.depositoGarantia) || 0,
