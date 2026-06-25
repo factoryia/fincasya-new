@@ -122,6 +122,19 @@ export class S3Service {
     return this.uploadFile(file, 'images');
   }
 
+  /** Comprobante de pago del portal / check-in: imagen o PDF. */
+  async uploadPaymentReceipt(file: Express.Multer.File): Promise<string> {
+    const ext = file?.originalname?.toLowerCase().split('.').pop();
+    const isImage = file?.mimetype?.startsWith('image/');
+    const isPdf = file?.mimetype === 'application/pdf' || ext === 'pdf';
+    if (!isImage && !isPdf) {
+      throw new BadRequestException('El archivo debe ser una imagen o un PDF');
+    }
+    return this.uploadFile(file, isPdf ? 'documents' : 'images', undefined, {
+      contentDisposition: isPdf ? 'inline' : 'attachment',
+    });
+  }
+
   async uploadImages(files: Express.Multer.File[]): Promise<string[]> {
     const invalidFiles = files.filter((file) => !file?.mimetype?.startsWith('image/'));
     if (invalidFiles.length > 0) {

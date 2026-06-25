@@ -1520,7 +1520,7 @@ http.route({
 
       if (file.size > 900_000) {
         return jsonResponse(
-          { error: 'La imagen es muy grande (máx. ~900 KB).' },
+          { error: 'El archivo es muy grande (máx. ~900 KB).' },
           413,
           PAYMENT_CORS,
         );

@@ -808,7 +808,7 @@ export class CheckinMessagingService {
     // Subimos el comprobante a S3 y guardamos solo la URL. Antes se enviaba el
     // archivo como base64 al doc de la reserva en Convex, que tiene un límite
     // de 1 MiB: un comprobante grande lo desbordaba y la subida fallaba.
-    const receiptUrl = await this.s3Service.uploadImage(payload.file);
+    const receiptUrl = await this.s3Service.uploadPaymentReceipt(payload.file);
 
     const res = await fetch(
       `${base.replace(/\/+$/, '')}/api/payment/${encodeURIComponent(trimmed)}`,
