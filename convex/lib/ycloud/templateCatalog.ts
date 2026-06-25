@@ -167,11 +167,11 @@ export const CHECKIN_TEMPLATES: Record<CheckinTemplateKey, TemplateDef> = {
     name: "aviso_llegada_propietario",
     language: "es",
     category: "UTILITY",
-    paramKeys: ["nombrePropietario", "nombreFinca"],
+    paramKeys: ["nombrePropietario", "fechaViaje", "nombreFinca"],
     bodyText:
-      "Hola {{1}}, mañana estarán viajando nuestros turistas a tu finca {{2}}. Todo listo para recibirlos.",
+      "🏡 ¡Hola, {{1}}!\n📅 El {{2}} estarán viajando nuestros turistas a tu finca {{3}}. ✨ Todo está listo para recibirlos.\n📝 Te recordamos que en el enlace del check-in podrás consultar la lista de invitados y hacer seguimiento a medida que los turistas vayan completando su registro.\n🚗 El día del viaje te estaremos informando sobre los tiempos de desplazamiento para que todo esté debidamente coordinado.\n🤝 Si tienes alguna inquietud o se presenta alguna novedad, por favor háznoslo saber. ¡Estaremos atentos para apoyarte!",
     footer: "FincasYa",
-    exampleParams: ["Hernán", "Villa del Lago"],
+    exampleParams: ["Hernán", "sábado 15 de junio", "Villa del Lago"],
   },
   tourist_departure: {
     key: "tourist_departure",
