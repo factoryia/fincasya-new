@@ -715,6 +715,12 @@ export class BookingsController {
     return this.bookingsSyncService.listPendingPaymentReceipts();
   }
 
+  @Post('payment-receipts/backfill-flag')
+  @UseGuards(ConvexAuthGuard, AdminGuard)
+  async backfillPendingReceiptFlag() {
+    return this.bookingsSyncService.backfillPendingReceiptFlag();
+  }
+
   @Post(':id/receipts/:receiptId/approve')
   @UseGuards(ConvexAuthGuard, AdminGuard)
   async approvePaymentReceipt(

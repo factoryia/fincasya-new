@@ -638,6 +638,12 @@ export default defineSchema({
         }),
       ),
     ),
+    /**
+     * True si la reserva tiene algún soporte de pago PENDIENTE de revisar.
+     * Indexado para listar la cola de revisión sin escanear toda la tabla
+     * (evita el límite de lectura de Convex).
+     */
+    hasPendingReceipt: v.optional(v.boolean()),
   })
     .index('by_property', ['propertyId'])
     .index('by_status', ['status'])
@@ -645,7 +651,8 @@ export default defineSchema({
     .index('by_reference', ['reference'])
     .index('by_is_direct', ['isDirect'])
     .index('by_user', ['userId'])
-    .index('by_dates', ['fechaEntrada', 'fechaSalida']),
+    .index('by_dates', ['fechaEntrada', 'fechaSalida'])
+    .index('by_pending_receipt', ['hasPendingReceipt']),
 
   /**
    * Borrador de contrato desde admin: no bloquea calendario ni cuenta como reserva

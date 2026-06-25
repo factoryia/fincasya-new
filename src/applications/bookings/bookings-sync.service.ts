@@ -868,6 +868,11 @@ export class BookingsSyncService {
     return this.convexService.query('paymentReceipts:listPending', {});
   }
 
+  /** Marca el flag hasPendingReceipt en reservas existentes con soporte pendiente. */
+  async backfillPendingReceiptFlag() {
+    return this.convexService.mutation('paymentReceipts:backfillPendingFlag', {});
+  }
+
   /**
    * Aprueba un soporte: registra el abono (se refleja en la reserva) y marca el
    * recibo como aprobado.
