@@ -346,8 +346,14 @@ export class CheckinMessagingService {
         tipoDocumento: String(g.tipoDocumento ?? 'CC').trim().toUpperCase() || 'CC',
       })),
       invitadosPdfUrl: pdf?.url || null,
+      // Para el propietario ocultamos la línea de "Invitados adicionales (sujeto a
+      // aprobación)": esos los aprueba el equipo admin de Fincas Ya, no el propietario.
       checkinObservaciones:
-        String(booking.checkinObservaciones ?? '').trim() || null,
+        String(booking.checkinObservaciones ?? '')
+          .split('\n')
+          .filter((l) => !l.trim().startsWith('Invitados adicionales'))
+          .join('\n')
+          .trim() || null,
       serviciosNota: String(booking.checkinServiciosNota ?? '').trim() || null,
       clientObservaciones: String(booking.clientObservaciones ?? '').trim() || null,
       ownerReceiver: booking.ownerReceiver
