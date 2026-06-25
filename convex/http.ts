@@ -1,7 +1,7 @@
 import { httpRouter } from 'convex/server';
 import { httpAction } from './_generated/server';
 import { authComponent, createAuth } from './betterAuth/auth';
-import { internal } from './_generated/api';
+import { api, internal } from './_generated/api';
 import { parseWorkbookSheetsToPayloads } from './lib/whatsappTemplateSheet';
 import {
   isOutboundFromBusiness,
@@ -1602,6 +1602,449 @@ http.route({
         'Access-Control-Max-Age': '86400',
       },
     });
+  }),
+});
+
+// ---------------------------------------------------------------------------
+// Admin endpoints para sale-links (requieren API key)
+// ---------------------------------------------------------------------------
+
+/** POST /api/admin/sale-link — crea un nuevo link de venta */
+http.route({
+  path: '/api/admin/sale-link',
+  method: 'POST',
+  handler: httpAction(async (ctx, request) => {
+    const denied = requireConvexSiteApiKey(request);
+    if (denied) return denied;
+
+    let body: Record<string, unknown>;
+    try {
+      body = (await request.json()) as typeof body;
+    } catch {
+      return jsonResponse({ error: 'Body JSON inválido' }, 400);
+    }
+
+    if (!body.propertyId || !body.checkIn || !body.checkOut || !body.totalValue || !body.createdBy) {
+      return jsonResponse({ error: 'Faltan campos requeridos' }, 400);
+    }
+
+    const result = await ctx.runMutation(internal.saleLinks.create, {
+      propertyId: body.propertyId as import('./_generated/dataModel').Id<'properties'>,
+      createdBy: body.createdBy as string,
+      createdByName: body.createdByName as string | undefined,
+      checkIn: Number(body.checkIn),
+      checkOut: Number(body.checkOut),
+      nights: Number(body.nights ?? 1),
+      guests: Number(body.guests ?? 1),
+      checkInTime: body.checkInTime as string | undefined,
+      checkOutTime: body.checkOutTime as string | undefined,
+      totalValue: Number(body.totalValue),
+      rentalValue: Number(body.rentalValue ?? 0),
+      depositAmount: Number(body.depositAmount ?? 0),
+      cleaningFee: Number(body.cleaningFee ?? 0),
+      petDeposit: body.petDeposit !== undefined ? Number(body.petDeposit) : undefined,
+      petSurcharge: body.petSurcharge !== undefined ? Number(body.petSurcharge) : undefined,
+      petCount: body.petCount !== undefined ? Number(body.petCount) : undefined,
+      selectedBankAccountIds: (body.selectedBankAccountIds as string[]) ?? [],
+      notes: body.notes as string | undefined,
+    });
+
+    return jsonResponse(result, 200);
+  }),
+});
+
+/** GET /api/admin/sale-links — lista todos los links (con filtro opcional por createdBy) */
+http.route({
+  path: '/api/admin/sale-links',
+  method: 'GET',
+  handler: httpAction(async (ctx, request) => {
+    const denied = requireConvexSiteApiKey(request);
+    if (denied) return denied;
+
+    const url = new URL(request.url);
+    const createdBy = url.searchParams.get('createdBy') ?? undefined;
+    const status = url.searchParams.get('status') ?? undefined;
+
+    const rows = await ctx.runQuery(internal.saleLinks.list, {
+      createdBy,
+      status,
+    });
+
+    return jsonResponse({ ok: true, rows }, 200);
+  }),
+});
+
+/** GET /api/admin/sale-link/:token — obtiene un link por token */
+http.route({
+  pathPrefix: '/api/admin/sale-link/',
+  method: 'GET',
+  handler: httpAction(async (ctx, request) => {
+    const denied = requireConvexSiteApiKey(request);
+    if (denied) return denied;
+
+    const url = new URL(request.url);
+    const parts = url.pathname.replace('/api/admin/sale-link/', '').split('/');
+    const token = parts[0];
+
+    if (!token) return jsonResponse({ error: 'Token requerido' }, 400);
+
+    const row = await ctx.runQuery(internal.saleLinks.getByToken, { token });
+    if (!row) return jsonResponse({ error: 'Link no encontrado' }, 404);
+
+    return jsonResponse({ ok: true, row }, 200);
+  }),
+});
+
+/** PATCH /api/admin/sale-link/:id — actualiza campos del link */
+http.route({
+  pathPrefix: '/api/admin/sale-link/',
+  method: 'PATCH',
+  handler: httpAction(async (ctx, request) => {
+    const denied = requireConvexSiteApiKey(request);
+    if (denied) return denied;
+
+    const url = new URL(request.url);
+    const parts = url.pathname.replace('/api/admin/sale-link/', '').split('/');
+    const id = parts[0] as import('./_generated/dataModel').Id<'saleLinks'>;
+    const action = parts[1];
+
+    let body: Record<string, unknown>;
+    try {
+      body = (await request.json()) as typeof body;
+    } catch {
+      return jsonResponse({ error: 'Body JSON inválido' }, 400);
+    }
+
+    if (action === 'set-contract-url') {
+      await ctx.runMutation(internal.saleLinks.setContractUrl, {
+        id,
+        contractUrl: body.contractUrl as string,
+      });
+      return jsonResponse({ ok: true }, 200);
+    }
+
+    if (action === 'set-cr-url') {
+      await ctx.runMutation(internal.saleLinks.setCrUrl, {
+        id,
+        crUrl: body.crUrl as string,
+        bookingId: body.bookingId as import('./_generated/dataModel').Id<'bookings'> | undefined,
+      });
+      return jsonResponse({ ok: true }, 200);
+    }
+
+    const result = await ctx.runMutation(internal.saleLinks.update, {
+      id,
+      propertyId: body.propertyId as import('./_generated/dataModel').Id<'properties'> | undefined,
+      checkIn: body.checkIn !== undefined ? Number(body.checkIn) : undefined,
+      checkOut: body.checkOut !== undefined ? Number(body.checkOut) : undefined,
+      nights: body.nights !== undefined ? Number(body.nights) : undefined,
+      guests: body.guests !== undefined ? Number(body.guests) : undefined,
+      checkInTime: body.checkInTime as string | undefined,
+      checkOutTime: body.checkOutTime as string | undefined,
+      totalValue: body.totalValue !== undefined ? Number(body.totalValue) : undefined,
+      rentalValue: body.rentalValue !== undefined ? Number(body.rentalValue) : undefined,
+      depositAmount: body.depositAmount !== undefined ? Number(body.depositAmount) : undefined,
+      cleaningFee: body.cleaningFee !== undefined ? Number(body.cleaningFee) : undefined,
+      petDeposit: body.petDeposit !== undefined ? Number(body.petDeposit) : undefined,
+      petSurcharge: body.petSurcharge !== undefined ? Number(body.petSurcharge) : undefined,
+      petCount: body.petCount !== undefined ? Number(body.petCount) : undefined,
+      selectedBankAccountIds: body.selectedBankAccountIds as string[] | undefined,
+      notes: body.notes as string | undefined,
+      status: body.status as 'active' | 'completed' | 'cancelled' | undefined,
+    });
+
+    return jsonResponse(result, 200);
+  }),
+});
+
+/** DELETE /api/admin/sale-link/:id — elimina un link */
+http.route({
+  pathPrefix: '/api/admin/sale-link/',
+  method: 'DELETE',
+  handler: httpAction(async (ctx, request) => {
+    const denied = requireConvexSiteApiKey(request);
+    if (denied) return denied;
+
+    const url = new URL(request.url);
+    const id = url.pathname.replace('/api/admin/sale-link/', '').trim() as import('./_generated/dataModel').Id<'saleLinks'>;
+    if (!id) return jsonResponse({ error: 'ID requerido' }, 400);
+
+    const result = await ctx.runMutation(internal.saleLinks.remove, { id });
+    return jsonResponse(result, 200);
+  }),
+});
+
+/** POST /api/admin/sale-link/:token/validate-payment — valida el pago desde correo admin */
+http.route({
+  pathPrefix: '/api/admin/sale-link/',
+  method: 'POST',
+  handler: httpAction(async (ctx, request) => {
+    const url = new URL(request.url);
+    const parts = url.pathname.replace('/api/admin/sale-link/', '').split('/');
+    const token = parts[0];
+    const action = parts[1];
+
+    if (action === 'validate-payment') {
+      let body: { validationKey?: string; validatedBy?: string };
+      try {
+        body = (await request.json()) as typeof body;
+      } catch {
+        return jsonResponse({ error: 'Body inválido' }, 400);
+      }
+      if (!body.validationKey) {
+        return jsonResponse({ error: 'validationKey requerida' }, 422);
+      }
+
+      const result = await ctx.runMutation(internal.saleLinks.validatePayment, {
+        token,
+        validatedBy: body.validatedBy ?? 'admin',
+        validationKey: body.validationKey,
+      });
+
+      if (!result.ok) {
+        const statusMap: Record<string, number> = { not_found: 404, invalid_key: 403 };
+        return jsonResponse(result, statusMap[(result as { reason?: string }).reason ?? ''] ?? 400);
+      }
+      return jsonResponse(result, 200);
+    }
+
+    if (action === 'reset-payment') {
+      const result = await ctx.runMutation(internal.saleLinks.resetPaymentSubmission, {
+        token,
+      });
+      if (!result.ok) {
+        const statusMap: Record<string, number> = {
+          not_found: 404,
+          already_validated: 409,
+          nothing_to_reset: 400,
+        };
+        return jsonResponse(result, statusMap[result.reason ?? ''] ?? 400);
+      }
+      return jsonResponse(result, 200);
+    }
+
+    return jsonResponse({ error: 'Acción no reconocida' }, 404);
+  }),
+});
+
+/** POST /api/venta/:token/confirm-cr — cliente confirma descarga del CR (paso 5 → 6) */
+http.route({
+  pathPrefix: '/api/venta/',
+  method: 'POST',
+  handler: httpAction(async (ctx, request) => {
+    const url = new URL(request.url);
+    const parts = url.pathname.replace('/api/venta/', '').split('/');
+    const token = parts[0];
+    const action = parts[1];
+
+    if (action === 'confirm-cr') {
+      const result = await ctx.runMutation(internal.saleLinks.confirmCrInternal, { token });
+      return jsonResponse(result, result.ok ? 200 : 400, VENTA_CORS);
+    }
+
+    if (action === 'checkin') {
+      let body: {
+        guests?: Array<{ nombreCompleto: string; cedula?: string; tipoDocumento?: string; esMenor?: boolean }>;
+        placas?: string;
+        mascotas?: number;
+        observaciones?: string;
+        menoresDe2?: number;
+      };
+      try {
+        body = (await request.json()) as typeof body;
+      } catch {
+        return jsonResponse({ error: 'Body inválido' }, 400, VENTA_CORS);
+      }
+
+      const result = await ctx.runMutation(internal.saleLinks.submitCheckinInternal, {
+        token,
+        guests: body.guests ?? [],
+        placas: body.placas,
+        mascotas: body.mascotas,
+        observaciones: body.observaciones,
+        menoresDe2: body.menoresDe2,
+      });
+      return jsonResponse(result, result.ok ? 200 : 400, VENTA_CORS);
+    }
+
+    if (action === 'save-draft') {
+      let body: {
+        clientPortalUiStep?: number;
+        clientDraftPhase?: 'datos' | 'pago';
+        nombre?: string;
+        cedula?: string;
+        email?: string;
+        telefono?: string;
+        direccion?: string;
+        ciudad?: string;
+        paymentAmount?: number;
+      };
+      try {
+        body = (await request.json()) as typeof body;
+      } catch {
+        return jsonResponse({ error: 'Body inválido' }, 400, VENTA_CORS);
+      }
+
+      const result = await ctx.runMutation(internal.saleLinks.saveClientPortalDraft, {
+        token,
+        clientPortalUiStep: body.clientPortalUiStep,
+        clientDraftPhase: body.clientDraftPhase,
+        nombre: body.nombre,
+        cedula: body.cedula,
+        email: body.email,
+        telefono: body.telefono,
+        direccion: body.direccion,
+        ciudad: body.ciudad,
+        paymentAmount: body.paymentAmount,
+      });
+
+      if (!result.ok) {
+        const status =
+          result.reason === 'not_found'
+            ? 404
+            : result.reason === 'already_submitted'
+              ? 409
+              : 400;
+        return jsonResponse({ error: result.reason }, status, VENTA_CORS);
+      }
+
+      return jsonResponse({ ok: true }, 200, VENTA_CORS);
+    }
+
+    if (action === 'submit-payment') {
+      let body: {
+        nombre?: string;
+        cedula?: string;
+        email?: string;
+        telefono?: string;
+        direccion?: string;
+        ciudad?: string;
+        paymentProofUrl?: string;
+        paymentProofFileName?: string;
+        paymentProofMimeType?: string;
+        paymentProofAmount?: number;
+        paymentValidationKey?: string;
+      };
+      try {
+        body = (await request.json()) as typeof body;
+      } catch {
+        return jsonResponse({ error: 'Body inválido' }, 400, VENTA_CORS);
+      }
+
+      if (
+        !body.nombre?.trim() ||
+        !body.cedula?.trim() ||
+        !body.email?.trim() ||
+        !body.telefono?.trim() ||
+        !body.direccion?.trim() ||
+        !body.paymentProofUrl?.trim() ||
+        !body.paymentValidationKey?.trim()
+      ) {
+        return jsonResponse({ error: 'Faltan datos obligatorios' }, 422, VENTA_CORS);
+      }
+
+      const result = await ctx.runMutation(api.saleLinks.submitClientData, {
+        token,
+        nombre: body.nombre.trim(),
+        cedula: body.cedula.trim(),
+        email: body.email.trim(),
+        telefono: body.telefono.trim(),
+        direccion: body.direccion.trim(),
+        ciudad: body.ciudad?.trim() || undefined,
+        paymentProofUrl: body.paymentProofUrl.trim(),
+        paymentProofFileName: body.paymentProofFileName?.trim() || undefined,
+        paymentProofMimeType: body.paymentProofMimeType?.trim() || undefined,
+        paymentProofAmount: body.paymentProofAmount,
+        paymentValidationKey: body.paymentValidationKey.trim(),
+      });
+
+      if (!result.ok) {
+        const statusMap: Record<string, number> = {
+          not_found: 404,
+          inactive: 410,
+          already_submitted: 409,
+          already_validated: 409,
+          past_payment_step: 409,
+        };
+        return jsonResponse(
+          result,
+          statusMap[(result as { reason?: string }).reason ?? ''] ?? 400,
+          VENTA_CORS,
+        );
+      }
+
+      return jsonResponse({ ok: true }, 200, VENTA_CORS);
+    }
+
+    if (action === 'validate-payment') {
+      let body: { validationKey?: string; validatedBy?: string };
+      try {
+        body = (await request.json()) as typeof body;
+      } catch {
+        return jsonResponse({ error: 'Body inválido' }, 400, VENTA_CORS);
+      }
+      if (!body.validationKey) {
+        return jsonResponse({ error: 'validationKey requerida' }, 422, VENTA_CORS);
+      }
+      const result = await ctx.runMutation(internal.saleLinks.validatePayment, {
+        token,
+        validatedBy: body.validatedBy ?? 'admin-email',
+        validationKey: body.validationKey,
+      });
+      if (!result.ok) {
+        const statusMap: Record<string, number> = { not_found: 404, invalid_key: 403 };
+        return jsonResponse(result, statusMap[(result as { reason?: string }).reason ?? ''] ?? 400, VENTA_CORS);
+      }
+      return jsonResponse(result, 200, VENTA_CORS);
+    }
+
+    return jsonResponse({ error: 'Acción no reconocida' }, 404, VENTA_CORS);
+  }),
+});
+
+// ---------------------------------------------------------------------------
+// Portal de venta pública /api/venta/:token
+// ---------------------------------------------------------------------------
+
+const VENTA_CORS = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+  'Access-Control-Allow-Headers': 'Content-Type',
+};
+
+http.route({
+  pathPrefix: '/api/venta/',
+  method: 'OPTIONS',
+  handler: httpAction(async () => {
+    return new Response(null, {
+      status: 204,
+      headers: {
+        ...VENTA_CORS,
+        'Access-Control-Max-Age': '86400',
+      },
+    });
+  }),
+});
+
+/** GET /api/venta/:token — datos públicos del portal de venta */
+http.route({
+  pathPrefix: '/api/venta/',
+  method: 'GET',
+  handler: httpAction(async (ctx, request) => {
+    const url = new URL(request.url);
+    const token = url.pathname.replace('/api/venta/', '').split('/')[0];
+    if (!token) {
+      return jsonResponse({ error: 'Token requerido' }, 400, VENTA_CORS);
+    }
+
+    const publicData = await ctx.runQuery(internal.saleLinks.getForPortal, { token });
+    if (!publicData) {
+      return jsonResponse({ error: 'Link no encontrado' }, 404, VENTA_CORS);
+    }
+    if (publicData.status === 'cancelled') {
+      return jsonResponse({ error: 'Este link fue cancelado' }, 410, VENTA_CORS);
+    }
+    return jsonResponse(publicData, 200, VENTA_CORS);
   }),
 });
 

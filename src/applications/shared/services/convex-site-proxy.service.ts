@@ -12,7 +12,7 @@ export class ConvexSiteProxyService {
   }
 
   async forwardJson(
-    method: 'GET' | 'POST' | 'PUT' | 'DELETE',
+    method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE',
     convexPath: string,
     body?: unknown,
   ): Promise<unknown> {

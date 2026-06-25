@@ -183,8 +183,8 @@ export class BrevoEmailService {
   }
 
   /**
-   * Alerta a comercial cuando un turista sube un soporte de pago en el portal,
-   * para que un asesor entre a revisarlo. Va siempre a los dos correos del área.
+   * Alerta cuando un turista sube un soporte de pago en el portal.
+   * Producción → fincasecoturisticasdelllano@gmail.com (configurable en admin).
    */
   async sendPaymentReceiptAlert(data: {
     reference: string;
@@ -202,7 +202,7 @@ export class BrevoEmailService {
     const list =
       Array.isArray(data.emails) && data.emails.length > 0
         ? data.emails
-        : ['comercial@fincasya.com', 'fincasecoturisticasdelllano@gmail.com'];
+        : ['fincasecoturisticasdelllano@gmail.com'];
     const recipients = list.map((email) => ({ email }));
     if (this.isEmailSendingDisabled()) {
       this.logEmailSkipped('alerta soporte de pago', recipients.map((r) => r.email).join(', '));
@@ -453,6 +453,176 @@ export class BrevoEmailService {
     } catch (error) {
       this.logger.error(`Error enviando Habeas Data al admin: ${error.message}`);
       // No relanzamos: la solicitud ya quedó persistida; el email es secundario.
+    }
+  }
+
+  /**
+   * Notifica al admin que el cliente de un link de venta subió el soporte de pago.
+   * Incluye botón "Validar Pago" con URL de un solo uso.
+   */
+  async sendSaleLinkPaymentAlert(data: {
+    adminEmail: string;
+    clientName: string;
+    clientEmail: string;
+    clientPhone: string;
+    totalValue: number;
+    checkIn: number;
+    checkOut: number;
+    nights: number;
+    paymentProofUrl: string;
+    validateUrl: string;
+    token: string;
+  }): Promise<void> {
+    const isDisabled = process.env.DISABLE_EMAIL_SENDING === 'true';
+    if (isDisabled || !this.apiKey) {
+      this.logger.warn('[sale-link] Email deshabilitado, omitiendo envío de alerta de pago.');
+      return;
+    }
+
+    const logoUrl = process.env.LOGO_URL || 'https://fincasya.com/logo.png';
+    const esc = (s: string | undefined) =>
+      (s ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;');
+
+    const formatCOP = (n: number) =>
+      new Intl.NumberFormat('es-CO', {
+        style: 'currency',
+        currency: 'COP',
+        minimumFractionDigits: 0,
+      }).format(n);
+
+    const formatDate = (ms: number) =>
+      new Date(ms).toLocaleDateString('es-CO', {
+        day: '2-digit',
+        month: 'long',
+        year: 'numeric',
+      });
+
+    const isImage = /\.(jpg|jpeg|png|webp|gif)(\?|$)/i.test(data.paymentProofUrl);
+
+    const htmlContent = `<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1.0">
+  <title>Soporte de Pago - FincasYa</title>
+</head>
+<body style="margin:0;padding:0;background:#f4f7f9;font-family:'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
+  <table width="100%" cellpadding="0" cellspacing="0" style="background:#f4f7f9;padding:32px 0;">
+    <tr><td align="center">
+      <table width="600" cellpadding="0" cellspacing="0" style="background:#ffffff;border-radius:16px;overflow:hidden;box-shadow:0 4px 20px rgba(0,0,0,0.06);max-width:600px;">
+
+        <!-- Header -->
+        <tr>
+          <td style="background:#000000;padding:32px 24px;text-align:center;">
+            <img src="${esc(logoUrl)}" alt="FincasYa" style="max-width:140px;height:auto;">
+          </td>
+        </tr>
+
+        <!-- Body -->
+        <tr>
+          <td style="padding:40px 40px 32px;">
+            <h1 style="margin:0 0 8px;font-size:22px;color:#1a1a1a;">💰 Nuevo soporte de pago recibido</h1>
+            <p style="margin:0 0 24px;font-size:15px;color:#555;">
+              El cliente <strong>${esc(data.clientName)}</strong> subió un soporte de pago para su reserva.
+              Por favor revisa el comprobante y valida si el pago fue recibido.
+            </p>
+
+            <!-- Info cliente -->
+            <table width="100%" cellpadding="0" cellspacing="0" style="background:#f8f9fa;border-radius:10px;padding:20px;margin-bottom:24px;">
+              <tr>
+                <td style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:#888;padding-bottom:12px;">
+                  Datos del Cliente
+                </td>
+              </tr>
+              <tr><td style="font-size:14px;color:#333;padding:4px 0;"><strong>Nombre:</strong> ${esc(data.clientName)}</td></tr>
+              <tr><td style="font-size:14px;color:#333;padding:4px 0;"><strong>Email:</strong> ${esc(data.clientEmail)}</td></tr>
+              <tr><td style="font-size:14px;color:#333;padding:4px 0;"><strong>Teléfono:</strong> ${esc(data.clientPhone)}</td></tr>
+            </table>
+
+            <!-- Info reserva -->
+            <table width="100%" cellpadding="0" cellspacing="0" style="background:#f8f9fa;border-radius:10px;padding:20px;margin-bottom:24px;">
+              <tr>
+                <td style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:#888;padding-bottom:12px;">
+                  Resumen de la Reserva
+                </td>
+              </tr>
+              <tr><td style="font-size:14px;color:#333;padding:4px 0;"><strong>Check-in:</strong> ${formatDate(data.checkIn)}</td></tr>
+              <tr><td style="font-size:14px;color:#333;padding:4px 0;"><strong>Check-out:</strong> ${formatDate(data.checkOut)}</td></tr>
+              <tr><td style="font-size:14px;color:#333;padding:4px 0;"><strong>Noches:</strong> ${data.nights}</td></tr>
+              <tr><td style="font-size:24px;font-weight:700;color:#E8571F;padding:12px 0 4px;">
+                Total: ${formatCOP(data.totalValue)}
+              </td></tr>
+            </table>
+
+            <!-- Soporte de pago -->
+            ${isImage
+      ? `<p style="font-size:13px;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:#888;margin:0 0 12px;">Comprobante de pago</p>
+               <img src="${esc(data.paymentProofUrl)}" alt="Comprobante de pago" style="max-width:100%;border-radius:10px;border:1px solid #e2e8f0;display:block;margin-bottom:24px;">`
+      : `<p style="margin:0 0 16px;font-size:14px;color:#555;">
+               📎 <a href="${esc(data.paymentProofUrl)}" style="color:#E8571F;">Ver comprobante de pago adjunto</a>
+             </p>`
+    }
+
+            <!-- CTA Validar -->
+            <table width="100%" cellpadding="0" cellspacing="0" style="background:#e8f5e9;border-radius:12px;padding:24px;margin-bottom:24px;text-align:center;">
+              <tr><td>
+                <p style="font-size:15px;color:#2e7d32;margin:0 0 16px;font-weight:600;">
+                  ¿Llegó el pago? Haz clic en el botón para confirmar.
+                </p>
+                <a href="${esc(data.validateUrl)}"
+                   style="display:inline-block;background:#2e7d32;color:#ffffff;text-decoration:none;padding:16px 40px;border-radius:8px;font-size:16px;font-weight:700;letter-spacing:0.5px;">
+                  ✅ Validar Pago
+                </a>
+                <p style="font-size:12px;color:#555;margin:12px 0 0;">
+                  Este botón es de un solo uso. Al hacer clic se habilitará automáticamente el siguiente paso para el cliente.
+                </p>
+              </td></tr>
+            </table>
+
+            <p style="font-size:12px;color:#999;margin:0;">
+              Token del link: <code style="background:#f1f5f9;padding:2px 6px;border-radius:4px;">${esc(data.token)}</code>
+            </p>
+          </td>
+        </tr>
+
+        <!-- Footer -->
+        <tr>
+          <td style="background:#fafbfc;padding:24px 40px;text-align:center;font-size:13px;color:#718096;border-top:1px solid #edf2f7;">
+            FincasYa &nbsp;|&nbsp; Sistema de ventas
+          </td>
+        </tr>
+
+      </table>
+    </td></tr>
+  </table>
+</body>
+</html>`;
+
+    try {
+      const response = await fetch('https://api.brevo.com/v3/smtp/email', {
+        method: 'POST',
+        headers: {
+          'api-key': this.apiKey,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          sender: { name: this.senderName, email: this.senderEmail },
+          to: [{ email: data.adminEmail }],
+          subject: `💰 Pago recibido — ${data.clientName} — ${formatCOP(data.totalValue)}`,
+          htmlContent,
+        }),
+      });
+
+      if (!response.ok) {
+        const err = await response.json();
+        throw new Error(err.message || 'Error enviando email de alerta de pago');
+      }
+      this.logger.log(`[sale-link] Alerta de pago enviada a ${data.adminEmail}`);
+    } catch (error) {
+      this.logger.error(`[sale-link] Error enviando alerta de pago: ${error.message}`);
     }
   }
 }

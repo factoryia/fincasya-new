@@ -3,7 +3,6 @@ import { mutation, query } from './_generated/server';
 
 /** Correos por defecto si no hay configuración guardada. */
 const DEFAULT_PAYMENT_RECEIPT_EMAILS = [
-  'comercial@fincasya.com',
   'fincasecoturisticasdelllano@gmail.com',
 ];
 

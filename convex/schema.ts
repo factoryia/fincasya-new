@@ -1413,4 +1413,138 @@ export default defineSchema({
   })
     .index('by_token', ['token'])
     .index('by_conversation', ['conversationId']),
+
+  /**
+   * Links de venta: el vendedor crea un link con la negociación y lo comparte
+   * con el cliente. El cliente completa el flujo por pasos (stepper):
+   * 1-Resumen → 2-Datos+Soporte → 3-En revisión → 4-Contrato → 5-CR → 6-Check-in.
+   * Al completar el paso 5 se crea la reserva (booking) automáticamente.
+   */
+  saleLinks: defineTable({
+    /** Token UUID aleatorio que va en la URL pública /venta/:token */
+    token: v.string(),
+    /** Finca seleccionada */
+    propertyId: v.id('properties'),
+    /** Better Auth userId del vendedor/admin que creó el link */
+    createdBy: v.string(),
+    /** Nombre visible del vendedor */
+    createdByName: v.optional(v.string()),
+    /** Fecha de entrada (Unix ms) */
+    checkIn: v.number(),
+    /** Fecha de salida (Unix ms) */
+    checkOut: v.number(),
+    /** Número de noches */
+    nights: v.number(),
+    /** Número de personas */
+    guests: v.number(),
+    /** Hora de entrada, ej: "15:00" */
+    checkInTime: v.optional(v.string()),
+    /** Hora de salida, ej: "11:00" */
+    checkOutTime: v.optional(v.string()),
+    /** Valor total acordado (todo incluido) */
+    totalValue: v.number(),
+    /** Subtotal alquiler */
+    rentalValue: v.number(),
+    /** Depósito de garantía reembolsable */
+    depositAmount: v.number(),
+    /** Aseo/limpieza */
+    cleaningFee: v.number(),
+    /** Depósito mascotas */
+    petDeposit: v.optional(v.number()),
+    /** Recargo mascotas */
+    petSurcharge: v.optional(v.number()),
+    /** Número de mascotas */
+    petCount: v.optional(v.number()),
+    /** IDs de cuentas bancarias del catálogo global seleccionadas para este deal */
+    selectedBankAccountIds: v.array(v.string()),
+    /** Notas de negociación (solo visibles para el vendedor) */
+    notes: v.optional(v.string()),
+    /** Paso actual del cliente (1-6). Empieza en 1. */
+    clientStep: v.number(),
+    /** Paso UI del portal antes de enviar comprobante (p. ej. 2 = mis datos). */
+    clientPortalUiStep: v.optional(v.number()),
+    /** Sub-fase del paso 2: datos personales o soporte de pago. */
+    clientDraftPhase: v.optional(
+      v.union(v.literal('datos'), v.literal('pago')),
+    ),
+    /** Monto de anticipo en borrador (paso 2). */
+    clientDraftPaymentAmount: v.optional(v.number()),
+    /** Estado general */
+    status: v.union(
+      v.literal('active'),
+      v.literal('completed'),
+      v.literal('cancelled'),
+    ),
+    /** Datos personales llenados por el cliente (paso 2) */
+    clientData: v.optional(
+      v.object({
+        nombre: v.string(),
+        cedula: v.string(),
+        email: v.string(),
+        telefono: v.string(),
+        direccion: v.string(),
+        ciudad: v.optional(v.string()),
+        filledAt: v.number(),
+      }),
+    ),
+    /** URL S3 del soporte de pago subido por el cliente */
+    paymentProofUrl: v.optional(v.string()),
+    paymentProofFileName: v.optional(v.string()),
+    paymentProofMimeType: v.optional(v.string()),
+    paymentProofAmount: v.optional(v.number()),
+    paymentProofSubmittedAt: v.optional(v.number()),
+    /** Historial de comprobantes (permite varios soportes antes de validar el pago) */
+    paymentProofs: v.optional(
+      v.array(
+        v.object({
+          url: v.string(),
+          fileName: v.optional(v.string()),
+          mimeType: v.optional(v.string()),
+          amount: v.optional(v.number()),
+          submittedAt: v.number(),
+        }),
+      ),
+    ),
+    /** Token secreto de un solo uso para validar el pago desde el email */
+    paymentValidationKey: v.optional(v.string()),
+    /** Pago validado por el admin */
+    paymentValidated: v.optional(v.boolean()),
+    paymentValidatedAt: v.optional(v.number()),
+    paymentValidatedBy: v.optional(v.string()),
+    /** URL S3 del contrato PDF generado */
+    contractUrl: v.optional(v.string()),
+    contractGeneratedAt: v.optional(v.number()),
+    /** URL S3 del contrato firmado subido por el cliente */
+    signedContractUrl: v.optional(v.string()),
+    signedContractFileName: v.optional(v.string()),
+    signedContractSubmittedAt: v.optional(v.number()),
+    /** URL S3 del documento CR (Confirmación de Reserva) */
+    crUrl: v.optional(v.string()),
+    crGeneratedAt: v.optional(v.number()),
+    /** ID de la reserva creada automáticamente al confirmar el CR */
+    bookingId: v.optional(v.id('bookings')),
+    /** Lista de huéspedes (paso 6 check-in) */
+    checkinGuests: v.optional(
+      v.array(
+        v.object({
+          nombreCompleto: v.string(),
+          cedula: v.optional(v.string()),
+          tipoDocumento: v.optional(v.string()),
+          esMenor: v.optional(v.boolean()),
+        }),
+      ),
+    ),
+    checkinMenoresDe2: v.optional(v.number()),
+    checkinMascotas: v.optional(v.number()),
+    checkinPlacas: v.optional(v.string()),
+    checkinObservaciones: v.optional(v.string()),
+    checkinCompleted: v.optional(v.boolean()),
+    checkinCompletedAt: v.optional(v.number()),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index('by_token', ['token'])
+    .index('by_property', ['propertyId'])
+    .index('by_created_by', ['createdBy'])
+    .index('by_status', ['status']),
 });

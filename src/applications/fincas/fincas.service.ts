@@ -1733,7 +1733,11 @@ Al confirmar tu pago, recibirás el *soporte oficial* junto con todos los detall
 
       // Obtener informaciÃ³n de la conversaciÃ³n y contacto para el cliente
       let contact: any = null;
-      if (dto.conversationId && dto.conversationId !== 'direct-reservation') {
+      if (
+        dto.conversationId &&
+        dto.conversationId !== 'direct-reservation' &&
+        dto.conversationId !== 'sale-link'
+      ) {
         try {
           const conv = await this.convexService.query('conversations:getById', {
             conversationId: dto.conversationId,
@@ -2492,7 +2496,11 @@ Al confirmar tu pago, recibirás el *soporte oficial* junto con todos los detall
       }
 
       // 5. Enviar mensaje a la conversaciÃ³n (solo si es una conversaciÃ³n vÃ¡lida)
-      if (dto.conversationId && dto.conversationId !== 'direct-reservation') {
+      if (
+        dto.conversationId &&
+        dto.conversationId !== 'direct-reservation' &&
+        dto.conversationId !== 'sale-link'
+      ) {
         try {
       const contractMetadata = {
         kind: 'generated_contract',

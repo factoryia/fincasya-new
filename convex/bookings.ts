@@ -1708,3 +1708,124 @@ export const setGoogleCalendarLink = internalMutation({
     });
   },
 });
+
+const saleLinkGuestValidator = v.object({
+  nombreCompleto: v.string(),
+  cedula: v.optional(v.string()),
+  tipoDocumento: v.optional(v.string()),
+  esMenor: v.optional(v.boolean()),
+});
+
+/** Crea o actualiza la reserva del calendario al completar check-in de un link de venta. */
+export const createFromSaleLink = internalMutation({
+  args: {
+    saleLinkId: v.id('saleLinks'),
+    guestDisplayName: v.string(),
+    guests: v.array(saleLinkGuestValidator),
+    menoresDe2: v.optional(v.number()),
+    mascotas: v.optional(v.number()),
+    placas: v.optional(v.string()),
+    observaciones: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    const link = await ctx.db.get(args.saleLinkId);
+    if (!link) return { ok: false as const, reason: 'not_found' as const };
+    const client = link.clientData;
+    if (!client) return { ok: false as const, reason: 'no_client' as const };
+
+    const now = Date.now();
+    const observaciones = [
+      args.observaciones?.trim(),
+      args.placas?.trim() ? `Placas: ${args.placas.trim()}` : null,
+      args.guests.length
+        ? `Huéspedes: ${args.guests.map((g) => g.nombreCompleto).join(', ')}`
+        : null,
+      `Link venta: ${link.token}`,
+    ]
+      .filter(Boolean)
+      .join('\n');
+
+    const checkinPatch = {
+      checkinGuests: args.guests,
+      checkinMenoresDe2: args.menoresDe2,
+      checkinMascotas: args.mascotas,
+      checkinPlacas: args.placas,
+      checkinObservaciones: args.observaciones,
+      checkinCompleted: true,
+      checkinCompletedAt: now,
+      checkinUpdatedAt: now,
+      nombreCompleto: args.guestDisplayName,
+      observaciones,
+      updatedAt: now,
+    };
+
+    if (link.bookingId) {
+      await ctx.db.patch(link.bookingId, checkinPatch);
+      await ctx.scheduler.runAfter(0, internal.googleCalendar.syncBookingToCalendar, {
+        bookingId: link.bookingId,
+      });
+      return { ok: true as const, bookingId: link.bookingId };
+    }
+
+    const availability = await ctx.runQuery(api.bookings.checkAvailability, {
+      propertyId: link.propertyId,
+      fechaEntrada: link.checkIn,
+      fechaSalida: link.checkOut,
+    });
+    if (!availability.available) {
+      return { ok: false as const, reason: 'unavailable' as const };
+    }
+
+    const bookingId = await ctx.db.insert('bookings', {
+      propertyId: link.propertyId,
+      cedula: client.cedula,
+      celular: client.telefono,
+      correo: client.email,
+      fechaEntrada: link.checkIn,
+      fechaSalida: link.checkOut,
+      numeroNoches: link.nights,
+      numeroPersonas: link.guests,
+      personasAdicionales: 0,
+      tieneMascotas: (link.petCount ?? 0) > 0,
+      numeroMascotas: link.petCount ?? 0,
+      subtotal: link.rentalValue,
+      costoPersonasAdicionales: 0,
+      costoMascotas: link.petSurcharge ?? 0,
+      depositoMascotas: link.petDeposit ?? 0,
+      sobrecargoMascotas: link.petSurcharge ?? 0,
+      costoPersonalServicio: 0,
+      depositoGarantia: link.depositAmount,
+      depositoAseo: link.cleaningFee,
+      discountAmount: 0,
+      precioTotal: link.totalValue,
+      currency: 'COP',
+      temporada: 'ESTANDAR',
+      status: 'CONFIRMED',
+      paymentStatus: 'PAID',
+      reference: `VL-${link.token.slice(0, 8).toUpperCase()}`,
+      city: client.ciudad,
+      address: client.direccion,
+      horaEntrada: link.checkInTime,
+      horaSalida: link.checkOutTime,
+      isDirect: true,
+      calendarLabel: '',
+      ...checkinPatch,
+      createdAt: now,
+    });
+
+    await ctx.db.insert('propertyAvailability', {
+      propertyId: link.propertyId,
+      bookingId,
+      fechaEntrada: link.checkIn,
+      fechaSalida: link.checkOut,
+      blocked: true,
+      reason: 'Reserva confirmada (venta link)',
+    });
+
+    await ctx.scheduler.runAfter(0, internal.googleCalendar.syncBookingToCalendar, {
+      bookingId,
+    });
+
+    return { ok: true as const, bookingId };
+  },
+});
