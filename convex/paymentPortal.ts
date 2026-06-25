@@ -350,6 +350,7 @@ export const submitReceipt = internalMutation({
     const prev = booking.paymentPortalReceipts ?? [];
     await ctx.db.patch(booking._id, {
       paymentPortalReceipts: [...prev, entry],
+      hasPendingReceipt: true,
       updatedAt: Date.now(),
     });
 

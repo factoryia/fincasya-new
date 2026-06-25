@@ -246,6 +246,7 @@ export const markPaymentReceiptsReviewed = mutation({
     if (updated > 0) {
       await ctx.db.patch(args.bookingId, {
         paymentPortalReceipts: next,
+        hasPendingReceipt: next.some((r) => r.status === 'pending'),
         updatedAt: Date.now(),
       });
     }

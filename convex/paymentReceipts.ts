@@ -8,9 +8,12 @@ import { mutation, query } from './_generated/server';
 export const listPending = query({
   args: {},
   handler: async (ctx) => {
-    // Acotamos el escaneo a reservas recientes (los soportes pendientes son de
-    // reservas activas/próximas) para no exceder el límite de lectura de Convex.
-    const bookings = await ctx.db.query('bookings').order('desc').take(800);
+    // Solo las reservas con un soporte pendiente (vía índice), sin escanear toda
+    // la tabla: así nunca se excede el límite de lectura de Convex.
+    const bookings = await ctx.db
+      .query('bookings')
+      .withIndex('by_pending_receipt', (q) => q.eq('hasPendingReceipt', true))
+      .collect();
     const propCache = new Map<string, { title?: string } | null>();
     const getProp = async (id: any) => {
       if (!id) return null;
@@ -124,10 +127,38 @@ export const setReceiptStatus = mutation({
       };
     });
     if (!found) return { ok: false as const, reason: 'receipt_not_found' };
+    const stillPending = next.some((r) => r.status === 'pending');
     await ctx.db.patch(args.bookingId, {
       paymentPortalReceipts: next,
+      hasPendingReceipt: stillPending,
       updatedAt: Date.now(),
     });
     return { ok: true as const };
+  },
+});
+
+/**
+ * Marca `hasPendingReceipt` en las reservas existentes que ya tienen un soporte
+ * pendiente (para que aparezcan en la cola con el nuevo índice). Acotado a las
+ * reservas recientes para no exceder el límite de lectura.
+ */
+export const backfillPendingFlag = mutation({
+  args: {},
+  handler: async (ctx) => {
+    const bookings = await ctx.db.query('bookings').order('desc').take(400);
+    let actualizadas = 0;
+    for (const b of bookings) {
+      const tienePend = (b.paymentPortalReceipts ?? []).some(
+        (r) => r.status === 'pending',
+      );
+      if (tienePend && b.hasPendingReceipt !== true) {
+        await ctx.db.patch(b._id, { hasPendingReceipt: true });
+        actualizadas++;
+      } else if (!tienePend && b.hasPendingReceipt === true) {
+        await ctx.db.patch(b._id, { hasPendingReceipt: false });
+        actualizadas++;
+      }
+    }
+    return { ok: true as const, actualizadas };
   },
 });
