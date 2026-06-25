@@ -155,7 +155,8 @@ async function loadPropertyCoverImageUrl(
     .collect();
   if (images.length === 0) return null;
   const sorted = images.sort(
-    (a, b) => (a.order ?? 0) - (b.order ?? 0),
+    (a: Doc<'propertyImages'>, b: Doc<'propertyImages'>) =>
+      (a.order ?? 0) - (b.order ?? 0),
   );
   const url = String(sorted[0]?.url ?? '').trim();
   return url || null;
