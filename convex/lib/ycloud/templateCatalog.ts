@@ -169,10 +169,10 @@ export const CHECKIN_TEMPLATES: Record<CheckinTemplateKey, TemplateDef> = {
     category: "UTILITY",
     paramKeys: ["nombrePropietario", "fechaViaje", "nombreFinca", "linkAnfitrion"],
     bodyText:
-      "🏡 ¡Hola, {{1}}!\n📅 El {{2}} estarán viajando nuestros turistas a tu finca {{3}}. ✨ Todo está listo para recibirlos.\n📝 Te recordamos que en este enlace podrás consultar la lista de invitados y hacer seguimiento a medida que los turistas vayan completando su registro:\n👉 {{4}}\n🚗 El día del viaje te estaremos informando sobre los tiempos de desplazamiento para que todo esté debidamente coordinado.\n🤝 Si tienes alguna inquietud o se presenta alguna novedad, por favor háznoslo saber. ¡Estaremos atentos para apoyarte!",
+      "🏡 ¡Hola, {{1}}! Un gusto saludarte.\n📅 El {{2}} estarán viajando nuestros turistas a tu finca {{3}}. ✨ Todo está listo para recibirlos.\n📝 Te recordamos que en este enlace podrás consultar la lista de invitados y hacer seguimiento a medida que los turistas vayan completando su registro:\n👉 {{4}}\n🚗 El día del viaje te estaremos informando sobre los tiempos de desplazamiento para que todo esté debidamente coordinado.\n🤝 Si tienes alguna inquietud o se presenta alguna novedad, por favor háznoslo saber. ¡Estaremos atentos para apoyarte!\n✨ Muchas gracias, como siempre, por toda tu colaboración.\nEste fin de semana queremos pedirte un apoyo especial: muchos turistas intentarán viajar más temprano por la congestión de San Pedro y para alcanzar a ver el partido Colombia vs. Portugal.\nAgradecemos mucho tu buena disposición para facilitar los ingresos, en la medida de lo posible. 🤝🏡",
     footer: "FincasYa",
     exampleParams: [
-      "Hernán",
+      "señor Hernán",
       "sábado 15 de junio",
       "Villa del Lago",
       "https://fincasya.com/anfitrion/2625",

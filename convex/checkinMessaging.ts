@@ -38,6 +38,15 @@ function ownerPortalBase(): string {
   return checkinPortalBase().replace(/\/[^/]+$/, "/anfitrion");
 }
 
+/** Saludo con tratamiento: "señor Hernán" / "señora Mikaela". Sin tratamiento, solo el nombre. */
+function saludoPropietario(nombre?: string, tratamiento?: string): string {
+  const fn = firstName(nombre) || "propietario";
+  const t = (tratamiento ?? "").trim().toLowerCase();
+  if (t.startsWith("sr") || t.startsWith("señor")) return `señor ${fn}`;
+  if (t.startsWith("sra") || t.startsWith("señora")) return `señora ${fn}`;
+  return fn;
+}
+
 /** Primer nombre, para un saludo más natural en la plantilla. */
 function firstName(full: string | undefined | null): string {
   const s = String(full ?? "").trim();
@@ -399,6 +408,7 @@ type EnrichedBooking = {
   scheduledMessages?: Array<{ key: string; recipient: string }>;
   propertyTitle: string;
   propietarioNombre?: string;
+  propietarioTratamiento?: string;
   propietarioTelefono?: string;
   encargadoNombre?: string;
   encargadoTelefono?: string;
@@ -443,6 +453,8 @@ export const bookingsInWindow = internalQuery({
           propertyTitle: (property as { title?: string } | null)?.title || "tu finca",
           propietarioNombre: (property as { propietarioNombre?: string } | null)
             ?.propietarioNombre,
+          propietarioTratamiento: (property as { propietarioTratamiento?: string } | null)
+            ?.propietarioTratamiento,
           propietarioTelefono: (property as { propietarioTelefono?: string } | null)
             ?.propietarioTelefono,
           encargadoNombre: (property as { encargadoNombre?: string } | null)
@@ -562,7 +574,10 @@ function planSendsForMoment(
             recipientName: b.propietarioNombre || "propietario",
             recipientType: "owner",
             bodyParams: buildBodyParams(def, {
-              nombrePropietario: firstName(b.propietarioNombre) || "propietario",
+              nombrePropietario: saludoPropietario(
+                b.propietarioNombre,
+                b.propietarioTratamiento,
+              ),
               fechaViaje: formatDiaViaje(b.fechaEntrada),
               nombreFinca: finca,
               linkAnfitrion: `${ownerPortalBase()}/${cr}`,
@@ -635,6 +650,8 @@ export const getBookingForSend = internalQuery({
       propertyTitle: (property as { title?: string } | null)?.title || "tu finca",
       propietarioNombre: (property as { propietarioNombre?: string } | null)
         ?.propietarioNombre,
+      propietarioTratamiento: (property as { propietarioTratamiento?: string } | null)
+        ?.propietarioTratamiento,
       propietarioTelefono: (property as { propietarioTelefono?: string } | null)
         ?.propietarioTelefono,
       encargadoNombre: (property as { encargadoNombre?: string } | null)
@@ -665,7 +682,10 @@ function resolveManualSend(
       recipientName: b.propietarioNombre || "propietario",
       recipientType: "owner",
       bodyParams: buildBodyParams(def, {
-        nombrePropietario: firstName(b.propietarioNombre) || "propietario",
+        nombrePropietario: saludoPropietario(
+          b.propietarioNombre,
+          b.propietarioTratamiento,
+        ),
         fechaViaje: formatDiaViaje(b.fechaEntrada),
         nombreFinca: finca,
         linkAnfitrion: `${ownerPortalBase()}/${cr}`,
@@ -949,8 +969,10 @@ export const listBookingsForBatch = query({
       const cr = (b.reference || b._id) as string;
       const defaults: Record<string, string> = {
         nombreTurista: firstName(b.nombreCompleto),
-        nombrePropietario: firstName(
+        nombrePropietario: saludoPropietario(
           (property as { propietarioNombre?: string } | null)?.propietarioNombre,
+          (property as { propietarioTratamiento?: string } | null)
+            ?.propietarioTratamiento,
         ),
         nombreFinca: finca,
         referenciaReserva: cr,
