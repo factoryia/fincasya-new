@@ -863,6 +863,60 @@ export class BookingsSyncService {
     );
   }
 
+  /** Revisión de pagos: lista de soportes pendientes con contexto de reserva. */
+  async listPendingPaymentReceipts() {
+    return this.convexService.query('paymentReceipts:listPending', {});
+  }
+
+  /**
+   * Aprueba un soporte: registra el abono (se refleja en la reserva) y marca el
+   * recibo como aprobado.
+   */
+  async approvePaymentReceipt(params: {
+    bookingId: string;
+    receiptId: string;
+    amount: number;
+    paymentMethod?: string;
+    reviewedBy?: string;
+  }) {
+    const amount = Math.max(0, Math.floor(Number(params.amount) || 0));
+    if (amount <= 0) {
+      throw new BadRequestException('El monto verificado debe ser mayor a cero.');
+    }
+    await this.convexService.mutation('bookings:createPayment', {
+      bookingId: params.bookingId as any,
+      type: 'ABONO_50',
+      amount,
+      paymentMethod: params.paymentMethod?.trim() || 'Soporte verificado',
+      notes: `Abono verificado y aprobado en Revisión de Pagos${params.reviewedBy ? ` por ${params.reviewedBy}` : ''}.`,
+      status: 'PAID',
+    });
+    await this.convexService.mutation('paymentReceipts:setReceiptStatus', {
+      bookingId: params.bookingId as any,
+      receiptId: params.receiptId,
+      status: 'approved',
+      reviewedAmount: amount,
+      reviewedBy: params.reviewedBy,
+    });
+    return { ok: true };
+  }
+
+  /** Rechaza un soporte con un motivo. No registra abono. */
+  async rejectPaymentReceipt(params: {
+    bookingId: string;
+    receiptId: string;
+    motivo: string;
+    reviewedBy?: string;
+  }) {
+    return this.convexService.mutation('paymentReceipts:setReceiptStatus', {
+      bookingId: params.bookingId as any,
+      receiptId: params.receiptId,
+      status: 'rejected',
+      rejectReason: params.motivo,
+      reviewedBy: params.reviewedBy,
+    });
+  }
+
   /** Ajustes de notificaciones (correos de alerta de soportes de pago). */
   async getNotificationSettings() {
     return this.convexService.query('notificationSettings:get', {});

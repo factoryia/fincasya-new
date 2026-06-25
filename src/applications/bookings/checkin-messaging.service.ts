@@ -857,7 +857,7 @@ export class CheckinMessagingService {
           typeof portal?.pagoPendiente === 'number'
             ? portal.pagoPendiente
             : undefined,
-        adminUrl: 'https://fincasya.com/admin/reservations',
+        adminUrl: 'https://fincasya.com/admin/payment-review',
       });
     } catch (mailErr) {
       console.warn(

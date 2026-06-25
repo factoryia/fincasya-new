@@ -607,6 +607,13 @@ export default defineSchema({
             v.literal('rejected'),
           ),
           submittedAt: v.number(),
+          /** Revisión por el admin/representante legal. */
+          reviewedAt: v.optional(v.number()),
+          reviewedBy: v.optional(v.string()),
+          /** Monto verificado al aprobar (puede diferir del reportado). */
+          reviewedAmount: v.optional(v.number()),
+          /** Motivo cuando status === 'rejected'. */
+          rejectReason: v.optional(v.string()),
         }),
       ),
     ),
