@@ -944,6 +944,17 @@ export class BookingsController {
     return this.bookingsSyncService.createManualPayment(id, body);
   }
 
+  /** Elimina un abono cargado por error (solo ADMIN). */
+  @Delete(':id/payments/:paymentId')
+  @UseGuards(ConvexAuthGuard, RolesGuard)
+  @Roles(UserRole.ADMIN)
+  async deleteBookingPayment(
+    @Param('id') id: string,
+    @Param('paymentId') paymentId: string,
+  ) {
+    return this.bookingsSyncService.deleteBookingPayment(id, paymentId);
+  }
+
   /**
    * "Validar pago": registra un abono con su soporte (imagen/PDF) que llegó por
    * correo/WhatsApp. Sube el soporte y crea el pago como PAID.
