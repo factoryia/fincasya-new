@@ -35,8 +35,8 @@ const CELL_MARGINS = `<w:tcMar>
   <w:right w:w="100" w:type="dxa"/>
 </w:tcMar>`;
 
-const LABEL_FILL = 'FFF0E6';
-const HEADER_FILL = 'FDE9DE';
+const LABEL_FILL = 'F0F0F0';
+const HEADER_FILL = 'E8E8E8';
 
 function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
