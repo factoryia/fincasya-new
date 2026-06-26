@@ -1,6 +1,32 @@
 const WORD_TEMPLATE_GAP =
   '(?:<[^>]+>|\\s|&nbsp;|&#160;|&#xA0;|\\u00A0)*';
 
+/** Ancho útil de la página (Letter con márgenes de 1440 dxa). */
+const TABLE_WIDTH_DXA = 9360;
+
+const TABLE_BORDERS = `<w:tblBorders>
+  <w:top w:val="single" w:sz="4" w:space="0" w:color="BBBBBB"/>
+  <w:left w:val="single" w:sz="4" w:space="0" w:color="BBBBBB"/>
+  <w:bottom w:val="single" w:sz="4" w:space="0" w:color="BBBBBB"/>
+  <w:right w:val="single" w:sz="4" w:space="0" w:color="BBBBBB"/>
+  <w:insideH w:val="single" w:sz="4" w:space="0" w:color="BBBBBB"/>
+  <w:insideV w:val="single" w:sz="4" w:space="0" w:color="BBBBBB"/>
+</w:tblBorders>`;
+
+const CELL_BORDERS = `<w:tcBorders>
+  <w:top w:val="single" w:sz="4" w:space="0" w:color="BBBBBB"/>
+  <w:left w:val="single" w:sz="4" w:space="0" w:color="BBBBBB"/>
+  <w:bottom w:val="single" w:sz="4" w:space="0" w:color="BBBBBB"/>
+  <w:right w:val="single" w:sz="4" w:space="0" w:color="BBBBBB"/>
+</w:tcBorders>`;
+
+const CELL_MARGINS = `<w:tcMar>
+  <w:top w:w="60" w:type="dxa"/>
+  <w:left w:w="100" w:type="dxa"/>
+  <w:bottom w:w="60" w:type="dxa"/>
+  <w:right w:w="100" w:type="dxa"/>
+</w:tcMar>`;
+
 function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
@@ -63,50 +89,73 @@ export function replaceWordRawBlockPlaceholder(
   return xml.slice(0, para.start) + rawXml + xml.slice(para.end);
 }
 
-function wordCell(text: string, opts?: { header?: boolean; width?: number }) {
+function wordParagraph(text: string, opts?: { bold?: boolean; center?: boolean }) {
+  const pPr = opts?.center
+    ? '<w:pPr><w:jc w:val="center"/></w:pPr>'
+    : '';
+  const rPr = opts?.bold
+    ? '<w:rPr><w:b/><w:sz w:val="20"/><w:lang w:val="es-CO"/></w:rPr>'
+    : '<w:rPr><w:sz w:val="20"/><w:lang w:val="es-CO"/></w:rPr>';
+  return `<w:p>${pPr}<w:r>${rPr}<w:t xml:space="preserve">${escapeWordXml(text)}</w:t></w:r></w:p>`;
+}
+
+function wordCell(
+  text: string,
+  opts?: { header?: boolean; width?: number; center?: boolean },
+) {
   const width = opts?.width ?? 4500;
   const fill = opts?.header ? ' w:fill="F5F5F5"' : '';
-  return `<w:tc><w:tcPr><w:tcW w:w="${width}" w:type="dxa"/><w:shd w:val="clear" w:color="auto"${fill}/></w:tcPr><w:p><w:r><w:rPr><w:sz w:val="20"/><w:lang w:val="es-CO"/></w:rPr><w:t xml:space="preserve">${escapeWordXml(text)}</w:t></w:r></w:p></w:tc>`;
+  return `<w:tc><w:tcPr><w:tcW w:w="${width}" w:type="dxa"/>${CELL_BORDERS}${CELL_MARGINS}<w:shd w:val="clear" w:color="auto"${fill}/></w:tcPr>${wordParagraph(text, { bold: opts?.header, center: opts?.center })}</w:tc>`;
 }
 
 function wordRow(cells: string[]) {
   return `<w:tr>${cells.join('')}</w:tr>`;
 }
 
-function wordTable(rows: string[]) {
-  return `<w:tbl><w:tblPr><w:tblStyle w:val="TableGrid"/><w:tblW w:w="0" w:type="auto"/></w:tblPr><w:tblGrid><w:gridCol w:w="3200"/><w:gridCol w:w="6200"/></w:tblGrid>${rows.join('')}</w:tbl>`;
+function wordTable(gridCols: number[], rows: string[]) {
+  const grid = gridCols.map((w) => `<w:gridCol w:w="${w}"/>`).join('');
+  return `<w:tbl><w:tblPr><w:tblW w:w="${TABLE_WIDTH_DXA}" w:type="dxa"/>${TABLE_BORDERS}<w:tblLayout w:type="fixed"/></w:tblPr><w:tblGrid>${grid}</w:tblGrid>${rows.join('')}</w:tbl>`;
 }
 
 export function buildGuestListMetaTableXml(
   pairs: Array<[string, string]>,
 ): string {
+  const labelWidth = 3200;
+  const valueWidth = TABLE_WIDTH_DXA - labelWidth;
   const rows = pairs.map(([label, value]) =>
-    wordRow([wordCell(label, { header: true, width: 3200 }), wordCell(value, { width: 6200 })]),
+    wordRow([
+      wordCell(label, { header: true, width: labelWidth }),
+      wordCell(value, { width: valueWidth }),
+    ]),
   );
-  return wordTable(rows);
+  return wordTable([labelWidth, valueWidth], rows);
 }
 
 export function buildGuestListGuestsTableXml(
   headers: string[],
   bodyRows: string[][],
 ): string {
+  const colWidths = [800, 4200, TABLE_WIDTH_DXA - 800 - 4200];
   const headerRow = wordRow(
     headers.map((h, i) =>
       wordCell(h, {
         header: true,
-        width: i === 0 ? 700 : i === 1 ? 4200 : 4500,
+        width: colWidths[i] ?? 4500,
+        center: i === 0,
       }),
     ),
   );
-  const widths = [700, 4200, 4500];
   const dataRows = bodyRows.map((cells) =>
     wordRow(
       cells.map((c, i) =>
-        wordCell(c, { width: widths[i] ?? 4500 }),
+        wordCell(c, {
+          width: colWidths[i] ?? 4500,
+          center: i === 0,
+        }),
       ),
     ),
   );
-  return `<w:tbl><w:tblPr><w:tblStyle w:val="TableGrid"/><w:tblW w:w="0" w:type="auto"/></w:tblPr><w:tblGrid><w:gridCol w:w="700"/><w:gridCol w:w="4200"/><w:gridCol w:w="4500"/></w:tblGrid>${headerRow}${dataRows.join('')}</w:tbl>`;
+  return wordTable(colWidths, [headerRow, ...dataRows]);
 }
 
 export function processGuestListTemplateXml(
