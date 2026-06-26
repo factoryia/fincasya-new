@@ -335,6 +335,10 @@ export class CheckinMessagingService {
       (m: any) =>
         m.type === 'application/pdf' && /invitad|guest/i.test(m.name || ''),
     );
+    const portalShare = resolveOwnerPortalShare(
+      booking.ownerPortalShare as Record<string, boolean | undefined> | null,
+    );
+    const shareGuests = portalShare.showGuestList;
 
     return {
       reference: booking.reference || trimmed,
@@ -357,13 +361,16 @@ export class CheckinMessagingService {
           ? booking.checkinMascotas
           : Number(booking.numeroMascotas) || 0,
       checkinCompleted: Boolean(booking.checkinCompleted),
-      guestCount: allGuests.length,
-      guests: allGuests.map((g: any) => ({
-        nombre: g.nombreCompleto,
-        cedula: maskCedula(g.cedula),
-        tipoDocumento: String(g.tipoDocumento ?? 'CC').trim().toUpperCase() || 'CC',
-      })),
-      invitadosPdfUrl: pdf?.url || null,
+      guestCount: shareGuests ? allGuests.length : 0,
+      guests: shareGuests
+        ? allGuests.map((g: any) => ({
+            nombre: g.nombreCompleto,
+            cedula: maskCedula(g.cedula),
+            tipoDocumento:
+              String(g.tipoDocumento ?? 'CC').trim().toUpperCase() || 'CC',
+          }))
+        : [],
+      invitadosPdfUrl: shareGuests ? pdf?.url || null : null,
       // Para el propietario ocultamos la línea de "Invitados adicionales (sujeto a
       // aprobación)": esos los aprueba el equipo admin de Fincas Ya, no el propietario.
       checkinObservaciones:
@@ -374,9 +381,7 @@ export class CheckinMessagingService {
           .trim() || null,
       serviciosNota: String(booking.checkinServiciosNota ?? '').trim() || null,
       clientObservaciones: String(booking.clientObservaciones ?? '').trim() || null,
-      ownerPortalShare: resolveOwnerPortalShare(
-        booking.ownerPortalShare as Record<string, boolean | undefined> | null,
-      ),
+      ownerPortalShare: portalShare,
       ownerReceiver: booking.ownerReceiver
         ? {
             nombre: String(booking.ownerReceiver.nombre ?? '').trim() || null,
@@ -624,6 +629,11 @@ export class CheckinMessagingService {
       { reference: trimmed },
     );
     if (!booking) return null;
+
+    const portalShare = resolveOwnerPortalShare(
+      booking.ownerPortalShare as Record<string, boolean | undefined> | null,
+    );
+    if (!portalShare.showGuestList) return null;
 
     const guests = (booking.checkinGuests || []).filter((g: any) => !g.esMenor);
     if (guests.length === 0) return null;
