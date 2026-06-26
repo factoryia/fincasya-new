@@ -21,11 +21,14 @@ const CELL_BORDERS = `<w:tcBorders>
 </w:tcBorders>`;
 
 const CELL_MARGINS = `<w:tcMar>
-  <w:top w:w="60" w:type="dxa"/>
-  <w:left w:w="100" w:type="dxa"/>
-  <w:bottom w:w="60" w:type="dxa"/>
-  <w:right w:w="100" w:type="dxa"/>
+  <w:top w:w="40" w:type="dxa"/>
+  <w:left w:w="80" w:type="dxa"/>
+  <w:bottom w:w="40" w:type="dxa"/>
+  <w:right w:w="80" w:type="dxa"/>
 </w:tcMar>`;
+
+const COMPACT_PARAGRAPH_SPACING =
+  '<w:spacing w:before="0" w:after="0" w:line="240" w:lineRule="auto"/>';
 
 function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -90,13 +93,17 @@ export function replaceWordRawBlockPlaceholder(
 }
 
 function wordParagraph(text: string, opts?: { bold?: boolean; center?: boolean }) {
-  const pPr = opts?.center
-    ? '<w:pPr><w:jc w:val="center"/></w:pPr>'
-    : '';
+  const pPrParts = [COMPACT_PARAGRAPH_SPACING];
+  if (opts?.center) pPrParts.unshift('<w:jc w:val="center"/>');
+  const pPr = `<w:pPr>${pPrParts.join('')}</w:pPr>`;
   const rPr = opts?.bold
-    ? '<w:rPr><w:b/><w:sz w:val="20"/><w:lang w:val="es-CO"/></w:rPr>'
-    : '<w:rPr><w:sz w:val="20"/><w:lang w:val="es-CO"/></w:rPr>';
+    ? '<w:rPr><w:b/><w:sz w:val="18"/><w:lang w:val="es-CO"/></w:rPr>'
+    : '<w:rPr><w:sz w:val="18"/><w:lang w:val="es-CO"/></w:rPr>';
   return `<w:p>${pPr}<w:r>${rPr}<w:t xml:space="preserve">${escapeWordXml(text)}</w:t></w:r></w:p>`;
+}
+
+function wordSectionTitle(text: string): string {
+  return `<w:p><w:pPr><w:spacing w:before="100" w:after="40" w:line="240" w:lineRule="auto"/><w:keepNext/></w:pPr><w:r><w:rPr><w:b/><w:sz w:val="22"/><w:lang w:val="es-CO"/></w:rPr><w:t xml:space="preserve">${escapeWordXml(text)}</w:t></w:r></w:p>`;
 }
 
 function wordCell(
@@ -158,17 +165,62 @@ export function buildGuestListGuestsTableXml(
   return wordTable(colWidths, [headerRow, ...dataRows]);
 }
 
+/** Meta + título + invitados en un solo bloque (evita salto de página entre tablas). */
+export function buildGuestListBodyXml(
+  metaPairs: Array<[string, string]>,
+  guestHeaders: string[],
+  guestRows: string[][],
+): string {
+  return [
+    buildGuestListMetaTableXml(metaPairs),
+    wordSectionTitle('Personas registradas'),
+    buildGuestListGuestsTableXml(guestHeaders, guestRows),
+  ].join('');
+}
+
+/** Reduce márgenes y encabezado para que quepa más contenido en una página. */
+export function compactGuestListDocumentXml(xml: string): string {
+  return xml
+    .replace(
+      /<w:pgMar[^/>]*\/>/,
+      '<w:pgMar w:top="900" w:right="1200" w:bottom="900" w:left="1200" w:header="400" w:footer="400" w:gutter="0"/>',
+    )
+    .replace(
+      /<w:headerReference w:type="first" r:id="[^"]+"\/>/g,
+      '',
+    )
+    .replace(
+      /<w:footerReference w:type="first" r:id="[^"]+"\/>/g,
+      '',
+    );
+}
+
+/** Marca de agua del encabezado más pequeña para no empujar el contenido. */
+export function compactGuestListHeaderXml(xml: string): string {
+  return xml.replace(
+    /width:468pt;height:468pt/g,
+    'width:320pt;height:320pt',
+  );
+}
+
 export function processGuestListTemplateXml(
   xml: string,
   metaTableXml: string,
   guestsTableXml: string,
 ): string {
-  let processed = xml;
+  let processed = compactGuestListDocumentXml(xml);
+
+  const bodyXml = `${metaTableXml}${wordSectionTitle('Personas registradas')}${guestsTableXml}`;
+  if (processed.includes('{{contenido}}') || processed.includes('{contenido}')) {
+    processed = replaceWordRawBlockPlaceholder(processed, 'contenido', bodyXml);
+    return processed;
+  }
+
   processed = replaceWordRawBlockPlaceholder(processed, 'tablaMeta', metaTableXml);
   processed = replaceWordRawBlockPlaceholder(
     processed,
     'tablaInvitados',
-    guestsTableXml,
+    `${wordSectionTitle('Personas registradas')}${guestsTableXml}`,
   );
   return processed;
 }

@@ -6,6 +6,7 @@ import { loadDefaultGuestListTemplateBytes } from './guest-list-default-template
 import {
   buildGuestListGuestsTableXml,
   buildGuestListMetaTableXml,
+  compactGuestListHeaderXml,
   processGuestListTemplateXml,
 } from './guest-list-word.util';
 
@@ -202,6 +203,8 @@ export class GuestListPdfService {
                 guestsTableXml,
               ),
             );
+          } else if (/^word\/header\d+\.xml$/.test(fileName)) {
+            zip.file(fileName, compactGuestListHeaderXml(raw));
           }
         }
 

@@ -18,19 +18,14 @@ OUTPUT = CONTRACTS_DIR / "default-guest-list-template.docx"
 
 BODY_BLOCK = """
 <w:p>
-  <w:pPr><w:jc w:val="center"/><w:spacing w:after="120"/></w:pPr>
-  <w:r><w:rPr><w:b/><w:sz w:val="32"/></w:rPr><w:t xml:space="preserve">LISTA DE INVITADOS — CHECK-IN</w:t></w:r>
+  <w:pPr><w:jc w:val="center"/><w:spacing w:after="60" w:line="260" w:lineRule="auto"/></w:pPr>
+  <w:r><w:rPr><w:b/><w:sz w:val="28"/></w:rPr><w:t xml:space="preserve">LISTA DE INVITADOS — CHECK-IN</w:t></w:r>
 </w:p>
 <w:p>
-  <w:pPr><w:jc w:val="center"/><w:spacing w:after="240"/></w:pPr>
-  <w:r><w:rPr><w:sz w:val="18"/><w:color w:val="666666"/></w:rPr><w:t xml:space="preserve">Documento generado por Fincas Ya para el propietario</w:t></w:r>
+  <w:pPr><w:jc w:val="center"/><w:spacing w:after="80" w:line="240" w:lineRule="auto"/></w:pPr>
+  <w:r><w:rPr><w:sz w:val="16"/><w:color w:val="666666"/></w:rPr><w:t xml:space="preserve">Documento generado por Fincas Ya para el propietario</w:t></w:r>
 </w:p>
-<w:p><w:r><w:t>{{tablaMeta}}</w:t></w:r></w:p>
-<w:p>
-  <w:pPr><w:spacing w:before="240" w:after="120"/></w:pPr>
-  <w:r><w:rPr><w:b/><w:sz w:val="24"/></w:rPr><w:t xml:space="preserve">Personas registradas</w:t></w:r>
-</w:p>
-<w:p><w:r><w:t>{{tablaInvitados}}</w:t></w:r></w:p>
+<w:p><w:r><w:t>{{contenido}}</w:t></w:r></w:p>
 """.strip()
 
 
