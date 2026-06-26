@@ -93,6 +93,33 @@ export const listWithAccounts = query({
   },
 });
 
+/** Para el backfill de Waze: ubicación (Maps/Waze) de cada finca. */
+export const listCheckinUbicaciones = query({
+  args: {},
+  handler: async (ctx) => {
+    const infos = await ctx.db.query('propertyOwnerInfo').collect();
+    return infos.map((info) => ({
+      propertyId: info.propertyId as unknown as string,
+      checkinUbicacionUrl: String(info.checkinUbicacionUrl ?? ''),
+      checkinWazeUrl: String(info.checkinWazeUrl ?? ''),
+    }));
+  },
+});
+
+/** Setea solo el enlace de Waze (usado por el backfill). */
+export const setCheckinWaze = mutation({
+  args: { propertyId: v.id('properties'), checkinWazeUrl: v.string() },
+  handler: async (ctx, args) => {
+    const existing = await ctx.db
+      .query('propertyOwnerInfo')
+      .withIndex('by_property', (q) => q.eq('propertyId', args.propertyId))
+      .unique();
+    if (!existing) return { ok: false as const };
+    await ctx.db.patch(existing._id, { checkinWazeUrl: args.checkinWazeUrl });
+    return { ok: true as const };
+  },
+});
+
 /**
  * Upsert owner information for a property
  */

@@ -694,6 +694,14 @@ export class BookingsSyncService {
     });
   }
 
+  /** Elimina un abono cargado por error y devuelve el resumen actualizado. */
+  async deleteBookingPayment(bookingId: string, paymentId: string) {
+    await this.convexService.mutation('bookings:deletePayment', {
+      paymentId: paymentId as any,
+    });
+    return this.getBookingPayments(bookingId);
+  }
+
   async createManualPayment(
     bookingId: string,
     body: {

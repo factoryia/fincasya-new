@@ -1520,6 +1520,70 @@ Al confirmar tu pago, recibirás el *soporte oficial* junto con todos los detall
     }
   }
 
+  /**
+   * Convierte un enlace de Google Maps en uno de Waze extrayendo las coordenadas.
+   * Si es un enlace corto (maps.app.goo.gl / goo.gl), lo resuelve siguiendo el
+   * redirect para obtener la URL larga con coordenadas. Devuelve null si no puede.
+   */
+  private async mapsLinkToWaze(mapsUrl: string): Promise<string | null> {
+    const url = (mapsUrl ?? '').trim();
+    if (!url) return null;
+
+    const buildWaze = (lat: string, lng: string) =>
+      `https://waze.com/ul?ll=${lat},${lng}&navigate=yes`;
+
+    const extractCoords = (
+      s: string,
+    ): { lat: string; lng: string } | null => {
+      const patterns: RegExp[] = [
+        /@(-?\d{1,3}\.\d{3,}),(-?\d{1,3}\.\d{3,})/,
+        /!3d(-?\d{1,3}\.\d{3,})!4d(-?\d{1,3}\.\d{3,})/,
+        /[?&](?:q|ll|sll|daddr|destination|center)=(-?\d{1,3}\.\d{3,}),(-?\d{1,3}\.\d{3,})/,
+        /\/(-?\d{1,3}\.\d{3,}),(-?\d{1,3}\.\d{3,})(?:[/,]|$)/,
+      ];
+      for (const re of patterns) {
+        const m = s.match(re);
+        if (m) {
+          const lat = parseFloat(m[1]);
+          const lng = parseFloat(m[2]);
+          if (
+            Number.isFinite(lat) &&
+            Number.isFinite(lng) &&
+            Math.abs(lat) <= 90 &&
+            Math.abs(lng) <= 180
+          ) {
+            return { lat: m[1], lng: m[2] };
+          }
+        }
+      }
+      return null;
+    };
+
+    const direct = extractCoords(url);
+    if (direct) return buildWaze(direct.lat, direct.lng);
+    if (!/^https?:\/\//i.test(url)) return null;
+
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 7000);
+    try {
+      const res = await fetch(url, {
+        redirect: 'follow',
+        signal: controller.signal,
+        headers: { 'User-Agent': 'Mozilla/5.0 (compatible; FincasYaBot/1.0)' },
+      });
+      const fromUrl = extractCoords(res.url || url);
+      if (fromUrl) return buildWaze(fromUrl.lat, fromUrl.lng);
+      const body = await res.text();
+      const fromBody = extractCoords(body);
+      if (fromBody) return buildWaze(fromBody.lat, fromBody.lng);
+      return null;
+    } catch {
+      return null;
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
   async upsertOwnerInfo(
     propertyId: string,
     dto: UpdateOwnerInfoDto,
@@ -1665,6 +1729,21 @@ Al confirmar tu pago, recibirás el *soporte oficial* junto con todos los detall
         updateData.checkinUbicacionImageUrl = finalUrls[0] ?? '';
       }
 
+      // Auto-generar el enlace de Waze desde Google Maps si no se proporcionó uno.
+      let wazeGenerada = false;
+      let wazeFallida = false;
+      const mapsUrlIn = (dto.checkinUbicacionUrl ?? '').trim();
+      const wazeManual = (dto.checkinWazeUrl ?? '').trim();
+      if (mapsUrlIn && !wazeManual) {
+        const waze = await this.mapsLinkToWaze(mapsUrlIn);
+        if (waze) {
+          updateData.checkinWazeUrl = waze;
+          wazeGenerada = true;
+        } else {
+          wazeFallida = true;
+        }
+      }
+
       const result = await this.convexService.mutation(
         'propertyOwners:upsert',
         updateData,
@@ -1698,10 +1777,61 @@ Al confirmar tu pago, recibirás el *soporte oficial* junto con todos los detall
         }
       }
 
-      return result;
+      return {
+        ...(typeof result === 'object' && result !== null
+          ? (result as Record<string, unknown>)
+          : { result }),
+        wazeGenerada,
+        wazeFallida,
+        checkinWazeUrl: updateData.checkinWazeUrl,
+      };
     } catch (error) {
       throw new BadRequestException(error.message);
     }
+  }
+
+  /**
+   * Backfill: para las fincas ya guardadas con Google Maps pero sin Waze,
+   * genera y guarda el enlace de Waze.
+   */
+  async backfillCheckinWaze() {
+    const rows: Array<{
+      propertyId: string;
+      checkinUbicacionUrl: string;
+      checkinWazeUrl: string;
+    }> = await this.convexService.query(
+      'propertyOwners:listCheckinUbicaciones',
+      {},
+    );
+    let procesados = 0;
+    let generados = 0;
+    let fallidos = 0;
+    let yaTenian = 0;
+    for (const r of rows) {
+      const maps = (r.checkinUbicacionUrl ?? '').trim();
+      const waze = (r.checkinWazeUrl ?? '').trim();
+      if (!maps) continue;
+      if (waze) {
+        yaTenian++;
+        continue;
+      }
+      procesados++;
+      const generado = await this.mapsLinkToWaze(maps);
+      if (generado) {
+        try {
+          await this.convexService.mutation('propertyOwners:setCheckinWaze', {
+            propertyId: r.propertyId,
+            checkinWazeUrl: generado,
+          });
+          generados++;
+        } catch {
+          fallidos++;
+        }
+      } else {
+        fallidos++;
+      }
+    }
+    return { total: rows.length, procesados, generados, fallidos, yaTenian };
   }
 
   async getOwnedProperties(ownerUserId: string) {

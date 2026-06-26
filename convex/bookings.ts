@@ -1182,6 +1182,39 @@ export const createPayment = mutation({
   },
 });
 
+/** Elimina un abono/pago cargado por error y recalcula el estado de pago. */
+export const deletePayment = mutation({
+  args: { paymentId: v.id('payments') },
+  handler: async (ctx, args) => {
+    const payment = await ctx.db.get(args.paymentId);
+    if (!payment) throw new Error('Pago no encontrado');
+    const bookingId = payment.bookingId;
+    await ctx.db.delete(args.paymentId);
+
+    const booking = await ctx.db.get(bookingId);
+    if (booking) {
+      const payments = await ctx.db
+        .query('payments')
+        .withIndex('by_booking', (q) => q.eq('bookingId', bookingId))
+        .collect();
+      const netPaid = netPaidFromPayments(payments);
+      const paymentStatus = deriveBookingPaymentStatus(
+        booking.precioTotal,
+        netPaid,
+      );
+      await ctx.db.patch(bookingId, {
+        paymentStatus,
+        updatedAt: Date.now(),
+        // Si ya no está pagado del todo, revierte el estado PAID de la reserva.
+        ...(booking.status === 'PAID' && paymentStatus !== 'PAID'
+          ? { status: 'CONFIRMED' as const }
+          : {}),
+      });
+    }
+    return { ok: true as const, bookingId };
+  },
+});
+
 const MANUAL_ABONO_TYPES = new Set(['ABONO_50', 'SALDO_50', 'COMPLETO']);
 
 function isGatewayPayment(payment: Doc<'payments'>): boolean {
