@@ -2,12 +2,14 @@ import { Injectable, Logger } from '@nestjs/common';
 import PizZip from 'pizzip';
 import { FincasService } from '../fincas/fincas.service';
 import { PdfService } from '../shared/services/pdf.service';
-import { loadDefaultGuestListTemplateBytes } from './guest-list-default-template';
+import { loadDefaultGuestListTemplateBytes, loadGuestListWatermarkBase64 } from './guest-list-default-template';
 import {
   buildGuestListGuestsTableXml,
   buildGuestListMetaTableXml,
-  compactGuestListHeaderXml,
+  enableGuestListBackgroundShapes,
+  ensureGuestListDocumentImageRel,
   processGuestListTemplateXml,
+  styleGuestListHeaderXml,
 } from './guest-list-word.util';
 
 export type GuestListPdfGuest = {
@@ -104,7 +106,7 @@ export class GuestListPdfService {
     return pairs;
   }
 
-  private buildHtmlFallback(input: GuestListPdfInput): string {
+  private buildHtmlFallback(input: GuestListPdfInput, watermarkDataUri?: string | null): string {
     const esc = (v: unknown) =>
       String(v ?? '')
         .replace(/&/g, '&amp;')
@@ -114,9 +116,9 @@ export class GuestListPdfService {
     const metaRows = this.buildMetaPairs(input)
       .map(
         ([k, v]) =>
-          `<tr><th style="border:1px solid #ddd;background:#f5f5f5;text-align:left;width:34%;padding:6px 10px;">${esc(
+          `<tr><th style="border:1px solid #ccc;background:#fff0e6;text-align:center;width:34%;padding:8px 12px;font-size:13pt;">${esc(
             k,
-          )}</th><td style="border:1px solid #ddd;padding:6px 10px;">${esc(
+          )}</th><td style="border:1px solid #ccc;padding:8px 12px;text-align:center;font-size:13pt;">${esc(
             v,
           )}</td></tr>`,
       )
@@ -124,23 +126,39 @@ export class GuestListPdfService {
     const guestRows = input.guests
       .map(
         (g, i) =>
-          `<tr><td style="border:1px solid #ddd;text-align:center;width:36px;padding:6px 10px;">${
+          `<tr><td style="border:1px solid #ccc;text-align:center;width:48px;padding:8px 12px;font-size:13pt;">${
             i + 1
-          }</td><td style="border:1px solid #ddd;padding:6px 10px;">${esc(
+          }</td><td style="border:1px solid #ccc;padding:8px 12px;text-align:center;font-size:13pt;">${esc(
             g.nombreCompleto || '—',
-          )}</td><td style="border:1px solid #ddd;padding:6px 10px;">${esc(
+          )}</td><td style="border:1px solid #ccc;padding:8px 12px;text-align:center;font-size:13pt;">${esc(
             this.formatGuestDocument(g),
           )}</td></tr>`,
       )
       .join('');
+    const watermarkCss = watermarkDataUri
+      ? `body::before {
+    content: '';
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    width: 420pt;
+    height: 420pt;
+    transform: translate(-50%, -50%);
+    background: url('${watermarkDataUri}') center/contain no-repeat;
+    opacity: 0.35;
+    z-index: -1;
+  }`
+      : '';
     return `<!DOCTYPE html>
 <html lang="es"><head><meta charset="utf-8" />
 <style>
-  body { font-family: Arial, 'Segoe UI', sans-serif; color: #111; padding: 8px; }
-  h1 { font-size: 16pt; margin: 0 0 4pt; text-align: center; }
-  p.sub { text-align: center; color: #555; font-size: 10pt; margin: 0 0 16pt; }
-  h2 { font-size: 12pt; margin: 0 0 8pt; }
-  table { width: 100%; border-collapse: collapse; margin-bottom: 16pt; font-size: 11pt; }
+  @page { margin: 18mm 14mm; }
+  body { font-family: Arial, 'Segoe UI', sans-serif; color: #111; padding: 0; position: relative; }
+  ${watermarkCss}
+  h1 { font-size: 20pt; margin: 0 0 6pt; text-align: center; letter-spacing: 0.02em; }
+  p.sub { text-align: center; color: #666; font-size: 13pt; margin: 0 0 18pt; }
+  h2 { font-size: 16pt; margin: 0 0 10pt; text-align: center; }
+  table { width: 100%; border-collapse: collapse; margin: 0 auto 18pt; font-size: 13pt; }
 </style></head>
 <body>
   <h1>Lista de invitados — Check-in</h1>
@@ -149,9 +167,9 @@ export class GuestListPdfService {
   <h2>Personas registradas (${input.guests.length})</h2>
   <table>
     <thead><tr>
-      <th style="border:1px solid #ddd;background:#f5f5f5;padding:6px 10px;width:36px;">#</th>
-      <th style="border:1px solid #ddd;background:#f5f5f5;text-align:left;padding:6px 10px;">Nombre completo</th>
-      <th style="border:1px solid #ddd;background:#f5f5f5;text-align:left;padding:6px 10px;">Documento</th>
+      <th style="border:1px solid #ccc;background:#fde9de;padding:8px 12px;width:48px;text-align:center;font-size:13pt;">#</th>
+      <th style="border:1px solid #ccc;background:#fde9de;padding:8px 12px;text-align:center;font-size:13pt;">Nombre completo</th>
+      <th style="border:1px solid #ccc;background:#fde9de;padding:8px 12px;text-align:center;font-size:13pt;">Documento</th>
     </tr></thead>
     <tbody>${guestRows}</tbody>
   </table>
@@ -184,6 +202,18 @@ export class GuestListPdfService {
         );
 
         const zip = new PizZip(templateBytes);
+        let watermarkRelId: string | null = null;
+        const relsRaw = zip.file('word/_rels/document.xml.rels')?.asText();
+        if (relsRaw) {
+          const { xml: relsXml, relId } = ensureGuestListDocumentImageRel(relsRaw);
+          watermarkRelId = relId;
+          zip.file('word/_rels/document.xml.rels', relsXml);
+        }
+        const settingsRaw = zip.file('word/settings.xml')?.asText();
+        if (settingsRaw) {
+          zip.file('word/settings.xml', enableGuestListBackgroundShapes(settingsRaw));
+        }
+
         const xmlTargets = Object.keys(zip.files).filter(
           (name) =>
             !zip.files[name].dir &&
@@ -201,10 +231,11 @@ export class GuestListPdfService {
                 raw,
                 metaTableXml,
                 guestsTableXml,
+                watermarkRelId,
               ),
             );
           } else if (/^word\/header\d+\.xml$/.test(fileName)) {
-            zip.file(fileName, compactGuestListHeaderXml(raw));
+            zip.file(fileName, styleGuestListHeaderXml(raw));
           }
         }
 
@@ -223,7 +254,8 @@ export class GuestListPdfService {
       }
     }
 
-    const html = this.buildHtmlFallback({ ...input, guests });
+    const watermarkDataUri = await loadGuestListWatermarkBase64();
+    const html = this.buildHtmlFallback({ ...input, guests }, watermarkDataUri);
     const buffer = await this.pdfService.htmlToPdf(html);
     return { buffer, filename };
   }
