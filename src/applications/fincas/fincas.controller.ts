@@ -432,6 +432,13 @@ export class FincasController {
     return this.fincasService.getOwnerInfo(id);
   }
 
+  /** Backfill: genera el Waze de las fincas que tienen Google Maps pero no Waze. */
+  @Post('backfill-waze')
+  @UseGuards(ConvexAuthGuard, AdminGuard)
+  async backfillCheckinWaze() {
+    return this.fincasService.backfillCheckinWaze();
+  }
+
   @Post(':id/owner')
   @UseGuards(ConvexAuthGuard, OwnerOrAdminGuard)
   @UseInterceptors(
