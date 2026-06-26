@@ -3342,6 +3342,10 @@ ${trimmed}
    * Convierte un buffer de Word (.docx) a PDF.
    * Orden: iLovePDF → LibreOffice (si está instalado) → error (el caller entrega .docx).
    */
+  async convertDocxBufferToPdf(docxBuffer: Buffer): Promise<Buffer> {
+    return this.convertDocxToPdf(docxBuffer);
+  }
+
   private async convertDocxToPdf(docxBuffer: Buffer): Promise<Buffer> {
     if (!docxBuffer?.length || docxBuffer.slice(0, 2).toString() !== 'PK') {
       throw new Error('Buffer .docx inválido para conversión a PDF');

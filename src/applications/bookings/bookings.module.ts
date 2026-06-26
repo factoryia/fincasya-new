@@ -7,6 +7,7 @@ import { FincasModule } from '../fincas/fincas.module';
 import { BookingsSyncService } from './bookings-sync.service';
 import { BookingsRemindersService } from './bookings-reminders.service';
 import { CheckinMessagingService } from './checkin-messaging.service';
+import { GuestListPdfService } from './guest-list-pdf.service';
 import { RolesGuard } from '../shared/guards/roles.guard';
 
 @Module({
@@ -16,12 +17,14 @@ import { RolesGuard } from '../shared/guards/roles.guard';
     BookingsSyncService,
     BookingsRemindersService,
     CheckinMessagingService,
+    GuestListPdfService,
     RolesGuard,
   ],
   exports: [
     BookingsSyncService,
     BookingsRemindersService,
     CheckinMessagingService,
+    GuestListPdfService,
   ],
 })
 export class BookingsModule {}

@@ -26,6 +26,10 @@ import {
   type CheckinMomentKey,
   type PortalExtraBankAccount,
 } from './checkin-messaging.service';
+import {
+  GuestListPdfService,
+  type GuestListPdfInput,
+} from './guest-list-pdf.service';
 import { ConvexAuthGuard } from '../shared/guards/convex-auth.guard';
 import { AdminGuard } from '../shared/guards/admin.guard';
 import { OwnerOrAdminGuard } from '../shared/guards/owner-or-admin.guard';
@@ -41,6 +45,7 @@ export class BookingsController {
     private readonly authService: AuthService,
     private readonly remindersService: BookingsRemindersService,
     private readonly checkinMessaging: CheckinMessagingService,
+    private readonly guestListPdfService: GuestListPdfService,
   ) {}
 
   @Post('trigger-reminders')
@@ -528,6 +533,27 @@ export class BookingsController {
       'Content-Length': String(result.buffer.length),
     });
     res.send(result.buffer);
+  }
+
+  /** PDF del listado de invitados desde datos del check-in (admin / turista). */
+  @Post('checkin/guests-pdf')
+  async generateCheckinGuestsPdf(
+    @Body() body: GuestListPdfInput,
+    @Res() res: Response,
+  ) {
+    try {
+      const result = await this.guestListPdfService.generateBuffer(body);
+      res.set({
+        'Content-Type': 'application/pdf',
+        'Content-Disposition': `attachment; filename="${result.filename}"`,
+        'Content-Length': String(result.buffer.length),
+      });
+      res.send(result.buffer);
+    } catch (error: unknown) {
+      const message =
+        error instanceof Error ? error.message : 'Error al generar el PDF.';
+      throw new HttpException({ error: message }, HttpStatus.BAD_REQUEST);
+    }
   }
 
   /** Resumen de pago + imágenes por WhatsApp al cliente de la reserva. */

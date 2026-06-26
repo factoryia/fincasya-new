@@ -5,6 +5,10 @@ import {
   netPaidFromPayments,
   pendingFromTotal,
 } from './lib/bookingPayments';
+import {
+  assertGuestListEditable,
+  guestListLockInfo,
+} from './lib/checkinGuestListLock';
 
 /**
  * Portal público de check-in del turista (`/checkin/:reference`).
@@ -234,6 +238,12 @@ export const getForPortal = internalQuery({
       booking.propertyId,
     );
 
+    const guestListLock = guestListLockInfo(
+      booking.fechaEntrada,
+      booking.fechaSalida,
+      booking.horaEntrada,
+    );
+
     return {
       reference: booking.reference ?? booking._id,
       nombreTitular: booking.nombreCompleto,
@@ -276,6 +286,9 @@ export const getForPortal = internalQuery({
       checkinRecomendaciones: checkinLocation.checkinRecomendaciones,
       checkinUbicacionImageUrl: checkinLocation.checkinUbicacionImageUrl,
       checkinUbicacionImageUrls: checkinLocation.checkinUbicacionImageUrls,
+      guestListLocked: guestListLock.guestListLocked,
+      guestListLockHours: guestListLock.guestListLockHours,
+      guestListLockAt: guestListLock.guestListLockAt,
     };
   },
 });
@@ -298,6 +311,8 @@ export const saveDraft = internalMutation({
     if (!booking) return { ok: false as const, reason: 'not_found' };
 
     const { guests } = normalizeGuests(args.guests);
+    const lockReason = assertGuestListEditable(booking, guests);
+    if (lockReason) return { ok: false as const, reason: lockReason };
 
     await ctx.db.patch(booking._id, {
       checkinGuests: guests,
@@ -341,6 +356,9 @@ export const submitCheckin = internalMutation({
     }
 
     const { guests } = normalizeGuests(args.guests);
+    const lockReason = assertGuestListEditable(booking, guests);
+    if (lockReason) return { ok: false as const, reason: lockReason };
+
     const expected = expectedGuestCount(booking);
 
     if (requiresGuestList && guests.length < 1) {

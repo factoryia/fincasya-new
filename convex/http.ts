@@ -1308,6 +1308,7 @@ http.route({
         missing_name: 422,
         missing_cedula: 422,
         missing_data_consent: 422,
+        guest_list_locked: 423,
       };
       return jsonResponse(
         { error: reason, ...result },
