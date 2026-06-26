@@ -492,6 +492,20 @@ export default defineSchema({
         medio: v.optional(v.string()),
         comprobanteUrl: v.optional(v.string()),
         updatedAt: v.optional(v.number()),
+        /** Abonos individuales al propietario (cada fila del reporte). */
+        abonos: v.optional(
+          v.array(
+            v.object({
+              id: v.string(),
+              amount: v.number(),
+              fecha: v.optional(v.string()),
+              medio: v.optional(v.string()),
+              comprobanteUrl: v.optional(v.string()),
+              createdAt: v.number(),
+              actor: v.optional(v.string()),
+            }),
+          ),
+        ),
         log: v.optional(
           v.array(
             v.object({
@@ -501,6 +515,21 @@ export default defineSchema({
             }),
           ),
         ),
+      }),
+    ),
+    /**
+     * Cuadro de rendimientos admin: casillas manuales (pagó, llegó, etc.).
+     * true = sí, false = no, omitido = sin marcar.
+     */
+    reconciliationSheet: v.optional(
+      v.object({
+        turistaPago: v.optional(v.boolean()),
+        turistaLlego: v.optional(v.boolean()),
+        propietarioPago: v.optional(v.boolean()),
+        checkinListo: v.optional(v.boolean()),
+        notas: v.optional(v.string()),
+        updatedAt: v.optional(v.number()),
+        updatedBy: v.optional(v.string()),
       }),
     ),
     /**

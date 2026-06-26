@@ -9,6 +9,12 @@ import {
   pendingFromTotal,
 } from './lib/bookingPayments';
 import { resolveOwnerContactFields } from './lib/ownerSalutation';
+import {
+  buildOwnerPayoutFromAbonos,
+  normalizeOwnerAbonos,
+  sumOwnerAbonos,
+  type OwnerPayoutRecord,
+} from './lib/ownerPayout';
 
 /** Fecha calendario YYYY-MM-DD en hora de Colombia (negocio). */
 function calendarDateColombia(ms: number): string {
@@ -203,6 +209,166 @@ export const list = query({
       hasMore,
       nextCursor,
     };
+  },
+});
+
+/** Datos para reportes admin (reservas y pagos al propietario). */
+export const listForReports = query({
+  args: {
+    propertyId: v.optional(v.id('properties')),
+    dateFrom: v.optional(v.number()),
+    dateTo: v.optional(v.number()),
+  },
+  handler: async (ctx, args) => {
+    const allBookings = args.propertyId
+      ? await ctx.db
+          .query('bookings')
+          .withIndex('by_property', (q) => q.eq('propertyId', args.propertyId!))
+          .collect()
+      : await ctx.db.query('bookings').collect();
+
+    let filtered = allBookings.filter((b) => b.status !== 'CANCELLED');
+
+    if (args.dateFrom != null) {
+      filtered = filtered.filter((b) => b.fechaEntrada >= args.dateFrom!);
+    }
+    if (args.dateTo != null) {
+      filtered = filtered.filter((b) => b.fechaEntrada <= args.dateTo!);
+    }
+
+    filtered.sort((a, b) => b.fechaEntrada - a.fechaEntrada);
+
+    const rows = await Promise.all(
+      filtered.map(async (booking) => {
+        const property = await ctx.db.get(booking.propertyId);
+        let propietarioNombre: string | null = null;
+        if (property) {
+          const ownerContact = await resolveOwnerContactFields(
+            ctx,
+            property._id,
+            property as Record<string, unknown>,
+          );
+          propietarioNombre = ownerContact.propietarioNombre ?? null;
+        }
+
+        const payments = await ctx.db
+          .query('payments')
+          .withIndex('by_booking', (q) => q.eq('bookingId', booking._id))
+          .collect();
+        const turistaPagado = netPaidFromPayments(payments);
+
+        const adjustments = Array.isArray(booking.economicAdjustments)
+          ? booking.economicAdjustments
+          : [];
+        const adjustmentsNet = adjustments.reduce((sum, item) => {
+          const amt = Number(item.amount) || 0;
+          return item.type === 'INCREMENT' ? sum + amt : sum - amt;
+        }, 0);
+        const descuentos =
+          (Number(booking.discountAmount) || 0) +
+          adjustments
+            .filter((item) => item.type === 'DISCOUNT')
+            .reduce((sum, item) => sum + (Number(item.amount) || 0), 0);
+
+        const valorAlquiler = Number(booking.subtotal) || 0;
+        const valorNetoAlquiler =
+          valorAlquiler +
+          (Number(booking.costoPersonasAdicionales) || 0) +
+          (Number(booking.costoMascotas) || 0) +
+          (Number(booking.costoPersonalServicio) || 0) +
+          adjustmentsNet -
+          (Number(booking.discountAmount) || 0);
+
+        const deposito = Number(booking.depositoGarantia) || 0;
+        const aseo = Number(booking.depositoAseo) || 0;
+        const ownerPayout = (booking.ownerPayout ?? null) as OwnerPayoutRecord | null;
+        const valorOfertaPropietario = Number(ownerPayout?.valorAcordado) || 0;
+        const abonosProp = ownerPayout
+          ? normalizeOwnerAbonos(ownerPayout, String(booking._id))
+          : [];
+        const propietarioPagado = sumOwnerAbonos(abonosProp);
+        const ganancia = Math.max(0, Math.max(0, valorNetoAlquiler) - valorOfertaPropietario);
+        const invitadosRegistrados = Array.isArray(booking.checkinGuests)
+          ? booking.checkinGuests.length
+          : 0;
+
+        return {
+          id: booking._id,
+          reference: booking.reference ?? null,
+          propertyTitle: property?.title ?? '',
+          propietarioNombre,
+          numeroPersonas: booking.numeroPersonas,
+          invitadosRegistrados,
+          valorAlquiler,
+          descuentos,
+          valorNetoAlquiler: Math.max(0, valorNetoAlquiler),
+          deposito,
+          aseo,
+          precioTotal: booking.precioTotal,
+          turistaPagado,
+          turistaPendiente: pendingFromTotal(booking.precioTotal, turistaPagado),
+          valorOfertaPropietario,
+          propietarioPagado,
+          ganancia,
+          netoAlquiler: Math.max(0, valorNetoAlquiler),
+          fechaEntrada: booking.fechaEntrada,
+          fechaSalida: booking.fechaSalida,
+          status: booking.status,
+          paymentStatus: booking.paymentStatus,
+          clienteNombre: booking.nombreCompleto,
+          checkinCompleted: Boolean(booking.checkinCompleted),
+          ownerPayout: booking.ownerPayout ?? null,
+          reconciliationSheet: booking.reconciliationSheet ?? null,
+        };
+      }),
+    );
+
+    return { rows, total: rows.length };
+  },
+});
+
+/** Guarda casillas del cuadro de rendimientos (admin). */
+export const saveReconciliationSheet = mutation({
+  args: {
+    id: v.id('bookings'),
+    turistaPago: v.optional(v.union(v.boolean(), v.null())),
+    turistaLlego: v.optional(v.union(v.boolean(), v.null())),
+    propietarioPago: v.optional(v.union(v.boolean(), v.null())),
+    checkinListo: v.optional(v.union(v.boolean(), v.null())),
+    notas: v.optional(v.string()),
+    updatedBy: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    const booking = await ctx.db.get(args.id);
+    if (!booking) throw new Error('Reserva no encontrada');
+    const prev = { ...(booking.reconciliationSheet ?? {}) };
+    const ts = Date.now();
+
+    const apply = (key: keyof typeof prev, value: boolean | null | undefined) => {
+      if (value === undefined) return;
+      if (value === null) {
+        delete prev[key];
+        return;
+      }
+      (prev as Record<string, unknown>)[key] = value;
+    };
+
+    apply('turistaPago', args.turistaPago);
+    apply('turistaLlego', args.turistaLlego);
+    apply('propietarioPago', args.propietarioPago);
+    apply('checkinListo', args.checkinListo);
+    if (args.notas !== undefined) {
+      prev.notas = args.notas.trim() || undefined;
+      if (!prev.notas) delete prev.notas;
+    }
+    prev.updatedAt = ts;
+    prev.updatedBy = (args.updatedBy ?? '').trim() || prev.updatedBy;
+
+    await ctx.db.patch(args.id, {
+      reconciliationSheet: prev,
+      updatedAt: ts,
+    });
+    return { ok: true as const, reconciliationSheet: prev };
   },
 });
 
@@ -1345,7 +1511,7 @@ export const saveOwnerReceiver = mutation({
   },
 });
 
-/** Check-out propietario (Fase 1): registra/edita el pago al propietario con log. */
+/** Check-out propietario: guarda valor acordado (sin abonos). */
 export const saveOwnerPayout = mutation({
   args: {
     id: v.id('bookings'),
@@ -1362,32 +1528,123 @@ export const saveOwnerPayout = mutation({
     if (!booking) throw new Error('Reserva no encontrada');
     const actor = (args.actor ?? '').trim() || 'Equipo';
     const ts = Date.now();
-    const prev = (booking.ownerPayout ?? {}) as {
-      valorAcordado?: number;
-      abono?: number;
-      valor?: number;
-      fecha?: string;
-      medio?: string;
-      comprobanteUrl?: string;
-      log?: Array<{ accion: string; actor: string; ts: number }>;
-    };
+    const prev = (booking.ownerPayout ?? {}) as OwnerPayoutRecord;
     const prevLog = Array.isArray(prev.log) ? prev.log : [];
-    const accion = prevLog.length === 0 ? 'Pago registrado' : 'Pago actualizado';
-    await ctx.db.patch(args.id, {
-      ownerPayout: {
-        valorAcordado: args.valorAcordado ?? prev.valorAcordado,
-        abono: args.abono ?? prev.abono,
-        valor: args.valor ?? prev.valor,
-        fecha: args.fecha ?? prev.fecha,
-        medio: args.medio ?? prev.medio,
-        // Conserva el comprobante anterior si no se sube uno nuevo.
-        comprobanteUrl: args.comprobanteUrl ?? prev.comprobanteUrl,
-        updatedAt: ts,
-        log: [...prevLog, { accion, actor, ts }].slice(-30),
-      },
+    const abonos = normalizeOwnerAbonos(prev, String(args.id), ts);
+
+    let ownerPayout: OwnerPayoutRecord = {
+      ...prev,
+      valorAcordado:
+        args.valorAcordado !== undefined ? args.valorAcordado : prev.valorAcordado,
       updatedAt: ts,
+      log: [
+        ...prevLog,
+        {
+          accion:
+            prevLog.length === 0 ? 'Pago registrado' : 'Valor acordado actualizado',
+          actor,
+          ts,
+        },
+      ].slice(-30),
+      abonos: abonos.length > 0 ? abonos : prev.abonos,
+      abono:
+        abonos.length > 0
+          ? abonos.reduce((s, a) => s + a.amount, 0)
+          : args.abono ?? prev.abono,
+    };
+
+    // Compatibilidad: si llega valor desde clientes antiguos, registrar abono.
+    const valorPago =
+      args.valor !== undefined && Number.isFinite(args.valor) ? args.valor : undefined;
+    if (valorPago !== undefined && valorPago > 0) {
+      const merged = [
+        ...abonos,
+        {
+          id: `${ts}-${abonos.length}`,
+          amount: valorPago,
+          fecha: args.fecha ?? prev.fecha,
+          medio: args.medio ?? prev.medio,
+          comprobanteUrl: args.comprobanteUrl ?? prev.comprobanteUrl,
+          createdAt: ts,
+          actor,
+        },
+      ];
+      ownerPayout = buildOwnerPayoutFromAbonos(
+        { ...prev, valorAcordado: ownerPayout.valorAcordado },
+        merged,
+        ts,
+        { accion: 'Abono registrado', actor, ts },
+      );
+    }
+
+    await ctx.db.patch(args.id, { ownerPayout, updatedAt: ts });
+    return { ok: true as const, ownerPayout };
+  },
+});
+
+/** Registra un abono individual al propietario. */
+export const addOwnerPayoutAbono = mutation({
+  args: {
+    id: v.id('bookings'),
+    amount: v.number(),
+    fecha: v.optional(v.string()),
+    medio: v.optional(v.string()),
+    comprobanteUrl: v.optional(v.string()),
+    actor: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    const amount = Math.floor(Number(args.amount) || 0);
+    if (!Number.isFinite(amount) || amount <= 0) {
+      throw new Error('El monto debe ser mayor a cero.');
+    }
+    const booking = await ctx.db.get(args.id);
+    if (!booking) throw new Error('Reserva no encontrada');
+    const actor = (args.actor ?? '').trim() || 'Equipo';
+    const ts = Date.now();
+    const prev = (booking.ownerPayout ?? {}) as OwnerPayoutRecord;
+    const abonos = normalizeOwnerAbonos(prev, String(args.id), ts);
+    abonos.push({
+      id: `${ts}-${abonos.length}`,
+      amount,
+      fecha: args.fecha?.trim() || undefined,
+      medio: args.medio?.trim() || undefined,
+      comprobanteUrl: args.comprobanteUrl,
+      createdAt: ts,
+      actor,
     });
-    return { ok: true };
+    const ownerPayout = buildOwnerPayoutFromAbonos(prev, abonos, ts, {
+      accion: 'Abono registrado',
+      actor,
+      ts,
+    });
+    await ctx.db.patch(args.id, { ownerPayout, updatedAt: ts });
+    return { ok: true as const, ownerPayout };
+  },
+});
+
+/** Elimina un abono al propietario por id. */
+export const removeOwnerPayoutAbono = mutation({
+  args: {
+    id: v.id('bookings'),
+    abonoId: v.string(),
+    actor: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    const booking = await ctx.db.get(args.id);
+    if (!booking) throw new Error('Reserva no encontrada');
+    const actor = (args.actor ?? '').trim() || 'Equipo';
+    const ts = Date.now();
+    const prev = (booking.ownerPayout ?? {}) as OwnerPayoutRecord;
+    const abonos = normalizeOwnerAbonos(prev, String(args.id), ts).filter(
+      (item) => item.id !== args.abonoId,
+    );
+    const ownerPayout = buildOwnerPayoutFromAbonos(prev, abonos, ts, {
+      accion: 'Abono eliminado',
+      actor,
+      ts,
+    });
+    await ctx.db.patch(args.id, { ownerPayout, updatedAt: ts });
+    return { ok: true as const, ownerPayout };
   },
 });
 

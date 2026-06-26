@@ -288,6 +288,75 @@ export class BookingsController {
     );
   }
 
+  /** Registra un abono individual al propietario. */
+  @Post(':id/owner-payout/abono')
+  @UseGuards(ConvexAuthGuard, RolesGuard)
+  @Roles(UserRole.ADMIN, UserRole.ASSISTANT)
+  @UseInterceptors(
+    FileInterceptor('comprobante', {
+      storage: memoryStorage(),
+      limits: { fileSize: 50 * 1024 * 1024 },
+    }),
+  )
+  async addOwnerPayoutAbono(
+    @Param('id') id: string,
+    @Body()
+    body: {
+      amount?: string;
+      fecha?: string;
+      medio?: string;
+      actor?: string;
+    },
+    @UploadedFile() comprobante?: Express.Multer.File,
+  ) {
+    const amount = Number(String(body?.amount ?? '').replace(/[^\d.-]/g, ''));
+    return this.checkinMessaging.addOwnerPayoutAbono(
+      id,
+      {
+        amount,
+        fecha: body?.fecha,
+        medio: body?.medio,
+        actor: body?.actor,
+      },
+      comprobante,
+    );
+  }
+
+  /** Elimina un abono al propietario. */
+  @Delete(':id/owner-payout/abono/:abonoId')
+  @UseGuards(ConvexAuthGuard, RolesGuard)
+  @Roles(UserRole.ADMIN, UserRole.ASSISTANT)
+  async removeOwnerPayoutAbono(
+    @Param('id') id: string,
+    @Param('abonoId') abonoId: string,
+    @Body() body?: { actor?: string },
+  ) {
+    return this.checkinMessaging.removeOwnerPayoutAbono(
+      id,
+      abonoId,
+      body?.actor,
+    );
+  }
+
+  /** Cuadro de rendimientos: casillas manuales por reserva. */
+  @Post(':id/reconciliation-sheet')
+  @UseGuards(ConvexAuthGuard, RolesGuard)
+  @Roles(UserRole.ADMIN, UserRole.ASSISTANT)
+  async saveReconciliationSheet(
+    @Param('id') id: string,
+    @Body()
+    body: {
+      turistaPago?: boolean | null;
+      turistaLlego?: boolean | null;
+      propietarioPago?: boolean | null;
+      checkinListo?: boolean | null;
+      notas?: string;
+      updatedBy?: string;
+    },
+  ) {
+    return this.bookingsSyncService.saveReconciliationSheet(id, body);
+  }
+
   /** Check-out cliente (Fase 3): validación del propietario por el equipo admin. */
   @Post(':id/deposit-approval')
   @UseGuards(ConvexAuthGuard, RolesGuard)
@@ -572,6 +641,26 @@ export class BookingsController {
   @UseGuards(ConvexAuthGuard, AdminGuard)
   async count() {
     return this.bookingsSyncService.countBookings();
+  }
+
+  @Get('reports')
+  @UseGuards(ConvexAuthGuard, RolesGuard)
+  @Roles(UserRole.ADMIN, UserRole.ASSISTANT)
+  async listReports(
+    @Query('propertyId') propertyId?: string,
+    @Query('dateFrom') dateFrom?: string,
+    @Query('dateTo') dateTo?: string,
+  ) {
+    const parseMs = (v?: string) => {
+      if (!v?.trim()) return undefined;
+      const n = Date.parse(v.trim());
+      return Number.isFinite(n) ? n : undefined;
+    };
+    return this.bookingsSyncService.listBookingsForReports({
+      propertyId: propertyId?.trim() || undefined,
+      dateFrom: parseMs(dateFrom),
+      dateTo: parseMs(dateTo),
+    });
   }
 
   @Get('my-bookings')

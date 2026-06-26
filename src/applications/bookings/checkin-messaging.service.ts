@@ -398,10 +398,23 @@ export class CheckinMessagingService {
               fecha?: string;
               medio?: string;
               comprobanteUrl?: string;
+              abonos?: Array<{ id: string; amount: number; fecha?: string; medio?: string; comprobanteUrl?: string; createdAt: number; actor?: string }>;
             };
             const valorAcordado =
               typeof op.valorAcordado === 'number' ? op.valorAcordado : null;
-            const abono = typeof op.abono === 'number' ? op.abono : null;
+            const abonosFromList = Array.isArray(op.abonos)
+              ? op.abonos.filter((a) => (Number(a.amount) || 0) > 0)
+              : [];
+            const abonoFromList = abonosFromList.reduce(
+              (sum, item) => sum + (Number(item.amount) || 0),
+              0,
+            );
+            const abono =
+              abonoFromList > 0
+                ? abonoFromList
+                : typeof op.abono === 'number'
+                  ? op.abono
+                  : null;
             const saldo =
               valorAcordado != null
                 ? Math.max(0, valorAcordado - (abono ?? 0))
@@ -410,6 +423,14 @@ export class CheckinMessagingService {
               valorAcordado,
               abono,
               saldo,
+              abonos: abonosFromList.map((a) => ({
+                id: a.id,
+                amount: a.amount,
+                fecha: a.fecha ?? null,
+                medio: a.medio ?? null,
+                comprobanteUrl: a.comprobanteUrl ?? null,
+                createdAt: a.createdAt,
+              })),
               valor: typeof op.valor === 'number' ? op.valor : null,
               fecha: op.fecha ?? null,
               medio: op.medio ?? null,
@@ -491,6 +512,45 @@ export class CheckinMessagingService {
       medio: payload.medio?.trim() || undefined,
       comprobanteUrl,
       actor: payload.actor?.trim() || undefined,
+    });
+  }
+
+  async addOwnerPayoutAbono(
+    bookingId: string,
+    payload: {
+      amount: number;
+      fecha?: string;
+      medio?: string;
+      actor?: string;
+    },
+    comprobante?: Express.Multer.File,
+  ) {
+    let comprobanteUrl: string | undefined;
+    if (comprobante) {
+      comprobanteUrl = await this.s3Service.uploadFile(
+        comprobante,
+        'owners/payouts',
+      );
+    }
+    return this.convexService.mutation('bookings:addOwnerPayoutAbono', {
+      id: bookingId,
+      amount: Math.floor(Number(payload.amount) || 0),
+      fecha: payload.fecha?.trim() || undefined,
+      medio: payload.medio?.trim() || undefined,
+      comprobanteUrl,
+      actor: payload.actor?.trim() || undefined,
+    });
+  }
+
+  async removeOwnerPayoutAbono(
+    bookingId: string,
+    abonoId: string,
+    actor?: string,
+  ) {
+    return this.convexService.mutation('bookings:removeOwnerPayoutAbono', {
+      id: bookingId,
+      abonoId,
+      actor: actor?.trim() || undefined,
     });
   }
 

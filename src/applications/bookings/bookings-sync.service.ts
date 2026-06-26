@@ -659,6 +659,35 @@ export class BookingsSyncService {
     return this.convexService.query('bookings:list', params);
   }
 
+  async listBookingsForReports(params: {
+    propertyId?: string;
+    dateFrom?: number;
+    dateTo?: number;
+  }) {
+    return this.convexService.query('bookings:listForReports', {
+      propertyId: params.propertyId as any,
+      dateFrom: params.dateFrom,
+      dateTo: params.dateTo,
+    });
+  }
+
+  async saveReconciliationSheet(
+    bookingId: string,
+    payload: {
+      turistaPago?: boolean | null;
+      turistaLlego?: boolean | null;
+      propietarioPago?: boolean | null;
+      checkinListo?: boolean | null;
+      notas?: string;
+      updatedBy?: string;
+    },
+  ) {
+    return this.convexService.mutation('bookings:saveReconciliationSheet', {
+      id: bookingId,
+      ...payload,
+    });
+  }
+
   async getBookingPayments(bookingId: string) {
     return this.convexService.query('bookings:getPaymentsByBooking', {
       bookingId: bookingId as any,
