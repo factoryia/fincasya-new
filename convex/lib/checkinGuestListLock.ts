@@ -115,10 +115,13 @@ export function assertGuestListEditable(
     fechaSalida: number;
     horaEntrada?: string | null;
     checkinGuests?: GuestLike[] | null;
+    guestListUnlocked?: boolean | null;
   },
   incomingGuests: GuestLike[],
   now = Date.now(),
 ): 'guest_list_locked' | null {
+  // Override manual del equipo: si está desbloqueada, se permite editar.
+  if (booking.guestListUnlocked) return null;
   if (
     !isGuestListLocked(
       booking.fechaEntrada,
@@ -139,11 +142,13 @@ export function guestListLockInfo(
   fechaSalida: number,
   horaEntrada?: string | null,
   now = Date.now(),
+  unlocked?: boolean | null,
 ) {
   const lockHours = guestListLockHours(fechaEntrada, fechaSalida);
   const lockAt = guestListLockAtMs(fechaEntrada, fechaSalida, horaEntrada);
   return {
-    guestListLocked: now >= lockAt,
+    // El override del equipo levanta el bloqueo aunque ya esté en la ventana.
+    guestListLocked: !unlocked && now >= lockAt,
     guestListLockHours: lockHours,
     guestListLockAt: lockAt,
   };

@@ -702,6 +702,14 @@ export class BookingsSyncService {
     return this.getBookingPayments(bookingId);
   }
 
+  /** Habilita/bloquea la edición de la lista de invitados (override del equipo). */
+  async setGuestListUnlocked(bookingId: string, unlocked: boolean) {
+    return this.convexService.mutation('bookings:setGuestListUnlocked', {
+      bookingId: bookingId as any,
+      unlocked,
+    });
+  }
+
   async createManualPayment(
     bookingId: string,
     body: {

@@ -1070,6 +1070,17 @@ export class BookingsController {
     return this.bookingsSyncService.deleteBookingPayment(id, paymentId);
   }
 
+  /** Habilita/bloquea la edición de la lista de invitados de una reserva. */
+  @Post(':id/guest-list-unlock')
+  @UseGuards(ConvexAuthGuard, RolesGuard)
+  @Roles(UserRole.ADMIN, UserRole.ASSISTANT)
+  async setGuestListUnlocked(
+    @Param('id') id: string,
+    @Body() body: { unlocked?: boolean },
+  ) {
+    return this.bookingsSyncService.setGuestListUnlocked(id, !!body?.unlocked);
+  }
+
   /**
    * "Validar pago": registra un abono con su soporte (imagen/PDF) que llegó por
    * correo/WhatsApp. Sube el soporte y crea el pago como PAID.

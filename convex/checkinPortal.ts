@@ -242,6 +242,8 @@ export const getForPortal = internalQuery({
       booking.fechaEntrada,
       booking.fechaSalida,
       booking.horaEntrada,
+      Date.now(),
+      booking.guestListUnlocked,
     );
 
     return {
