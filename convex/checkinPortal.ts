@@ -1,5 +1,9 @@
 import { v } from 'convex/values';
-import { internalMutation, internalQuery } from './_generated/server';
+import {
+  internalMutation,
+  internalQuery,
+  mutation,
+} from './_generated/server';
 import type { Doc, Id } from './_generated/dataModel';
 import {
   netPaidFromPayments,
@@ -408,5 +412,28 @@ export const submitCheckin = internalMutation({
     });
 
     return { ok: true as const, completed: true, total: guests.length };
+  },
+});
+
+/**
+ * Edición directa del equipo (admin): guarda la lista de invitados SIN el bloqueo
+ * de las 24/12 h. La usa el panel admin cuando se autoriza un ajuste.
+ */
+export const adminSaveGuests = mutation({
+  args: {
+    bookingId: v.id('bookings'),
+    guests: v.array(guestValidator),
+  },
+  handler: async (ctx, args) => {
+    const booking = await ctx.db.get(args.bookingId);
+    if (!booking) throw new Error('Reserva no encontrada');
+    const { guests } = normalizeGuests(args.guests);
+    const now = Date.now();
+    await ctx.db.patch(args.bookingId, {
+      checkinGuests: guests,
+      checkinUpdatedAt: now,
+      updatedAt: now,
+    });
+    return { ok: true as const, total: guests.length, guests };
   },
 });

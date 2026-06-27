@@ -710,6 +710,22 @@ export class BookingsSyncService {
     });
   }
 
+  /** Edición directa del equipo: guarda la lista de invitados (sin bloqueo). */
+  async adminSaveCheckinGuests(
+    bookingId: string,
+    guests: Array<{
+      nombreCompleto: string;
+      cedula?: string;
+      tipoDocumento?: string;
+      esMenor?: boolean;
+    }>,
+  ) {
+    return this.convexService.mutation('checkinPortal:adminSaveGuests', {
+      bookingId: bookingId as any,
+      guests: Array.isArray(guests) ? guests : [],
+    });
+  }
+
   async createManualPayment(
     bookingId: string,
     body: {

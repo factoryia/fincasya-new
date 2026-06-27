@@ -1081,6 +1081,25 @@ export class BookingsController {
     return this.bookingsSyncService.setGuestListUnlocked(id, !!body?.unlocked);
   }
 
+  /** Edición directa del equipo: guarda la lista de invitados de una reserva. */
+  @Post(':id/checkin-guests')
+  @UseGuards(ConvexAuthGuard, RolesGuard)
+  @Roles(UserRole.ADMIN, UserRole.ASSISTANT)
+  async adminSaveCheckinGuests(
+    @Param('id') id: string,
+    @Body()
+    body: {
+      guests?: Array<{
+        nombreCompleto: string;
+        cedula?: string;
+        tipoDocumento?: string;
+        esMenor?: boolean;
+      }>;
+    },
+  ) {
+    return this.bookingsSyncService.adminSaveCheckinGuests(id, body?.guests ?? []);
+  }
+
   /**
    * "Validar pago": registra un abono con su soporte (imagen/PDF) que llegó por
    * correo/WhatsApp. Sube el soporte y crea el pago como PAID.
