@@ -116,7 +116,7 @@ export class GuestListPdfService {
     const metaRows = this.buildMetaPairs(input)
       .map(
         ([k, v]) =>
-          `<tr><th style="border:1px solid #ccc;background:#fff0e6;text-align:center;width:34%;padding:8px 12px;font-size:13pt;">${esc(
+          `<tr><th style="border:1px solid #ccc;background:#f0f0f0;text-align:center;width:34%;padding:8px 12px;font-size:13pt;">${esc(
             k,
           )}</th><td style="border:1px solid #ccc;padding:8px 12px;text-align:center;font-size:13pt;">${esc(
             v,
@@ -167,9 +167,9 @@ export class GuestListPdfService {
   <h2>Personas registradas (${input.guests.length})</h2>
   <table>
     <thead><tr>
-      <th style="border:1px solid #ccc;background:#fde9de;padding:8px 12px;width:48px;text-align:center;font-size:13pt;">#</th>
-      <th style="border:1px solid #ccc;background:#fde9de;padding:8px 12px;text-align:center;font-size:13pt;">Nombre completo</th>
-      <th style="border:1px solid #ccc;background:#fde9de;padding:8px 12px;text-align:center;font-size:13pt;">Documento</th>
+      <th style="border:1px solid #ccc;background:#e8e8e8;padding:8px 12px;width:48px;text-align:center;font-size:13pt;">#</th>
+      <th style="border:1px solid #ccc;background:#e8e8e8;padding:8px 12px;text-align:center;font-size:13pt;">Nombre completo</th>
+      <th style="border:1px solid #ccc;background:#e8e8e8;padding:8px 12px;text-align:center;font-size:13pt;">Documento</th>
     </tr></thead>
     <tbody>${guestRows}</tbody>
   </table>
