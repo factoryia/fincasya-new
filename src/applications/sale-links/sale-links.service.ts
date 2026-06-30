@@ -389,6 +389,7 @@ export class SaleLinksService {
     const row = linkResp.row as {
       _id: string;
       propertyId: string;
+      contractCode?: string | null;
       crUrl?: string;
       clientData?: {
         nombre: string;
