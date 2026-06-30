@@ -77,6 +77,80 @@ function resolveSaleLinkPaymentAlertEmail(): string {
   return DEFAULT_PAYMENT_ALERT_EMAIL;
 }
 
+function propietarioTratoLabel(tratamiento?: string | null): 'señor' | 'señora' {
+  const t = String(tratamiento ?? '')
+    .trim()
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/\p{M}/gu, '');
+  if (
+    t === 'sra' ||
+    t === 'senora' ||
+    t.startsWith('sra ') ||
+    t.includes('senora')
+  ) {
+    return 'señora';
+  }
+  return 'señor';
+}
+
+function ownerDisplayName(
+  tratamiento?: string | null,
+  fullName?: string | null,
+): { tratamiento: string; name: string } {
+  const first =
+    String(fullName ?? '')
+      .trim()
+      .split(/\s+/)[0] || 'propietario';
+  return { tratamiento: propietarioTratoLabel(tratamiento), name: first };
+}
+
+async function resolveOwnerEmailForProperty(
+  convexService: ConvexService,
+  propertyId: string,
+): Promise<{ email: string; tratamiento: string; name: string } | null> {
+  const ownerInfo = (await convexService
+    .query('propertyOwners:getByPropertyId', { propertyId })
+    .catch(() => null)) as {
+    propietarioCorreo?: string;
+    propietarioNombre?: string;
+    propietarioTratamiento?: string;
+    ownerUserId?: string;
+  } | null;
+
+  const property = (await convexService
+    .query('fincas:getById', { id: propertyId })
+    .catch(() => null)) as {
+    propietarioCorreo?: string;
+    propietarioNombre?: string;
+    propietarioTratamiento?: string;
+  } | null;
+
+  let email =
+    ownerInfo?.propietarioCorreo?.trim() ||
+    property?.propietarioCorreo?.trim() ||
+    '';
+
+  if (!email && ownerInfo?.ownerUserId?.trim()) {
+    const user = (await convexService
+      .query('users:getById', { id: ownerInfo.ownerUserId.trim() })
+      .catch(() => null)) as { email?: string } | null;
+    email = user?.email?.trim() || '';
+  }
+
+  if (!email) return null;
+
+  const fullName =
+    ownerInfo?.propietarioNombre?.trim() ||
+    property?.propietarioNombre?.trim() ||
+    '';
+  const tratamiento =
+    ownerInfo?.propietarioTratamiento ??
+    property?.propietarioTratamiento ??
+    null;
+  return { email, ...ownerDisplayName(tratamiento, fullName) };
+}
+
 /** Formatea un número como COP (sin decimales) */
 function formatCOP(amount: number): string {
   return new Intl.NumberFormat('es-CO', {
@@ -775,7 +849,7 @@ export class SaleLinksService {
       { validationKey, validatedBy },
     )) as { ok?: boolean; alreadyValidated?: boolean };
 
-    if (result?.ok) {
+    if (result?.ok && !result?.alreadyValidated) {
       try {
         await this.generateContract(token);
       } catch (err) {
@@ -784,12 +858,80 @@ export class SaleLinksService {
           err,
         );
       }
-      // Con el pago ya validado, se genera la Confirmación de Reserva (CR).
       try {
         await this.generateCr(token);
       } catch (err) {
         console.error(
           '[sale-links] No se pudo generar la CR tras validar pago:',
+          err,
+        );
+      }
+
+      try {
+        const portal = (await this.convexService.query('saleLinks:getPublicByToken', {
+          token,
+        })) as {
+          clientData?: { nombre?: string; email?: string };
+          clientName?: string;
+          property?: { id?: string; title?: string } | null;
+          checkIn?: number;
+          checkOut?: number;
+          nights?: number;
+          guests?: number;
+          bookingReference?: string;
+          contractCode?: string;
+        } | null;
+
+        const clientEmail = portal?.clientData?.email?.trim();
+        if (clientEmail) {
+          const ventaUrl = `${FRONTEND_BASE}/venta/${encodeURIComponent(token)}`;
+          await this.brevoEmail.sendSaleLinkPaymentValidatedClientEmail({
+            clientName:
+              portal?.clientData?.nombre?.trim() ||
+              portal?.clientName?.trim() ||
+              'Cliente',
+            clientEmail,
+            propertyTitle: portal?.property?.title ?? undefined,
+            checkIn: portal?.checkIn,
+            checkOut: portal?.checkOut,
+            nights: portal?.nights,
+            ventaUrl,
+          });
+        }
+
+        const propertyId = portal?.property?.id?.trim();
+        const bookingReference =
+          portal?.bookingReference?.trim() ||
+          portal?.contractCode?.trim() ||
+          '';
+        if (propertyId && bookingReference) {
+          const owner = await resolveOwnerEmailForProperty(
+            this.convexService,
+            propertyId,
+          );
+          if (owner) {
+            const anfitrionUrl = `${FRONTEND_BASE}/anfitrion/${encodeURIComponent(bookingReference)}`;
+            await this.brevoEmail.sendSaleLinkOwnerAnfitrionEmail({
+              ownerName: owner.name,
+              ownerTratamiento: owner.tratamiento,
+              ownerEmail: owner.email,
+              propertyTitle: portal?.property?.title ?? undefined,
+              clientName:
+                portal?.clientData?.nombre?.trim() ||
+                portal?.clientName?.trim() ||
+                'Cliente',
+              checkIn: portal?.checkIn,
+              checkOut: portal?.checkOut,
+              nights: portal?.nights,
+              guests: portal?.guests,
+              bookingReference,
+              anfitrionUrl,
+            });
+          }
+        }
+      } catch (err) {
+        console.error(
+          '[sale-links] No se pudo enviar correos tras validar pago:',
           err,
         );
       }

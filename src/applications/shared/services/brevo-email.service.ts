@@ -638,4 +638,257 @@ export class BrevoEmailService {
       this.logger.error(`[sale-link] Error enviando alerta de pago: ${error.message}`);
     }
   }
+
+  /**
+   * Avisa al cliente que su pago fue validado y puede continuar la reserva.
+   */
+  async sendSaleLinkPaymentValidatedClientEmail(data: {
+    clientName: string;
+    clientEmail: string;
+    propertyTitle?: string;
+    checkIn?: number;
+    checkOut?: number;
+    nights?: number;
+    ventaUrl: string;
+  }): Promise<void> {
+    const isDisabled = process.env.DISABLE_EMAIL_SENDING === 'true';
+    if (isDisabled || !this.apiKey) {
+      this.logger.warn(
+        '[sale-link] Email deshabilitado, omitiendo aviso de pago validado al cliente.',
+      );
+      return;
+    }
+
+    const clientEmail = data.clientEmail?.trim();
+    if (!clientEmail) {
+      this.logger.warn(
+        '[sale-link] Sin email del cliente; no se envía aviso de pago validado.',
+      );
+      return;
+    }
+
+    const logoUrl = process.env.LOGO_URL || 'https://fincasya.com/logo.png';
+    const esc = (s: string | undefined) =>
+      (s ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;');
+
+    const formatDate = (ms: number) =>
+      new Date(ms).toLocaleDateString('es-CO', {
+        day: '2-digit',
+        month: 'long',
+        year: 'numeric',
+      });
+
+    const propertyLine = data.propertyTitle
+      ? `<p style="margin:0 0 8px;font-size:14px;color:#333;"><strong>Finca:</strong> ${esc(data.propertyTitle)}</p>`
+      : '';
+
+    const htmlContent = `<!DOCTYPE html>
+<html lang="es">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1.0"></head>
+<body style="margin:0;padding:0;background:#f4f7f9;font-family:'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
+  <table width="100%" cellpadding="0" cellspacing="0" style="background:#f4f7f9;padding:32px 16px;">
+    <tr><td align="center">
+      <table width="600" cellpadding="0" cellspacing="0" style="background:#ffffff;border-radius:16px;overflow:hidden;box-shadow:0 4px 20px rgba(0,0,0,0.06);max-width:600px;width:100%;">
+        <tr><td style="background:#000000;padding:32px 24px;text-align:center;">
+          <img src="${esc(logoUrl)}" alt="FincasYa" style="max-width:160px;height:auto;">
+        </td></tr>
+        <tr><td style="padding:40px;">
+          <p style="margin:0 0 8px;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:1.5px;color:#2e7d32;">Pago confirmado</p>
+          <h1 style="margin:0 0 16px;font-size:24px;color:#1a1a1a;">¡Ya puedes continuar con tu reserva!</h1>
+          <p style="margin:0 0 20px;font-size:15px;color:#555;line-height:1.6;">
+            Hola <strong>${esc(data.clientName)}</strong>, confirmamos que tu pago fue validado.
+            Ya puedes seguir con el contrato y los siguientes pasos de tu reserva.
+          </p>
+          <table width="100%" cellpadding="0" cellspacing="0" style="background:#f8f9fa;border-radius:10px;padding:20px;margin-bottom:24px;">
+            <tr><td style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:#888;padding-bottom:12px;">Tu reserva</td></tr>
+            ${propertyLine}
+            <tr><td style="font-size:14px;color:#333;padding:4px 0;"><strong>Entrada:</strong> ${data.checkIn ? esc(formatDate(data.checkIn)) : '—'}</td></tr>
+            <tr><td style="font-size:14px;color:#333;padding:4px 0;"><strong>Salida:</strong> ${data.checkOut ? esc(formatDate(data.checkOut)) : '—'}</td></tr>
+            <tr><td style="font-size:14px;color:#333;padding:4px 0;"><strong>Noches:</strong> ${Math.max(1, data.nights ?? 1)}</td></tr>
+          </table>
+          <table width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:20px;">
+            <tr><td align="center">
+              <a href="${esc(data.ventaUrl)}" style="display:inline-block;background:#E8571F;color:#ffffff;text-decoration:none;padding:16px 40px;border-radius:10px;font-size:16px;font-weight:700;">
+                Continuar mi reserva
+              </a>
+            </td></tr>
+          </table>
+          <p style="font-size:13px;color:#666;margin:0 0 8px;">Si perdiste el enlace, puedes usar este correo o copiar la URL:</p>
+          <p style="font-size:12px;color:#1a73e8;margin:0;word-break:break-all;"><a href="${esc(data.ventaUrl)}" style="color:#1a73e8;">${esc(data.ventaUrl)}</a></p>
+        </td></tr>
+        <tr><td style="background:#fafbfc;padding:24px 40px;text-align:center;font-size:13px;color:#718096;border-top:1px solid #edf2f7;">
+          FincasYa — Experiencias inolvidables
+        </td></tr>
+      </table>
+    </td></tr>
+  </table>
+</body>
+</html>`;
+
+    try {
+      const response = await fetch('https://api.brevo.com/v3/smtp/email', {
+        method: 'POST',
+        headers: {
+          'api-key': this.apiKey,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          sender: { name: this.senderName, email: this.senderEmail },
+          to: [{ email: clientEmail, name: data.clientName }],
+          subject: '¡Tu pago fue confirmado! Continúa tu reserva — FincasYa',
+          htmlContent,
+        }),
+      });
+
+      if (!response.ok) {
+        const err = await response.json();
+        throw new Error(err.message || 'Error enviando email de pago validado');
+      }
+      this.logger.log(
+        `[sale-link] Pago validado: correo enviado al cliente ${clientEmail}`,
+      );
+    } catch (error) {
+      this.logger.error(
+        `[sale-link] Error enviando pago validado al cliente: ${error.message}`,
+      );
+    }
+  }
+
+  /**
+   * Avisa al propietario que el pago fue validado y debe confirmar en /anfitrion.
+   * No envía nada si no hay correo del propietario.
+   */
+  async sendSaleLinkOwnerAnfitrionEmail(data: {
+    ownerName: string;
+    ownerTratamiento: string;
+    ownerEmail: string;
+    propertyTitle?: string;
+    clientName: string;
+    checkIn?: number;
+    checkOut?: number;
+    nights?: number;
+    guests?: number;
+    bookingReference: string;
+    anfitrionUrl: string;
+  }): Promise<void> {
+    const isDisabled = process.env.DISABLE_EMAIL_SENDING === 'true';
+    if (isDisabled || !this.apiKey) {
+      this.logger.warn(
+        '[sale-link] Email deshabilitado, omitiendo aviso de anfitrión al propietario.',
+      );
+      return;
+    }
+
+    const ownerEmail = data.ownerEmail?.trim();
+    if (!ownerEmail) {
+      this.logger.warn(
+        '[sale-link] Sin email del propietario; no se envía link de anfitrión.',
+      );
+      return;
+    }
+
+    const logoUrl = process.env.LOGO_URL || 'https://fincasya.com/logo.png';
+    const esc = (s: string | undefined) =>
+      (s ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;');
+
+    const formatDate = (ms: number) =>
+      new Date(ms).toLocaleDateString('es-CO', {
+        day: '2-digit',
+        month: 'long',
+        year: 'numeric',
+      });
+
+    const propertyLine = data.propertyTitle
+      ? `<p style="margin:0 0 8px;font-size:14px;color:#333;"><strong>Finca:</strong> ${esc(data.propertyTitle)}</p>`
+      : '';
+    const guestsLine =
+      data.guests != null && data.guests > 0
+        ? `<p style="margin:0 0 8px;font-size:14px;color:#333;"><strong>Huéspedes:</strong> ${data.guests}</p>`
+        : '';
+
+    const checkInStr = data.checkIn ? formatDate(data.checkIn) : '—';
+    const checkOutStr = data.checkOut ? formatDate(data.checkOut) : '—';
+    const nights = data.nights ?? 0;
+
+    const htmlContent = `<!DOCTYPE html>
+<html lang="es">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1.0"></head>
+<body style="margin:0;padding:0;background:#f4f7f9;font-family:'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
+  <table width="100%" cellpadding="0" cellspacing="0" style="background:#f4f7f9;padding:32px 16px;">
+    <tr><td align="center">
+      <table width="600" cellpadding="0" cellspacing="0" style="background:#ffffff;border-radius:16px;overflow:hidden;box-shadow:0 4px 20px rgba(0,0,0,0.06);max-width:600px;width:100%;">
+        <tr><td style="background:#1a73e8;padding:32px 24px;text-align:center;">
+          <img src="${esc(logoUrl)}" alt="FincasYa" style="max-width:160px;height:auto;">
+          <h1 style="margin:12px 0 0;font-size:22px;color:#ffffff;font-weight:700;">Nueva reserva confirmada</h1>
+        </td></tr>
+        <tr><td style="padding:40px;">
+          <p style="margin:0 0 16px;font-size:16px;color:#333;line-height:1.6;">
+            Estimado/a ${esc(data.ownerTratamiento)} <strong>${esc(data.ownerName)}</strong>,
+          </p>
+          <p style="margin:0 0 20px;font-size:15px;color:#555;line-height:1.6;">
+            El pago de una reserva en tu finca fue confirmado. Ingresa al portal de anfitrión para
+            <strong>confirmar la reserva</strong> y revisar los detalles.
+          </p>
+          <table width="100%" cellpadding="0" cellspacing="0" style="background:#f8f9fb;border-radius:8px;margin-bottom:24px;">
+            <tr><td style="padding:20px 24px;">
+              ${propertyLine}
+              <p style="margin:0 0 8px;font-size:14px;color:#333;"><strong>Cliente:</strong> ${esc(data.clientName)}</p>
+              <p style="margin:0 0 8px;font-size:14px;color:#333;"><strong>Entrada:</strong> ${esc(checkInStr)}</p>
+              <p style="margin:0 0 8px;font-size:14px;color:#333;"><strong>Salida:</strong> ${esc(checkOutStr)}</p>
+              <p style="margin:0 0 8px;font-size:14px;color:#333;"><strong>Noches:</strong> ${nights}</p>
+              ${guestsLine}
+              <p style="margin:0;font-size:14px;color:#333;"><strong>Referencia:</strong> ${esc(data.bookingReference)}</p>
+            </td></tr>
+          </table>
+          <table cellpadding="0" cellspacing="0" style="margin:0 auto 24px;">
+            <tr><td style="background:#1a73e8;border-radius:8px;">
+              <a href="${esc(data.anfitrionUrl)}" style="display:inline-block;padding:14px 32px;color:#ffffff;font-size:16px;font-weight:700;text-decoration:none;">Confirmar reserva</a>
+            </td></tr>
+          </table>
+          <p style="font-size:13px;color:#718096;margin:0;line-height:1.6;">Si el botón no funciona, copia este enlace:</p>
+          <p style="font-size:12px;color:#1a73e8;margin:8px 0 0;word-break:break-all;"><a href="${esc(data.anfitrionUrl)}" style="color:#1a73e8;">${esc(data.anfitrionUrl)}</a></p>
+        </td></tr>
+        <tr><td style="background:#fafbfc;padding:24px 40px;text-align:center;font-size:13px;color:#718096;border-top:1px solid #edf2f7;">
+          FincasYa — Experiencias inolvidables
+        </td></tr>
+      </table>
+    </td></tr>
+  </table>
+</body>
+</html>`;
+
+    try {
+      const response = await fetch('https://api.brevo.com/v3/smtp/email', {
+        method: 'POST',
+        headers: {
+          'api-key': this.apiKey,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          sender: { name: this.senderName, email: this.senderEmail },
+          to: [{ email: ownerEmail, name: data.ownerName }],
+          subject: `Nueva reserva confirmada — confirma en FincasYa (${data.bookingReference})`,
+          htmlContent,
+        }),
+      });
+
+      if (!response.ok) {
+        const err = await response.json();
+        throw new Error(err.message || 'Error enviando email de anfitrión al propietario');
+      }
+      this.logger.log(
+        `[sale-link] Pago validado: correo de anfitrión enviado a ${ownerEmail}`,
+      );
+    } catch (error) {
+      this.logger.error(
+        `[sale-link] Error enviando anfitrión al propietario: ${error.message}`,
+      );
+    }
+  }
 }
