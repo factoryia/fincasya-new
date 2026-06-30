@@ -1749,6 +1749,21 @@ http.route({
       return jsonResponse(result, result.ok ? 200 : 400);
     }
 
+    if (body.ownerOfferAmount !== undefined) {
+      const result = await ctx.runMutation(internal.saleLinks.setOwnerOfferInternal, {
+        id,
+        ownerOfferAmount: Number(body.ownerOfferAmount),
+      });
+      return jsonResponse(result, result.ok ? 200 : 400);
+    }
+
+    if (body.markOwnerOfferSent === true) {
+      const result = await ctx.runMutation(internal.saleLinks.markOwnerOfferSentInternal, {
+        id,
+      });
+      return jsonResponse(result, result.ok ? 200 : 400);
+    }
+
     const result = await ctx.runMutation(internal.saleLinks.update, {
       id,
       propertyId: body.propertyId as import('./_generated/dataModel').Id<'properties'> | undefined,

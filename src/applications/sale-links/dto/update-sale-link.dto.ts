@@ -1,5 +1,6 @@
 import {
   IsArray,
+  IsBoolean,
   IsNumber,
   IsOptional,
   IsString,
@@ -81,4 +82,13 @@ export class UpdateSaleLinkDto {
   @IsString()
   @IsOptional()
   status?: 'active' | 'completed' | 'cancelled';
+
+  @IsNumber()
+  @IsOptional()
+  @Min(0)
+  ownerOfferAmount?: number;
+
+  @IsBoolean()
+  @IsOptional()
+  markOwnerOfferSent?: boolean;
 }
