@@ -16,6 +16,55 @@ import {
 } from '../shared/services/pdf.service';
 import type { CreateSaleLinkDto } from './dto/create-sale-link.dto';
 import type { UpdateSaleLinkDto } from './dto/update-sale-link.dto';
+import type { UploadPaymentProofDto } from './dto/upload-payment-proof.dto';
+
+const PROOF_IMAGE_EXTS = new Set(['jpg', 'jpeg', 'png', 'webp', 'gif', 'heic', 'heif']);
+const EXT_TO_MIME: Record<string, string> = {
+  jpg: 'image/jpeg',
+  jpeg: 'image/jpeg',
+  png: 'image/png',
+  webp: 'image/webp',
+  gif: 'image/gif',
+  heic: 'image/heic',
+  heif: 'image/heif',
+  pdf: 'application/pdf',
+};
+
+function proofExtension(fileName: string): string {
+  return fileName.split('.').pop()?.toLowerCase().trim() ?? '';
+}
+
+function guessProofMimeType(fileName: string, mimeType: string): string {
+  const mime = mimeType.trim().toLowerCase();
+  if (mime.startsWith('image/') || mime === 'application/pdf') return mime;
+  return EXT_TO_MIME[proofExtension(fileName)] ?? mime;
+}
+
+function isAllowedProofUpload(fileName: string, mimeType: string): boolean {
+  const mime = guessProofMimeType(fileName, mimeType);
+  if (mime.startsWith('image/') || mime === 'application/pdf') return true;
+  const ext = proofExtension(fileName);
+  return PROOF_IMAGE_EXTS.has(ext) || ext === 'pdf';
+}
+
+function bufferToMulterFile(
+  buffer: Buffer,
+  fileName: string,
+  mimeType: string,
+): Express.Multer.File {
+  return {
+    fieldname: 'file',
+    originalname: fileName,
+    encoding: '7bit',
+    mimetype: mimeType,
+    buffer,
+    size: buffer.length,
+    stream: Readable.from(buffer),
+    destination: '',
+    filename: '',
+    path: '',
+  };
+}
 
 const FRONTEND_BASE =
   (process.env.NEXT_PUBLIC_APP_URL || process.env.FRONTEND_INTERNAL_URL || 'https://fincasya.com').replace(/\/$/, '');
@@ -105,6 +154,173 @@ export class SaleLinksService {
   // Subida de comprobante de pago (cliente)
   // ---------------------------------------------------------------------------
 
+  async uploadPaymentProofJson(token: string, body: UploadPaymentProofDto) {
+    const fileName = String(body.fileName ?? '').trim();
+    const mimeType = guessProofMimeType(fileName, String(body.mimeType ?? '').trim());
+    const fileBase64 = String(body.fileBase64 ?? '').trim();
+    const nombre = String(body.nombre ?? '').trim();
+    const cedula = String(body.cedula ?? '').trim();
+    const email = String(body.email ?? '').trim();
+    const telefono = String(body.telefono ?? '').trim();
+    const direccion = String(body.direccion ?? '').trim();
+    const ciudad = String(body.ciudad ?? '').trim() || undefined;
+    const paymentAmount =
+      typeof body.paymentAmount === 'number' && body.paymentAmount > 0
+        ? body.paymentAmount
+        : undefined;
+    const cedulaPhotoFileName = String(body.cedulaPhotoFileName ?? '').trim();
+    const cedulaPhotoMimeType = guessProofMimeType(
+      cedulaPhotoFileName,
+      String(body.cedulaPhotoMimeType ?? '').trim(),
+    );
+    const cedulaPhotoBase64 = String(body.cedulaPhotoBase64 ?? '').trim();
+
+    if (!fileName || !fileBase64) {
+      throw new BadRequestException('Debes adjuntar un comprobante');
+    }
+    if (!nombre || !cedula || !email || !telefono || !direccion) {
+      throw new BadRequestException('Completa todos los datos obligatorios');
+    }
+    if (!isAllowedProofUpload(fileName, mimeType)) {
+      throw new BadRequestException('Solo se permiten imágenes o PDF');
+    }
+
+    const buffer = Buffer.from(fileBase64, 'base64');
+    if (!buffer.length) {
+      throw new BadRequestException('El comprobante está vacío');
+    }
+    if (buffer.length > 10 * 1024 * 1024) {
+      throw new BadRequestException('El archivo debe pesar menos de 10 MB');
+    }
+
+    const portal = (await this.convexService
+      .query('saleLinks:getPublicByToken', { token })
+      .catch(() => null)) as {
+      paymentProofSubmitted?: boolean;
+      paymentValidated?: boolean;
+      clientStep?: number;
+      totalValue?: number;
+      checkIn?: number;
+      checkOut?: number;
+      nights?: number;
+      property?: { title?: string } | null;
+      clientData?: {
+        cedulaPhotoUrl?: string;
+        cedulaPhotoFileName?: string;
+        cedulaPhotoMimeType?: string;
+      } | null;
+    } | null;
+
+    if (!portal) {
+      throw new NotFoundException('Link no encontrado');
+    }
+    if (portal.paymentValidated || (portal.clientStep ?? 1) >= 4) {
+      throw new BadRequestException(
+        'El pago ya fue validado, no puedes modificar los soportes',
+      );
+    }
+
+    const isAppend = portal.paymentProofSubmitted || (portal.clientStep ?? 1) >= 3;
+    const existingCedulaUrl = portal.clientData?.cedulaPhotoUrl?.trim();
+
+    let cedulaPhotoUrl = existingCedulaUrl;
+    let cedulaPhotoStoredFileName = portal.clientData?.cedulaPhotoFileName;
+    let cedulaPhotoStoredMimeType = portal.clientData?.cedulaPhotoMimeType;
+
+    if (cedulaPhotoBase64 && cedulaPhotoFileName) {
+      if (!isAllowedProofUpload(cedulaPhotoFileName, cedulaPhotoMimeType)) {
+        throw new BadRequestException('La foto de cédula debe ser imagen o PDF');
+      }
+      const cedulaBuffer = Buffer.from(cedulaPhotoBase64, 'base64');
+      if (!cedulaBuffer.length) {
+        throw new BadRequestException('La foto de cédula está vacía');
+      }
+      const cedulaExt = proofExtension(cedulaPhotoFileName) || 'jpg';
+      const cedulaFile = bufferToMulterFile(
+        cedulaBuffer,
+        cedulaPhotoFileName,
+        cedulaPhotoMimeType,
+      );
+      cedulaPhotoUrl = await this.s3Service.uploadFile(
+        cedulaFile,
+        `sale-links/${token}`,
+        `cedula_${Date.now()}.${cedulaExt}`,
+        { contentDisposition: 'inline' },
+      );
+      cedulaPhotoStoredFileName = cedulaPhotoFileName;
+      cedulaPhotoStoredMimeType = cedulaPhotoMimeType;
+    } else if (!isAppend && !existingCedulaUrl) {
+      throw new BadRequestException('Debes adjuntar la foto de tu cédula');
+    }
+
+    const proofExt = proofExtension(fileName) || 'jpg';
+    const proofFile = bufferToMulterFile(buffer, fileName, mimeType);
+    const proofUrl = await this.s3Service.uploadFile(
+      proofFile,
+      `sale-links/${token}`,
+      `pago_${Date.now()}.${proofExt}`,
+      { contentDisposition: 'inline' },
+    );
+
+    const validationKey = Array.from({ length: 32 }, () =>
+      Math.floor(Math.random() * 16).toString(16),
+    ).join('');
+
+    const mutResult = await this.convexService.mutation('saleLinks:submitClientData', {
+      token,
+      nombre,
+      cedula,
+      email,
+      telefono,
+      direccion,
+      ciudad,
+      paymentProofUrl: proofUrl,
+      paymentProofFileName: fileName,
+      paymentProofMimeType: mimeType,
+      paymentProofAmount: paymentAmount,
+      paymentValidationKey: validationKey,
+      cedulaPhotoUrl,
+      cedulaPhotoFileName: cedulaPhotoStoredFileName,
+      cedulaPhotoMimeType: cedulaPhotoStoredMimeType,
+    }) as { ok?: boolean; reason?: string; appended?: boolean };
+
+    if (!mutResult?.ok) {
+      throw new BadRequestException(
+        mutResult?.reason ?? 'Error al guardar datos del cliente',
+      );
+    }
+
+    const adminEmail = resolveSaleLinkPaymentAlertEmail();
+    const validateUrl = `${FRONTEND_BASE}/admin/ventas/validar/${encodeURIComponent(token)}?key=${validationKey}`;
+    const proofViewUrl = `${FRONTEND_BASE}/venta/comprobante/${encodeURIComponent(token)}?key=${validationKey}`;
+
+    try {
+      await this.brevoEmail.sendSaleLinkPaymentAlert({
+        adminEmail,
+        clientName: nombre,
+        clientEmail: email,
+        clientPhone: telefono,
+        totalValue: portal.totalValue ?? 0,
+        checkIn: portal.checkIn ?? 0,
+        checkOut: portal.checkOut ?? 0,
+        nights: portal.nights ?? 0,
+        paymentProofUrl: proofUrl,
+        proofViewUrl,
+        validateUrl,
+        token,
+      });
+    } catch (e) {
+      console.error('[sale-links] Error enviando email al admin:', e);
+    }
+
+    if (!isAppend) {
+      // El correo de confirmación al cliente lo envía la ruta Next.js cuando aplica.
+    }
+
+    return { ok: true, proofUrl, appended: mutResult.appended ?? isAppend };
+  }
+
+  /** @deprecated Usar uploadPaymentProofJson (JSON + base64). */
   async uploadPaymentProof(
     token: string,
     file: Express.Multer.File,

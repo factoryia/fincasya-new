@@ -17,6 +17,7 @@ import type { Request } from 'express';
 import { SaleLinksService } from './sale-links.service';
 import { CreateSaleLinkDto } from './dto/create-sale-link.dto';
 import { UpdateSaleLinkDto } from './dto/update-sale-link.dto';
+import { UploadPaymentProofDto } from './dto/upload-payment-proof.dto';
 
 @Controller('sale-links')
 export class SaleLinksController {
@@ -52,30 +53,11 @@ export class SaleLinksController {
   }
 
   @Post(':token/upload-payment-proof')
-  @UseInterceptors(
-    FileInterceptor('file', {
-      storage: memoryStorage(),
-      limits: { fileSize: 10 * 1024 * 1024 },
-    }),
-  )
   async uploadPaymentProof(
     @Param('token') token: string,
-    @UploadedFile() file: Express.Multer.File,
-    @Body()
-    body: {
-      nombre: string;
-      cedula: string;
-      email: string;
-      telefono: string;
-      direccion: string;
-      ciudad?: string;
-      paymentAmount?: string;
-    },
+    @Body() body: UploadPaymentProofDto,
   ) {
-    return this.saleLinksService.uploadPaymentProof(token, file, {
-      ...body,
-      paymentAmount: body.paymentAmount ? Number(body.paymentAmount) : undefined,
-    });
+    return this.saleLinksService.uploadPaymentProofJson(token, body);
   }
 
   @Post(':token/upload-signed-contract')
