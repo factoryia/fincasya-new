@@ -6,8 +6,6 @@ import { loadDefaultGuestListTemplateBytes, loadGuestListWatermarkBase64 } from 
 import {
   buildGuestListGuestsTableXml,
   buildGuestListMetaTableXml,
-  enableGuestListBackgroundShapes,
-  ensureGuestListDocumentImageRel,
   processGuestListTemplateXml,
   styleGuestListHeaderXml,
 } from './guest-list-word.util';
@@ -202,17 +200,6 @@ export class GuestListPdfService {
         );
 
         const zip = new PizZip(templateBytes);
-        let watermarkRelId: string | null = null;
-        const relsRaw = zip.file('word/_rels/document.xml.rels')?.asText();
-        if (relsRaw) {
-          const { xml: relsXml, relId } = ensureGuestListDocumentImageRel(relsRaw);
-          watermarkRelId = relId;
-          zip.file('word/_rels/document.xml.rels', relsXml);
-        }
-        const settingsRaw = zip.file('word/settings.xml')?.asText();
-        if (settingsRaw) {
-          zip.file('word/settings.xml', enableGuestListBackgroundShapes(settingsRaw));
-        }
 
         const xmlTargets = Object.keys(zip.files).filter(
           (name) =>
@@ -231,7 +218,6 @@ export class GuestListPdfService {
                 raw,
                 metaTableXml,
                 guestsTableXml,
-                watermarkRelId,
               ),
             );
           } else if (/^word\/header\d+\.xml$/.test(fileName)) {

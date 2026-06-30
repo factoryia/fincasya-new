@@ -14,7 +14,6 @@ function candidatePaths(): string[] {
   return [
     envPath,
     path.join(contractsDir, DEFAULT_GUEST_LIST_TEMPLATE_FILENAME),
-    path.join(contractsDir, 'Doc1.docx'),
     path.join(cwd, 'docs', DEFAULT_GUEST_LIST_TEMPLATE_FILENAME),
   ].filter((p): p is string => Boolean(p?.trim()));
 }

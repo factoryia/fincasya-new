@@ -219,15 +219,16 @@ export function stripLeadingEmptyBodyParagraphs(xml: string): string {
   let body = xml.slice(bodyStart + '<w:body>'.length, sectStart);
   const tail = xml.slice(sectStart);
 
-  const emptyPara =
-    /<w:p\b[^>]*\/>|<w:p\b[^>]*>\s*(?:<w:pPr\b[^>]*\/>|<w:pPr>[\s\S]*?<\/w:pPr>)?\s*(?:<w:r>\s*<w:tab\s*\/>\s*<\/w:r>\s*)?<\/w:p>/g;
-
-  body = body.replace(/^(\s*)/, '');
+  body = body.replace(/^\s+/, '');
   let prev = '';
   while (prev !== body) {
     prev = body;
-    body = body.replace(emptyPara, '');
-    body = body.replace(/^\s+/, '');
+    // Solo al inicio: párrafos vacíos auto-cerrados o con un tab sin texto.
+    body = body.replace(/^<w:p\b[^>]*\/>\s*/, '');
+    body = body.replace(
+      /^<w:p\b[^>]*>\s*(?:<w:pPr\b[^>]*\/>|<w:pPr>[\s\S]*?<\/w:pPr>)?\s*<w:r>\s*<w:tab\s*\/>\s*<\/w:r>\s*<\/w:p>\s*/,
+      '',
+    );
   }
 
   return head + body + tail;
@@ -309,12 +310,8 @@ export function processGuestListTemplateXml(
   xml: string,
   metaTableXml: string,
   guestsTableXml: string,
-  imageRelId?: string | null,
 ): string {
   let processed = compactGuestListDocumentXml(xml);
-  if (imageRelId) {
-    processed = injectGuestListBodyWatermark(processed, imageRelId);
-  }
 
   const bodyXml = `${metaTableXml}${wordSectionTitle('Personas registradas')}${guestsTableXml}`;
   if (processed.includes('{{contenido}}') || processed.includes('{contenido}')) {
@@ -322,11 +319,19 @@ export function processGuestListTemplateXml(
     return processed;
   }
 
-  processed = replaceWordRawBlockPlaceholder(processed, 'tablaMeta', metaTableXml);
-  processed = replaceWordRawBlockPlaceholder(
+  const metaOnly = replaceWordRawBlockPlaceholder(
     processed,
-    'tablaInvitados',
-    `${wordSectionTitle('Personas registradas')}${guestsTableXml}`,
+    'tablaMeta',
+    metaTableXml,
   );
-  return processed;
+  if (metaOnly !== processed) {
+    return replaceWordRawBlockPlaceholder(
+      metaOnly,
+      'tablaInvitados',
+      `${wordSectionTitle('Personas registradas')}${guestsTableXml}`,
+    );
+  }
+
+  // Sin placeholder: insertar tablas antes de la configuración de página.
+  return processed.replace('<w:sectPr', `${bodyXml}<w:sectPr`);
 }
