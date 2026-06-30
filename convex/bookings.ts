@@ -1215,6 +1215,16 @@ export const deletePayment = mutation({
   },
 });
 
+/** Devuelve el estado fresco de la devolución del depósito (cuenta, estado, etc.). */
+export const getDepositReturn = query({
+  args: { bookingId: v.id('bookings') },
+  handler: async (ctx, args) => {
+    const booking = await ctx.db.get(args.bookingId);
+    if (!booking) return null;
+    return booking.depositReturn ?? null;
+  },
+});
+
 /** Override del equipo: habilitar/bloquear la edición de la lista de invitados. */
 export const setGuestListUnlocked = mutation({
   args: { bookingId: v.id('bookings'), unlocked: v.boolean() },

@@ -1070,6 +1070,14 @@ export class BookingsController {
     return this.bookingsSyncService.deleteBookingPayment(id, paymentId);
   }
 
+  /** Estado fresco de la devolución del depósito (para que el admin no vea datos viejos). */
+  @Get(':id/deposit-return')
+  @UseGuards(ConvexAuthGuard, RolesGuard)
+  @Roles(UserRole.ADMIN, UserRole.ASSISTANT)
+  async getDepositReturn(@Param('id') id: string) {
+    return this.bookingsSyncService.getDepositReturn(id);
+  }
+
   /** Habilita/bloquea la edición de la lista de invitados de una reserva. */
   @Post(':id/guest-list-unlock')
   @UseGuards(ConvexAuthGuard, RolesGuard)

@@ -710,6 +710,13 @@ export class BookingsSyncService {
     });
   }
 
+  /** Estado fresco de la devolución del depósito (cuenta, estado, etc.). */
+  async getDepositReturn(bookingId: string) {
+    return this.convexService.query('bookings:getDepositReturn', {
+      bookingId: bookingId as any,
+    });
+  }
+
   /** Edición directa del equipo: guarda la lista de invitados (sin bloqueo). */
   async adminSaveCheckinGuests(
     bookingId: string,
