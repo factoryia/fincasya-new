@@ -84,6 +84,19 @@ export class SaleLinksController {
     return this.saleLinksService.generateCr(token);
   }
 
+  @Post(':id/set-owner-offer')
+  async setOwnerOffer(
+    @Param('id') id: string,
+    @Body() body: { ownerOfferAmount: number },
+  ) {
+    return this.saleLinksService.setOwnerOffer(id, Number(body.ownerOfferAmount ?? 0));
+  }
+
+  @Post(':id/mark-owner-offer-sent')
+  async markOwnerOfferSent(@Param('id') id: string) {
+    return this.saleLinksService.markOwnerOfferSent(id);
+  }
+
   @Post(':token/validate-payment')
   async validatePayment(
     @Param('token') token: string,

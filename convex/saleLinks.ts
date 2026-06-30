@@ -13,6 +13,18 @@ import {
   resolveSaleLinkReference,
 } from './lib/saleLinkReference';
 
+type ProvisionFromSaleLinkResult =
+  | { ok: true; bookingId: Id<'bookings'>; reference: string }
+  | { ok: false; reason: string };
+
+type SetCrUrlResult =
+  | { ok: true; bookingId?: Id<'bookings'> }
+  | { ok: false; reason: 'not_found' };
+
+type SubmitSignedContractResult =
+  | { ok: true; bookingId?: Id<'bookings'> }
+  | { ok: false; reason: string };
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -311,14 +323,32 @@ export const setCrUrl = internalMutation({
     crUrl: v.string(),
     bookingId: v.optional(v.id('bookings')),
   },
-  handler: async (ctx, { id, crUrl, bookingId }) => {
+  handler: async (ctx, { id, crUrl, bookingId }): Promise<SetCrUrlResult> => {
+    const link = await ctx.db.get(id);
+    if (!link) return { ok: false as const, reason: 'not_found' as const };
+
+    let resolvedBookingId = bookingId ?? link.bookingId;
+    if (!resolvedBookingId && link.clientData) {
+      const provisioned: ProvisionFromSaleLinkResult = await ctx.runMutation(
+        internal.bookings.provisionFromSaleLink,
+        { saleLinkId: id },
+      );
+      if (provisioned.ok) {
+        resolvedBookingId = provisioned.bookingId;
+      }
+    }
+
     const patch: Record<string, unknown> = {
       crUrl,
       crGeneratedAt: Date.now(),
       updatedAt: Date.now(),
     };
-    if (bookingId) patch.bookingId = bookingId;
+    if (resolvedBookingId) patch.bookingId = resolvedBookingId;
     await ctx.db.patch(id, patch);
+    return {
+      ok: true as const,
+      bookingId: resolvedBookingId,
+    };
   },
 });
 
@@ -577,7 +607,7 @@ export const submitSignedContract = mutation({
     signedContractUrl: v.string(),
     signedContractFileName: v.optional(v.string()),
   },
-  handler: async (ctx, args) => {
+  handler: async (ctx, args): Promise<SubmitSignedContractResult> => {
     const link = await ctx.db
       .query('saleLinks')
       .withIndex('by_token', (q) => q.eq('token', args.token))
@@ -586,14 +616,26 @@ export const submitSignedContract = mutation({
     if (link.clientStep < 4) return { ok: false, reason: 'not_ready' };
 
     const now = Date.now();
+    let bookingId = link.bookingId;
+    if (!bookingId && link.clientData) {
+      const provisioned: ProvisionFromSaleLinkResult = await ctx.runMutation(
+        internal.bookings.provisionFromSaleLink,
+        { saleLinkId: link._id },
+      );
+      if (provisioned.ok) {
+        bookingId = provisioned.bookingId;
+      }
+    }
+
     await ctx.db.patch(link._id, {
       signedContractUrl: args.signedContractUrl,
       signedContractFileName: args.signedContractFileName,
       signedContractSubmittedAt: now,
       clientStep: 5,
+      ...(bookingId ? { bookingId } : {}),
       updatedAt: now,
     });
-    return { ok: true };
+    return { ok: true, bookingId };
   },
 });
 
@@ -898,10 +940,6 @@ export const onOwnerOfferAcceptedInternal = internalMutation({
 // ---------------------------------------------------------------------------
 // Public query (portal del cliente)
 // ---------------------------------------------------------------------------
-
-type ProvisionFromSaleLinkResult =
-  | { ok: true; bookingId: Id<'bookings'>; reference: string }
-  | { ok: false; reason: string };
 
 type ConfirmCrResult =
   | { ok: true; bookingReference: string }

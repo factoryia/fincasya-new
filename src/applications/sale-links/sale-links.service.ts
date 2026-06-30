@@ -735,6 +735,36 @@ export class SaleLinksService {
   }
 
   // ---------------------------------------------------------------------------
+  // Oferta al propietario (admin)
+  // ---------------------------------------------------------------------------
+
+  async setOwnerOffer(id: string, ownerOfferAmount: number) {
+    const result = (await this.convexProxy.forwardJson(
+      'PATCH',
+      `/api/admin/sale-link/${encodeURIComponent(id)}/set-owner-offer`,
+      { ownerOfferAmount },
+    )) as { ok?: boolean; reason?: string; ownerOfferAmount?: number };
+
+    if (!result?.ok) {
+      throw new BadRequestException(result?.reason ?? 'No se pudo guardar la oferta');
+    }
+    return result;
+  }
+
+  async markOwnerOfferSent(id: string) {
+    const result = (await this.convexProxy.forwardJson(
+      'PATCH',
+      `/api/admin/sale-link/${encodeURIComponent(id)}/mark-owner-offer-sent`,
+      {},
+    )) as { ok?: boolean; reason?: string };
+
+    if (!result?.ok) {
+      throw new BadRequestException(result?.reason ?? 'No se pudo marcar la oferta');
+    }
+    return result;
+  }
+
+  // ---------------------------------------------------------------------------
   // Validar pago (admin desde el correo)
   // ---------------------------------------------------------------------------
 
