@@ -408,6 +408,11 @@ export class SaleLinksService {
       throw new BadRequestException('El cliente aún no ha enviado sus datos');
     }
 
+    // La CR (Confirmación de Reserva) solo se genera con el pago YA validado.
+    if (!row.paymentValidated) {
+      return { ok: false as const, reason: 'payment_not_validated' as const };
+    }
+
     const property = (await this.convexService
       .query('fincas:getById', { id: row.propertyId })
       .catch(() => null)) as { title?: string; location?: string } | null;
@@ -512,6 +517,15 @@ export class SaleLinksService {
       } catch (err) {
         console.error(
           '[sale-links] No se pudo generar el contrato tras validar pago:',
+          err,
+        );
+      }
+      // Con el pago ya validado, se genera la Confirmación de Reserva (CR).
+      try {
+        await this.generateCr(token);
+      } catch (err) {
+        console.error(
+          '[sale-links] No se pudo generar la CR tras validar pago:',
           err,
         );
       }
