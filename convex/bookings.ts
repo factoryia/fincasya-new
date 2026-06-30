@@ -1215,6 +1215,30 @@ export const deletePayment = mutation({
   },
 });
 
+/** Devuelve el estado fresco de la devolución del depósito (cuenta, estado, etc.). */
+export const getDepositReturn = query({
+  args: { bookingId: v.id('bookings') },
+  handler: async (ctx, args) => {
+    const booking = await ctx.db.get(args.bookingId);
+    if (!booking) return null;
+    return booking.depositReturn ?? null;
+  },
+});
+
+/** Override del equipo: habilitar/bloquear la edición de la lista de invitados. */
+export const setGuestListUnlocked = mutation({
+  args: { bookingId: v.id('bookings'), unlocked: v.boolean() },
+  handler: async (ctx, args) => {
+    const booking = await ctx.db.get(args.bookingId);
+    if (!booking) throw new Error('Reserva no encontrada');
+    await ctx.db.patch(args.bookingId, {
+      guestListUnlocked: args.unlocked,
+      updatedAt: Date.now(),
+    });
+    return { ok: true as const, guestListUnlocked: args.unlocked };
+  },
+});
+
 const MANUAL_ABONO_TYPES = new Set(['ABONO_50', 'SALDO_50', 'COMPLETO']);
 
 function isGatewayPayment(payment: Doc<'payments'>): boolean {

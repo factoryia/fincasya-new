@@ -403,6 +403,11 @@ export default defineSchema({
     checkinCompleted: v.optional(v.boolean()),
     checkinCompletedAt: v.optional(v.number()),
     /**
+     * Override manual del equipo: si es true, la lista de invitados se puede
+     * editar aunque ya esté dentro de la ventana de bloqueo (24/12 h antes).
+     */
+    guestListUnlocked: v.optional(v.boolean()),
+    /**
      * Marca manual: el equipo envió el check-in al cliente (ej. copió el
      * mensaje). Lleva la reserva a la etapa "morado / check-in enviado" en
      * el semáforo del calendario, sin esperar un envío automático.

@@ -702,6 +702,37 @@ export class BookingsSyncService {
     return this.getBookingPayments(bookingId);
   }
 
+  /** Habilita/bloquea la edición de la lista de invitados (override del equipo). */
+  async setGuestListUnlocked(bookingId: string, unlocked: boolean) {
+    return this.convexService.mutation('bookings:setGuestListUnlocked', {
+      bookingId: bookingId as any,
+      unlocked,
+    });
+  }
+
+  /** Estado fresco de la devolución del depósito (cuenta, estado, etc.). */
+  async getDepositReturn(bookingId: string) {
+    return this.convexService.query('bookings:getDepositReturn', {
+      bookingId: bookingId as any,
+    });
+  }
+
+  /** Edición directa del equipo: guarda la lista de invitados (sin bloqueo). */
+  async adminSaveCheckinGuests(
+    bookingId: string,
+    guests: Array<{
+      nombreCompleto: string;
+      cedula?: string;
+      tipoDocumento?: string;
+      esMenor?: boolean;
+    }>,
+  ) {
+    return this.convexService.mutation('checkinPortal:adminSaveGuests', {
+      bookingId: bookingId as any,
+      guests: Array.isArray(guests) ? guests : [],
+    });
+  }
+
   async createManualPayment(
     bookingId: string,
     body: {
