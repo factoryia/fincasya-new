@@ -22,6 +22,14 @@ export class S3Service {
     });
   }
 
+  private safeDownloadFilename(name: string): string {
+    const base = (name.split(/[/\\]/).pop() || 'download')
+      .replace(/[\r\n\x00-\x1f"]/g, '')
+      .replace(/[^\x20-\x7E]/g, '_')
+      .trim();
+    return base.slice(0, 180) || 'download';
+  }
+
   async uploadFile(
     file: Express.Multer.File,
     folder: string = 'uploads',
@@ -36,7 +44,9 @@ export class S3Service {
       ? `${folder}/${customFileName}`
       : `${folder}/${randomUUID()}.${ext}`;
     const disposition = options?.contentDisposition ?? 'attachment';
-    const downloadName = customFileName || file.originalname || 'download';
+    const downloadName = this.safeDownloadFilename(
+      customFileName || file.originalname || 'download',
+    );
 
     try {
       const command = new PutObjectCommand({

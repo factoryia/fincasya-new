@@ -470,6 +470,7 @@ export class BrevoEmailService {
     checkOut: number;
     nights: number;
     paymentProofUrl: string;
+    proofViewUrl?: string;
     validateUrl: string;
     token: string;
   }): Promise<void> {
@@ -500,6 +501,7 @@ export class BrevoEmailService {
         year: 'numeric',
       });
 
+    const proofViewUrl = data.proofViewUrl || data.paymentProofUrl;
     const isImage = /\.(jpg|jpeg|png|webp|gif)(\?|$)/i.test(data.paymentProofUrl);
 
     const htmlContent = `<!DOCTYPE html>
@@ -558,12 +560,23 @@ export class BrevoEmailService {
             </table>
 
             <!-- Soporte de pago -->
+            <table width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:24px;">
+              <tr><td align="center" style="padding-bottom:12px;">
+                <a href="${esc(proofViewUrl)}"
+                   style="display:inline-block;background:#1a1a1a;color:#ffffff;text-decoration:none;padding:14px 32px;border-radius:10px;font-size:15px;font-weight:700;">
+                  Ver comprobante en el navegador
+                </a>
+              </td></tr>
+              <tr><td align="center">
+                <p style="margin:0;font-size:12px;color:#888;">
+                  Se abre en una ventana del navegador — no necesitas descargar el archivo.
+                </p>
+              </td></tr>
+            </table>
             ${isImage
-      ? `<p style="font-size:13px;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:#888;margin:0 0 12px;">Comprobante de pago</p>
-               <img src="${esc(data.paymentProofUrl)}" alt="Comprobante de pago" style="max-width:100%;border-radius:10px;border:1px solid #e2e8f0;display:block;margin-bottom:24px;">`
-      : `<p style="margin:0 0 16px;font-size:14px;color:#555;">
-               📎 <a href="${esc(data.paymentProofUrl)}" style="color:#E8571F;">Ver comprobante de pago adjunto</a>
-             </p>`
+      ? `<p style="font-size:13px;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:#888;margin:0 0 12px;text-align:center;">Vista previa</p>
+               <img src="${esc(data.paymentProofUrl)}" alt="Comprobante de pago" style="max-width:100%;border-radius:10px;border:1px solid #e2e8f0;display:block;margin:0 auto 24px;">`
+      : ''
     }
 
             <!-- CTA Validar -->

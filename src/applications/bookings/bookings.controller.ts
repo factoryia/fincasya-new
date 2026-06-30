@@ -514,6 +514,22 @@ export class BookingsController {
     return { ok: true, ...data };
   }
 
+  /** El propietario acepta el valor ofrecido desde /anfitrion. */
+  @Post('owner/:ref/accept-offer')
+  async acceptOwnerOffer(@Param('ref') ref: string) {
+    const result = await this.checkinMessaging.acceptOwnerOffer(ref);
+    if (!result?.ok) {
+      throw new HttpException(
+        {
+          error: (result as { reason?: string })?.reason ?? 'offer_error',
+          message: 'No se pudo registrar la aceptación.',
+        },
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+    return result;
+  }
+
   /** PDF del listado de invitados, generado al vuelo (público, para el propietario). */
   @Get('owner/:ref/guests-pdf')
   async getOwnerGuestsPdf(@Param('ref') ref: string, @Res() res: Response) {
@@ -679,8 +695,11 @@ export class BookingsController {
   ) {
     const parseMs = (v?: string) => {
       if (!v?.trim()) return undefined;
-      const n = Date.parse(v.trim());
-      return Number.isFinite(n) ? n : undefined;
+      const raw = v.trim();
+      const asNumber = Number(raw);
+      if (Number.isFinite(asNumber) && raw !== '') return asNumber;
+      const parsed = Date.parse(raw);
+      return Number.isFinite(parsed) ? parsed : undefined;
     };
     return this.bookingsSyncService.listBookingsForReports({
       propertyId: propertyId?.trim() || undefined,

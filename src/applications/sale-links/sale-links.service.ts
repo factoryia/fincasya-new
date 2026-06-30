@@ -20,21 +20,12 @@ import type { UpdateSaleLinkDto } from './dto/update-sale-link.dto';
 const FRONTEND_BASE =
   (process.env.NEXT_PUBLIC_APP_URL || process.env.FRONTEND_INTERNAL_URL || 'https://fincasya.com').replace(/\/$/, '');
 
-const PRODUCTION_PAYMENT_ALERT_EMAIL = 'fincasecoturisticasdelllano@gmail.com';
-const LOCAL_PAYMENT_ALERT_EMAIL = 'nspes2020@gmail.com';
+const DEFAULT_PAYMENT_ALERT_EMAIL = 'comercial@fincasya.com';
 
 function resolveSaleLinkPaymentAlertEmail(): string {
   const override = process.env.SALE_LINK_PAYMENT_ALERT_EMAIL?.trim();
   if (override) return override;
-
-  const appUrl =
-    process.env.NEXT_PUBLIC_APP_URL ||
-    process.env.FRONTEND_INTERNAL_URL ||
-    process.env.SITE_URL ||
-    '';
-  const isLocal =
-    appUrl.includes('localhost') || appUrl.includes('127.0.0.1');
-  return isLocal ? LOCAL_PAYMENT_ALERT_EMAIL : PRODUCTION_PAYMENT_ALERT_EMAIL;
+  return DEFAULT_PAYMENT_ALERT_EMAIL;
 }
 
 /** Formatea un número como COP (sin decimales) */
@@ -118,17 +109,24 @@ export class SaleLinksService {
       paymentAmount?: number;
     },
   ) {
-    // 1. Subir archivo a S3
-    if (!file?.mimetype?.match(/image\//)) {
-      if (!file?.mimetype?.match(/application\/pdf/)) {
-        throw new BadRequestException('Solo se permiten imágenes o PDF');
-      }
+    if (!file?.buffer?.length) {
+      throw new BadRequestException('Debes adjuntar un comprobante');
+    }
+
+    const ext = file.originalname?.split('.').pop()?.toLowerCase() ?? '';
+    const mime = String(file.mimetype ?? '').toLowerCase();
+    const isImage = mime.startsWith('image/');
+    const isPdf = mime === 'application/pdf' || ext === 'pdf';
+    const imageExts = new Set(['jpg', 'jpeg', 'png', 'webp', 'gif', 'heic', 'heif']);
+    const allowedByExt = imageExts.has(ext) || ext === 'pdf';
+
+    if (!isImage && !isPdf && !allowedByExt) {
+      throw new BadRequestException('Solo se permiten imágenes o PDF');
     }
     if (file.size > 10 * 1024 * 1024) {
       throw new BadRequestException('El archivo debe pesar menos de 10 MB');
     }
-    const ext = file.originalname?.split('.').pop() ?? 'jpg';
-    const safeName = `pago_${Date.now()}.${ext}`;
+    const safeName = `pago_${Date.now()}.${ext || 'jpg'}`;
     const proofUrl = await this.s3Service.uploadFile(
       file,
       `sale-links/${token}`,
@@ -176,6 +174,7 @@ export class SaleLinksService {
     // 5. Enviar email al admin (local → pruebas; producción → Hernán)
     const adminEmail = resolveSaleLinkPaymentAlertEmail();
     const validateUrl = `${FRONTEND_BASE}/admin/ventas/validar/${encodeURIComponent(token)}?key=${validationKey}`;
+    const proofViewUrl = `${FRONTEND_BASE}/venta/comprobante/${encodeURIComponent(token)}?key=${validationKey}`;
 
     try {
       await this.brevoEmail.sendSaleLinkPaymentAlert({
@@ -188,6 +187,7 @@ export class SaleLinksService {
         checkOut: linkData.row?.checkOut ?? 0,
         nights: linkData.row?.nights ?? 0,
         paymentProofUrl: proofUrl,
+        proofViewUrl,
         validateUrl,
         token,
       });

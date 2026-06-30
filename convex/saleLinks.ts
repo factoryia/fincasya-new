@@ -5,7 +5,7 @@ import {
   mutation,
   query,
 } from './_generated/server';
-import type { MutationCtx } from './_generated/server';
+import type { MutationCtx, QueryCtx } from './_generated/server';
 import { internal } from './_generated/api';
 import type { Doc, Id } from './_generated/dataModel';
 
@@ -25,6 +25,16 @@ function generateToken(): string {
     .map((b) => b.toString(16).padStart(2, '0'))
     .join('');
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+}
+
+async function resolveBookingReference(
+  ctx: { db: QueryCtx['db'] },
+  link: Doc<'saleLinks'>,
+): Promise<string | undefined> {
+  if (!link.bookingId) return undefined;
+  const booking = await ctx.db.get(link.bookingId);
+  if (!booking) return undefined;
+  return booking.reference ?? String(booking._id);
 }
 
 type PaymentProofRecord = {
@@ -632,7 +642,7 @@ async function finalizeSaleLinkCheckin(
     checkinCompleted: true,
     checkinCompletedAt: now,
     bookingId: bookingResult.bookingId,
-    status: 'completed',
+    clientStep: 7,
     updatedAt: now,
   });
 
@@ -672,25 +682,304 @@ export const submitCheckin = mutation({
   },
 });
 
+/** Lista enriquecida para el panel admin de links de venta. */
+export const listForAdmin = internalQuery({
+  args: {
+    createdBy: v.optional(v.string()),
+    status: v.optional(v.string()),
+  },
+  handler: async (ctx, { createdBy, status }) => {
+    let docs: Doc<'saleLinks'>[];
+    if (createdBy) {
+      docs = await ctx.db
+        .query('saleLinks')
+        .withIndex('by_created_by', (q) => q.eq('createdBy', createdBy))
+        .order('desc')
+        .collect();
+    } else {
+      docs = await ctx.db.query('saleLinks').order('desc').collect();
+    }
+    if (status) {
+      docs = docs.filter((d) => d.status === status);
+    }
+
+    const rows = await Promise.all(
+      docs.map(async (link) => {
+        const property = await ctx.db.get(link.propertyId);
+        const ownerInfo = await ctx.db
+          .query('propertyOwnerInfo')
+          .withIndex('by_property', (q) => q.eq('propertyId', link.propertyId))
+          .unique();
+        let bookingReference: string | undefined;
+        let ownerOfferAcceptedAt: number | undefined;
+        let checkinNeedsEmpleada: boolean | undefined;
+        let checkinNeedsTeam: boolean | undefined;
+        let checkinServiciosNota: string | undefined;
+        let horaEntrada: string | undefined;
+        let ownerPayoutAbono: number | undefined;
+        if (link.bookingId) {
+          const booking = await ctx.db.get(link.bookingId);
+          if (booking) {
+            bookingReference = booking.reference ?? String(booking._id);
+            ownerOfferAcceptedAt =
+              link.ownerOfferAcceptedAt ?? booking.ownerOfferAcceptedAt;
+            checkinNeedsEmpleada = booking.checkinNeedsEmpleada === true;
+            checkinNeedsTeam = booking.checkinNeedsTeam === true;
+            checkinServiciosNota = booking.checkinServiciosNota ?? undefined;
+            horaEntrada = booking.horaEntrada ?? link.checkInTime ?? undefined;
+            const op = booking.ownerPayout as { abono?: number } | undefined;
+            ownerPayoutAbono =
+              typeof op?.abono === 'number' ? op.abono : undefined;
+          }
+        }
+        return {
+          ...link,
+          propertyTitle: property?.title ?? null,
+          propertyLocation: property?.location ?? null,
+          propietarioNombre: ownerInfo?.propietarioNombre ?? null,
+          propietarioTelefono: ownerInfo?.propietarioTelefono ?? null,
+          propietarioTratamiento: ownerInfo?.propietarioTratamiento ?? null,
+          bookingReference,
+          ownerOfferAcceptedAt,
+          checkinNeedsEmpleada,
+          checkinNeedsTeam,
+          checkinServiciosNota,
+          horaEntrada,
+          ownerPayoutAbono,
+        };
+      }),
+    );
+    return rows;
+  },
+});
+
+async function resolveOwnerAbonoFromSaleLink(
+  link: Doc<'saleLinks'>,
+): Promise<number> {
+  const proofs = link.paymentProofs ?? [];
+  const fromProofs = proofs.reduce(
+    (sum, p) => sum + Math.max(0, Math.floor(Number(p.amount) || 0)),
+    0,
+  );
+  if (fromProofs > 0) return fromProofs;
+  const single = Math.max(0, Math.floor(Number(link.paymentProofAmount) || 0));
+  if (single > 0) return single;
+  if (link.paymentValidated) {
+    return Math.max(0, Math.round(Number(link.totalValue) / 2));
+  }
+  return 0;
+}
+
+/** Guarda el valor ofrecido al propietario y lo refleja en la reserva. */
+export const setOwnerOfferInternal = internalMutation({
+  args: {
+    id: v.id('saleLinks'),
+    ownerOfferAmount: v.number(),
+  },
+  handler: async (ctx, { id, ownerOfferAmount }) => {
+    const link = await ctx.db.get(id);
+    if (!link) return { ok: false as const, reason: 'not_found' as const };
+
+    const amount = Math.max(0, Math.floor(Number(ownerOfferAmount) || 0));
+    const now = Date.now();
+    await ctx.db.patch(id, {
+      ownerOfferAmount: amount,
+      updatedAt: now,
+    });
+
+    if (link.bookingId) {
+      const booking = await ctx.db.get(link.bookingId);
+      if (booking) {
+        const prev = (booking.ownerPayout ?? {}) as Record<string, unknown>;
+        const abonoFromPayments = await (async () => {
+          const payments = await ctx.db
+            .query('payments')
+            .withIndex('by_booking', (q) => q.eq('bookingId', link.bookingId!))
+            .collect();
+          return payments
+            .filter((p) => String(p.status ?? '').toUpperCase() === 'PAID')
+            .reduce(
+              (sum, p) => sum + Math.max(0, Math.floor(Number(p.amount) || 0)),
+              0,
+            );
+        })();
+        const abono =
+          abonoFromPayments > 0
+            ? abonoFromPayments
+            : await resolveOwnerAbonoFromSaleLink(link);
+        await ctx.db.patch(link.bookingId, {
+          ownerPayout: {
+            ...prev,
+            valorAcordado: amount,
+            abono: abono > 0 ? abono : undefined,
+            updatedAt: now,
+          },
+          updatedAt: now,
+        });
+      }
+    }
+
+    return { ok: true as const, ownerOfferAmount: amount };
+  },
+});
+
+export const markOwnerOfferSentInternal = internalMutation({
+  args: { id: v.id('saleLinks') },
+  handler: async (ctx, { id }) => {
+    const link = await ctx.db.get(id);
+    if (!link) return { ok: false as const, reason: 'not_found' as const };
+    await ctx.db.patch(id, {
+      ownerOfferSentAt: Date.now(),
+      updatedAt: Date.now(),
+    });
+    return { ok: true as const };
+  },
+});
+
+/** El propietario aceptó la oferta — avanza al paso 8. */
+export const onOwnerOfferAcceptedInternal = internalMutation({
+  args: { saleLinkId: v.id('saleLinks') },
+  handler: async (ctx, { saleLinkId }) => {
+    const link = await ctx.db.get(saleLinkId);
+    if (!link) return { ok: false as const, reason: 'not_found' as const };
+    const now = Date.now();
+    await ctx.db.patch(saleLinkId, {
+      ownerOfferAcceptedAt: now,
+      clientStep: 8,
+      status: 'completed',
+      updatedAt: now,
+    });
+    return { ok: true as const };
+  },
+});
+
 // ---------------------------------------------------------------------------
 // Public query (portal del cliente)
 // ---------------------------------------------------------------------------
 
+type ProvisionFromSaleLinkResult =
+  | { ok: true; bookingId: Id<'bookings'>; reference: string }
+  | { ok: false; reason: string };
+
+type ConfirmCrResult =
+  | { ok: true; bookingReference: string }
+  | { ok: false; reason: string };
+
+type EnsureBookingForCheckinResult =
+  | { ok: true; bookingReference: string }
+  | { ok: false; reason: string };
+
 /** InternalMutation: confirmar CR desde HTTP route */
 export const confirmCrInternal = internalMutation({
   args: { token: v.string() },
-  handler: async (ctx, { token }) => {
+  handler: async (ctx, { token }): Promise<ConfirmCrResult> => {
     const link = await ctx.db
       .query('saleLinks')
       .withIndex('by_token', (q) => q.eq('token', token))
       .unique();
     if (!link) return { ok: false, reason: 'not_found' };
     if (link.clientStep < 5) return { ok: false, reason: 'not_ready' };
+
+    const provisioned: ProvisionFromSaleLinkResult = await ctx.runMutation(
+      internal.bookings.provisionFromSaleLink,
+      {
+        saleLinkId: link._id,
+      },
+    );
+    if (!provisioned.ok) {
+      return { ok: false, reason: provisioned.reason };
+    }
+
     await ctx.db.patch(link._id, {
       clientStep: 6,
+      bookingId: provisioned.bookingId,
       updatedAt: Date.now(),
     });
-    return { ok: true };
+    return {
+      ok: true,
+      bookingReference: provisioned.reference,
+    };
+  },
+});
+
+/** Sincroniza el link de venta cuando el check-in se guarda vía portal estándar. */
+export const syncCheckinFromBooking = internalMutation({
+  args: {
+    bookingId: v.id('bookings'),
+    completed: v.boolean(),
+    guests: v.optional(
+      v.array(
+        v.object({
+          nombreCompleto: v.string(),
+          cedula: v.optional(v.string()),
+          tipoDocumento: v.optional(v.string()),
+          esMenor: v.optional(v.boolean()),
+        }),
+      ),
+    ),
+    menoresDe2: v.optional(v.number()),
+    placas: v.optional(v.string()),
+    mascotas: v.optional(v.number()),
+    observaciones: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    const link = await ctx.db
+      .query('saleLinks')
+      .withIndex('by_booking', (q) => q.eq('bookingId', args.bookingId))
+      .first();
+    if (!link) return { ok: false as const, reason: 'no_link' as const };
+
+    const now = Date.now();
+    const patch: Record<string, unknown> = {
+      checkinGuests: args.guests,
+      checkinMenoresDe2: args.menoresDe2,
+      checkinMascotas: args.mascotas,
+      checkinPlacas: args.placas,
+      checkinObservaciones: args.observaciones,
+      updatedAt: now,
+    };
+    if (args.completed) {
+      patch.checkinCompleted = true;
+      patch.checkinCompletedAt = now;
+      patch.clientStep = 7;
+    }
+    await ctx.db.patch(link._id, patch);
+    return { ok: true as const };
+  },
+});
+
+/** Asegura que exista reserva para el check-in (paso 6). */
+export const ensureBookingForCheckinInternal = internalMutation({
+  args: { token: v.string() },
+  handler: async (ctx, { token }): Promise<EnsureBookingForCheckinResult> => {
+    const link = await ctx.db
+      .query('saleLinks')
+      .withIndex('by_token', (q) => q.eq('token', token))
+      .unique();
+    if (!link) return { ok: false, reason: 'not_found' };
+    if (link.clientStep < 6) return { ok: false, reason: 'not_ready' };
+
+    const provisioned: ProvisionFromSaleLinkResult = await ctx.runMutation(
+      internal.bookings.provisionFromSaleLink,
+      {
+        saleLinkId: link._id,
+      },
+    );
+    if (!provisioned.ok) {
+      return { ok: false, reason: provisioned.reason };
+    }
+
+    if (!link.bookingId) {
+      await ctx.db.patch(link._id, {
+        bookingId: provisioned.bookingId,
+        updatedAt: Date.now(),
+      });
+    }
+
+    return {
+      ok: true,
+      bookingReference: provisioned.reference,
+    };
   },
 });
 
@@ -766,6 +1055,8 @@ export const getPublicByToken = query({
       }
     }
 
+    const bookingReference = await resolveBookingReference(ctx, link);
+
     return {
       token: link.token,
       status: link.status,
@@ -809,6 +1100,7 @@ export const getPublicByToken = query({
       contractUrl: link.contractUrl,
       signedContractSubmitted: !!link.signedContractUrl,
       crUrl: link.crUrl,
+      bookingReference,
       checkinCompleted: link.checkinCompleted,
       checkinGuests: link.checkinGuests,
     };
@@ -854,6 +1146,8 @@ export const getForPortal = internalQuery({
       }
     }
 
+    const bookingReference = await resolveBookingReference(ctx, link);
+
     return {
       token: link.token,
       status: link.status,
@@ -897,6 +1191,7 @@ export const getForPortal = internalQuery({
       contractUrl: link.contractUrl,
       signedContractSubmitted: !!link.signedContractUrl,
       crUrl: link.crUrl,
+      bookingReference,
       checkinCompleted: link.checkinCompleted,
       checkinGuests: link.checkinGuests,
     };

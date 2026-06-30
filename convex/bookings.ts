@@ -1,7 +1,7 @@
 import { v } from 'convex/values';
 import { query, mutation, internalQuery, internalMutation } from './_generated/server';
 import { api, internal } from './_generated/api';
-import type { Doc } from './_generated/dataModel';
+import type { Doc, Id } from './_generated/dataModel';
 import { normalizeContractLookupQueryConvex } from './lib/contractLookup';
 import {
   deriveBookingPaymentStatus,
@@ -15,6 +15,7 @@ import {
   sumOwnerAbonos,
   type OwnerPayoutRecord,
 } from './lib/ownerPayout';
+import { resolveRefundableDeposit } from './lib/bookingDeposit';
 
 /** Fecha calendario YYYY-MM-DD en hora de Colombia (negocio). */
 function calendarDateColombia(ms: number): string {
@@ -279,7 +280,12 @@ export const listForReports = query({
           adjustmentsNet -
           (Number(booking.discountAmount) || 0);
 
-        const deposito = Number(booking.depositoGarantia) || 0;
+        const deposito = resolveRefundableDeposit(
+          booking,
+          Math.max(0, valorNetoAlquiler),
+          (property as { depositoDanosReembolsable?: number } | null)
+            ?.depositoDanosReembolsable,
+        );
         const aseo = Number(booking.depositoAseo) || 0;
         const ownerPayout = (booking.ownerPayout ?? null) as OwnerPayoutRecord | null;
         const valorOfertaPropietario = Number(ownerPayout?.valorAcordado) || 0;
@@ -292,8 +298,19 @@ export const listForReports = query({
           ? booking.checkinGuests.length
           : 0;
 
+        const paidPayments = payments
+          .filter((p) => String(p.status ?? '').toUpperCase() === 'PAID')
+          .sort((a, b) => (b.createdAt ?? 0) - (a.createdAt ?? 0));
+        const latestPaid = paidPayments[0];
+        const banco = latestPaid?.paymentMethod?.trim() || '';
+        const monto =
+          turistaPagado > 0
+            ? turistaPagado
+            : Number(latestPaid?.amount) || booking.precioTotal;
+
         return {
           id: booking._id,
+          propertyId: booking.propertyId,
           reference: booking.reference ?? null,
           propertyTitle: property?.title ?? '',
           propietarioNombre,
@@ -319,6 +336,8 @@ export const listForReports = query({
           checkinCompleted: Boolean(booking.checkinCompleted),
           ownerPayout: booking.ownerPayout ?? null,
           reconciliationSheet: booking.reconciliationSheet ?? null,
+          banco,
+          monto,
         };
       }),
     );
@@ -458,6 +477,17 @@ export const getByReference = query({
       .withIndex('by_booking', (q) => q.eq('bookingId', booking._id))
       .collect();
 
+    let saleLink = booking.saleLinkId
+      ? await ctx.db.get(booking.saleLinkId)
+      : await ctx.db
+          .query('saleLinks')
+          .withIndex('by_booking', (q) => q.eq('bookingId', booking._id))
+          .first();
+
+    const clientPaidAbono = payments
+      .filter((p) => String(p.status ?? '').toUpperCase() === 'PAID')
+      .reduce((sum, p) => sum + Math.max(0, Math.floor(Number(p.amount) || 0)), 0);
+
     // Respaldo de datos del propietario desde propertyOwnerInfo (para el saludo
     // Sr/Sra y el teléfono en /anfitrion y el mensaje al propietario).
     let propertyEnriched = property as any;
@@ -477,6 +507,8 @@ export const getByReference = query({
       ...booking,
       property: propertyEnriched,
       payments,
+      saleLink: saleLink ?? null,
+      clientPaidAbono,
     };
   },
 });
@@ -1705,6 +1737,64 @@ export const removeOwnerPayoutAbono = mutation({
   },
 });
 
+/** El propietario acepta el valor ofrecido desde /anfitrion (links de venta). */
+export const acceptOwnerOffer = mutation({
+  args: { reference: v.string() },
+  handler: async (ctx, { reference }) => {
+    const trimmed = reference.trim();
+    if (!trimmed) return { ok: false as const, reason: 'invalid_reference' as const };
+
+    const byRef = await ctx.db
+      .query('bookings')
+      .withIndex('by_reference', (q) => q.eq('reference', trimmed))
+      .first();
+    const booking = byRef ?? (await ctx.db.get(trimmed as Id<'bookings'>));
+    if (!booking || !('numeroPersonas' in booking)) {
+      return { ok: false as const, reason: 'not_found' as const };
+    }
+
+    const valorAcordado = Number(
+      (booking.ownerPayout as { valorAcordado?: number } | undefined)?.valorAcordado,
+    );
+    let saleLinkId = booking.saleLinkId;
+    if (!saleLinkId) {
+      const linked = await ctx.db
+        .query('saleLinks')
+        .withIndex('by_booking', (q) => q.eq('bookingId', booking._id))
+        .first();
+      saleLinkId = linked?._id;
+      if (saleLinkId) {
+        await ctx.db.patch(booking._id, { saleLinkId, updatedAt: Date.now() });
+      }
+    }
+    if (!saleLinkId || valorAcordado <= 0) {
+      return { ok: false as const, reason: 'no_pending_offer' as const };
+    }
+    if (booking.ownerOfferAcceptedAt) {
+      return { ok: true as const, alreadyAccepted: true as const };
+    }
+
+    const now = Date.now();
+    await ctx.db.patch(booking._id, {
+      ownerOfferAcceptedAt: now,
+      saleLinkId,
+      ownerPortalShare: {
+        showGuestList: true,
+        showPlates: true,
+        showEmpleada: true,
+        showInternalNotes: false,
+      },
+      updatedAt: now,
+    });
+
+    await ctx.runMutation(internal.saleLinks.onOwnerOfferAcceptedInternal, {
+      saleLinkId,
+    });
+
+    return { ok: true as const };
+  },
+});
+
 /** Check-out cliente (Fase 3): validación del propietario sobre la devolución del depósito. */
 export const saveDepositApproval = mutation({
   args: {
@@ -2036,6 +2126,136 @@ const saleLinkGuestValidator = v.object({
   esMenor: v.optional(v.boolean()),
 });
 
+/** Crea la reserva del calendario al confirmar el CR (paso 5 → 6), sin completar check-in. */
+export const provisionFromSaleLink = internalMutation({
+  args: { saleLinkId: v.id('saleLinks') },
+  handler: async (ctx, { saleLinkId }) => {
+    const link = await ctx.db.get(saleLinkId);
+    if (!link) return { ok: false as const, reason: 'not_found' as const };
+    const client = link.clientData;
+    if (!client) return { ok: false as const, reason: 'no_client' as const };
+
+    if (link.bookingId) {
+      const existing = await ctx.db.get(link.bookingId);
+      if (existing) {
+        return {
+          ok: true as const,
+          bookingId: link.bookingId,
+          reference: existing.reference ?? String(existing._id),
+        };
+      }
+    }
+
+    const availability = await ctx.runQuery(api.bookings.checkAvailability, {
+      propertyId: link.propertyId,
+      fechaEntrada: link.checkIn,
+      fechaSalida: link.checkOut,
+    });
+    if (!availability.available) {
+      return { ok: false as const, reason: 'unavailable' as const };
+    }
+
+    const now = Date.now();
+    const reference = `VL-${link.token.slice(0, 8).toUpperCase()}`;
+    const bookingId = await ctx.db.insert('bookings', {
+      propertyId: link.propertyId,
+      cedula: client.cedula,
+      celular: client.telefono,
+      correo: client.email,
+      nombreCompleto: client.nombre,
+      fechaEntrada: link.checkIn,
+      fechaSalida: link.checkOut,
+      numeroNoches: link.nights,
+      numeroPersonas: link.guests,
+      personasAdicionales: 0,
+      tieneMascotas: (link.petCount ?? 0) > 0,
+      numeroMascotas: link.petCount ?? 0,
+      subtotal: link.rentalValue,
+      costoPersonasAdicionales: 0,
+      costoMascotas: link.petSurcharge ?? 0,
+      depositoMascotas: link.petDeposit ?? 0,
+      sobrecargoMascotas: link.petSurcharge ?? 0,
+      costoPersonalServicio: 0,
+      depositoGarantia: link.depositAmount,
+      depositoAseo: link.cleaningFee,
+      discountAmount: 0,
+      precioTotal: link.totalValue,
+      currency: 'COP',
+      temporada: 'ESTANDAR',
+      status: 'CONFIRMED',
+      paymentStatus: 'PARTIAL',
+      reference,
+      city: client.ciudad,
+      address: client.direccion,
+      horaEntrada: link.checkInTime,
+      horaSalida: link.checkOutTime,
+      isDirect: true,
+      calendarLabel: '',
+      paymentPortalConfig:
+        link.selectedBankAccountIds.length > 0
+          ? {
+              bankAccountIds: link.selectedBankAccountIds,
+              paymentMediaIds: [],
+              updatedAt: now,
+            }
+          : undefined,
+      observaciones: `Link venta: ${link.token}`,
+      saleLinkId: link._id,
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    const paidAmount = Math.max(
+      0,
+      Math.floor(
+        Number(link.paymentProofAmount) ||
+          Math.round(Number(link.totalValue) / 2),
+      ),
+    );
+    if (paidAmount > 0) {
+      await ctx.db.insert('payments', {
+        bookingId,
+        type: 'ABONO_50',
+        amount: paidAmount,
+        currency: 'COP',
+        paymentMethod: 'Transferencia (link venta)',
+        status: 'PAID',
+        notes: 'Anticipo validado desde link de venta',
+        verifiedBy: link.paymentValidatedBy,
+        verifiedAt: link.paymentValidatedAt ?? now,
+        createdAt: now,
+        updatedAt: now,
+      });
+      const paymentStatus =
+        paidAmount >= Number(link.totalValue) ? 'PAID' : 'PARTIAL';
+      await ctx.db.patch(bookingId, {
+        paymentStatus,
+        updatedAt: now,
+      });
+    }
+
+    await ctx.db.insert('propertyAvailability', {
+      propertyId: link.propertyId,
+      bookingId,
+      fechaEntrada: link.checkIn,
+      fechaSalida: link.checkOut,
+      blocked: true,
+      reason: 'Reserva confirmada (venta link)',
+    });
+
+    await ctx.db.patch(saleLinkId, {
+      bookingId,
+      updatedAt: now,
+    });
+
+    await ctx.scheduler.runAfter(0, internal.googleCalendar.syncBookingToCalendar, {
+      bookingId,
+    });
+
+    return { ok: true as const, bookingId, reference };
+  },
+});
+
 /** Crea o actualiza la reserva del calendario al completar check-in de un link de venta. */
 export const createFromSaleLink = internalMutation({
   args: {
@@ -2087,65 +2307,20 @@ export const createFromSaleLink = internalMutation({
       return { ok: true as const, bookingId: link.bookingId };
     }
 
-    const availability = await ctx.runQuery(api.bookings.checkAvailability, {
-      propertyId: link.propertyId,
-      fechaEntrada: link.checkIn,
-      fechaSalida: link.checkOut,
-    });
-    if (!availability.available) {
-      return { ok: false as const, reason: 'unavailable' as const };
+    const provisioned = (await ctx.runMutation(
+      internal.bookings.provisionFromSaleLink,
+      { saleLinkId: link._id },
+    )) as
+      | { ok: true; bookingId: Id<'bookings'>; reference: string }
+      | { ok: false; reason: string };
+    if (!provisioned.ok) {
+      return provisioned;
     }
 
-    const bookingId = await ctx.db.insert('bookings', {
-      propertyId: link.propertyId,
-      cedula: client.cedula,
-      celular: client.telefono,
-      correo: client.email,
-      fechaEntrada: link.checkIn,
-      fechaSalida: link.checkOut,
-      numeroNoches: link.nights,
-      numeroPersonas: link.guests,
-      personasAdicionales: 0,
-      tieneMascotas: (link.petCount ?? 0) > 0,
-      numeroMascotas: link.petCount ?? 0,
-      subtotal: link.rentalValue,
-      costoPersonasAdicionales: 0,
-      costoMascotas: link.petSurcharge ?? 0,
-      depositoMascotas: link.petDeposit ?? 0,
-      sobrecargoMascotas: link.petSurcharge ?? 0,
-      costoPersonalServicio: 0,
-      depositoGarantia: link.depositAmount,
-      depositoAseo: link.cleaningFee,
-      discountAmount: 0,
-      precioTotal: link.totalValue,
-      currency: 'COP',
-      temporada: 'ESTANDAR',
-      status: 'CONFIRMED',
-      paymentStatus: 'PAID',
-      reference: `VL-${link.token.slice(0, 8).toUpperCase()}`,
-      city: client.ciudad,
-      address: client.direccion,
-      horaEntrada: link.checkInTime,
-      horaSalida: link.checkOutTime,
-      isDirect: true,
-      calendarLabel: '',
-      ...checkinPatch,
-      createdAt: now,
-    });
-
-    await ctx.db.insert('propertyAvailability', {
-      propertyId: link.propertyId,
-      bookingId,
-      fechaEntrada: link.checkIn,
-      fechaSalida: link.checkOut,
-      blocked: true,
-      reason: 'Reserva confirmada (venta link)',
-    });
-
+    await ctx.db.patch(provisioned.bookingId, checkinPatch);
     await ctx.scheduler.runAfter(0, internal.googleCalendar.syncBookingToCalendar, {
-      bookingId,
+      bookingId: provisioned.bookingId,
     });
-
-    return { ok: true as const, bookingId };
+    return { ok: true as const, bookingId: provisioned.bookingId };
   },
 });

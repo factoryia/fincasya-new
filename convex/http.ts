@@ -1666,7 +1666,7 @@ http.route({
     const createdBy = url.searchParams.get('createdBy') ?? undefined;
     const status = url.searchParams.get('status') ?? undefined;
 
-    const rows = await ctx.runQuery(internal.saleLinks.list, {
+    const rows = await ctx.runQuery(internal.saleLinks.listForAdmin, {
       createdBy,
       status,
     });
@@ -1731,6 +1731,21 @@ http.route({
         bookingId: body.bookingId as import('./_generated/dataModel').Id<'bookings'> | undefined,
       });
       return jsonResponse({ ok: true }, 200);
+    }
+
+    if (action === 'set-owner-offer') {
+      const result = await ctx.runMutation(internal.saleLinks.setOwnerOfferInternal, {
+        id,
+        ownerOfferAmount: Number(body.ownerOfferAmount),
+      });
+      return jsonResponse(result, result.ok ? 200 : 400);
+    }
+
+    if (action === 'mark-owner-offer-sent') {
+      const result = await ctx.runMutation(internal.saleLinks.markOwnerOfferSentInternal, {
+        id,
+      });
+      return jsonResponse(result, result.ok ? 200 : 400);
     }
 
     const result = await ctx.runMutation(internal.saleLinks.update, {
@@ -1840,6 +1855,14 @@ http.route({
 
     if (action === 'confirm-cr') {
       const result = await ctx.runMutation(internal.saleLinks.confirmCrInternal, { token });
+      return jsonResponse(result, result.ok ? 200 : 400, VENTA_CORS);
+    }
+
+    if (action === 'ensure-checkin-booking') {
+      const result = await ctx.runMutation(
+        internal.saleLinks.ensureBookingForCheckinInternal,
+        { token },
+      );
       return jsonResponse(result, result.ok ? 200 : 400, VENTA_CORS);
     }
 

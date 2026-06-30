@@ -5,6 +5,7 @@ import {
   mutation,
 } from './_generated/server';
 import type { Doc, Id } from './_generated/dataModel';
+import { internal } from './_generated/api';
 import {
   netPaidFromPayments,
   pendingFromTotal,
@@ -327,6 +328,16 @@ export const saveDraft = internalMutation({
       updatedAt: Date.now(),
     });
 
+    await ctx.runMutation(internal.saleLinks.syncCheckinFromBooking, {
+      bookingId: booking._id,
+      completed: false,
+      guests,
+      menoresDe2: parseMenoresDe2(args.menoresDe2),
+      placas: args.placas,
+      mascotas: args.mascotas,
+      observaciones: args.observaciones,
+    });
+
     return {
       ok: true as const,
       saved: guests.length,
@@ -409,6 +420,16 @@ export const submitCheckin = internalMutation({
       checkinCompletedAt: now,
       checkinUpdatedAt: now,
       updatedAt: now,
+    });
+
+    await ctx.runMutation(internal.saleLinks.syncCheckinFromBooking, {
+      bookingId: booking._id,
+      completed: true,
+      guests,
+      menoresDe2: parseMenoresDe2(args.menoresDe2),
+      placas: args.placas,
+      mascotas: args.mascotas,
+      observaciones,
     });
 
     return { ok: true as const, completed: true, total: guests.length };

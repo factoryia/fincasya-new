@@ -355,6 +355,10 @@ export default defineSchema({
     ),
     transactionId: v.optional(v.string()),
     reference: v.optional(v.string()),
+    /** Reserva originada en un link de venta (/venta/:token). */
+    saleLinkId: v.optional(v.id('saleLinks')),
+    /** El propietario aceptó el valor ofrecido en /anfitrion. */
+    ownerOfferAcceptedAt: v.optional(v.number()),
     observaciones: v.optional(v.string()),
     city: v.optional(v.string()),
     purpose: v.optional(v.string()),
@@ -1584,6 +1588,12 @@ export default defineSchema({
     crGeneratedAt: v.optional(v.number()),
     /** ID de la reserva creada automáticamente al confirmar el CR */
     bookingId: v.optional(v.id('bookings')),
+    /** Valor de arriendo acordado con el propietario (paso 7 admin). */
+    ownerOfferAmount: v.optional(v.number()),
+    /** Cuándo el equipo envió la oferta al propietario por WhatsApp. */
+    ownerOfferSentAt: v.optional(v.number()),
+    /** Cuándo el propietario aceptó la oferta en /anfitrion. */
+    ownerOfferAcceptedAt: v.optional(v.number()),
     /** Lista de huéspedes (paso 6 check-in) */
     checkinGuests: v.optional(
       v.array(
@@ -1607,5 +1617,6 @@ export default defineSchema({
     .index('by_token', ['token'])
     .index('by_property', ['propertyId'])
     .index('by_created_by', ['createdBy'])
-    .index('by_status', ['status']),
+    .index('by_status', ['status'])
+    .index('by_booking', ['bookingId']),
 });

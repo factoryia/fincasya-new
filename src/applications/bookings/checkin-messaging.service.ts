@@ -343,7 +343,39 @@ export class CheckinMessagingService {
     const portalShare = resolveOwnerPortalShare(
       booking.ownerPortalShare as Record<string, boolean | undefined> | null,
     );
-    const shareGuests = portalShare.showGuestList;
+    const saleLink = booking.saleLink ?? null;
+    const saleLinkId = booking.saleLinkId ?? saleLink?._id ?? null;
+    const isSaleLinkBooking = Boolean(saleLinkId || saleLink);
+    const valorOferta =
+      typeof (booking.ownerPayout as { valorAcordado?: number } | undefined)
+        ?.valorAcordado === 'number'
+        ? (booking.ownerPayout as { valorAcordado: number }).valorAcordado
+        : saleLink?.ownerOfferAmount ?? 0;
+    const ownerOfferAccepted = Boolean(
+      booking.ownerOfferAcceptedAt || saleLink?.ownerOfferAcceptedAt,
+    );
+    const saleLinkStep = saleLink?.clientStep ?? 0;
+    const ownerOfferPending =
+      isSaleLinkBooking &&
+      valorOferta > 0 &&
+      !ownerOfferAccepted &&
+      saleLinkStep >= 7 &&
+      saleLinkStep < 8;
+    const clientPaidAbono = Math.max(
+      0,
+      Math.floor(Number(booking.clientPaidAbono) || 0),
+    );
+
+    let effectiveShare = portalShare;
+    if (ownerOfferPending) {
+      effectiveShare = {
+        showGuestList: false,
+        showPlates: false,
+        showEmpleada: false,
+        showInternalNotes: false,
+      };
+    }
+    const shareGuests = effectiveShare.showGuestList;
 
     return {
       reference: booking.reference || trimmed,
@@ -386,7 +418,9 @@ export class CheckinMessagingService {
           .trim() || null,
       serviciosNota: String(booking.checkinServiciosNota ?? '').trim() || null,
       clientObservaciones: String(booking.clientObservaciones ?? '').trim() || null,
-      ownerPortalShare: portalShare,
+      ownerPortalShare: effectiveShare,
+      ownerOfferPending,
+      ownerOfferAccepted,
       ownerReceiver: booking.ownerReceiver
         ? {
             nombre: String(booking.ownerReceiver.nombre ?? '').trim() || null,
@@ -417,9 +451,11 @@ export class CheckinMessagingService {
             const abono =
               abonoFromList > 0
                 ? abonoFromList
-                : typeof op.abono === 'number'
+                : typeof op.abono === 'number' && op.abono > 0
                   ? op.abono
-                  : null;
+                  : isSaleLinkBooking && clientPaidAbono > 0
+                    ? clientPaidAbono
+                    : null;
             const saldo =
               valorAcordado != null
                 ? Math.max(0, valorAcordado - (abono ?? 0))
@@ -442,7 +478,21 @@ export class CheckinMessagingService {
               comprobanteUrl: op.comprobanteUrl ?? null,
             };
           })()
-        : null,
+        : valorOferta > 0
+          ? (() => {
+              const abono = clientPaidAbono > 0 ? clientPaidAbono : null;
+              return {
+                valorAcordado: valorOferta,
+                abono,
+                saldo: Math.max(0, valorOferta - (abono ?? 0)),
+                abonos: [],
+                valor: null,
+                fecha: null,
+                medio: null,
+                comprobanteUrl: null,
+              };
+            })()
+          : null,
       // Devolución del depósito (Fase 3): estado para que el propietario valide.
       depositoGarantia: Number(booking.depositoGarantia) || 0,
       depositReturn: booking.depositReturn
@@ -455,6 +505,13 @@ export class CheckinMessagingService {
           }
         : null,
     };
+  }
+
+  /** El propietario acepta el valor ofrecido (link de venta). */
+  async acceptOwnerOffer(reference: string) {
+    return this.convexService.mutation('bookings:acceptOwnerOffer', {
+      reference: String(reference ?? '').trim(),
+    });
   }
 
   /** Check-out propietario (Fase 1): guarda observaciones del cliente (con log). */
