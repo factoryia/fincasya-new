@@ -12,6 +12,10 @@ export class CreateSaleLinkDto {
   @IsNotEmpty()
   propertyId: string;
 
+  @IsString()
+  @IsNotEmpty()
+  contractCode: string;
+
   @IsNumber()
   checkIn: number;
 

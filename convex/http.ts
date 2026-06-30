@@ -1625,12 +1625,13 @@ http.route({
       return jsonResponse({ error: 'Body JSON inválido' }, 400);
     }
 
-    if (!body.propertyId || !body.checkIn || !body.checkOut || !body.totalValue || !body.createdBy) {
+    if (!body.propertyId || !body.checkIn || !body.checkOut || !body.totalValue || !body.createdBy || !body.contractCode) {
       return jsonResponse({ error: 'Faltan campos requeridos' }, 400);
     }
 
     const result = await ctx.runMutation(internal.saleLinks.create, {
       propertyId: body.propertyId as import('./_generated/dataModel').Id<'properties'>,
+      contractCode: String(body.contractCode ?? '').trim(),
       createdBy: body.createdBy as string,
       createdByName: body.createdByName as string | undefined,
       checkIn: Number(body.checkIn),
@@ -1948,6 +1949,9 @@ http.route({
         paymentProofMimeType?: string;
         paymentProofAmount?: number;
         paymentValidationKey?: string;
+        cedulaPhotoUrl?: string;
+        cedulaPhotoFileName?: string;
+        cedulaPhotoMimeType?: string;
       };
       try {
         body = (await request.json()) as typeof body;
@@ -1980,6 +1984,9 @@ http.route({
         paymentProofMimeType: body.paymentProofMimeType?.trim() || undefined,
         paymentProofAmount: body.paymentProofAmount,
         paymentValidationKey: body.paymentValidationKey.trim(),
+        cedulaPhotoUrl: body.cedulaPhotoUrl?.trim() || undefined,
+        cedulaPhotoFileName: body.cedulaPhotoFileName?.trim() || undefined,
+        cedulaPhotoMimeType: body.cedulaPhotoMimeType?.trim() || undefined,
       });
 
       if (!result.ok) {

@@ -1488,6 +1488,8 @@ export default defineSchema({
   saleLinks: defineTable({
     /** Token UUID aleatorio que va en la URL pública /venta/:token */
     token: v.string(),
+    /** Codificación manual (CR / número de contrato) definida al crear el link */
+    contractCode: v.optional(v.string()),
     /** Finca seleccionada */
     propertyId: v.id('properties'),
     /** Better Auth userId del vendedor/admin que creó el link */
@@ -1549,6 +1551,9 @@ export default defineSchema({
         telefono: v.string(),
         direccion: v.string(),
         ciudad: v.optional(v.string()),
+        cedulaPhotoUrl: v.optional(v.string()),
+        cedulaPhotoFileName: v.optional(v.string()),
+        cedulaPhotoMimeType: v.optional(v.string()),
         filledAt: v.number(),
       }),
     ),
@@ -1615,6 +1620,7 @@ export default defineSchema({
     updatedAt: v.number(),
   })
     .index('by_token', ['token'])
+    .index('by_contract_code', ['contractCode'])
     .index('by_property', ['propertyId'])
     .index('by_created_by', ['createdBy'])
     .index('by_status', ['status'])

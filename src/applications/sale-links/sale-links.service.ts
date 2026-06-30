@@ -44,6 +44,15 @@ function formatDate(ms: number): string {
   return d.toLocaleDateString('es-CO', { day: '2-digit', month: '2-digit', year: 'numeric' });
 }
 
+function resolveSaleLinkContractNumber(row: {
+  contractCode?: string | null;
+  token: string;
+}): string {
+  const manual = row.contractCode?.trim();
+  if (manual) return manual.toUpperCase().replace(/\s+/g, '');
+  return `VL-${row.token.slice(0, 8).toUpperCase()}`;
+}
+
 @Injectable()
 export class SaleLinksService {
   constructor(
@@ -253,6 +262,8 @@ export class SaleLinksService {
     const row = linkResp.row as {
       _id: string;
       propertyId: string;
+      token: string;
+      contractCode?: string | null;
       clientData?: {
         nombre: string;
         cedula: string;
@@ -302,7 +313,10 @@ export class SaleLinksService {
     dto.petSurcharge = row.petSurcharge ?? 0;
     dto.cleaningFee = row.cleaningFee;
     dto.refundableDeposit = row.depositAmount;
-    dto.contractNumber = `VL-${token.slice(0, 8).toUpperCase()}`;
+    dto.contractNumber = resolveSaleLinkContractNumber({
+      contractCode: row.contractCode,
+      token,
+    });
 
     const result = await this.fincasService.generateContract(row.propertyId, dto, {});
 
@@ -419,7 +433,10 @@ export class SaleLinksService {
 
     const checkInDate = new Date(row.checkIn).toISOString().split('T')[0];
     const checkOutDate = new Date(row.checkOut).toISOString().split('T')[0];
-    const contractNumber = `VL-${token.slice(0, 8).toUpperCase()}`;
+    const contractNumber = resolveSaleLinkContractNumber({
+      contractCode: row.contractCode,
+      token,
+    });
 
     const financials = computeConfirmationFinancials({
       precioTotal: row.totalValue,

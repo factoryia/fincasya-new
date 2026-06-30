@@ -16,6 +16,7 @@ import {
   type OwnerPayoutRecord,
 } from './lib/ownerPayout';
 import { resolveRefundableDeposit } from './lib/bookingDeposit';
+import { resolveSaleLinkReference } from './lib/saleLinkReference';
 
 /** Fecha calendario YYYY-MM-DD en hora de Colombia (negocio). */
 function calendarDateColombia(ms: number): string {
@@ -2156,7 +2157,7 @@ export const provisionFromSaleLink = internalMutation({
     }
 
     const now = Date.now();
-    const reference = `VL-${link.token.slice(0, 8).toUpperCase()}`;
+    const reference = resolveSaleLinkReference(link);
     const bookingId = await ctx.db.insert('bookings', {
       propertyId: link.propertyId,
       cedula: client.cedula,

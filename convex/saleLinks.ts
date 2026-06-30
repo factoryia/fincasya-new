@@ -8,12 +8,15 @@ import {
 import type { MutationCtx, QueryCtx } from './_generated/server';
 import { internal } from './_generated/api';
 import type { Doc, Id } from './_generated/dataModel';
+import {
+  normalizeContractCode,
+  resolveSaleLinkReference,
+} from './lib/saleLinkReference';
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
-/** Genera token UUID aleatorio (v4 sin dependencias). */
 function generateToken(): string {
   const bytes = new Uint8Array(16);
   for (let i = 0; i < 16; i++) {
@@ -25,6 +28,35 @@ function generateToken(): string {
     .map((b) => b.toString(16).padStart(2, '0'))
     .join('');
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+}
+
+async function assertContractCodeAvailable(
+  ctx: MutationCtx,
+  rawCode: string,
+  excludeId?: Id<'saleLinks'>,
+) {
+  const code = normalizeContractCode(rawCode);
+  if (!code || code.length < 2) {
+    throw new Error('La codificación debe tener al menos 2 caracteres');
+  }
+
+  const existingLink = await ctx.db
+    .query('saleLinks')
+    .withIndex('by_contract_code', (q) => q.eq('contractCode', code))
+    .first();
+  if (existingLink && existingLink._id !== excludeId) {
+    throw new Error(`Ya existe un link con la codificación ${code}`);
+  }
+
+  const existingBooking = await ctx.db
+    .query('bookings')
+    .withIndex('by_reference', (q) => q.eq('reference', code))
+    .first();
+  if (existingBooking) {
+    throw new Error(`Ya existe una reserva con la codificación ${code}`);
+  }
+
+  return code;
 }
 
 async function resolveBookingReference(
@@ -185,6 +217,7 @@ async function resolveProperty(ctx: any, propertyId: Id<'properties'>) {
 export const create = internalMutation({
   args: {
     propertyId: v.id('properties'),
+    contractCode: v.string(),
     createdBy: v.string(),
     createdByName: v.optional(v.string()),
     checkIn: v.number(),
@@ -204,17 +237,20 @@ export const create = internalMutation({
     notes: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
+    const { contractCode: rawContractCode, ...rest } = args;
+    const contractCode = await assertContractCodeAvailable(ctx, rawContractCode);
     const token = generateToken();
     const now = Date.now();
     const id = await ctx.db.insert('saleLinks', {
       token,
-      ...args,
+      contractCode,
+      ...rest,
       clientStep: 1,
       status: 'active',
       createdAt: now,
       updatedAt: now,
     });
-    return { id, token };
+    return { id, token, contractCode };
   },
 });
 
@@ -441,6 +477,9 @@ export const submitClientData = mutation({
     paymentProofMimeType: v.optional(v.string()),
     paymentProofAmount: v.optional(v.number()),
     paymentValidationKey: v.string(),
+    cedulaPhotoUrl: v.optional(v.string()),
+    cedulaPhotoFileName: v.optional(v.string()),
+    cedulaPhotoMimeType: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
     const link = await ctx.db
@@ -471,6 +510,9 @@ export const submitClientData = mutation({
         telefono: args.telefono,
         direccion: args.direccion,
         ciudad: args.ciudad,
+        cedulaPhotoUrl: args.cedulaPhotoUrl,
+        cedulaPhotoFileName: args.cedulaPhotoFileName,
+        cedulaPhotoMimeType: args.cedulaPhotoMimeType,
         filledAt: link.clientData?.filledAt ?? now,
       },
       paymentProofUrl: args.paymentProofUrl,
@@ -710,7 +752,7 @@ export const listForAdmin = internalQuery({
           .query('propertyOwnerInfo')
           .withIndex('by_property', (q) => q.eq('propertyId', link.propertyId))
           .unique();
-        let bookingReference: string | undefined;
+        let bookingReference = resolveSaleLinkReference(link);
         let ownerOfferAcceptedAt: number | undefined;
         let checkinNeedsEmpleada: boolean | undefined;
         let checkinNeedsTeam: boolean | undefined;
@@ -720,7 +762,7 @@ export const listForAdmin = internalQuery({
         if (link.bookingId) {
           const booking = await ctx.db.get(link.bookingId);
           if (booking) {
-            bookingReference = booking.reference ?? String(booking._id);
+            bookingReference = booking.reference ?? bookingReference;
             ownerOfferAcceptedAt =
               link.ownerOfferAcceptedAt ?? booking.ownerOfferAcceptedAt;
             checkinNeedsEmpleada = booking.checkinNeedsEmpleada === true;
@@ -1055,10 +1097,12 @@ export const getPublicByToken = query({
       }
     }
 
-    const bookingReference = await resolveBookingReference(ctx, link);
+    const bookingReference =
+      (await resolveBookingReference(ctx, link)) ?? resolveSaleLinkReference(link);
 
     return {
       token: link.token,
+      contractCode: link.contractCode ?? resolveSaleLinkReference(link),
       status: link.status,
       clientStep: link.clientStep,
       clientPortalUiStep: link.clientPortalUiStep,
@@ -1089,6 +1133,8 @@ export const getPublicByToken = query({
             telefono: link.clientData.telefono,
             direccion: link.clientData.direccion,
             ciudad: link.clientData.ciudad,
+            cedulaPhotoUrl: link.clientData.cedulaPhotoUrl,
+            cedulaPhotoFileName: link.clientData.cedulaPhotoFileName,
           }
         : undefined,
       paymentProofSubmitted: !!link.paymentProofUrl,
@@ -1146,10 +1192,12 @@ export const getForPortal = internalQuery({
       }
     }
 
-    const bookingReference = await resolveBookingReference(ctx, link);
+    const bookingReference =
+      (await resolveBookingReference(ctx, link)) ?? resolveSaleLinkReference(link);
 
     return {
       token: link.token,
+      contractCode: link.contractCode ?? resolveSaleLinkReference(link),
       status: link.status,
       clientStep: link.clientStep,
       clientPortalUiStep: link.clientPortalUiStep,
@@ -1180,6 +1228,8 @@ export const getForPortal = internalQuery({
             telefono: link.clientData.telefono,
             direccion: link.clientData.direccion,
             ciudad: link.clientData.ciudad,
+            cedulaPhotoUrl: link.clientData.cedulaPhotoUrl,
+            cedulaPhotoFileName: link.clientData.cedulaPhotoFileName,
           }
         : undefined,
       paymentProofSubmitted: !!link.paymentProofUrl,
