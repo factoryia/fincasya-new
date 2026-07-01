@@ -6,6 +6,7 @@ import { internal, api } from './_generated/api';
 import type { Id } from './_generated/dataModel';
 import { buildCatalogProductDescription } from './lib/catalogDescription';
 import { buildCatalogPriceFields } from './lib/catalogPrice';
+import { buildCatalogImageUrl, buildCatalogImageUrls } from './lib/catalogImageUrl';
 
 /**
  * Sincroniza cat?logos de Meta a whatsappCatalogs.
@@ -141,10 +142,9 @@ function buildMetaPayload(
   }
   const images = prop.images?.filter(Boolean) ?? [];
   if (images.length > 0) {
-    // Campo principal que espera Meta para el cat?logo: enlace de imagen.
-    payload.image_link = images[0];
+    payload.image_link = buildCatalogImageUrl(images[0]);
     if (images.length > 1) {
-      payload.additional_image_link = images.slice(1);
+      payload.additional_image_link = buildCatalogImageUrls(images.slice(1));
     }
   }
   if (prop.video) {
@@ -347,7 +347,7 @@ export const syncPropertyToAllCatalogs = internalAction({
 
 /**
  * Re-sincroniza en Meta todas las fincas que tengan v?nculo en propertyWhatsAppCatalog.
- * ÿÿtil cuando se actualiza contenido multimedia (ej. video) y se quiere propagar en bloque.
+ * ??til cuando se actualiza contenido multimedia (ej. video) y se quiere propagar en bloque.
  *
  * Ejecutar: npx convex run metaCatalog:resyncAllLinkedPropertiesToMeta
  */

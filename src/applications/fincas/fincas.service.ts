@@ -346,6 +346,7 @@ import {
 } from './contract-template-values';
 import { buildConfirmationWordValues } from './confirmation-template-values';
 import { postProcessConfirmationWordXml } from './confirmation-word-postprocess';
+import { buildCatalogImageUrl, buildCatalogImageUrls } from './catalog-image-url';
 import { buildCatalogProductDescription } from './catalog-description';
 import { buildCatalogPriceFields } from './catalog-price';
 import {
@@ -860,8 +861,8 @@ Al confirmar tu pago, recibirás el *soporte oficial* junto con todos los detall
         title,
         description,
         link: `https://fincasya.com/fincas/${slug}`,
-        image_link: images[0],
-        additional_image_link: images.slice(1).join(','),
+        image_link: buildCatalogImageUrl(images[0]),
+        additional_image_link: buildCatalogImageUrls(images.slice(1)).join(','),
         'video[0].url': videoUrl,
         price: catalogPrices.price,
         sale_price: catalogPrices.sale_price,

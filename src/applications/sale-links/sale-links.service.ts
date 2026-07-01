@@ -923,19 +923,47 @@ export class SaleLinksService {
       throw new BadRequestException('Clave de acceso requerida');
     }
 
-    const adminData = (await this.convexProxy.forwardJson(
-      'GET',
-      `/api/admin/sale-link/${encodeURIComponent(token)}`,
-    )) as { ok?: boolean; row?: PaymentProofAdminRow };
+    const baseUrl =
+      process.env.CONVEX_SITE_URL?.replace(/\/$/, '') ||
+      'https://adventurous-octopus-651.convex.site';
+    const res = await fetch(
+      `${baseUrl}/api/venta/${encodeURIComponent(token.trim())}/payment-proof?key=${encodeURIComponent(key.trim())}`,
+      { cache: 'no-store' },
+    );
 
-    const row = adminData?.row;
-    if (!row?.paymentProofUrl?.trim() || !row.paymentValidationKey?.trim()) {
-      throw new NotFoundException('Comprobante no encontrado');
+    let payload: {
+      ok?: boolean;
+      error?: string;
+      paymentProofUrl?: string;
+      fileName?: string;
+      mimeType?: string;
+      clientName?: string;
+      totalValue?: number;
+    } = {};
+    try {
+      payload = (await res.json()) as typeof payload;
+    } catch {
+      throw new NotFoundException('No se pudo cargar el comprobante');
     }
-    if (row.paymentValidationKey.trim() !== key.trim()) {
-      throw new ForbiddenException('Clave de acceso inválida');
+
+    if (!res.ok || !payload.ok || !payload.paymentProofUrl?.trim()) {
+      const message = payload.error ?? 'Comprobante no encontrado';
+      if (res.status === 403 || message.includes('inválida')) {
+        throw new ForbiddenException(message);
+      }
+      if (res.status === 400) {
+        throw new BadRequestException(message);
+      }
+      throw new NotFoundException(message);
     }
-    return row;
+
+    return {
+      paymentProofUrl: payload.paymentProofUrl.trim(),
+      paymentProofFileName: payload.fileName?.trim() || 'comprobante',
+      paymentProofMimeType: payload.mimeType?.trim(),
+      clientData: { nombre: payload.clientName },
+      totalValue: payload.totalValue,
+    };
   }
 
   async getPaymentProofMeta(token: string, key: string) {

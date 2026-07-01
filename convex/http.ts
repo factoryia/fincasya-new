@@ -2105,9 +2105,75 @@ http.route({
   method: 'GET',
   handler: httpAction(async (ctx, request) => {
     const url = new URL(request.url);
-    const token = url.pathname.replace('/api/venta/', '').split('/')[0];
+    const parts = url.pathname.replace('/api/venta/', '').split('/').filter(Boolean);
+    const token = parts[0];
     if (!token) {
       return jsonResponse({ error: 'Token requerido' }, 400, VENTA_CORS);
+    }
+
+    if (parts.length === 2 && parts[1] === 'payment-proof') {
+      const key = url.searchParams.get('key')?.trim() ?? '';
+      if (!key) {
+        return jsonResponse(
+          { ok: false, error: 'Clave de acceso requerida' },
+          400,
+          VENTA_CORS,
+        );
+      }
+
+      const proof = await ctx.runQuery(
+        internal.saleLinks.getPaymentProofForValidationKey,
+        { token, validationKey: key },
+      );
+
+      if (!proof.ok) {
+        const status =
+          proof.reason === 'invalid_key'
+            ? 403
+            : proof.reason === 'key_required'
+              ? 400
+              : 404;
+        const message =
+          proof.reason === 'not_found'
+            ? 'Link no encontrado'
+            : proof.reason === 'invalid_key'
+              ? 'Clave de acceso inválida'
+              : proof.reason === 'no_proof'
+                ? 'Comprobante no encontrado'
+                : 'Clave de acceso requerida';
+        return jsonResponse({ ok: false, error: message }, status, VENTA_CORS);
+      }
+
+      const fileName = proof.paymentProofFileName?.trim() || 'comprobante';
+      const lower = fileName.toLowerCase();
+      const mimeType =
+        proof.paymentProofMimeType?.trim() ||
+        (lower.endsWith('.pdf')
+          ? 'application/pdf'
+          : lower.match(/\.(jpe?g)$/)
+            ? 'image/jpeg'
+            : lower.endsWith('.png')
+              ? 'image/png'
+              : lower.endsWith('.webp')
+                ? 'image/webp'
+                : 'application/octet-stream');
+
+      return jsonResponse(
+        {
+          ok: true,
+          fileName,
+          mimeType,
+          clientName: proof.clientName,
+          totalValue: proof.totalValue,
+          paymentProofUrl: proof.paymentProofUrl,
+        },
+        200,
+        VENTA_CORS,
+      );
+    }
+
+    if (parts.length !== 1) {
+      return jsonResponse({ error: 'Ruta no encontrada' }, 404, VENTA_CORS);
     }
 
     const publicData = await ctx.runQuery(internal.saleLinks.getForPortal, { token });

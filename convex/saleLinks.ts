@@ -1265,6 +1265,39 @@ export const getPublicByToken = query({
   },
 });
 
+/** Metadatos del comprobante si la clave del correo admin es válida. */
+export const getPaymentProofForValidationKey = internalQuery({
+  args: { token: v.string(), validationKey: v.string() },
+  handler: async (ctx, { token, validationKey }) => {
+    const trimmedToken = token.trim();
+    const trimmedKey = validationKey.trim();
+    if (!trimmedToken) return { ok: false as const, reason: 'not_found' as const };
+    if (!trimmedKey) return { ok: false as const, reason: 'key_required' as const };
+
+    const link = await ctx.db
+      .query('saleLinks')
+      .withIndex('by_token', (q) => q.eq('token', trimmedToken))
+      .unique();
+    if (!link) return { ok: false as const, reason: 'not_found' as const };
+    if (link.paymentValidationKey?.trim() !== trimmedKey) {
+      return { ok: false as const, reason: 'invalid_key' as const };
+    }
+    if (!link.paymentProofUrl?.trim()) {
+      return { ok: false as const, reason: 'no_proof' as const };
+    }
+
+    const fileName = link.paymentProofFileName?.trim() || 'comprobante';
+    return {
+      ok: true as const,
+      paymentProofUrl: link.paymentProofUrl.trim(),
+      paymentProofFileName: fileName,
+      paymentProofMimeType: link.paymentProofMimeType,
+      clientName: link.clientData?.nombre ?? 'Cliente',
+      totalValue: link.totalValue ?? 0,
+    };
+  },
+});
+
 /** InternalQuery equivalente para HTTP routes (mismo output que getPublicByToken). */
 export const getForPortal = internalQuery({
   args: { token: v.string() },
