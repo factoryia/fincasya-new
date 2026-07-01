@@ -1,19 +1,60 @@
 import { v } from 'convex/values';
 import { mutation, query } from './_generated/server';
+import { resolveSaleLinkReference } from './lib/saleLinkReference';
+
+type PaymentProofRecord = {
+  url: string;
+  fileName?: string;
+  mimeType?: string;
+  amount?: number;
+  submittedAt: number;
+};
+
+function resolveSaleLinkPaymentProofs(link: {
+  paymentProofs?: PaymentProofRecord[];
+  paymentProofUrl?: string;
+  paymentProofFileName?: string;
+  paymentProofMimeType?: string;
+  paymentProofAmount?: number;
+  paymentProofSubmittedAt?: number;
+}): PaymentProofRecord[] {
+  if (link.paymentProofs?.length) return link.paymentProofs;
+  if (link.paymentProofUrl?.trim()) {
+    return [
+      {
+        url: link.paymentProofUrl.trim(),
+        fileName: link.paymentProofFileName,
+        mimeType: link.paymentProofMimeType,
+        amount: link.paymentProofAmount,
+        submittedAt: link.paymentProofSubmittedAt ?? Date.now(),
+      },
+    ];
+  }
+  return [];
+}
 
 /**
- * Lista los soportes de pago PENDIENTES (subidos por turistas en el portal),
- * con el contexto de la reserva, para que el representante legal los revise.
+ * Lista los soportes de pago PENDIENTES (portal check-in + links de venta),
+ * con el contexto de la reserva, para que el equipo los revise.
  */
 export const listPending = query({
-  args: {},
-  handler: async (ctx) => {
+  args: {
+    source: v.optional(
+      v.union(v.literal('all'), v.literal('portal'), v.literal('sale-link')),
+    ),
+    search: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    const sourceFilter = args.source ?? 'all';
+    const search = args.search?.trim().toLowerCase() ?? '';
+
+    const matchesSearch = (fields: Array<string | undefined>) => {
+      if (!search) return true;
+      return fields.some((f) => String(f ?? '').toLowerCase().includes(search));
+    };
+
     // Solo las reservas con un soporte pendiente (vía índice), sin escanear toda
     // la tabla: así nunca se excede el límite de lectura de Convex.
-    const bookings = await ctx.db
-      .query('bookings')
-      .withIndex('by_pending_receipt', (q) => q.eq('hasPendingReceipt', true))
-      .collect();
     const propCache = new Map<string, { title?: string } | null>();
     const getProp = async (id: any) => {
       if (!id) return null;
@@ -30,55 +71,133 @@ export const listPending = query({
     };
 
     const items: Array<Record<string, unknown>> = [];
-    for (const b of bookings) {
-      try {
-        const pending = (b.paymentPortalReceipts ?? []).filter(
-          (r) => r.status === 'pending',
-        );
-        if (!pending.length) continue;
 
-        const property = await getProp(b.propertyId);
-        let pagado = 0;
+    if (sourceFilter === 'all' || sourceFilter === 'portal') {
+      const bookings = await ctx.db
+        .query('bookings')
+        .withIndex('by_pending_receipt', (q) => q.eq('hasPendingReceipt', true))
+        .collect();
+
+      for (const b of bookings) {
         try {
-          const payments = await ctx.db
-            .query('payments')
-            .withIndex('by_booking', (q) => q.eq('bookingId', b._id))
-            .collect();
-          pagado = payments.reduce(
-            (acc, p) =>
-              acc +
-              (p.type === 'REEMBOLSO'
-                ? -(Number(p.amount) || 0)
-                : Number(p.amount) || 0),
-            0,
+          const pending = (b.paymentPortalReceipts ?? []).filter(
+            (r) => r.status === 'pending',
           );
-        } catch {
-          pagado = 0;
-        }
-        const precioTotal = Number(b.precioTotal) || 0;
-        const pendiente = Math.max(0, precioTotal - pagado);
+          if (!pending.length) continue;
 
-        for (const r of pending) {
-          items.push({
-            bookingId: b._id,
-            receiptId: r.id,
-            reference: b.reference ?? b._id,
-            propertyTitle: property?.title ?? '',
-            clienteNombre: b.nombreCompleto ?? '',
-            clienteCedula: b.cedula ?? '',
-            precioTotal,
-            pagado,
-            pendiente,
-            amount: typeof r.amount === 'number' ? r.amount : undefined,
-            bankName: r.bankName ?? '',
-            receiptUrl: r.receiptUrl,
-            fileName: r.fileName ?? '',
-            submittedAt: r.submittedAt,
-          });
+          const property = await getProp(b.propertyId);
+          let pagado = 0;
+          try {
+            const payments = await ctx.db
+              .query('payments')
+              .withIndex('by_booking', (q) => q.eq('bookingId', b._id))
+              .collect();
+            pagado = payments.reduce(
+              (acc, p) =>
+                acc +
+                (p.type === 'REEMBOLSO'
+                  ? -(Number(p.amount) || 0)
+                  : Number(p.amount) || 0),
+              0,
+            );
+          } catch {
+            pagado = 0;
+          }
+          const precioTotal = Number(b.precioTotal) || 0;
+          const pendiente = Math.max(0, precioTotal - pagado);
+          const reference = String(b.reference ?? b._id);
+
+          for (const r of pending) {
+            if (
+              !matchesSearch([
+                reference,
+                property?.title,
+                b.nombreCompleto,
+                b.cedula,
+              ])
+            ) {
+              continue;
+            }
+            items.push({
+              source: 'portal',
+              bookingId: b._id,
+              receiptId: r.id,
+              reference,
+              propertyTitle: property?.title ?? '',
+              clienteNombre: b.nombreCompleto ?? '',
+              clienteCedula: b.cedula ?? '',
+              precioTotal,
+              pagado,
+              pendiente,
+              amount: typeof r.amount === 'number' ? r.amount : undefined,
+              bankName: r.bankName ?? '',
+              receiptUrl: r.receiptUrl,
+              fileName: r.fileName ?? '',
+              submittedAt: r.submittedAt,
+            });
+          }
+        } catch {
+          continue;
         }
-      } catch {
-        // Si una reserva falla, la saltamos para no romper toda la lista.
-        continue;
+      }
+    }
+
+    if (sourceFilter === 'all' || sourceFilter === 'sale-link') {
+      const saleLinks = await ctx.db.query('saleLinks').order('desc').take(400);
+
+      for (const link of saleLinks) {
+        if (link.paymentValidated) continue;
+        if (link.status === 'cancelled') continue;
+        if ((link.clientStep ?? 1) < 3) continue;
+
+        const proofs = resolveSaleLinkPaymentProofs(link);
+        if (!proofs.length) continue;
+
+        const property = await getProp(link.propertyId);
+        const reference = resolveSaleLinkReference(link);
+        const client = link.clientData;
+        const latest = proofs[proofs.length - 1];
+        const anticipo = Math.max(
+          0,
+          Math.floor(Number(latest.amount ?? link.paymentProofAmount) || 0),
+        );
+        const precioTotal = Number(link.totalValue) || 0;
+        const pendiente = Math.max(0, precioTotal - anticipo);
+
+        if (
+          !matchesSearch([
+            reference,
+            link.contractCode,
+            property?.title,
+            client?.nombre,
+            client?.cedula,
+            client?.email,
+          ])
+        ) {
+          continue;
+        }
+
+        items.push({
+          source: 'sale-link',
+          saleLinkToken: link.token,
+          saleLinkId: link._id,
+          bookingId: link.bookingId ?? null,
+          receiptId: `sale-link-${link.token}`,
+          reference,
+          propertyTitle: property?.title ?? '',
+          clienteNombre: client?.nombre ?? '',
+          clienteCedula: client?.cedula ?? '',
+          clienteEmail: client?.email ?? '',
+          precioTotal,
+          pagado: anticipo,
+          pendiente,
+          amount: anticipo > 0 ? anticipo : Math.round(precioTotal / 2),
+          bankName: 'Link de venta',
+          receiptUrl: latest.url,
+          fileName: latest.fileName ?? link.paymentProofFileName ?? '',
+          submittedAt: latest.submittedAt ?? link.paymentProofSubmittedAt,
+          clientStep: link.clientStep,
+        });
       }
     }
 

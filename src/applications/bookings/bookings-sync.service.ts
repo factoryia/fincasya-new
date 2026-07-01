@@ -970,8 +970,14 @@ export class BookingsSyncService {
   }
 
   /** Revisión de pagos: lista de soportes pendientes con contexto de reserva. */
-  async listPendingPaymentReceipts() {
-    return this.convexService.query('paymentReceipts:listPending', {});
+  async listPendingPaymentReceipts(filters?: {
+    source?: 'all' | 'portal' | 'sale-link';
+    search?: string;
+  }) {
+    return this.convexService.query('paymentReceipts:listPending', {
+      source: filters?.source,
+      search: filters?.search,
+    });
   }
 
   /** Marca el flag hasPendingReceipt en reservas existentes con soporte pendiente. */

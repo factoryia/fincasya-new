@@ -862,8 +862,14 @@ export class BookingsController {
 
   @Get('payment-receipts/pending')
   @UseGuards(ConvexAuthGuard, AdminGuard)
-  async listPendingPaymentReceipts() {
-    return this.bookingsSyncService.listPendingPaymentReceipts();
+  async listPendingPaymentReceipts(
+    @Query('source') source?: 'all' | 'portal' | 'sale-link',
+    @Query('search') search?: string,
+  ) {
+    return this.bookingsSyncService.listPendingPaymentReceipts({
+      source: source ?? 'all',
+      search,
+    });
   }
 
   @Post('payment-receipts/backfill-flag')
