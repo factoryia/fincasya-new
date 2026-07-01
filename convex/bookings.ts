@@ -1130,6 +1130,34 @@ export const getPaymentsByBooking = query({
 
     payments.sort((a, b) => b.createdAt - a.createdAt);
 
+    const approvedReceipts = (booking.paymentPortalReceipts ?? []).filter(
+      (r) => r.status === 'approved',
+    );
+    const enrichedPayments = payments.map((payment) => {
+      if (payment.verifiedBy?.trim()) return payment;
+      const notesMatch = String(payment.notes ?? '').match(/\bpor\s+([^·.\n]+)/i);
+      if (notesMatch?.[1]?.trim()) {
+        return {
+          ...payment,
+          verifiedBy: notesMatch[1].trim(),
+        };
+      }
+      const match = approvedReceipts.find((receipt) => {
+        const receiptAmount = Math.floor(
+          Number(receipt.reviewedAmount ?? receipt.amount ?? 0),
+        );
+        if (receiptAmount !== payment.amount) return false;
+        const receiptAt = receipt.reviewedAt ?? receipt.submittedAt;
+        return Math.abs(receiptAt - payment.createdAt) <= 5 * 60 * 1000;
+      });
+      if (!match?.reviewedBy) return payment;
+      return {
+        ...payment,
+        verifiedBy: match.reviewedBy,
+        verifiedAt: match.reviewedAt ?? payment.verifiedAt,
+      };
+    });
+
     const netPaid = netPaidFromPayments(payments);
     const pending = pendingFromTotal(booking.precioTotal, netPaid);
 
@@ -1139,7 +1167,7 @@ export const getPaymentsByBooking = query({
       paymentStatus: booking.paymentStatus,
       netPaid,
       pending,
-      payments,
+      payments: enrichedPayments,
     };
   },
 });

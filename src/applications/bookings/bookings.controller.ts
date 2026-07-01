@@ -1135,6 +1135,7 @@ export class BookingsController {
       paymentMethod?: string;
       reference?: string;
       notes?: string;
+      actor?: string;
     },
   ) {
     if (!body?.type || body.amount === undefined) {

@@ -741,6 +741,7 @@ export class BookingsSyncService {
       paymentMethod?: string;
       reference?: string;
       notes?: string;
+      actor?: string;
     },
   ) {
     const amount = Math.floor(Number(body.amount) || 0);
@@ -748,7 +749,8 @@ export class BookingsSyncService {
       throw new BadRequestException('El monto debe ser mayor a cero.');
     }
 
-    const paymentId = await this.convexService.mutation('bookings:createPayment', {
+    const actor = body.actor?.trim() || undefined;
+    await this.convexService.mutation('bookings:createPayment', {
       bookingId: bookingId as any,
       type: body.type,
       amount,
@@ -756,6 +758,8 @@ export class BookingsSyncService {
       reference: body.reference?.trim() || undefined,
       notes: body.notes?.trim() || undefined,
       status: 'PAID',
+      verifiedBy: actor,
+      verifiedAt: actor ? Date.now() : undefined,
     });
 
     return this.getBookingPayments(bookingId);
@@ -1015,6 +1019,8 @@ export class BookingsSyncService {
       paymentMethod: params.paymentMethod?.trim() || 'Soporte verificado',
       notes: `Abono verificado y aprobado en Revisión de Pagos${params.reviewedBy ? ` por ${params.reviewedBy}` : ''}.`,
       status: 'PAID',
+      verifiedBy: params.reviewedBy?.trim() || undefined,
+      verifiedAt: Date.now(),
     });
     await this.convexService.mutation('paymentReceipts:setReceiptStatus', {
       bookingId: params.bookingId as any,
