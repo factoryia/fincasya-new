@@ -64,6 +64,30 @@ export function arrivalTimestampMs(
   return dayStartUtc + h * HOUR_MS + m * 60 * 1000;
 }
 
+/** Timestamp de salida en ms (fecha + hora de entrega, zona Bogotá). */
+export function departureTimestampMs(
+  fechaSalida: number,
+  horaSalida?: string | null,
+): number {
+  const DAY = 24 * HOUR_MS;
+  const dayIndex = Math.floor((fechaSalida - BOGOTA_OFFSET_MS) / DAY);
+  const dayStartUtc = dayIndex * DAY + BOGOTA_OFFSET_MS;
+  const raw = String(horaSalida ?? '').trim();
+  const { h, m } = raw
+    ? parseHourMinute(horaSalida)
+    : { h: 16, m: 0 };
+  return dayStartUtc + h * HOUR_MS + m * 60 * 1000;
+}
+
+/** Tras la hora de salida el portal de check-in ya no admite cambios. */
+export function isCheckinPortalClosed(
+  fechaSalida: number,
+  horaSalida?: string | null,
+  now = Date.now(),
+): boolean {
+  return now >= departureTimestampMs(fechaSalida, horaSalida);
+}
+
 export function guestListLockAtMs(
   fechaEntrada: number,
   fechaSalida: number,

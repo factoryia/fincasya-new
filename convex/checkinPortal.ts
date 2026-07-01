@@ -13,6 +13,7 @@ import {
 import {
   assertGuestListEditable,
   guestListLockInfo,
+  isCheckinPortalClosed,
 } from './lib/checkinGuestListLock';
 
 /**
@@ -225,6 +226,10 @@ export const getForPortal = internalQuery({
     const booking = await findBooking(ctx, args.key);
     if (!booking) return null;
 
+    if (isCheckinPortalClosed(booking.fechaSalida, booking.horaSalida)) {
+      return { portalClosed: true as const };
+    }
+
     const property = await ctx.db.get(booking.propertyId);
 
     const payments = await ctx.db
@@ -317,6 +322,10 @@ export const saveDraft = internalMutation({
     const booking = await findBooking(ctx, args.key);
     if (!booking) return { ok: false as const, reason: 'not_found' };
 
+    if (isCheckinPortalClosed(booking.fechaSalida, booking.horaSalida)) {
+      return { ok: false as const, reason: 'reservation_ended' };
+    }
+
     const { guests } = normalizeGuests(args.guests);
     const lockReason = assertGuestListEditable(booking, guests);
     if (lockReason) return { ok: false as const, reason: lockReason };
@@ -362,6 +371,10 @@ export const submitCheckin = internalMutation({
   handler: async (ctx, args) => {
     const booking = await findBooking(ctx, args.key);
     if (!booking) return { ok: false as const, reason: 'not_found' };
+
+    if (isCheckinPortalClosed(booking.fechaSalida, booking.horaSalida)) {
+      return { ok: false as const, reason: 'reservation_ended' };
+    }
 
     const property = await ctx.db.get(booking.propertyId);
     const requiresGuestList =

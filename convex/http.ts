@@ -1218,6 +1218,17 @@ http.route({
     if (!key) return jsonResponse({ error: 'Referencia inválida' }, 400, CHECKIN_CORS);
 
     const data = await ctx.runQuery(internal.checkinPortal.getForPortal, { key });
+    if (data && 'portalClosed' in data && data.portalClosed) {
+      return jsonResponse(
+        {
+          error: 'reservation_ended',
+          message: 'Esta reserva ya finalizó.',
+          redirectUrl: 'https://fincasya.com',
+        },
+        410,
+        CHECKIN_CORS,
+      );
+    }
     if (!data) {
       return jsonResponse(
         { error: 'not_found', message: 'No encontramos esta reserva.' },
@@ -1309,6 +1320,7 @@ http.route({
         missing_cedula: 422,
         missing_data_consent: 422,
         guest_list_locked: 423,
+        reservation_ended: 410,
       };
       return jsonResponse(
         { error: reason, ...result },
