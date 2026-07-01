@@ -530,6 +530,58 @@ export class BookingsController {
     return result;
   }
 
+  /** El propietario rechaza el valor ofrecido desde /anfitrion. */
+  @Post('owner/:ref/reject-offer')
+  async rejectOwnerOffer(
+    @Param('ref') ref: string,
+    @Body() body: { reason?: string },
+  ) {
+    const reason = String(body?.reason ?? '').trim();
+    if (!reason) {
+      throw new HttpException(
+        { error: 'reason_required', message: 'Indica el motivo del rechazo.' },
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+    const result = await this.checkinMessaging.rejectOwnerOffer(ref, reason);
+    if (!result?.ok) {
+      throw new HttpException(
+        {
+          error: (result as { reason?: string })?.reason ?? 'offer_error',
+          message: 'No se pudo registrar el rechazo.',
+        },
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+    return result;
+  }
+
+  /** Observación del propietario sin rechazar la oferta. */
+  @Post('owner/:ref/owner-offer-comment')
+  async commentOwnerOffer(
+    @Param('ref') ref: string,
+    @Body() body: { comment?: string },
+  ) {
+    const comment = String(body?.comment ?? '').trim();
+    if (!comment) {
+      throw new HttpException(
+        { error: 'comment_required', message: 'Escribe una observación.' },
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+    const result = await this.checkinMessaging.commentOwnerOffer(ref, comment);
+    if (!result?.ok) {
+      throw new HttpException(
+        {
+          error: (result as { reason?: string })?.reason ?? 'offer_error',
+          message: 'No se pudo enviar la observación.',
+        },
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+    return result;
+  }
+
   /** PDF del listado de invitados, generado al vuelo (público, para el propietario). */
   @Get('owner/:ref/guests-pdf')
   async getOwnerGuestsPdf(@Param('ref') ref: string, @Res() res: Response) {

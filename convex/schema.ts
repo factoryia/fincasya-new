@@ -359,6 +359,12 @@ export default defineSchema({
     saleLinkId: v.optional(v.id('saleLinks')),
     /** El propietario aceptó el valor ofrecido en /anfitrion. */
     ownerOfferAcceptedAt: v.optional(v.number()),
+    /** El propietario rechazó la oferta en /anfitrion. */
+    ownerOfferRejectedAt: v.optional(v.number()),
+    ownerOfferRejectedReason: v.optional(v.string()),
+    /** Observación del propietario sin rechazar (sigue pendiente). */
+    ownerOfferComment: v.optional(v.string()),
+    ownerOfferCommentAt: v.optional(v.number()),
     observaciones: v.optional(v.string()),
     city: v.optional(v.string()),
     purpose: v.optional(v.string()),
@@ -1599,6 +1605,10 @@ export default defineSchema({
     ownerOfferSentAt: v.optional(v.number()),
     /** Cuándo el propietario aceptó la oferta en /anfitrion. */
     ownerOfferAcceptedAt: v.optional(v.number()),
+    ownerOfferRejectedAt: v.optional(v.number()),
+    ownerOfferRejectedReason: v.optional(v.string()),
+    ownerOfferComment: v.optional(v.string()),
+    ownerOfferCommentAt: v.optional(v.number()),
     /** Lista de huéspedes (paso 6 check-in) */
     checkinGuests: v.optional(
       v.array(

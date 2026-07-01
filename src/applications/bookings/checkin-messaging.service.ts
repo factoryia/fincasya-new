@@ -354,6 +354,13 @@ export class CheckinMessagingService {
     const ownerOfferAccepted = Boolean(
       booking.ownerOfferAcceptedAt || saleLink?.ownerOfferAcceptedAt,
     );
+    const ownerOfferRejected = Boolean(
+      booking.ownerOfferRejectedAt || saleLink?.ownerOfferRejectedAt,
+    );
+    const ownerOfferRejectedReason =
+      String(
+        booking.ownerOfferRejectedReason ?? saleLink?.ownerOfferRejectedReason ?? '',
+      ).trim() || null;
     const saleLinkStep = saleLink?.clientStep ?? 0;
     const ownerPortalReady = Boolean(
       saleLink?.crUrl ||
@@ -364,6 +371,7 @@ export class CheckinMessagingService {
       isSaleLinkBooking &&
       valorOferta > 0 &&
       !ownerOfferAccepted &&
+      !ownerOfferRejected &&
       ownerPortalReady &&
       saleLinkStep < 8;
     const clientPaidAbono = Math.max(
@@ -426,6 +434,8 @@ export class CheckinMessagingService {
       ownerPortalShare: effectiveShare,
       ownerOfferPending,
       ownerOfferAccepted,
+      ownerOfferRejected,
+      ownerOfferRejectedReason,
       ownerReceiver: booking.ownerReceiver
         ? {
             nombre: String(booking.ownerReceiver.nombre ?? '').trim() || null,
@@ -514,8 +524,167 @@ export class CheckinMessagingService {
 
   /** El propietario acepta el valor ofrecido (link de venta). */
   async acceptOwnerOffer(reference: string) {
-    return this.convexService.mutation('bookings:acceptOwnerOffer', {
-      reference: String(reference ?? '').trim(),
+    const trimmed = String(reference ?? '').trim();
+    const result = await this.convexService.mutation('bookings:acceptOwnerOffer', {
+      reference: trimmed,
+    });
+    if (result?.ok && !result?.alreadyAccepted) {
+      void this.notifyOwnerOfferAccepted(trimmed).catch((err) => {
+        this.logger.warn(
+          `[owner-offer] No se pudieron enviar correos tras aceptación: ${err}`,
+        );
+      });
+    }
+    return result;
+  }
+
+  /** El propietario rechaza el valor ofrecido. */
+  async rejectOwnerOffer(reference: string, reason: string) {
+    const trimmed = String(reference ?? '').trim();
+    const result = await this.convexService.mutation('bookings:rejectOwnerOffer', {
+      reference: trimmed,
+      reason: String(reason ?? '').trim(),
+    });
+    if (result?.ok && !result?.alreadyRejected) {
+      void this.notifyOwnerOfferRejected(trimmed, String(reason ?? '').trim()).catch(
+        (err) => {
+          this.logger.warn(
+            `[owner-offer] No se pudo avisar rechazo al equipo: ${err}`,
+          );
+        },
+      );
+    }
+    return result;
+  }
+
+  /** Observación del propietario sin rechazar. */
+  async commentOwnerOffer(reference: string, comment: string) {
+    const trimmed = String(reference ?? '').trim();
+    const result = await this.convexService.mutation('bookings:commentOwnerOffer', {
+      reference: trimmed,
+      comment: String(comment ?? '').trim(),
+    });
+    if (result?.ok) {
+      void this.notifyOwnerOfferComment(trimmed, String(comment ?? '').trim()).catch(
+        (err) => {
+          this.logger.warn(
+            `[owner-offer] No se pudo avisar observación al equipo: ${err}`,
+          );
+        },
+      );
+    }
+    return result;
+  }
+
+  private async getOpsAlertEmails(): Promise<string[] | undefined> {
+    const settings = (await this.convexService
+      .query('notificationSettings:get', {})
+      .catch(() => null)) as { paymentReceiptEmails?: string[] } | null;
+    return Array.isArray(settings?.paymentReceiptEmails)
+      ? settings!.paymentReceiptEmails
+      : undefined;
+  }
+
+  private async getOwnerOfferMailContext(reference: string) {
+    const booking: any = await this.convexService.query('bookings:getByReference', {
+      reference,
+    });
+    if (!booking) return null;
+    const property = booking.property || {};
+    const saleLink = booking.saleLink ?? null;
+    const valorAcordado =
+      typeof booking.ownerPayout?.valorAcordado === 'number'
+        ? booking.ownerPayout.valorAcordado
+        : saleLink?.ownerOfferAmount ?? 0;
+    const ownerEmail =
+      property.propietarioCorreo?.trim() ||
+      property.ownerEmail?.trim() ||
+      '';
+    return {
+      reference: booking.reference || reference,
+      propertyTitle: property.title || 'Finca',
+      propertyId: property._id || booking.propertyId,
+      ownerName: property.propietarioNombre || 'Propietario',
+      ownerTratamiento: property.propietarioTratamiento || '',
+      ownerEmail,
+      clientName:
+        saleLink?.clientData?.nombre?.trim() ||
+        booking.nombreCompleto?.trim() ||
+        'Cliente',
+      checkIn: booking.fechaEntrada,
+      checkOut: booking.fechaSalida,
+      guests: booking.numeroPersonas,
+      valorAcordado,
+      saleLinkToken: saleLink?.token,
+    };
+  }
+
+  private async notifyOwnerOfferAccepted(reference: string) {
+    const ctx = await this.getOwnerOfferMailContext(reference);
+    if (!ctx) return;
+    const anfitrionUrl = `https://fincasya.com/anfitrion/${encodeURIComponent(ctx.reference)}`;
+    const adminUrl = ctx.saleLinkToken
+      ? `https://fincasya.com/admin/ventas?token=${encodeURIComponent(ctx.saleLinkToken)}`
+      : 'https://fincasya.com/admin/ventas';
+    const emails = await this.getOpsAlertEmails();
+
+    if (ctx.ownerEmail) {
+      await this.brevoEmail.sendOwnerOfferAcceptedConfirmationEmail({
+        ownerName: ctx.ownerName,
+        ownerTratamiento: ctx.ownerTratamiento,
+        ownerEmail: ctx.ownerEmail,
+        propertyTitle: ctx.propertyTitle,
+        clientName: ctx.clientName,
+        checkIn: ctx.checkIn,
+        checkOut: ctx.checkOut,
+        guests: ctx.guests,
+        bookingReference: ctx.reference,
+        valorAcordado: ctx.valorAcordado,
+        anfitrionUrl,
+      });
+    }
+
+    await this.brevoEmail.sendOwnerConfirmedReserveOpsAlert({
+      emails,
+      reference: ctx.reference,
+      propertyTitle: ctx.propertyTitle,
+      ownerName: ctx.ownerName,
+      clientName: ctx.clientName,
+      checkIn: ctx.checkIn,
+      checkOut: ctx.checkOut,
+      guests: ctx.guests,
+      valorAcordado: ctx.valorAcordado,
+      adminUrl,
+    });
+  }
+
+  private async notifyOwnerOfferRejected(reference: string, reason: string) {
+    const ctx = await this.getOwnerOfferMailContext(reference);
+    if (!ctx) return;
+    const emails = await this.getOpsAlertEmails();
+    await this.brevoEmail.sendOwnerOfferRejectedOpsAlert({
+      emails,
+      reference: ctx.reference,
+      propertyTitle: ctx.propertyTitle,
+      ownerName: ctx.ownerName,
+      clientName: ctx.clientName,
+      reason,
+      adminUrl: 'https://fincasya.com/admin/ventas',
+    });
+  }
+
+  private async notifyOwnerOfferComment(reference: string, comment: string) {
+    const ctx = await this.getOwnerOfferMailContext(reference);
+    if (!ctx) return;
+    const emails = await this.getOpsAlertEmails();
+    await this.brevoEmail.sendOwnerOfferCommentOpsAlert({
+      emails,
+      reference: ctx.reference,
+      propertyTitle: ctx.propertyTitle,
+      ownerName: ctx.ownerName,
+      clientName: ctx.clientName,
+      comment,
+      adminUrl: 'https://fincasya.com/admin/ventas',
     });
   }
 

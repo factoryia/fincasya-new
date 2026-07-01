@@ -35,6 +35,32 @@ export class BrevoEmailService {
     );
   }
 
+  private async sendHtmlEmail(data: {
+    to: Array<{ email: string; name?: string }>;
+    subject: string;
+    htmlContent: string;
+  }): Promise<void> {
+    if (!this.apiKey) {
+      throw new Error('BREVO_API_KEY no configurada');
+    }
+    const response = await fetch('https://api.brevo.com/v3/smtp/email', {
+      method: 'POST',
+      headers: { 'api-key': this.apiKey, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        sender: { name: this.senderName, email: this.senderEmail },
+        to: data.to,
+        subject: data.subject,
+        htmlContent: data.htmlContent,
+      }),
+    });
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}));
+      throw new Error(
+        (errorData as { message?: string }).message || 'Error enviando email',
+      );
+    }
+  }
+
   async sendBookingConfirmationToClient(data: {
     clientEmail: string;
     clientName: string;
@@ -890,5 +916,223 @@ export class BrevoEmailService {
         `[sale-link] Error enviando anfitrión al propietario: ${error.message}`,
       );
     }
+  }
+
+  /**
+   * Confirmación formal al propietario tras aceptar la reserva en /anfitrion.
+   */
+  async sendOwnerOfferAcceptedConfirmationEmail(data: {
+    ownerName: string;
+    ownerTratamiento: string;
+    ownerEmail: string;
+    propertyTitle?: string;
+    clientName: string;
+    checkIn?: number;
+    checkOut?: number;
+    guests?: number;
+    bookingReference: string;
+    valorAcordado?: number;
+    anfitrionUrl: string;
+  }): Promise<void> {
+    const ownerEmail = data.ownerEmail?.trim();
+    if (!ownerEmail || this.isEmailSendingDisabled() || !this.apiKey) {
+      this.logger.warn(
+        '[owner-offer] Sin email o envío deshabilitado; omitiendo confirmación al propietario.',
+      );
+      return;
+    }
+
+    const esc = (s: string | undefined) =>
+      (s ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;');
+    const fmtDate = (ms?: number) =>
+      ms
+        ? new Date(ms).toLocaleDateString('es-CO', {
+            day: '2-digit',
+            month: 'long',
+            year: 'numeric',
+          })
+        : '—';
+    const fmtCOP = (n?: number) =>
+      typeof n === 'number' && n > 0
+        ? new Intl.NumberFormat('es-CO', {
+            style: 'currency',
+            currency: 'COP',
+            minimumFractionDigits: 0,
+          }).format(n)
+        : '—';
+
+    const htmlContent = `<!DOCTYPE html>
+<html lang="es"><body style="margin:0;padding:24px;background:#f4f7f9;font-family:Arial,sans-serif;">
+  <div style="max-width:560px;margin:0 auto;background:#fff;border-radius:12px;padding:32px;">
+    <h1 style="margin:0 0 8px;font-size:20px;color:#047857;">Reserva confirmada</h1>
+    <p style="margin:0 0 16px;color:#555;line-height:1.6;">
+      Estimado/a ${esc(data.ownerTratamiento)} <strong>${esc(data.ownerName)}</strong>,
+      confirmaste la reserva en <strong>${esc(data.propertyTitle ?? 'tu finca')}</strong>.
+      El equipo de FincasYa procederá con los siguientes pasos.
+    </p>
+    <table style="width:100%;font-size:14px;color:#333;margin-bottom:20px;">
+      <tr><td style="padding:4px 0;color:#666;">Referencia</td><td style="text-align:right;font-weight:600;">${esc(data.bookingReference)}</td></tr>
+      <tr><td style="padding:4px 0;color:#666;">Cliente</td><td style="text-align:right;font-weight:600;">${esc(data.clientName)}</td></tr>
+      <tr><td style="padding:4px 0;color:#666;">Entrada</td><td style="text-align:right;">${fmtDate(data.checkIn)}</td></tr>
+      <tr><td style="padding:4px 0;color:#666;">Salida</td><td style="text-align:right;">${fmtDate(data.checkOut)}</td></tr>
+      ${data.guests ? `<tr><td style="padding:4px 0;color:#666;">Huéspedes</td><td style="text-align:right;">${data.guests}</td></tr>` : ''}
+      <tr><td style="padding:4px 0;color:#666;">Valor acordado</td><td style="text-align:right;font-weight:700;color:#047857;">${fmtCOP(data.valorAcordado)}</td></tr>
+    </table>
+    <p style="margin:0 0 16px;font-size:14px;color:#555;">
+      Puedes seguir revisando el check-in y los datos del arriendo en tu portal de anfitrión.
+    </p>
+    <a href="${esc(data.anfitrionUrl)}" style="display:inline-block;background:#059669;color:#fff;text-decoration:none;padding:12px 24px;border-radius:8px;font-weight:700;">Ver portal de anfitrión</a>
+  </div>
+</body></html>`;
+
+    await this.sendHtmlEmail({
+      to: [{ email: ownerEmail, name: data.ownerName }],
+      subject: `Reserva confirmada — ${data.propertyTitle ?? data.bookingReference}`,
+      htmlContent,
+    });
+    this.logger.log(
+      `[owner-offer] Confirmación enviada al propietario ${ownerEmail}`,
+    );
+  }
+
+  /** Alerta operativa: propietario confirmó — reservar la finca. */
+  async sendOwnerConfirmedReserveOpsAlert(data: {
+    emails?: string[];
+    reference: string;
+    propertyTitle: string;
+    ownerName: string;
+    clientName: string;
+    checkIn?: number;
+    checkOut?: number;
+    guests?: number;
+    valorAcordado?: number;
+    adminUrl: string;
+  }): Promise<void> {
+    const list =
+      Array.isArray(data.emails) && data.emails.length > 0
+        ? data.emails
+        : ['fincasecoturisticasdelllano@gmail.com'];
+    if (this.isEmailSendingDisabled()) {
+      this.logEmailSkipped('alerta reserva propietario', list.join(', '));
+      return;
+    }
+    const fmtDate = (ms?: number) =>
+      ms
+        ? new Date(ms).toLocaleDateString('es-CO', {
+            day: '2-digit',
+            month: 'short',
+            year: 'numeric',
+          })
+        : '—';
+    const fmtCOP = (n?: number) =>
+      typeof n === 'number' && n > 0
+        ? new Intl.NumberFormat('es-CO', {
+            style: 'currency',
+            currency: 'COP',
+            minimumFractionDigits: 0,
+          }).format(n)
+        : '—';
+    const row = (label: string, value: string) =>
+      `<tr><td style="padding:6px 0;color:#666;">${label}</td><td style="padding:6px 0;font-weight:600;text-align:right;">${value}</td></tr>`;
+    const htmlContent = `
+      <div style="font-family:Arial,sans-serif;max-width:560px;margin:0 auto;color:#1a1a1a;">
+        <h2 style="font-size:18px;margin:0 0 4px;color:#b45309;">🏡 Propietario confirmó — reservar finca</h2>
+        <p style="color:#666;margin:0 0 16px;">El propietario aceptó la oferta. Ve y reserva esta finca en el sistema.</p>
+        <table style="width:100%;border-collapse:collapse;font-size:14px;">
+          ${row('Referencia', data.reference)}
+          ${row('Finca', data.propertyTitle)}
+          ${row('Propietario', data.ownerName)}
+          ${row('Cliente', data.clientName)}
+          ${row('Entrada', fmtDate(data.checkIn))}
+          ${row('Salida', fmtDate(data.checkOut))}
+          ${data.guests ? row('Huéspedes', String(data.guests)) : ''}
+          ${row('Valor acordado', fmtCOP(data.valorAcordado))}
+        </table>
+        <p style="margin:20px 0 0;"><a href="${data.adminUrl}" style="background:#1a73e8;color:#fff;padding:10px 18px;border-radius:6px;text-decoration:none;font-weight:600;">Abrir en admin</a></p>
+      </div>`;
+    await this.sendHtmlEmail({
+      to: list.map((email) => ({ email })),
+      subject: `🏡 Propietario confirmó — ${data.propertyTitle} (${data.reference})`,
+      htmlContent,
+    });
+  }
+
+  /** Alerta operativa: propietario rechazó la oferta. */
+  async sendOwnerOfferRejectedOpsAlert(data: {
+    emails?: string[];
+    reference: string;
+    propertyTitle: string;
+    ownerName: string;
+    clientName: string;
+    reason: string;
+    adminUrl: string;
+  }): Promise<void> {
+    const list =
+      Array.isArray(data.emails) && data.emails.length > 0
+        ? data.emails
+        : ['fincasecoturisticasdelllano@gmail.com'];
+    if (this.isEmailSendingDisabled()) {
+      this.logEmailSkipped('alerta rechazo propietario', list.join(', '));
+      return;
+    }
+    const esc = (s: string) =>
+      s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    const htmlContent = `
+      <div style="font-family:Arial,sans-serif;max-width:560px;margin:0 auto;">
+        <h2 style="font-size:18px;color:#b91c1c;">❌ Propietario rechazó la reserva</h2>
+        <p style="color:#666;">${esc(data.ownerName)} rechazó la oferta en ${esc(data.propertyTitle)}.</p>
+        <p style="background:#fef2f2;padding:12px;border-radius:8px;color:#991b1b;"><strong>Motivo:</strong> ${esc(data.reason)}</p>
+        <table style="width:100%;font-size:14px;margin-top:12px;">
+          <tr><td style="color:#666;">Referencia</td><td style="text-align:right;font-weight:600;">${esc(data.reference)}</td></tr>
+          <tr><td style="color:#666;">Cliente</td><td style="text-align:right;">${esc(data.clientName)}</td></tr>
+        </table>
+        <p style="margin-top:16px;"><a href="${data.adminUrl}">Ver en admin</a></p>
+      </div>`;
+    await this.sendHtmlEmail({
+      to: list.map((email) => ({ email })),
+      subject: `❌ Propietario rechazó — ${data.propertyTitle} (${data.reference})`,
+      htmlContent,
+    });
+  }
+
+  /** Alerta operativa: observación del propietario (sin rechazar). */
+  async sendOwnerOfferCommentOpsAlert(data: {
+    emails?: string[];
+    reference: string;
+    propertyTitle: string;
+    ownerName: string;
+    clientName: string;
+    comment: string;
+    adminUrl: string;
+  }): Promise<void> {
+    const list =
+      Array.isArray(data.emails) && data.emails.length > 0
+        ? data.emails
+        : ['fincasecoturisticasdelllano@gmail.com'];
+    if (this.isEmailSendingDisabled()) {
+      this.logEmailSkipped('alerta observación propietario', list.join(', '));
+      return;
+    }
+    const esc = (s: string) =>
+      s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    const htmlContent = `
+      <div style="font-family:Arial,sans-serif;max-width:560px;margin:0 auto;">
+        <h2 style="font-size:18px;color:#1d4ed8;">💬 Observación del propietario</h2>
+        <p style="color:#666;">${esc(data.ownerName)} dejó una observación sobre ${esc(data.propertyTitle)}. La oferta sigue pendiente.</p>
+        <p style="background:#eff6ff;padding:12px;border-radius:8px;color:#1e3a8a;">${esc(data.comment)}</p>
+        <table style="width:100%;font-size:14px;margin-top:12px;">
+          <tr><td style="color:#666;">Referencia</td><td style="text-align:right;font-weight:600;">${esc(data.reference)}</td></tr>
+          <tr><td style="color:#666;">Cliente</td><td style="text-align:right;">${esc(data.clientName)}</td></tr>
+        </table>
+        <p style="margin-top:16px;"><a href="${data.adminUrl}">Ver en admin</a></p>
+      </div>`;
+    await this.sendHtmlEmail({
+      to: list.map((email) => ({ email })),
+      subject: `💬 Observación propietario — ${data.propertyTitle} (${data.reference})`,
+      htmlContent,
+    });
   }
 }

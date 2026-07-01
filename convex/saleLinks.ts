@@ -824,6 +824,10 @@ export const listForAdmin = internalQuery({
           .unique();
         let bookingReference = resolveSaleLinkReference(link);
         let ownerOfferAcceptedAt: number | undefined;
+        let ownerOfferRejectedAt: number | undefined;
+        let ownerOfferRejectedReason: string | undefined;
+        let ownerOfferComment: string | undefined;
+        let ownerOfferCommentAt: number | undefined;
         let checkinNeedsEmpleada: boolean | undefined;
         let checkinNeedsTeam: boolean | undefined;
         let checkinServiciosNota: string | undefined;
@@ -835,6 +839,14 @@ export const listForAdmin = internalQuery({
             bookingReference = booking.reference ?? bookingReference;
             ownerOfferAcceptedAt =
               link.ownerOfferAcceptedAt ?? booking.ownerOfferAcceptedAt;
+            ownerOfferRejectedAt =
+              link.ownerOfferRejectedAt ?? booking.ownerOfferRejectedAt;
+            ownerOfferRejectedReason =
+              link.ownerOfferRejectedReason ?? booking.ownerOfferRejectedReason;
+            ownerOfferComment =
+              link.ownerOfferComment ?? booking.ownerOfferComment;
+            ownerOfferCommentAt =
+              link.ownerOfferCommentAt ?? booking.ownerOfferCommentAt;
             checkinNeedsEmpleada = booking.checkinNeedsEmpleada === true;
             checkinNeedsTeam = booking.checkinNeedsTeam === true;
             checkinServiciosNota = booking.checkinServiciosNota ?? undefined;
@@ -853,6 +865,10 @@ export const listForAdmin = internalQuery({
           propietarioTratamiento: ownerInfo?.propietarioTratamiento ?? null,
           bookingReference,
           ownerOfferAcceptedAt,
+          ownerOfferRejectedAt,
+          ownerOfferRejectedReason,
+          ownerOfferComment,
+          ownerOfferCommentAt,
           checkinNeedsEmpleada,
           checkinNeedsTeam,
           checkinServiciosNota,
@@ -959,6 +975,36 @@ export const onOwnerOfferAcceptedInternal = internalMutation({
       ownerOfferAcceptedAt: now,
       clientStep: 8,
       status: 'completed',
+      updatedAt: now,
+    });
+    return { ok: true as const };
+  },
+});
+
+export const onOwnerOfferRejectedInternal = internalMutation({
+  args: { saleLinkId: v.id('saleLinks'), reason: v.string() },
+  handler: async (ctx, { saleLinkId, reason }) => {
+    const link = await ctx.db.get(saleLinkId);
+    if (!link) return { ok: false as const, reason: 'not_found' as const };
+    const now = Date.now();
+    await ctx.db.patch(saleLinkId, {
+      ownerOfferRejectedAt: now,
+      ownerOfferRejectedReason: reason.trim(),
+      updatedAt: now,
+    });
+    return { ok: true as const };
+  },
+});
+
+export const onOwnerOfferCommentInternal = internalMutation({
+  args: { saleLinkId: v.id('saleLinks'), comment: v.string() },
+  handler: async (ctx, { saleLinkId, comment }) => {
+    const link = await ctx.db.get(saleLinkId);
+    if (!link) return { ok: false as const, reason: 'not_found' as const };
+    const now = Date.now();
+    await ctx.db.patch(saleLinkId, {
+      ownerOfferComment: comment.trim(),
+      ownerOfferCommentAt: now,
       updatedAt: now,
     });
     return { ok: true as const };

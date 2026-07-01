@@ -1782,6 +1782,9 @@ export const acceptOwnerOffer = mutation({
     if (booking.ownerOfferAcceptedAt) {
       return { ok: true as const, alreadyAccepted: true as const };
     }
+    if (booking.ownerOfferRejectedAt) {
+      return { ok: false as const, reason: 'offer_rejected' as const };
+    }
 
     const now = Date.now();
     await ctx.db.patch(booking._id, {
@@ -1798,6 +1801,122 @@ export const acceptOwnerOffer = mutation({
 
     await ctx.runMutation(internal.saleLinks.onOwnerOfferAcceptedInternal, {
       saleLinkId,
+    });
+
+    return { ok: true as const };
+  },
+});
+
+async function resolveSaleLinkIdForOwnerOffer(
+  ctx: { db: any },
+  booking: { _id: Id<'bookings'>; saleLinkId?: Id<'saleLinks'> },
+): Promise<Id<'saleLinks'> | null> {
+  let saleLinkId = booking.saleLinkId;
+  if (!saleLinkId) {
+    const linked = await ctx.db
+      .query('saleLinks')
+      .withIndex('by_booking', (q: any) => q.eq('bookingId', booking._id))
+      .first();
+    saleLinkId = linked?._id;
+    if (saleLinkId) {
+      await ctx.db.patch(booking._id, { saleLinkId, updatedAt: Date.now() });
+    }
+  }
+  return saleLinkId ?? null;
+}
+
+/** El propietario rechaza el valor ofrecido desde /anfitrion. */
+export const rejectOwnerOffer = mutation({
+  args: { reference: v.string(), reason: v.string() },
+  handler: async (ctx, { reference, reason }) => {
+    const trimmed = reference.trim();
+    const trimmedReason = reason.trim();
+    if (!trimmed) return { ok: false as const, reason: 'invalid_reference' as const };
+    if (!trimmedReason) return { ok: false as const, reason: 'reason_required' as const };
+
+    const byRef = await ctx.db
+      .query('bookings')
+      .withIndex('by_reference', (q) => q.eq('reference', trimmed))
+      .first();
+    const booking = byRef ?? (await ctx.db.get(trimmed as Id<'bookings'>));
+    if (!booking || !('numeroPersonas' in booking)) {
+      return { ok: false as const, reason: 'not_found' as const };
+    }
+
+    const valorAcordado = Number(
+      (booking.ownerPayout as { valorAcordado?: number } | undefined)?.valorAcordado,
+    );
+    const saleLinkId = await resolveSaleLinkIdForOwnerOffer(ctx, booking);
+    if (!saleLinkId || valorAcordado <= 0) {
+      return { ok: false as const, reason: 'no_pending_offer' as const };
+    }
+    if (booking.ownerOfferAcceptedAt) {
+      return { ok: false as const, reason: 'already_accepted' as const };
+    }
+    if (booking.ownerOfferRejectedAt) {
+      return { ok: true as const, alreadyRejected: true as const };
+    }
+
+    const now = Date.now();
+    await ctx.db.patch(booking._id, {
+      ownerOfferRejectedAt: now,
+      ownerOfferRejectedReason: trimmedReason,
+      saleLinkId,
+      updatedAt: now,
+    });
+
+    await ctx.runMutation(internal.saleLinks.onOwnerOfferRejectedInternal, {
+      saleLinkId,
+      reason: trimmedReason,
+    });
+
+    return { ok: true as const };
+  },
+});
+
+/** Observación del propietario sin rechazar la oferta. */
+export const commentOwnerOffer = mutation({
+  args: { reference: v.string(), comment: v.string() },
+  handler: async (ctx, { reference, comment }) => {
+    const trimmed = reference.trim();
+    const trimmedComment = comment.trim();
+    if (!trimmed) return { ok: false as const, reason: 'invalid_reference' as const };
+    if (!trimmedComment) return { ok: false as const, reason: 'comment_required' as const };
+
+    const byRef = await ctx.db
+      .query('bookings')
+      .withIndex('by_reference', (q) => q.eq('reference', trimmed))
+      .first();
+    const booking = byRef ?? (await ctx.db.get(trimmed as Id<'bookings'>));
+    if (!booking || !('numeroPersonas' in booking)) {
+      return { ok: false as const, reason: 'not_found' as const };
+    }
+
+    const valorAcordado = Number(
+      (booking.ownerPayout as { valorAcordado?: number } | undefined)?.valorAcordado,
+    );
+    const saleLinkId = await resolveSaleLinkIdForOwnerOffer(ctx, booking);
+    if (!saleLinkId || valorAcordado <= 0) {
+      return { ok: false as const, reason: 'no_pending_offer' as const };
+    }
+    if (booking.ownerOfferAcceptedAt) {
+      return { ok: false as const, reason: 'already_accepted' as const };
+    }
+    if (booking.ownerOfferRejectedAt) {
+      return { ok: false as const, reason: 'offer_rejected' as const };
+    }
+
+    const now = Date.now();
+    await ctx.db.patch(booking._id, {
+      ownerOfferComment: trimmedComment,
+      ownerOfferCommentAt: now,
+      saleLinkId,
+      updatedAt: now,
+    });
+
+    await ctx.runMutation(internal.saleLinks.onOwnerOfferCommentInternal, {
+      saleLinkId,
+      comment: trimmedComment,
     });
 
     return { ok: true as const };
