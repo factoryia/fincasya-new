@@ -355,11 +355,16 @@ export class CheckinMessagingService {
       booking.ownerOfferAcceptedAt || saleLink?.ownerOfferAcceptedAt,
     );
     const saleLinkStep = saleLink?.clientStep ?? 0;
+    const ownerPortalReady = Boolean(
+      saleLink?.crUrl ||
+        saleLink?.bookingReference ||
+        booking.reference,
+    );
     const ownerOfferPending =
       isSaleLinkBooking &&
       valorOferta > 0 &&
       !ownerOfferAccepted &&
-      saleLinkStep >= 7 &&
+      ownerPortalReady &&
       saleLinkStep < 8;
     const clientPaidAbono = Math.max(
       0,

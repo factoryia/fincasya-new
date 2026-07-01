@@ -1840,6 +1840,33 @@ http.route({
       return jsonResponse(result, 200);
     }
 
+    if (action === 'validate-payment-admin') {
+      let body: { validatedBy?: string };
+      try {
+        body = (await request.json()) as typeof body;
+      } catch {
+        return jsonResponse({ error: 'Body inválido' }, 400);
+      }
+      const validatedBy = String(body.validatedBy ?? '').trim();
+      if (!validatedBy) {
+        return jsonResponse({ error: 'validatedBy requerido' }, 422);
+      }
+
+      const result = await ctx.runMutation(internal.saleLinks.validatePaymentAdmin, {
+        token,
+        validatedBy,
+      });
+
+      if (!result.ok) {
+        const statusMap: Record<string, number> = {
+          not_found: 404,
+          no_proof: 400,
+        };
+        return jsonResponse(result, statusMap[(result as { reason?: string }).reason ?? ''] ?? 400);
+      }
+      return jsonResponse(result, 200);
+    }
+
     if (action === 'reset-payment') {
       const result = await ctx.runMutation(internal.saleLinks.resetPaymentSubmission, {
         token,

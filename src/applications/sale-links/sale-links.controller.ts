@@ -8,9 +8,12 @@ import {
   Post,
   Query,
   Req,
+  Res,
+  StreamableFile,
   UploadedFile,
   UseInterceptors,
 } from '@nestjs/common';
+import type { Response } from 'express';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { memoryStorage } from 'multer';
 import type { Request } from 'express';
@@ -35,6 +38,58 @@ export class SaleLinksController {
     @Query('status') status?: string,
   ) {
     return this.saleLinksService.list({ createdBy, status });
+  }
+
+  @Get(':token/payment-proof')
+  async getPaymentProofMeta(
+    @Param('token') token: string,
+    @Query('key') key: string,
+  ) {
+    return this.saleLinksService.getPaymentProofMeta(token, key ?? '');
+  }
+
+  @Get(':token/payment-proof-file')
+  async getPaymentProofFile(
+    @Param('token') token: string,
+    @Query('key') key: string,
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    const file = await this.saleLinksService.getPaymentProofFile(token, key ?? '');
+    res.set({
+      'Content-Type': file.mimeType,
+      'Content-Disposition': `inline; filename="${file.safeFileName}"`,
+      'Cache-Control': 'private, max-age=300',
+    });
+    return new StreamableFile(file.buffer);
+  }
+
+  @Get(':token/document-file')
+  async getDocumentFile(
+    @Param('token') token: string,
+    @Query('type') type: string,
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    const file = await this.saleLinksService.getDocumentFile(token, type ?? '');
+    res.set({
+      'Content-Type': file.mimeType,
+      'Content-Disposition': `inline; filename="${file.safeFileName}"`,
+      'Cache-Control': 'private, max-age=300',
+    });
+    return new StreamableFile(file.buffer);
+  }
+
+  @Get(':token/cedula-photo-file')
+  async getCedulaPhotoFile(
+    @Param('token') token: string,
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    const file = await this.saleLinksService.getDocumentFile(token, 'cedula-photo');
+    res.set({
+      'Content-Type': file.mimeType,
+      'Content-Disposition': `inline; filename="${file.safeFileName}"`,
+      'Cache-Control': 'private, max-age=300',
+    });
+    return new StreamableFile(file.buffer);
   }
 
   @Get(':token')
@@ -103,5 +158,13 @@ export class SaleLinksController {
     @Body() body: { validationKey: string; validatedBy?: string },
   ) {
     return this.saleLinksService.validatePayment(token, body.validationKey, body.validatedBy);
+  }
+
+  @Post(':token/validate-payment-admin')
+  async validatePaymentAdmin(
+    @Param('token') token: string,
+    @Body() body: { validatedBy: string },
+  ) {
+    return this.saleLinksService.validatePaymentAsAdmin(token, body.validatedBy);
   }
 }

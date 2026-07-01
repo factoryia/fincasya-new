@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ForbiddenException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
@@ -165,6 +166,78 @@ function formatCOP(amount: number): string {
 function formatDate(ms: number): string {
   const d = new Date(ms);
   return d.toLocaleDateString('es-CO', { day: '2-digit', month: '2-digit', year: 'numeric' });
+}
+
+function safeProofFilename(fileName: string): string {
+  const base = (fileName.split(/[/\\]/).pop() || 'comprobante')
+    .replace(/[^\w.\-() ]+/g, '_')
+    .trim();
+  return base.slice(0, 180) || 'comprobante';
+}
+
+type PaymentProofAdminRow = {
+  paymentProofUrl?: string;
+  paymentProofFileName?: string;
+  paymentProofMimeType?: string;
+  paymentValidationKey?: string;
+  clientData?: { nombre?: string };
+  totalValue?: number;
+};
+
+type SaleLinkDocumentType = 'signed-contract' | 'cedula-photo' | 'payment-proof';
+
+type SaleLinkAdminDocumentRow = {
+  signedContractUrl?: string;
+  signedContractFileName?: string;
+  paymentProofUrl?: string;
+  paymentProofFileName?: string;
+  paymentProofMimeType?: string;
+  clientData?: {
+    nombre?: string;
+    cedulaPhotoUrl?: string;
+    cedulaPhotoFileName?: string;
+    cedulaPhotoMimeType?: string;
+  };
+};
+
+function resolveSaleLinkDocument(
+  row: SaleLinkAdminDocumentRow,
+  type: SaleLinkDocumentType,
+): { url: string; fileName: string; mimeType: string } | null {
+  if (type === 'signed-contract') {
+    const url = row.signedContractUrl?.trim();
+    if (!url) return null;
+    const fileName = row.signedContractFileName?.trim() || 'contrato_firmado.pdf';
+    return {
+      url,
+      fileName,
+      mimeType: guessProofMimeType(fileName, 'application/pdf'),
+    };
+  }
+
+  if (type === 'payment-proof') {
+    const url = row.paymentProofUrl?.trim();
+    if (!url) return null;
+    const fileName = row.paymentProofFileName?.trim() || 'comprobante';
+    return {
+      url,
+      fileName,
+      mimeType:
+        row.paymentProofMimeType?.trim() ||
+        guessProofMimeType(fileName, 'application/octet-stream'),
+    };
+  }
+
+  const url = row.clientData?.cedulaPhotoUrl?.trim();
+  if (!url) return null;
+  const fileName = row.clientData?.cedulaPhotoFileName?.trim() || 'cedula.jpg';
+  return {
+    url,
+    fileName,
+    mimeType:
+      row.clientData?.cedulaPhotoMimeType?.trim() ||
+      guessProofMimeType(fileName, 'image/jpeg'),
+  };
 }
 
 function resolveSaleLinkContractNumber(row: {
@@ -839,8 +912,206 @@ export class SaleLinksService {
   }
 
   // ---------------------------------------------------------------------------
-  // Validar pago (admin desde el correo)
+  // Ver comprobante (admin desde correo / venta/comprobante)
   // ---------------------------------------------------------------------------
+
+  private async loadPaymentProofRow(
+    token: string,
+    key: string,
+  ): Promise<PaymentProofAdminRow> {
+    if (!key?.trim()) {
+      throw new BadRequestException('Clave de acceso requerida');
+    }
+
+    const adminData = (await this.convexProxy.forwardJson(
+      'GET',
+      `/api/admin/sale-link/${encodeURIComponent(token)}`,
+    )) as { ok?: boolean; row?: PaymentProofAdminRow };
+
+    const row = adminData?.row;
+    if (!row?.paymentProofUrl?.trim() || !row.paymentValidationKey?.trim()) {
+      throw new NotFoundException('Comprobante no encontrado');
+    }
+    if (row.paymentValidationKey.trim() !== key.trim()) {
+      throw new ForbiddenException('Clave de acceso inválida');
+    }
+    return row;
+  }
+
+  async getPaymentProofMeta(token: string, key: string) {
+    const row = await this.loadPaymentProofRow(token, key);
+    const fileName = row.paymentProofFileName?.trim() || 'comprobante';
+    const mimeType =
+      row.paymentProofMimeType?.trim() ||
+      guessProofMimeType(fileName, 'application/octet-stream');
+    const trimmedKey = key.trim();
+
+    return {
+      ok: true,
+      fileName,
+      mimeType,
+      clientName: row.clientData?.nombre ?? 'Cliente',
+      totalValue: row.totalValue ?? 0,
+      fileUrl: `${FRONTEND_BASE}/api/sale-links/${encodeURIComponent(token)}/payment-proof-file?key=${encodeURIComponent(trimmedKey)}`,
+      validateUrl: `${FRONTEND_BASE}/admin/ventas/validar/${encodeURIComponent(token)}?key=${encodeURIComponent(trimmedKey)}`,
+    };
+  }
+
+  async getPaymentProofFile(token: string, key: string) {
+    const row = await this.loadPaymentProofRow(token, key);
+    const proofUrl = row.paymentProofUrl!.trim();
+    const fileName = row.paymentProofFileName?.trim() || 'comprobante';
+    const mimeType =
+      row.paymentProofMimeType?.trim() ||
+      guessProofMimeType(fileName, 'application/octet-stream');
+
+    const fileRes = await fetch(proofUrl, { cache: 'no-store' });
+    if (!fileRes.ok) {
+      throw new NotFoundException('No se pudo obtener el archivo del comprobante');
+    }
+
+    return {
+      buffer: Buffer.from(await fileRes.arrayBuffer()),
+      mimeType,
+      safeFileName: safeProofFilename(fileName),
+    };
+  }
+
+  // ---------------------------------------------------------------------------
+  // Documentos del link (contrato firmado, cédula, comprobante) — panel admin
+  // ---------------------------------------------------------------------------
+
+  private async loadAdminSaleLinkRow(token: string): Promise<SaleLinkAdminDocumentRow> {
+    const adminData = (await this.convexProxy.forwardJson(
+      'GET',
+      `/api/admin/sale-link/${encodeURIComponent(token)}`,
+    )) as { ok?: boolean; row?: SaleLinkAdminDocumentRow };
+
+    if (!adminData?.row) {
+      throw new NotFoundException('Link de venta no encontrado');
+    }
+    return adminData.row;
+  }
+
+  async getDocumentFile(token: string, type: string) {
+    const docType = String(type ?? '').trim() as SaleLinkDocumentType;
+    if (
+      docType !== 'signed-contract' &&
+      docType !== 'cedula-photo' &&
+      docType !== 'payment-proof'
+    ) {
+      throw new BadRequestException('Tipo de documento inválido');
+    }
+
+    const row = await this.loadAdminSaleLinkRow(token);
+    const doc = resolveSaleLinkDocument(row, docType);
+    if (!doc) {
+      throw new NotFoundException('Documento no encontrado');
+    }
+
+    const fileRes = await fetch(doc.url, { cache: 'no-store' });
+    if (!fileRes.ok) {
+      throw new NotFoundException('No se pudo obtener el archivo');
+    }
+
+    return {
+      buffer: Buffer.from(await fileRes.arrayBuffer()),
+      mimeType: doc.mimeType,
+      safeFileName: safeProofFilename(doc.fileName),
+    };
+  }
+
+  // ---------------------------------------------------------------------------
+  // Validar pago (admin desde el correo o panel)
+  // ---------------------------------------------------------------------------
+
+  private async afterPaymentValidated(token: string) {
+    try {
+      await this.generateContract(token);
+    } catch (err) {
+      console.error(
+        '[sale-links] No se pudo generar el contrato tras validar pago:',
+        err,
+      );
+    }
+    try {
+      await this.generateCr(token);
+    } catch (err) {
+      console.error(
+        '[sale-links] No se pudo generar la CR tras validar pago:',
+        err,
+      );
+    }
+
+    try {
+      const portal = (await this.convexService.query('saleLinks:getPublicByToken', {
+        token,
+      })) as {
+        clientData?: { nombre?: string; email?: string };
+        clientName?: string;
+        property?: { id?: string; title?: string } | null;
+        checkIn?: number;
+        checkOut?: number;
+        nights?: number;
+        guests?: number;
+        bookingReference?: string;
+        contractCode?: string;
+      } | null;
+
+      const clientEmail = portal?.clientData?.email?.trim();
+      if (clientEmail) {
+        const ventaUrl = `${FRONTEND_BASE}/venta/${encodeURIComponent(token)}`;
+        await this.brevoEmail.sendSaleLinkPaymentValidatedClientEmail({
+          clientName:
+            portal?.clientData?.nombre?.trim() ||
+            portal?.clientName?.trim() ||
+            'Cliente',
+          clientEmail,
+          propertyTitle: portal?.property?.title ?? undefined,
+          checkIn: portal?.checkIn,
+          checkOut: portal?.checkOut,
+          nights: portal?.nights,
+          ventaUrl,
+        });
+      }
+
+      const propertyId = portal?.property?.id?.trim();
+      const bookingReference =
+        portal?.bookingReference?.trim() ||
+        portal?.contractCode?.trim() ||
+        '';
+      if (propertyId && bookingReference) {
+        const owner = await resolveOwnerEmailForProperty(
+          this.convexService,
+          propertyId,
+        );
+        if (owner) {
+          const anfitrionUrl = `${FRONTEND_BASE}/anfitrion/${encodeURIComponent(bookingReference)}`;
+          await this.brevoEmail.sendSaleLinkOwnerAnfitrionEmail({
+            ownerName: owner.name,
+            ownerTratamiento: owner.tratamiento,
+            ownerEmail: owner.email,
+            propertyTitle: portal?.property?.title ?? undefined,
+            clientName:
+              portal?.clientData?.nombre?.trim() ||
+              portal?.clientName?.trim() ||
+              'Cliente',
+            checkIn: portal?.checkIn,
+            checkOut: portal?.checkOut,
+            nights: portal?.nights,
+            guests: portal?.guests,
+            bookingReference,
+            anfitrionUrl,
+          });
+        }
+      }
+    } catch (err) {
+      console.error(
+        '[sale-links] No se pudo enviar correos tras validar pago:',
+        err,
+      );
+    }
+  }
 
   async validatePayment(token: string, validationKey: string, validatedBy = 'admin') {
     const result = (await this.convexProxy.forwardJson(
@@ -850,91 +1121,31 @@ export class SaleLinksService {
     )) as { ok?: boolean; alreadyValidated?: boolean };
 
     if (result?.ok && !result?.alreadyValidated) {
-      try {
-        await this.generateContract(token);
-      } catch (err) {
-        console.error(
-          '[sale-links] No se pudo generar el contrato tras validar pago:',
-          err,
-        );
-      }
-      try {
-        await this.generateCr(token);
-      } catch (err) {
-        console.error(
-          '[sale-links] No se pudo generar la CR tras validar pago:',
-          err,
-        );
-      }
+      await this.afterPaymentValidated(token);
+    }
 
-      try {
-        const portal = (await this.convexService.query('saleLinks:getPublicByToken', {
-          token,
-        })) as {
-          clientData?: { nombre?: string; email?: string };
-          clientName?: string;
-          property?: { id?: string; title?: string } | null;
-          checkIn?: number;
-          checkOut?: number;
-          nights?: number;
-          guests?: number;
-          bookingReference?: string;
-          contractCode?: string;
-        } | null;
+    return result;
+  }
 
-        const clientEmail = portal?.clientData?.email?.trim();
-        if (clientEmail) {
-          const ventaUrl = `${FRONTEND_BASE}/venta/${encodeURIComponent(token)}`;
-          await this.brevoEmail.sendSaleLinkPaymentValidatedClientEmail({
-            clientName:
-              portal?.clientData?.nombre?.trim() ||
-              portal?.clientName?.trim() ||
-              'Cliente',
-            clientEmail,
-            propertyTitle: portal?.property?.title ?? undefined,
-            checkIn: portal?.checkIn,
-            checkOut: portal?.checkOut,
-            nights: portal?.nights,
-            ventaUrl,
-          });
-        }
+  /** Valida el pago desde el panel admin (cualquier usuario autorizado). */
+  async validatePaymentAsAdmin(token: string, validatedBy: string) {
+    const by = String(validatedBy ?? '').trim();
+    if (!by) {
+      throw new BadRequestException('validatedBy requerido');
+    }
 
-        const propertyId = portal?.property?.id?.trim();
-        const bookingReference =
-          portal?.bookingReference?.trim() ||
-          portal?.contractCode?.trim() ||
-          '';
-        if (propertyId && bookingReference) {
-          const owner = await resolveOwnerEmailForProperty(
-            this.convexService,
-            propertyId,
-          );
-          if (owner) {
-            const anfitrionUrl = `${FRONTEND_BASE}/anfitrion/${encodeURIComponent(bookingReference)}`;
-            await this.brevoEmail.sendSaleLinkOwnerAnfitrionEmail({
-              ownerName: owner.name,
-              ownerTratamiento: owner.tratamiento,
-              ownerEmail: owner.email,
-              propertyTitle: portal?.property?.title ?? undefined,
-              clientName:
-                portal?.clientData?.nombre?.trim() ||
-                portal?.clientName?.trim() ||
-                'Cliente',
-              checkIn: portal?.checkIn,
-              checkOut: portal?.checkOut,
-              nights: portal?.nights,
-              guests: portal?.guests,
-              bookingReference,
-              anfitrionUrl,
-            });
-          }
-        }
-      } catch (err) {
-        console.error(
-          '[sale-links] No se pudo enviar correos tras validar pago:',
-          err,
-        );
-      }
+    const result = (await this.convexProxy.forwardJson(
+      'POST',
+      `/api/admin/sale-link/${encodeURIComponent(token)}/validate-payment-admin`,
+      { validatedBy: by },
+    )) as { ok?: boolean; alreadyValidated?: boolean; reason?: string };
+
+    if (!result?.ok) {
+      throw new BadRequestException(result?.reason ?? 'No se pudo validar el pago');
+    }
+
+    if (!result?.alreadyValidated) {
+      await this.afterPaymentValidated(token);
     }
 
     return result;

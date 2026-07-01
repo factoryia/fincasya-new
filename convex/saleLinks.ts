@@ -379,6 +379,34 @@ export const validatePayment = internalMutation({
   },
 });
 
+/** Valida el pago desde el panel admin (sin clave del correo). */
+export const validatePaymentAdmin = internalMutation({
+  args: {
+    token: v.string(),
+    validatedBy: v.string(),
+  },
+  handler: async (ctx, { token, validatedBy }) => {
+    const link = await ctx.db
+      .query('saleLinks')
+      .withIndex('by_token', (q) => q.eq('token', token))
+      .unique();
+    if (!link) return { ok: false, reason: 'not_found' };
+    if (!link.paymentProofUrl?.trim()) {
+      return { ok: false, reason: 'no_proof' };
+    }
+    if (link.paymentValidated) return { ok: true, alreadyValidated: true };
+    const by = String(validatedBy ?? '').trim() || 'admin';
+    await ctx.db.patch(link._id, {
+      paymentValidated: true,
+      paymentValidatedAt: Date.now(),
+      paymentValidatedBy: by,
+      clientStep: 4,
+      updatedAt: Date.now(),
+    });
+    return { ok: true };
+  },
+});
+
 // ---------------------------------------------------------------------------
 // Admin queries
 // ---------------------------------------------------------------------------
