@@ -980,6 +980,14 @@ export class BookingsSyncService {
     });
   }
 
+  /** Huéspedes con abono/pago verificado (check-in, admin o link de venta). */
+  async searchVerifiedGuests(search?: string, limit?: number) {
+    return this.convexService.query('paymentReceipts:searchVerifiedGuests', {
+      search,
+      limit,
+    });
+  }
+
   /** Marca el flag hasPendingReceipt en reservas existentes con soporte pendiente. */
   async backfillPendingReceiptFlag() {
     return this.convexService.mutation('paymentReceipts:backfillPendingFlag', {});

@@ -924,6 +924,16 @@ export class BookingsController {
     });
   }
 
+  @Get('payment-receipts/verified-guests')
+  @UseGuards(ConvexAuthGuard, AdminGuard)
+  async searchVerifiedGuests(
+    @Query('search') search?: string,
+    @Query('limit') limit?: string,
+  ) {
+    const limitNum = limit ? parseInt(limit, 10) : undefined;
+    return this.bookingsSyncService.searchVerifiedGuests(search, limitNum);
+  }
+
   @Post('payment-receipts/backfill-flag')
   @UseGuards(ConvexAuthGuard, AdminGuard)
   async backfillPendingReceiptFlag() {

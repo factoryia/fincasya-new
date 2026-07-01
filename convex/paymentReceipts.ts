@@ -1,6 +1,8 @@
 import { v } from 'convex/values';
+import type { Id } from './_generated/dataModel';
 import { mutation, query } from './_generated/server';
 import { resolveSaleLinkReference } from './lib/saleLinkReference';
+import { textMatchesSearchTerm } from './lib/searchText';
 
 type PaymentProofRecord = {
   url: string;
@@ -279,5 +281,230 @@ export const backfillPendingFlag = mutation({
       }
     }
     return { ok: true as const, actualizadas };
+  },
+});
+
+type VerifiedGuestSource = 'checkin' | 'payment' | 'sale-link';
+
+type VerifiedGuestRow = {
+  id: string;
+  nombre: string;
+  cedula: string;
+  celular: string;
+  correo: string;
+  city: string;
+  reference: string;
+  propertyTitle: string;
+  source: VerifiedGuestSource;
+  sourceLabel: string;
+  lastVerifiedAt: number;
+  lastVerifiedAmount: number;
+  lastVerifiedBy: string;
+  bookingId?: Id<'bookings'>;
+};
+
+function guestDedupeKey(input: {
+  cedula?: string;
+  celular?: string;
+  nombre?: string;
+}): string {
+  const cedula = String(input.cedula ?? '').replace(/\D/g, '');
+  if (cedula.length >= 6) return `ced:${cedula}`;
+  const celular = String(input.celular ?? '').replace(/\D/g, '');
+  if (celular.length >= 10) return `tel:${celular.slice(-10)}`;
+  const nombre = String(input.nombre ?? '')
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, ' ');
+  return nombre ? `name:${nombre}` : '';
+}
+
+function matchesVerifiedGuestSearch(
+  search: string,
+  fields: Array<string | undefined>,
+): boolean {
+  if (!search) return true;
+  return fields.some((field) => textMatchesSearchTerm(String(field ?? ''), search));
+}
+
+function upsertVerifiedGuest(
+  map: Map<string, VerifiedGuestRow>,
+  row: VerifiedGuestRow,
+) {
+  const key =
+    guestDedupeKey({
+      cedula: row.cedula,
+      celular: row.celular,
+      nombre: row.nombre,
+    }) || row.id;
+  const existing = map.get(key);
+  if (!existing || row.lastVerifiedAt > existing.lastVerifiedAt) {
+    map.set(key, row);
+  }
+}
+
+/**
+ * Huéspedes con abono/pago verificado (check-in, revisión de pagos o link de venta).
+ * Para autocompletar datos al crear una reserva manual.
+ */
+export const searchVerifiedGuests = query({
+  args: {
+    search: v.optional(v.string()),
+    limit: v.optional(v.number()),
+  },
+  handler: async (ctx, args) => {
+    const search = args.search?.trim() ?? '';
+    const limit = Math.min(Math.max(args.limit ?? 12, 1), 30);
+    if (search.length < 2) return [];
+
+    const byGuest = new Map<string, VerifiedGuestRow>();
+    const propCache = new Map<string, { title?: string } | null>();
+    const getProp = async (id: Id<'properties'> | undefined) => {
+      if (!id) return null;
+      const key = String(id);
+      if (propCache.has(key)) return propCache.get(key) ?? null;
+      const p = (await ctx.db.get(id)) as { title?: string } | null;
+      propCache.set(key, p);
+      return p;
+    };
+
+    const bookings = await ctx.db.query('bookings').order('desc').take(700);
+    for (const booking of bookings) {
+      const property = await getProp(booking.propertyId);
+      const baseFields = [
+        booking.nombreCompleto,
+        booking.cedula,
+        booking.celular,
+        booking.correo,
+        booking.reference,
+        property?.title,
+      ];
+      if (!matchesVerifiedGuestSearch(search, baseFields)) continue;
+
+      const approvedReceipts = (booking.paymentPortalReceipts ?? [])
+        .filter((r) => r.status === 'approved')
+        .sort(
+          (a, b) =>
+            (b.reviewedAt ?? b.submittedAt) - (a.reviewedAt ?? a.submittedAt),
+        );
+      if (approvedReceipts.length > 0) {
+        const latest = approvedReceipts[0];
+        upsertVerifiedGuest(byGuest, {
+          id: `checkin:${booking._id}:${latest.id}`,
+          nombre: booking.nombreCompleto,
+          cedula: booking.cedula ?? '',
+          celular: booking.celular ?? '',
+          correo: booking.correo ?? '',
+          city: booking.city ?? '',
+          reference: booking.reference ?? '',
+          propertyTitle: property?.title ?? '',
+          source: 'checkin',
+          sourceLabel: 'Abono check-in',
+          lastVerifiedAt: latest.reviewedAt ?? latest.submittedAt,
+          lastVerifiedAmount: Math.max(
+            0,
+            Math.floor(Number(latest.reviewedAmount ?? latest.amount ?? 0)),
+          ),
+          lastVerifiedBy: latest.reviewedBy ?? '',
+          bookingId: booking._id,
+        });
+        continue;
+      }
+
+      const payments = await ctx.db
+        .query('payments')
+        .withIndex('by_booking', (q) => q.eq('bookingId', booking._id))
+        .collect();
+      const paid = payments
+        .filter(
+          (p) =>
+            String(p.status ?? '').toUpperCase() === 'PAID' &&
+            Math.floor(Number(p.amount) || 0) > 0,
+        )
+        .sort((a, b) => (b.createdAt ?? 0) - (a.createdAt ?? 0));
+      if (paid.length === 0) continue;
+
+      const latestPayment = paid[0];
+      upsertVerifiedGuest(byGuest, {
+        id: `payment:${booking._id}:${latestPayment._id}`,
+        nombre: booking.nombreCompleto,
+        cedula: booking.cedula ?? '',
+        celular: booking.celular ?? '',
+        correo: booking.correo ?? '',
+        city: booking.city ?? '',
+        reference: booking.reference ?? '',
+        propertyTitle: property?.title ?? '',
+        source: 'payment',
+        sourceLabel: 'Pago registrado',
+        lastVerifiedAt:
+          latestPayment.verifiedAt ?? latestPayment.updatedAt ?? latestPayment.createdAt,
+        lastVerifiedAmount: Math.max(
+          0,
+          Math.floor(Number(latestPayment.amount) || 0),
+        ),
+        lastVerifiedBy: latestPayment.verifiedBy ?? '',
+        bookingId: booking._id,
+      });
+    }
+
+    const saleLinks = await ctx.db.query('saleLinks').order('desc').take(250);
+    for (const link of saleLinks) {
+      if (!link.paymentValidated || !link.clientData) continue;
+      const property = await getProp(link.propertyId);
+      const reference = resolveSaleLinkReference(link);
+      const client = link.clientData;
+      const proofs = resolveSaleLinkPaymentProofs(link);
+      const latestProof = proofs[proofs.length - 1];
+      const amount = Math.max(
+        0,
+        Math.floor(
+          Number(
+            latestProof?.amount ??
+              link.paymentProofAmount ??
+              link.clientDraftPaymentAmount ??
+              0,
+          ),
+        ),
+      );
+
+      if (
+        !matchesVerifiedGuestSearch(search, [
+          reference,
+          link.contractCode,
+          client.nombre,
+          client.cedula,
+          client.email,
+          client.telefono,
+          property?.title,
+        ])
+      ) {
+        continue;
+      }
+
+      upsertVerifiedGuest(byGuest, {
+        id: `sale-link:${link._id}`,
+        nombre: client.nombre,
+        cedula: client.cedula,
+        celular: client.telefono,
+        correo: client.email,
+        city: client.ciudad ?? '',
+        reference,
+        propertyTitle: property?.title ?? '',
+        source: 'sale-link',
+        sourceLabel: 'Pago link venta',
+        lastVerifiedAt:
+          link.paymentValidatedAt ??
+          latestProof?.submittedAt ??
+          link.paymentProofSubmittedAt ??
+          Date.now(),
+        lastVerifiedAmount: amount,
+        lastVerifiedBy: link.paymentValidatedBy ?? '',
+        bookingId: link.bookingId,
+      });
+    }
+
+    return Array.from(byGuest.values())
+      .sort((a, b) => b.lastVerifiedAt - a.lastVerifiedAt)
+      .slice(0, limit);
   },
 });
