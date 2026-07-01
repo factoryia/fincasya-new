@@ -1,9 +1,12 @@
 /** Minúsculas sin diacríticos para búsqueda insensible a tildes. */
 export function normalizeSearchText(text: string): string {
   return text
+    .normalize('NFKD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/ñ/g, 'n')
+    .replace(/\u00a0/g, ' ')
     .toLowerCase()
-    .normalize('NFD')
-    .replace(/\p{M}/gu, '')
+    .replace(/\s+/g, ' ')
     .trim();
 }
 
@@ -23,11 +26,20 @@ export function containsWholeSearchToken(
   return pattern.test(` ${haystack} `);
 }
 
+function haystackMatchesNormalizedQuery(haystack: string, q: string): boolean {
+  if (!haystack || !q) return false;
+  if (haystack.includes(q)) return true;
+  if (q.length >= 3) {
+    return haystack.split(/\s+/).some((word) => word.startsWith(q));
+  }
+  return false;
+}
+
 export function textMatchesSearchTerm(haystack: string, term: string): boolean {
   const h = normalizeSearchText(haystack);
   const t = normalizeSearchText(term);
   if (!t) return false;
-  if (h.includes(t)) return true;
+  if (haystackMatchesNormalizedQuery(h, t)) return true;
   return containsWholeSearchToken(h, t);
 }
 
@@ -36,14 +48,10 @@ export function parseCapacitySearchParts(query: string): {
   capacityTargets: number[];
   textTerms: string[];
 } {
-  const input = query
-    .toLowerCase()
-    .replace(/[^\wáéíóúñ\s]/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
+  const input = normalizeSearchText(query).replace(/[^a-z0-9\s]/g, ' ');
 
   const capacityTargets: number[] = [];
-  let remaining = ` ${input} `;
+  let remaining = ` ${input.replace(/\s+/g, ' ').trim()} `;
 
   const labeledPatterns = [
     /\s(\d{1,3})\s*pax\s/gi,
@@ -102,6 +110,12 @@ export function propertySearchRelevanceScore(
   else if (title.startsWith(q)) score += 500;
   else if (title.includes(q)) {
     score += 200 + Math.max(0, 80 - title.indexOf(q));
+  }
+
+  if (q.length >= 3) {
+    for (const word of title.split(/\s+/)) {
+      if (word.startsWith(q)) score += 350;
+    }
   }
 
   const tokens = q.split(/\s+/).filter((w) => w.length >= 2);
