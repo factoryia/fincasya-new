@@ -311,6 +311,8 @@ export class SaleLinksService {
     const telefono = String(body.telefono ?? '').trim();
     const direccion = String(body.direccion ?? '').trim();
     const ciudad = String(body.ciudad ?? '').trim() || undefined;
+    const fechaNacimiento =
+      String(body.fechaNacimiento ?? '').trim() || undefined;
     const paymentAmount =
       typeof body.paymentAmount === 'number' && body.paymentAmount > 0
         ? body.paymentAmount
@@ -421,6 +423,7 @@ export class SaleLinksService {
       telefono,
       direccion,
       ciudad,
+      fechaNacimiento,
       paymentProofUrl: proofUrl,
       paymentProofFileName: fileName,
       paymentProofMimeType: mimeType,
@@ -478,6 +481,7 @@ export class SaleLinksService {
       telefono: string;
       direccion: string;
       ciudad?: string;
+      fechaNacimiento?: string;
       paymentAmount?: number;
     },
   ) {
@@ -520,6 +524,7 @@ export class SaleLinksService {
       telefono: clientData.telefono,
       direccion: clientData.direccion,
       ciudad: clientData.ciudad,
+      fechaNacimiento: clientData.fechaNacimiento,
       paymentProofUrl: proofUrl,
       paymentProofFileName: file.originalname,
       paymentProofMimeType: file.mimetype,

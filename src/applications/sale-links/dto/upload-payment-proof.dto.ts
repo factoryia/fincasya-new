@@ -46,6 +46,10 @@ export class UploadPaymentProofDto {
   ciudad?: string;
 
   @IsOptional()
+  @IsString()
+  fechaNacimiento?: string;
+
+  @IsOptional()
   @Type(() => Number)
   @IsNumber()
   @Min(1)

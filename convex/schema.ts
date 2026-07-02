@@ -938,6 +938,8 @@ export default defineSchema({
      * limpia y `crmType` pasa a 'client'.
      */
     dealLabel: v.optional(v.string()),
+    /** Fecha de nacimiento (ISO yyyy-MM-dd), capturada en check-in. */
+    fechaNacimiento: v.optional(v.string()),
     /** Fotos de cédula subidas desde el link de contrato (frente/reverso). */
     cedulaPhotoUrls: v.optional(v.array(v.string())),
     createdAt: v.number(),
@@ -1557,6 +1559,7 @@ export default defineSchema({
         telefono: v.string(),
         direccion: v.string(),
         ciudad: v.optional(v.string()),
+        fechaNacimiento: v.optional(v.string()),
         cedulaPhotoUrl: v.optional(v.string()),
         cedulaPhotoFileName: v.optional(v.string()),
         cedulaPhotoMimeType: v.optional(v.string()),
@@ -1635,4 +1638,38 @@ export default defineSchema({
     .index('by_created_by', ['createdBy'])
     .index('by_status', ['status'])
     .index('by_booking', ['bookingId']),
+
+  // CRM-1: notas manuales del asesor sobre un contacto
+  contactNotes: defineTable({
+    contactId: v.id('contacts'),
+    content: v.string(),
+    authorUserId: v.optional(v.string()),
+    authorName: v.optional(v.string()),
+    createdAt: v.number(),
+    updatedAt: v.optional(v.number()),
+  })
+    .index('by_contact', ['contactId']),
+
+  // CRM: log de envíos masivos de plantillas WhatsApp
+  broadcastLogs: defineTable({
+    templateKey: v.string(),
+    templateName: v.string(),
+    totalRequested: v.number(),
+    totalSent: v.number(),
+    totalFailed: v.number(),
+    totalSkipped: v.number(),
+    sentByUserId: v.optional(v.string()),
+    bodyParams: v.optional(v.array(v.string())),
+    recipients: v.array(
+      v.object({
+        contactId: v.id('contacts'),
+        phone: v.string(),
+        status: v.union(v.literal('sent'), v.literal('failed'), v.literal('skipped')),
+        wamid: v.optional(v.string()),
+        error: v.optional(v.string()),
+      }),
+    ),
+    createdAt: v.number(),
+  })
+    .index('by_created', ['createdAt']),
 });

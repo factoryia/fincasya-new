@@ -658,6 +658,7 @@ export const create = mutation({
     observaciones: v.optional(v.string()),
     city: v.optional(v.string()),
     address: v.optional(v.string()),
+    fechaNacimiento: v.optional(v.string()),
     isDirect: v.optional(v.boolean()),
     userEmail: v.optional(v.string()),
     purpose: v.optional(v.string()),
@@ -727,6 +728,12 @@ export const create = mutation({
       );
     }
 
+    const fechaNacimiento = (() => {
+      const raw = args.fechaNacimiento?.trim();
+      if (!raw) return undefined;
+      return /^\d{4}-\d{2}-\d{2}$/.test(raw) ? raw : undefined;
+    })();
+
     let resolvedUserId: any | undefined;
 
     // Crear/Enlazar cliente (Contacto CRM)
@@ -745,6 +752,7 @@ export const create = mutation({
           email: args.correo || contactByPhone.email,
           cedula: args.cedula || contactByPhone.cedula,
           city: args.city || contactByPhone.city,
+          ...(fechaNacimiento ? { fechaNacimiento } : {}),
           crmType: 'client',
           lastReservationAt: now,
           updatedAt: now,
@@ -763,6 +771,7 @@ export const create = mutation({
             phone: args.celular || contactByEmail.phone,
             cedula: args.cedula || contactByEmail.cedula,
             city: args.city || contactByEmail.city,
+            ...(fechaNacimiento ? { fechaNacimiento } : {}),
             crmType: 'client',
             lastReservationAt: now,
             updatedAt: now,
@@ -778,6 +787,7 @@ export const create = mutation({
           email: args.correo,
           cedula: args.cedula,
           city: args.city,
+          fechaNacimiento,
           crmType: 'client',
           createdAt: now,
           lastReservationAt: now,
@@ -970,6 +980,7 @@ export const adminUpdate = mutation({
     groupType: v.optional(v.string()),
     reference: v.optional(v.string()),
     address: v.optional(v.string()),
+    fechaNacimiento: v.optional(v.string()),
     calendarLabel: v.optional(v.string()),
     status: v.optional(
       v.union(
@@ -1022,8 +1033,15 @@ export const adminUpdate = mutation({
       );
     }
 
+    const fechaNacimiento = (() => {
+      const raw = updates.fechaNacimiento?.trim();
+      if (!raw) return undefined;
+      return /^\d{4}-\d{2}-\d{2}$/.test(raw) ? raw : undefined;
+    })();
+    const { fechaNacimiento: _dropBirthdate, ...bookingUpdates } = updates;
+
     const patch: Record<string, unknown> = {
-      ...updates,
+      ...bookingUpdates,
       propertyId,
       fechaEntrada,
       fechaSalida,
@@ -1031,6 +1049,53 @@ export const adminUpdate = mutation({
     };
 
     await ctx.db.patch(id, patch);
+
+    const celular = updates.celular ?? booking.celular;
+    const nombreCompleto = updates.nombreCompleto ?? booking.nombreCompleto;
+    const correo = updates.correo ?? booking.correo;
+    const cedula = updates.cedula ?? booking.cedula;
+    const city = updates.city ?? booking.city;
+    const now = Date.now();
+
+    if (celular && (fechaNacimiento || booking.userId)) {
+      let contactId = booking.userId;
+
+      if (!contactId) {
+        const contactByPhone = await ctx.db
+          .query('contacts')
+          .withIndex('by_phone', (q) => q.eq('phone', celular))
+          .first();
+        contactId = contactByPhone?._id;
+      }
+
+      if (contactId) {
+        await ctx.db.patch(contactId, {
+          name: nombreCompleto,
+          phone: celular,
+          email: correo,
+          cedula,
+          city,
+          ...(fechaNacimiento ? { fechaNacimiento } : {}),
+          crmType: 'client',
+          lastReservationAt: now,
+          updatedAt: now,
+        });
+      } else if (fechaNacimiento) {
+        const newContactId = await ctx.db.insert('contacts', {
+          name: nombreCompleto,
+          phone: celular,
+          email: correo,
+          cedula,
+          city,
+          fechaNacimiento,
+          crmType: 'client',
+          createdAt: now,
+          lastReservationAt: now,
+          updatedAt: now,
+        });
+        await ctx.db.patch(id, { userId: newContactId });
+      }
+    }
 
     const availabilityBlocks = await ctx.db
       .query('propertyAvailability')
@@ -2313,8 +2378,16 @@ export const provisionFromSaleLink = internalMutation({
 
     const now = Date.now();
     const reference = resolveSaleLinkReference(link);
+    let userId: Id<'contacts'> | undefined;
+    const byPhone = await ctx.db
+      .query('contacts')
+      .withIndex('by_phone', (q) => q.eq('phone', client.telefono))
+      .first();
+    if (byPhone) userId = byPhone._id;
+
     const bookingId = await ctx.db.insert('bookings', {
       propertyId: link.propertyId,
+      userId,
       cedula: client.cedula,
       celular: client.telefono,
       correo: client.email,

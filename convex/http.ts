@@ -1956,6 +1956,7 @@ http.route({
         telefono?: string;
         direccion?: string;
         ciudad?: string;
+        fechaNacimiento?: string;
         paymentAmount?: number;
       };
       try {
@@ -1974,6 +1975,7 @@ http.route({
         telefono: body.telefono,
         direccion: body.direccion,
         ciudad: body.ciudad,
+        fechaNacimiento: body.fechaNacimiento,
         paymentAmount: body.paymentAmount,
       });
 
@@ -1998,6 +2000,7 @@ http.route({
         telefono?: string;
         direccion?: string;
         ciudad?: string;
+        fechaNacimiento?: string;
         paymentProofUrl?: string;
         paymentProofFileName?: string;
         paymentProofMimeType?: string;
@@ -2033,6 +2036,7 @@ http.route({
         telefono: body.telefono.trim(),
         direccion: body.direccion.trim(),
         ciudad: body.ciudad?.trim() || undefined,
+        fechaNacimiento: body.fechaNacimiento?.trim() || undefined,
         paymentProofUrl: body.paymentProofUrl.trim(),
         paymentProofFileName: body.paymentProofFileName?.trim() || undefined,
         paymentProofMimeType: body.paymentProofMimeType?.trim() || undefined,

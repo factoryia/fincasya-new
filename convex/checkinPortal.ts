@@ -39,6 +39,9 @@ const guestValidator = v.object({
   cedula: v.optional(v.string()),
   tipoDocumento: v.optional(v.string()),
   esMenor: v.optional(v.boolean()),
+  email: v.optional(v.string()),
+  fechaNacimiento: v.optional(v.string()),
+  telefono: v.optional(v.string()),
 });
 
 type Guest = {
@@ -46,6 +49,9 @@ type Guest = {
   cedula?: string;
   tipoDocumento?: string;
   esMenor?: boolean;
+  email?: string;
+  fechaNacimiento?: string;
+  telefono?: string;
 };
 
 function normalizeGuestDocumentType(value: unknown): string {
@@ -119,11 +125,17 @@ function normalizeGuests(raw: unknown): { guests: Guest[]; error?: string } {
     const esMenor = Boolean(obj.esMenor);
     // Filas completamente vacías se ignoran (el turista deja un renglón en blanco).
     if (!nombreCompleto && !cedula && !esMenor) continue;
+    const email = String(obj.email ?? '').trim().toLowerCase();
+    const fechaNacimiento = String(obj.fechaNacimiento ?? '').trim();
+    const telefono = String(obj.telefono ?? '').trim();
     guests.push({
       nombreCompleto,
       cedula: cedula || undefined,
       tipoDocumento: cedula ? tipoDocumento : undefined,
       esMenor: esMenor || undefined,
+      email: email || undefined,
+      fechaNacimiento: fechaNacimiento || undefined,
+      telefono: telefono || undefined,
     });
   }
   return { guests };
@@ -443,6 +455,35 @@ export const submitCheckin = internalMutation({
       placas: args.placas,
       mascotas: args.mascotas,
       observaciones,
+    });
+
+    // Enrich contact with email/birthday from the titular (first guest)
+    if (booking.userId && guests.length > 0) {
+      const titular = guests[0];
+      const contactPatch: Record<string, unknown> = {};
+      if (titular.email) contactPatch.email = titular.email;
+      if (titular.fechaNacimiento) contactPatch.fechaNacimiento = titular.fechaNacimiento;
+      if (Object.keys(contactPatch).length > 0) {
+        const contact = await ctx.db.get(booking.userId);
+        if (contact) {
+          const finalPatch: Record<string, unknown> = { updatedAt: now };
+          if (titular.email && !contact.email) finalPatch.email = titular.email;
+          if (titular.fechaNacimiento && !contact.fechaNacimiento) finalPatch.fechaNacimiento = titular.fechaNacimiento;
+          if (Object.keys(finalPatch).length > 1) {
+            await ctx.db.patch(booking.userId, finalPatch as any);
+          }
+        }
+      }
+    }
+
+    await ctx.runMutation(internal.crmLeads.upsertGuestsAsLeads, {
+      guests: guests.map((g) => ({
+        nombreCompleto: g.nombreCompleto,
+        cedula: g.cedula,
+        email: g.email,
+        fechaNacimiento: g.fechaNacimiento,
+        telefono: g.telefono,
+      })),
     });
 
     return { ok: true as const, completed: true, total: guests.length };

@@ -426,6 +426,8 @@ export const update = mutation({
     cedula: v.optional(v.string()),
     email: v.optional(v.string()),
     city: v.optional(v.string()),
+    address: v.optional(v.string()),
+    fechaNacimiento: v.optional(v.string()),
     crmType: v.optional(v.union(v.literal("lead"), v.literal("client"))),
   },
   handler: async (ctx, args) => {
@@ -449,6 +451,17 @@ export const update = mutation({
     if (rest.city !== undefined) {
       const t = String(rest.city).trim();
       patch.city = t.length > 0 ? t : undefined;
+    }
+    if (rest.address !== undefined) {
+      const t = String(rest.address).trim();
+      patch.address = t.length > 0 ? t : undefined;
+    }
+    if (rest.fechaNacimiento !== undefined) {
+      const t = String(rest.fechaNacimiento).trim();
+      if (t && !/^\d{4}-\d{2}-\d{2}$/.test(t)) {
+        throw new Error("Fecha de nacimiento inválida (use AAAA-MM-DD)");
+      }
+      patch.fechaNacimiento = t || undefined;
     }
     if (rest.crmType !== undefined) patch.crmType = rest.crmType;
     await ctx.db.patch(contactId, patch);
@@ -562,6 +575,48 @@ export const getWithHistory = query({
     return {
       ...contact,
       bookings: enrichedBookings.sort((a, b) => b.fechaEntrada - a.fechaEntrada),
+    };
+  },
+});
+
+/** Elimina un contacto del CRM junto con sus notas y conversaciones del inbox. */
+export const removeContact = mutation({
+  args: { contactId: v.id("contacts") },
+  handler: async (ctx, args) => {
+    const contact = await ctx.db.get(args.contactId);
+    if (!contact) throw new Error("Contacto no encontrado");
+
+    const notes = await ctx.db
+      .query("contactNotes")
+      .withIndex("by_contact", (q) => q.eq("contactId", args.contactId))
+      .collect();
+    for (const note of notes) {
+      await ctx.db.delete(note._id);
+    }
+
+    const conversations = await ctx.db
+      .query("conversations")
+      .withIndex("by_contact", (q) => q.eq("contactId", args.contactId))
+      .collect();
+
+    for (const conv of conversations) {
+      const messages = await ctx.db
+        .query("messages")
+        .withIndex("by_conversation", (q) =>
+          q.eq("conversationId", conv._id),
+        )
+        .collect();
+      for (const msg of messages) {
+        await ctx.db.delete(msg._id);
+      }
+      await ctx.db.delete(conv._id);
+    }
+
+    await ctx.db.delete(args.contactId);
+    return {
+      ok: true as const,
+      deletedNotes: notes.length,
+      deletedConversations: conversations.length,
     };
   },
 });

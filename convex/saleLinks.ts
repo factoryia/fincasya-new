@@ -42,6 +42,76 @@ function generateToken(): string {
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
 }
 
+function normalizeBirthdate(value: string | undefined): string | undefined {
+  const t = value?.trim();
+  if (!t) return undefined;
+  return /^\d{4}-\d{2}-\d{2}$/.test(t) ? t : undefined;
+}
+
+async function upsertCrmContactFromSaleClient(
+  ctx: MutationCtx,
+  client: {
+    nombre: string;
+    cedula: string;
+    email: string;
+    telefono: string;
+    direccion: string;
+    ciudad?: string;
+    fechaNacimiento?: string;
+  },
+) {
+  const now = Date.now();
+  const phone = client.telefono.trim();
+  if (!phone) return;
+
+  const fechaNacimiento = normalizeBirthdate(client.fechaNacimiento);
+  let contactId: Id<'contacts'> | undefined;
+
+  const byPhone = await ctx.db
+    .query('contacts')
+    .withIndex('by_phone', (q) => q.eq('phone', phone))
+    .first();
+  if (byPhone) contactId = byPhone._id;
+
+  const cedula = client.cedula.trim();
+  if (!contactId && cedula) {
+    const byCedula = await ctx.db
+      .query('contacts')
+      .withIndex('by_cedula', (q) => q.eq('cedula', cedula))
+      .first();
+    if (byCedula) contactId = byCedula._id;
+  }
+
+  if (contactId) {
+    const existing = await ctx.db.get(contactId);
+    if (!existing) return;
+    await ctx.db.patch(contactId, {
+      name: client.nombre || existing.name,
+      email: client.email || existing.email,
+      cedula: cedula || existing.cedula,
+      city: client.ciudad || existing.city,
+      address: client.direccion || existing.address,
+      ...(fechaNacimiento ? { fechaNacimiento } : {}),
+      crmType: existing.crmType ?? 'lead',
+      updatedAt: now,
+    });
+    return;
+  }
+
+  await ctx.db.insert('contacts', {
+    phone,
+    name: client.nombre,
+    email: client.email,
+    cedula: cedula || undefined,
+    city: client.ciudad,
+    address: client.direccion,
+    fechaNacimiento,
+    crmType: 'lead',
+    createdAt: now,
+    updatedAt: now,
+  });
+}
+
 async function assertContractCodeAvailable(
   ctx: MutationCtx,
   rawCode: string,
@@ -469,6 +539,7 @@ export const saveClientPortalDraft = internalMutation({
     telefono: v.optional(v.string()),
     direccion: v.optional(v.string()),
     ciudad: v.optional(v.string()),
+    fechaNacimiento: v.optional(v.string()),
     paymentAmount: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
@@ -500,7 +571,16 @@ export const saveClientPortalDraft = internalMutation({
     const telefono = args.telefono?.trim();
     const direccion = args.direccion?.trim();
     const ciudad = args.ciudad?.trim();
-    const hasAnyField = !!(nombre || cedula || email || telefono || direccion || ciudad);
+    const fechaNacimiento = normalizeBirthdate(args.fechaNacimiento);
+    const hasAnyField = !!(
+      nombre ||
+      cedula ||
+      email ||
+      telefono ||
+      direccion ||
+      ciudad ||
+      fechaNacimiento
+    );
 
     if (hasAnyField) {
       const prev = link.clientData;
@@ -511,6 +591,7 @@ export const saveClientPortalDraft = internalMutation({
         telefono: telefono || prev?.telefono || '',
         direccion: direccion || prev?.direccion || '',
         ciudad: ciudad || prev?.ciudad,
+        fechaNacimiento: fechaNacimiento ?? prev?.fechaNacimiento,
         filledAt: prev?.filledAt ?? now,
       };
     }
@@ -530,6 +611,7 @@ export const submitClientData = mutation({
     telefono: v.string(),
     direccion: v.string(),
     ciudad: v.optional(v.string()),
+    fechaNacimiento: v.optional(v.string()),
     paymentProofUrl: v.string(),
     paymentProofFileName: v.optional(v.string()),
     paymentProofMimeType: v.optional(v.string()),
@@ -550,6 +632,7 @@ export const submitClientData = mutation({
     if (link.clientStep >= 4) return { ok: false, reason: 'past_payment_step' };
 
     const now = Date.now();
+    const fechaNacimiento = normalizeBirthdate(args.fechaNacimiento);
     const newProof: PaymentProofRecord = {
       url: args.paymentProofUrl,
       fileName: args.paymentProofFileName,
@@ -568,6 +651,7 @@ export const submitClientData = mutation({
         telefono: args.telefono,
         direccion: args.direccion,
         ciudad: args.ciudad,
+        fechaNacimiento,
         cedulaPhotoUrl: args.cedulaPhotoUrl,
         cedulaPhotoFileName: args.cedulaPhotoFileName,
         cedulaPhotoMimeType: args.cedulaPhotoMimeType,
@@ -591,6 +675,17 @@ export const submitClientData = mutation({
     }
 
     await ctx.db.patch(link._id, patch);
+
+    await upsertCrmContactFromSaleClient(ctx, {
+      nombre: args.nombre,
+      cedula: args.cedula,
+      email: args.email,
+      telefono: args.telefono,
+      direccion: args.direccion,
+      ciudad: args.ciudad,
+      fechaNacimiento,
+    });
+
     return { ok: true, appended: !isFirstSubmission };
   },
 });
@@ -1245,6 +1340,7 @@ export const getPublicByToken = query({
             telefono: link.clientData.telefono,
             direccion: link.clientData.direccion,
             ciudad: link.clientData.ciudad,
+            fechaNacimiento: link.clientData.fechaNacimiento,
             cedulaPhotoUrl: link.clientData.cedulaPhotoUrl,
             cedulaPhotoFileName: link.clientData.cedulaPhotoFileName,
           }
@@ -1373,6 +1469,7 @@ export const getForPortal = internalQuery({
             telefono: link.clientData.telefono,
             direccion: link.clientData.direccion,
             ciudad: link.clientData.ciudad,
+            fechaNacimiento: link.clientData.fechaNacimiento,
             cedulaPhotoUrl: link.clientData.cedulaPhotoUrl,
             cedulaPhotoFileName: link.clientData.cedulaPhotoFileName,
           }

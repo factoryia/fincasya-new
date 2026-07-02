@@ -220,6 +220,8 @@ export class InboxService {
       cedula?: string;
       email?: string;
       city?: string;
+      address?: string;
+      fechaNacimiento?: string;
       crmType?: 'lead' | 'client';
     },
   ) {

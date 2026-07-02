@@ -87,6 +87,7 @@ export class BookingsSyncService {
       horaEntrada?: string;
       horaSalida?: string;
       city?: string;
+      fechaNacimiento?: string;
       purpose?: string;
       reference?: string;
       address?: string;
@@ -262,6 +263,7 @@ export class BookingsSyncService {
       horaEntrada: params.horaEntrada,
       horaSalida: params.horaSalida,
       city: params.city,
+      fechaNacimiento: params.fechaNacimiento?.trim() || undefined,
       purpose: params.purpose,
       reference: params.reference,
       address: params.address,
@@ -331,6 +333,7 @@ export class BookingsSyncService {
       horaEntrada?: string;
       horaSalida?: string;
       city?: string;
+      fechaNacimiento?: string;
       purpose?: string;
       reference?: string;
       address?: string;
@@ -516,6 +519,7 @@ export class BookingsSyncService {
       temporada: params.temporada,
       observaciones: params.observaciones,
       city: params.city,
+      fechaNacimiento: params.fechaNacimiento?.trim() || undefined,
       purpose: params.purpose,
       groupType: params.groupType,
       reference: params.reference,
