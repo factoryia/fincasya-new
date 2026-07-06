@@ -155,40 +155,53 @@ export const sendMessage = action({
       }
 
       if (args.type === "product") {
-        const metadata = { ...(args.metadata ?? {}) } as Record<string, unknown>;
-        let bodyText = args.text || "Aquí tienes estas opciones:";
+        type FincaMeta = {
+          title?: string;
+          slug?: string;
+          image?: string;
+          price?: number;
+        };
 
-        if (metadata?.product) {
-          const finca = metadata.product as { title?: string; slug?: string };
-          bodyText = args.text || `Aquí tienes ${finca.title ?? "esta finca"} 🏡`;
-          const retailerId = finca.slug
-            ? await resolveRetailerIdForSlug(ctx, finca.slug)
-            : undefined;
-          if (retailerId) {
-            metadata.productRetailerId = retailerId;
-            await enrichWebProductMetadata(ctx, metadata, retailerId);
-          }
-        } else if (Array.isArray(metadata?.catalog)) {
-          const catalogItems = metadata.catalog as Array<{ slug?: string; title?: string }>;
-          const enriched = [];
-          for (const item of catalogItems) {
-            if (!item.slug) continue;
-            const retailerId = await resolveRetailerIdForSlug(ctx, item.slug);
-            if (!retailerId) continue;
-            const itemMeta: Record<string, unknown> = {
-              productRetailerId: retailerId,
-              productTitle: item.title,
-            };
-            await enrichWebProductMetadata(ctx, itemMeta, retailerId);
-            enriched.push(itemMeta);
-          }
-          if (enriched.length > 0) metadata.catalogItems = enriched;
+        const rawMeta = { ...(args.metadata ?? {}) } as Record<string, unknown>;
+        let items: Array<{ finca: FincaMeta; bodyText: string }> = [];
+
+        if (rawMeta.product && typeof rawMeta.product === "object") {
+          const finca = rawMeta.product as FincaMeta;
+          items = [
+            {
+              finca,
+              bodyText: args.text || `Aquí tienes ${finca.title ?? "esta finca"} 🏡`,
+            },
+          ];
+        } else if (Array.isArray(rawMeta.catalog)) {
+          const catalog = rawMeta.catalog as FincaMeta[];
+          items = catalog.map((finca, i) => ({
+            finca,
+            bodyText:
+              i === 0 && args.text?.trim()
+                ? args.text
+                : `Aquí tienes la información de ${finca.title ?? "esta finca"} 🏡`,
+          }));
+        } else {
+          throw new Error("metadata.product o metadata.catalog requerido");
         }
 
-        await recordAssistantMessage(bodyText, {
-          type: "product",
-          metadata,
-        });
+        for (let i = 0; i < items.length; i++) {
+          const { finca, bodyText } = items[i];
+          const itemMeta: Record<string, unknown> = { product: finca };
+          if (finca.slug) {
+            const retailerId = await resolveRetailerIdForSlug(ctx, finca.slug);
+            if (retailerId) {
+              itemMeta.productRetailerId = retailerId;
+              itemMeta.productTitle = finca.title;
+              await enrichWebProductMetadata(ctx, itemMeta, retailerId);
+            }
+          }
+          await recordAssistantMessage(bodyText, {
+            type: "product",
+            metadata: itemMeta,
+          });
+        }
         return { ok: true };
       }
 
@@ -248,67 +261,107 @@ export const sendMessage = action({
     }
 
     if (args.type === "product") {
-      const metadata = args.metadata;
-      let productRetailerIds: string[] = [];
-      let bodyText = args.text || "Aquí tienes estas opciones:";
+      type FincaMeta = {
+        title?: string;
+        slug?: string;
+        image?: string;
+        price?: number;
+      };
 
-      if (metadata?.product) {
-        // Single product
-        const finca = metadata.product;
-        bodyText = args.text || `Aquí tienes ${finca.title} 🏡`;
-        // We need to resolve the productRetailerId. 
-        // For simplicity in the manual flow, we'll try to find it or use a default catalog.
-        const catalog = await ctx.runQuery(api.whatsappCatalogs.getDefault, {});
-        if (catalog) {
-          const property = await ctx.runQuery(api.fincas.getBySlug, { slug: finca.slug });
+      const rawMeta = (args.metadata ?? {}) as {
+        product?: FincaMeta;
+        catalog?: FincaMeta[];
+      };
+
+      let items: Array<{ finca: FincaMeta; bodyText: string }> = [];
+
+      if (rawMeta.product) {
+        const finca = rawMeta.product;
+        items = [
+          {
+            finca,
+            bodyText: args.text || `Aquí tienes ${finca.title ?? "esta finca"} 🏡`,
+          },
+        ];
+      } else if (Array.isArray(rawMeta.catalog)) {
+        items = rawMeta.catalog.map((finca, i) => ({
+          finca,
+          bodyText:
+            i === 0 && args.text?.trim()
+              ? args.text
+              : `Aquí tienes la información de ${finca.title ?? "esta finca"} 🏡`,
+        }));
+      } else {
+        throw new Error("metadata.product o metadata.catalog requerido");
+      }
+
+      const waCatalog = await ctx.runQuery(api.whatsappCatalogs.getDefault, {});
+      const resolved: Array<{
+        finca: FincaMeta;
+        bodyText: string;
+        retailerId?: string;
+      }> = [];
+
+      for (const item of items) {
+        let retailerId: string | undefined;
+        if (waCatalog && item.finca.slug) {
+          const property = await ctx.runQuery(api.fincas.getBySlug, {
+            slug: item.finca.slug,
+          });
           if (property) {
             const entries = await ctx.runQuery(
               api.propertyWhatsAppCatalog.getProductRetailerIdsForProperties,
-              { catalogId: catalog._id, propertyIds: [property._id] }
+              { catalogId: waCatalog._id, propertyIds: [property._id] },
             );
-            productRetailerIds = [entries[0]?.productRetailerId || (property._id as string)];
+            retailerId =
+              entries[0]?.productRetailerId || (property._id as string);
           }
         }
-      } else if (metadata?.catalog) {
-        // Multiple products
-        const fincas = metadata.catalog;
-        const catalog = await ctx.runQuery(api.whatsappCatalogs.getDefault, {});
-        if (catalog) {
-          const propertyIds: any[] = [];
-          for (const f of fincas) {
-            const property = await ctx.runQuery(api.fincas.getBySlug, { slug: f.slug });
-            if (property) propertyIds.push(property._id);
-          }
-          if (propertyIds.length > 0) {
-            const entries = await ctx.runQuery(
-              api.propertyWhatsAppCatalog.getProductRetailerIdsForProperties,
-              { catalogId: catalog._id, propertyIds }
-            );
-            const entryMap = new Map(entries.map((e: any) => [e.propertyId, e.productRetailerId]));
-            productRetailerIds = propertyIds.map(id => (entryMap.get(id) as string) || (id as string));
-          }
-        }
+        resolved.push({ ...item, retailerId });
       }
 
+      const productRetailerIds = resolved
+        .map((r) => r.retailerId)
+        .filter((id): id is string => Boolean(id?.trim()));
+
+      let sendRows: Array<{ productRetailerId: string; wamid?: string; ok: boolean }> =
+        [];
       if (productRetailerIds.length > 0) {
-        const catalog = await ctx.runQuery(api.whatsappCatalogs.getDefault, {});
-        await ctx.runAction(internal.ycloud.sendWhatsAppCatalogList, {
+        sendRows = await ctx.runAction(internal.ycloud.sendWhatsAppCatalogList, {
           to: args.phone,
           productRetailerIds,
-          bodyText,
-          catalogId: catalog?.whatsappCatalogId,
+          bodyText: resolved[0]?.bodyText,
+          catalogId: waCatalog?.whatsappCatalogId,
           conversationId: args.conversationId,
         });
       }
 
-      await ctx.runMutation(internal.messages.insertAssistantMessageWithMedia, {
-        conversationId: args.conversationId,
-        content: bodyText,
-        type: "product",
-        metadata: args.metadata,
-        createdAt: now,
-        sentByUserId: args.sentByUserId,
-      });
+      const rowByRetailerId = new Map(
+        sendRows.map((row) => [row.productRetailerId, row]),
+      );
+
+      for (let i = 0; i < resolved.length; i++) {
+        const { finca, bodyText, retailerId } = resolved[i];
+        const row = retailerId ? rowByRetailerId.get(retailerId) : undefined;
+        if (retailerId && row?.ok === false) continue;
+
+        await ctx.runMutation(internal.messages.insertAssistantMessageWithMedia, {
+          conversationId: args.conversationId,
+          content: bodyText,
+          type: "product",
+          metadata: {
+            product: finca,
+            ...(retailerId
+              ? { productRetailerId: retailerId, productTitle: finca.title }
+              : {}),
+          },
+          createdAt: now + i * 25,
+          sentByUserId: args.sentByUserId,
+          wamid: row?.wamid,
+          whatsappStatus: row?.wamid ? ("sent" as const) : undefined,
+        });
+      }
+
       await ctx.runMutation(internal.conversations.updateLastMessageAt, {
         conversationId: args.conversationId,
       });
