@@ -460,6 +460,66 @@ export const markInboxRead = mutation({
   },
 });
 
+function messageCursorMs(msg: {
+  createdAt?: number;
+  _creationTime: number;
+}): number {
+  return msg.createdAt ?? msg._creationTime;
+}
+
+function isInboxContactMessage(msg: {
+  sender: string | { role?: string };
+  metadata?: { kind?: string } | null;
+}): boolean {
+  if (msg.metadata?.kind === "inbox_escalation_alert") return false;
+  const sender =
+    typeof msg.sender === "string" ? msg.sender : msg.sender?.role;
+  return sender === "user";
+}
+
+/** Marca la conversación como no leída (desde el último mensaje del cliente). */
+export const markInboxUnread = mutation({
+  args: { conversationId: v.id("conversations") },
+  handler: async (ctx, args) => {
+    const messages = await ctx.db
+      .query("messages")
+      .withIndex("by_conversation", (q) =>
+        q.eq("conversationId", args.conversationId),
+      )
+      .order("desc")
+      .take(250);
+
+    let lastContactAt: number | null = null;
+    for (const msg of messages) {
+      if (!isInboxContactMessage(msg)) continue;
+      lastContactAt = messageCursorMs(msg);
+      break;
+    }
+
+    if (lastContactAt === null) {
+      await ctx.db.patch(args.conversationId, {
+        inboxUnreadCount: 1,
+        inboxLastReadAt: 0,
+      });
+      return { inboxUnreadCount: 1, inboxLastReadAt: 0 };
+    }
+
+    const inboxLastReadAt = lastContactAt - 1;
+    let inboxUnreadCount = 0;
+    for (const msg of messages) {
+      if (!isInboxContactMessage(msg)) continue;
+      if (messageCursorMs(msg) > inboxLastReadAt) inboxUnreadCount++;
+    }
+    if (inboxUnreadCount < 1) inboxUnreadCount = 1;
+
+    await ctx.db.patch(args.conversationId, {
+      inboxUnreadCount,
+      inboxLastReadAt,
+    });
+    return { inboxUnreadCount, inboxLastReadAt };
+  },
+});
+
 const MAX_CONVERSATION_TAGS = 25;
 const MAX_TAG_LENGTH = 64;
 
@@ -881,8 +941,13 @@ export const retryBot = action({
       mediaUrl?: string;
     } | null;
 
+    const msgType = (latestMsg?.type as string | undefined) ?? "text";
     const text = String(latestMsg?.content ?? "").trim();
-    if (!text) {
+    const hasMedia =
+      Boolean(latestMsg?.mediaUrl) &&
+      msgType !== "text" &&
+      msgType !== "product";
+    if (!text && !hasMedia) {
       return { ok: false as const, reason: "no_user_message" as const };
     }
 

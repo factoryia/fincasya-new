@@ -96,6 +96,12 @@ export class InboxService {
     });
   }
 
+  async markInboxUnread(conversationId: string) {
+    return this.convexService.mutation('conversations:markInboxUnread', {
+      conversationId,
+    });
+  }
+
   async setConversationTags(conversationId: string, tags: string[]) {
     return this.convexService.mutation('conversations:setConversationTags', {
       conversationId,
@@ -200,6 +206,13 @@ export class InboxService {
       limit: opts?.limit,
       beforeCreatedAt: opts?.beforeCreatedAt,
       beforeCreationTime: opts?.beforeCreationTime,
+    });
+  }
+
+  async getLatestUserMessage(conversationId: string) {
+    return this.convexService.query('messages:getLatestUserMessage', {
+      conversationId,
+      scanLimit: 50,
     });
   }
 

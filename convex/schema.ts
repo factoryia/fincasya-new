@@ -1130,6 +1130,20 @@ export default defineSchema({
     .index('by_conversation', ['conversationId', 'createdAt'])
     .index('by_user', ['userId', 'createdAt']),
 
+  /** Historial de inicio/cierre de sesión en el panel admin. */
+  adminSessionLogs: defineTable({
+    userId: v.string(),
+    userEmail: v.string(),
+    userName: v.optional(v.string()),
+    role: v.optional(v.string()),
+    loginAt: v.number(),
+    logoutAt: v.optional(v.number()),
+    ipAddress: v.optional(v.string()),
+    userAgent: v.optional(v.string()),
+  })
+    .index('by_loginAt', ['loginAt'])
+    .index('by_user_loginAt', ['userId', 'loginAt']),
+
   ycloudProcessedEvents: defineTable({
     eventId: v.string(),
   }).index('by_event_id', ['eventId']),

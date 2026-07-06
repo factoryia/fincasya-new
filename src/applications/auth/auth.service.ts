@@ -155,7 +155,11 @@ export class AuthService {
     }
   }
 
-  async login(loginDto: LoginDto, cookies: string) {
+  async login(
+    loginDto: LoginDto,
+    cookies: string,
+    meta?: { ipAddress?: string; userAgent?: string },
+  ) {
     try {
       const result = await this.makeRequest(
         `${this.betterAuthUrl}/api/auth/sign-in/email`,
@@ -171,7 +175,24 @@ export class AuthService {
           },
         },
       );
-      return this.ensureUserRoleInResponse(result);
+      const enriched = this.ensureUserRoleInResponse(result);
+      const user = (enriched as any)?.data?.user ?? (enriched as any)?.user;
+      if (user?.id || user?._id) {
+        const userId = String(user.id ?? user._id);
+        try {
+          await this.convexService.mutation('adminSessionLogs:recordLogin', {
+            userId,
+            userEmail: String(user.email ?? loginDto.email),
+            userName: user.name ? String(user.name) : undefined,
+            role: user.role ? String(user.role) : undefined,
+            ipAddress: meta?.ipAddress,
+            userAgent: meta?.userAgent,
+          });
+        } catch (logErr: any) {
+          console.warn('Session login log failed:', logErr?.message ?? logErr);
+        }
+      }
+      return enriched;
     } catch (error: any) {
       throw new UnauthorizedException(
         error.message || 'Error al iniciar sesión',
@@ -252,8 +273,24 @@ export class AuthService {
     }
   }
 
-  async logout(cookies: string, authorization?: string) {
+  async logout(
+    cookies: string,
+    authorization?: string,
+    _meta?: { ipAddress?: string; userAgent?: string },
+  ) {
     try {
+      try {
+        const user = await this.getCurrentUser(cookies, authorization);
+        const userId = String((user as any)?.id ?? (user as any)?._id ?? '');
+        if (userId) {
+          await this.convexService.mutation('adminSessionLogs:recordLogout', {
+            userId,
+          });
+        }
+      } catch (logErr: any) {
+        console.warn('Session logout log failed:', logErr?.message ?? logErr);
+      }
+
       const result = await this.makeRequest(
         `${this.betterAuthUrl}/api/auth/sign-out`,
         {
@@ -270,6 +307,13 @@ export class AuthService {
     } catch (error: any) {
       throw new BadRequestException(error.message || 'Error al cerrar sesión');
     }
+  }
+
+  async listSessionLogs(args: { limit?: number; userId?: string }) {
+    return this.convexService.query('adminSessionLogs:list', {
+      limit: args.limit ?? 100,
+      userId: args.userId,
+    });
   }
 
   async getCurrentUser(cookies: string, authorization?: string) {

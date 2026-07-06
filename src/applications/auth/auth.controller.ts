@@ -1,8 +1,32 @@
-import { Controller, Post, Body, Get, Req, Res } from '@nestjs/common';
+import {
+  Controller,
+  Post,
+  Body,
+  Get,
+  Req,
+  Res,
+  Query,
+  UseGuards,
+} from '@nestjs/common';
 import type { Request, Response } from 'express';
 import { AuthService } from './auth.service';
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
+import { ConvexAuthGuard } from '../shared/guards/convex-auth.guard';
+import { AdminGuard } from '../shared/guards/admin.guard';
+
+function clientIp(req: Request): string | undefined {
+  const forwarded = req.headers['x-forwarded-for'];
+  if (typeof forwarded === 'string' && forwarded.length > 0) {
+    return forwarded.split(',')[0]?.trim();
+  }
+  return req.ip || undefined;
+}
+
+function clientUserAgent(req: Request): string | undefined {
+  const ua = req.headers['user-agent'];
+  return typeof ua === 'string' ? ua.slice(0, 512) : undefined;
+}
 
 @Controller('auth')
 export class AuthController {
@@ -48,6 +72,10 @@ export class AuthController {
       const result = await this.authService.login(
         loginDto,
         req.headers.cookie || '',
+        {
+          ipAddress: clientIp(req),
+          userAgent: clientUserAgent(req),
+        },
       );
       // Copiar cookies de la respuesta de Better Auth
       const setCookieHeaders = result.headers?.['set-cookie'];
@@ -132,6 +160,10 @@ export class AuthController {
       const result = await this.authService.logout(
         req.headers.cookie || '',
         req.headers.authorization,
+        {
+          ipAddress: clientIp(req),
+          userAgent: clientUserAgent(req),
+        },
       );
       // Copiar cookies de la respuesta de Better Auth (para limpiar la sesión)
       const setCookieHeaders = result.headers?.['set-cookie'];
@@ -200,5 +232,19 @@ export class AuthController {
       return res.status(401).json({ token: null });
     }
     return res.json({ token: decodeURIComponent(match[1]) });
+  }
+
+  /** Historial de accesos al panel (solo admin). */
+  @Get('session-logs')
+  @UseGuards(ConvexAuthGuard, AdminGuard)
+  async listSessionLogs(
+    @Query('limit') limit?: string,
+    @Query('userId') userId?: string,
+  ) {
+    const parsed = Number(limit);
+    return this.authService.listSessionLogs({
+      limit: Number.isFinite(parsed) ? parsed : 100,
+      userId: userId?.trim() || undefined,
+    });
   }
 }

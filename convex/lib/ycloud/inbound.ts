@@ -884,6 +884,17 @@ export async function processInboundMessageV2(
   if (retryMode && args.existingMessageId) {
     insertedMsgId = args.existingMessageId;
     finalContent = String(args.text ?? "").trim();
+    if (!finalContent && args.type === "audio" && args.mediaUrl) {
+      try {
+        const transcript = await deps.transcribeAudio(
+          args.mediaUrl,
+          "FincasYa, fincas, reservas, Colombia",
+        );
+        finalContent = `[Voz] ${transcript}`;
+      } catch {
+        finalContent = "[Audio] (no se pudo transcribir)";
+      }
+    }
   } else if (inboundWamid.length > 6) {
     const existing = (await ctx.runQuery(deps.internal.messages.getByWamid, {
       wamid: inboundWamid,

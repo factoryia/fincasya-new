@@ -186,6 +186,11 @@ export class InboxController {
    * Obtener mensajes de una conversación
    * GET /api/inbox/:conversationId/messages?limit=50
    */
+  @Get(':conversationId/latest-user-message')
+  async getLatestUserMessage(@Param('conversationId') conversationId: string) {
+    return this.inboxService.getLatestUserMessage(conversationId);
+  }
+
   @Get(':conversationId/messages')
   async getMessages(
     @Param('conversationId') conversationId: string,
@@ -580,6 +585,15 @@ export class InboxController {
   @Patch(':conversationId/read')
   async markInboxRead(@Param('conversationId') conversationId: string) {
     return this.inboxService.markInboxRead(conversationId);
+  }
+
+  /**
+   * Marcar conversación como no leída en inbox.
+   * PATCH /api/inbox/:conversationId/unread
+   */
+  @Patch(':conversationId/unread')
+  async markInboxUnread(@Param('conversationId') conversationId: string) {
+    return this.inboxService.markInboxUnread(conversationId);
   }
 
   /**
