@@ -66,6 +66,18 @@ type YcloudMessageBody = {
   catalog_id?: string;
 };
 
+/** Eco de ficha de catálogo WhatsApp — no persistir como mensaje de texto en inbox. */
+export function isCatalogInteractiveEcho(evt: {
+  type?: string;
+  interactive?: { type?: string };
+}): boolean {
+  if (evt.type !== "interactive" || !evt.interactive) return false;
+  const t = String(evt.interactive.type ?? "").toLowerCase();
+  return (
+    t === "product" || t === "product_list" || t === "catalog_message"
+  );
+}
+
 /** Extrae contenido y tipo desde payload YCloud (entrante u saliente). */
 export function parseYcloudWhatsappBody(
   evt: YcloudMessageBody,

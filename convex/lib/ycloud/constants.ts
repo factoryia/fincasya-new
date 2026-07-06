@@ -14,6 +14,13 @@ export const FALLBACK_CATALOG_ID = "1356998359824441";
  */
 export const MAX_CATALOG_PRODUCTS_PER_SEND = 12;
 
+/** Pausa entre fichas de catálogo WhatsApp — evita que Meta las agrupe en "Catálogo enviado". */
+export const CATALOG_BETWEEN_SENDS_MS = 1500;
+
+/** Ventana para agrupar fichas del mismo envío (paginación / pick ambiguo). */
+export const CATALOG_SEND_BATCH_WINDOW_MS =
+  MAX_CATALOG_PRODUCTS_PER_SEND * CATALOG_BETWEEN_SENDS_MS + 4000;
+
 /**
  * Espera antes de procesar un inbound: da tiempo a que el usuario mande 2+
  * burbujas seguidas. Luego `inbound.ts` vuelve a comprobar que este mensaje

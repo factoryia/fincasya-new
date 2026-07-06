@@ -14,6 +14,7 @@ import {
   sendTextToYcloud,
   sendTemplateToYcloud,
 } from "./lib/ycloud/senders";
+import { CATALOG_SEND_BATCH_WINDOW_MS } from "./lib/ycloud/constants";
 import {
   buildSendComponents,
   getTemplateDef,
@@ -234,6 +235,12 @@ export const markOutboundAsHuman = internalMutation({
 
 const OUTBOUND_WEBHOOK_METADATA = { source: "ycloud_outbound_webhook" as const };
 
+const JUNK_OUTBOUND_CONTENT = new Set([
+  "[respuesta interactiva]",
+  "[respuesta de botón]",
+  "[mensaje]",
+]);
+
 /**
  * Persiste en inbox mensajes enviados desde WhatsApp Business / YCloud dashboard
  * (no pasan por `inbox.sendMessage`). Dedupe por `wamid`.
@@ -266,9 +273,20 @@ export const recordOutboundFromWebhook = internalMutation({
     const phone = normalizeWhatsappPhone(args.phone);
     const content = String(args.content ?? "").trim();
     if (!phone || !content) return { ok: false as const, reason: "empty" };
+    if (JUNK_OUTBOUND_CONTENT.has(content.toLowerCase())) {
+      return { ok: false as const, reason: "junk" as const };
+    }
 
     const wamid = String(args.wamid ?? "").trim();
     if (wamid.length > 6) {
+      const catalogEcho = await ctx.db
+        .query("ycloudCatalogMessageWamids")
+        .withIndex("by_wamid", (q) => q.eq("wamid", wamid))
+        .first();
+      if (catalogEcho) {
+        return { ok: true as const, skipped: true as const, reason: "catalog_echo" as const };
+      }
+
       const existing = await ctx.db
         .query("messages")
         .withIndex("by_wamid", (q) => q.eq("wamid", wamid))
@@ -437,8 +455,8 @@ export const getAllCatalogRetailerIdsForConversation = internalQuery({
 /**
  * Devuelve los `productRetailerId` del ÚLTIMO batch de catálogo enviado en
  * esta conversación. Definimos "batch" como las entradas con `createdAt`
- * dentro de una ventana de 5 segundos respecto a la más reciente — el envío
- * de un catálogo crea N entradas con timestamps casi idénticos.
+ * dentro de una ventana temporal respecto a la más reciente — el envío
+ * de un catálogo crea N entradas espaciadas ~1,5 s entre sí.
  *
  * Se usa para resolver picks ambiguos del cliente: cuando dice "Quiero esta"
  * sin más contexto y el último catálogo contenía exactamente UNA finca,
@@ -463,9 +481,8 @@ export const getLatestCatalogRetailerIds = internalQuery({
       .take(20);
     if (rows.length === 0) return [] as string[];
     const latestTs = rows[0].createdAt;
-    const BATCH_WINDOW_MS = 5000;
     const batch = rows.filter(
-      (r) => Math.abs(r.createdAt - latestTs) <= BATCH_WINDOW_MS,
+      (r) => Math.abs(r.createdAt - latestTs) <= CATALOG_SEND_BATCH_WINDOW_MS,
     );
     // Dedup (defensivo) preservando orden.
     const seen = new Set<string>();
@@ -491,17 +508,23 @@ export const sendWhatsAppCatalogList = internalAction({
     conversationId: v.optional(v.id("conversations")),
   },
   handler: async (ctx, args) => {
-    const rows = await sendCatalogToYcloud(args);
-    const withWamid = rows.filter((r) => (r.wamid ?? "").length > 8);
-    if (args.conversationId && withWamid.length > 0) {
-      await ctx.runMutation(internal.ycloud.recordCatalogOutboundWamids, {
-        conversationId: args.conversationId,
-        entries: withWamid.map((r) => ({
-          wamid: r.wamid as string,
-          productRetailerId: r.productRetailerId,
-        })),
-      });
-    }
+    const rows = await sendCatalogToYcloud({
+      ...args,
+      onProductSent: args.conversationId
+        ? async (row) => {
+            if (!row.ok || !(row.wamid ?? "").trim()) return;
+            await ctx.runMutation(internal.ycloud.recordCatalogOutboundWamids, {
+              conversationId: args.conversationId!,
+              entries: [
+                {
+                  wamid: row.wamid!,
+                  productRetailerId: row.productRetailerId,
+                },
+              ],
+            });
+          }
+        : undefined,
+    });
     return rows;
   },
 });

@@ -7,6 +7,7 @@ import {
   isOutboundFromBusiness,
   normalizeWhatsappPhone,
   parseYcloudWhatsappBody,
+  isCatalogInteractiveEcho,
 } from './lib/ycloud/parseMessage';
 
 const YCLOUD_TEMPLATES_BASE = 'https://api.ycloud.com/v2/whatsapp/templates';
@@ -213,28 +214,30 @@ http.route({
     ) {
       const evt = outboundEvt.whatsappOutboundMessage;
       const phone = normalizeWhatsappPhone(evt.to ?? '');
-      const parsedMsg = parseYcloudWhatsappBody(evt);
-      if (phone && parsedMsg) {
-        const eventId =
-          outboundEvt.id ??
-          `out_${evt.wamid ?? evt.id ?? `${phone}_${Date.now()}`}`;
-        const dedupe = await ctx.runMutation(
-          internal.ycloud.recordProcessedEvent,
-          { eventId },
-        );
-        if (!dedupe.duplicate) {
-          await ctx.runMutation(internal.ycloud.recordOutboundFromWebhook, {
-            phone,
-            customerName: evt.customerProfile?.name,
-            content: parsedMsg.content,
-            messageType: parsedMsg.msgType,
-            mediaUrl: parsedMsg.mediaUrl,
-            wamid: evt.wamid ?? evt.id,
-            whatsappStatus: 'sent',
-          });
+      if (phone && !isCatalogInteractiveEcho(evt)) {
+        const parsedMsg = parseYcloudWhatsappBody(evt);
+        if (parsedMsg) {
+          const eventId =
+            outboundEvt.id ??
+            `out_${evt.wamid ?? evt.id ?? `${phone}_${Date.now()}`}`;
+          const dedupe = await ctx.runMutation(
+            internal.ycloud.recordProcessedEvent,
+            { eventId },
+          );
+          if (!dedupe.duplicate) {
+            await ctx.runMutation(internal.ycloud.recordOutboundFromWebhook, {
+              phone,
+              customerName: evt.customerProfile?.name,
+              content: parsedMsg.content,
+              messageType: parsedMsg.msgType,
+              mediaUrl: parsedMsg.mediaUrl,
+              wamid: evt.wamid ?? evt.id,
+              whatsappStatus: 'sent',
+            });
+          }
+        } else {
+          await ctx.runMutation(internal.ycloud.markOutboundAsHuman, { phone });
         }
-      } else if (phone) {
-        await ctx.runMutation(internal.ycloud.markOutboundAsHuman, { phone });
       }
     }
 
@@ -264,29 +267,31 @@ http.route({
     ) {
       const evt = smbEchoEvt.whatsappMessage;
       const phone = normalizeWhatsappPhone(evt.to ?? '');
-      const parsedMsg = parseYcloudWhatsappBody(evt);
-      if (phone && parsedMsg) {
-        const eventId =
-          smbEchoEvt.id ??
-          `smb_${evt.wamid ?? evt.id ?? `${phone}_${Date.now()}`}`;
-        const dedupe = await ctx.runMutation(
-          internal.ycloud.recordProcessedEvent,
-          { eventId },
-        );
-        if (!dedupe.duplicate) {
-          await ctx.runMutation(internal.ycloud.recordOutboundFromWebhook, {
-            phone,
-            customerName:
-              evt.customerProfile?.name ?? evt.customerProfile?.username,
-            content: parsedMsg.content,
-            messageType: parsedMsg.msgType,
-            mediaUrl: parsedMsg.mediaUrl,
-            wamid: evt.wamid ?? evt.id,
-            whatsappStatus: 'sent',
-          });
+      if (phone && !isCatalogInteractiveEcho(evt)) {
+        const parsedMsg = parseYcloudWhatsappBody(evt);
+        if (parsedMsg) {
+          const eventId =
+            smbEchoEvt.id ??
+            `smb_${evt.wamid ?? evt.id ?? `${phone}_${Date.now()}`}`;
+          const dedupe = await ctx.runMutation(
+            internal.ycloud.recordProcessedEvent,
+            { eventId },
+          );
+          if (!dedupe.duplicate) {
+            await ctx.runMutation(internal.ycloud.recordOutboundFromWebhook, {
+              phone,
+              customerName:
+                evt.customerProfile?.name ?? evt.customerProfile?.username,
+              content: parsedMsg.content,
+              messageType: parsedMsg.msgType,
+              mediaUrl: parsedMsg.mediaUrl,
+              wamid: evt.wamid ?? evt.id,
+              whatsappStatus: 'sent',
+            });
+          }
+        } else {
+          await ctx.runMutation(internal.ycloud.markOutboundAsHuman, { phone });
         }
-      } else if (phone) {
-        await ctx.runMutation(internal.ycloud.markOutboundAsHuman, { phone });
       }
     }
 
@@ -334,18 +339,20 @@ http.route({
           isOutboundFromBusiness(wm.from, process.env.YCLOUD_WABA_NUMBER)
         ) {
           const phone = normalizeWhatsappPhone(wm.to ?? '');
-          const parsedMsg = parseYcloudWhatsappBody(wm);
-          if (phone && parsedMsg) {
-            await ctx.runMutation(internal.ycloud.recordOutboundFromWebhook, {
-              phone,
-              customerName: wm.customerProfile?.name,
-              content: parsedMsg.content,
-              messageType: parsedMsg.msgType,
-              mediaUrl: parsedMsg.mediaUrl,
-              wamid,
-              whatsappStatus:
-                rawStatus === 'accepted' ? 'accepted' : 'sent',
-            });
+          if (phone && !isCatalogInteractiveEcho(wm)) {
+            const parsedMsg = parseYcloudWhatsappBody(wm);
+            if (parsedMsg) {
+              await ctx.runMutation(internal.ycloud.recordOutboundFromWebhook, {
+                phone,
+                customerName: wm.customerProfile?.name,
+                content: parsedMsg.content,
+                messageType: parsedMsg.msgType,
+                mediaUrl: parsedMsg.mediaUrl,
+                wamid,
+                whatsappStatus:
+                  rawStatus === 'accepted' ? 'accepted' : 'sent',
+              });
+            }
           }
         }
       }

@@ -1,4 +1,4 @@
-import { FALLBACK_CATALOG_ID, MAX_CATALOG_PRODUCTS_PER_SEND } from "./constants";
+import { FALLBACK_CATALOG_ID, MAX_CATALOG_PRODUCTS_PER_SEND, CATALOG_BETWEEN_SENDS_MS } from "./constants";
 
 /** Filas devueltas al orquestador: alinea cada producto con el wamid del mensaje enviado (si la API lo devolvió). */
 export type CatalogOutboundSendRow = {
@@ -356,7 +356,7 @@ export async function sendAudioToYcloud(args: {
   return { wamid, status };
 }
 
-const BETWEEN_SENDS_MS = 320;
+const BETWEEN_SENDS_MS = CATALOG_BETWEEN_SENDS_MS;
 
 /** Cuerpo cuando no hay línea de precio pero sí hay más fichas (sin numerar ni texto interno). */
 const BODY_WHEN_QUOTE_MISSING = "Aquí va otra opción 🏡";
@@ -373,6 +373,7 @@ export async function sendCatalogToYcloud(args: {
   bodyText?: string;
   catalogId?: string;
   wamid?: string;
+  onProductSent?: (row: CatalogOutboundSendRow) => void | Promise<void>;
 }): Promise<CatalogOutboundSendRow[]> {
   const ids = args.productRetailerIds.slice(0, MAX_CATALOG_PRODUCTS_PER_SEND);
   if (ids.length === 0) return [];
@@ -428,11 +429,11 @@ export async function sendCatalogToYcloud(args: {
   // re-enviaba las mismas). Ahora cada ficha mala se OMITE (se loguea) y se
   // sigue con el resto; `ok:false` marca las que no salieron.
   const rows: CatalogOutboundSendRow[] = [];
-  const pushRow = (
+  const pushRow = async (
     productRetailerId: string,
     resp: { ok: boolean; status: number; text: string },
     indexLabel: string,
-  ): void => {
+  ): Promise<void> => {
     if (resp.ok) {
       let parsed: unknown;
       try {
@@ -440,11 +441,13 @@ export async function sendCatalogToYcloud(args: {
       } catch {
         parsed = { raw: resp.text };
       }
-      rows.push({
+      const row: CatalogOutboundSendRow = {
         productRetailerId,
         wamid: wamidFromYcloudSendResponse(parsed),
         ok: true,
-      });
+      };
+      rows.push(row);
+      if (args.onProductSent) await args.onProductSent(row);
     } else {
       console.error(
         `[catalog] ficha ${indexLabel} (${productRetailerId}) falló — se omite: ${resp.status} ${resp.text.slice(0, 220)}`,
@@ -463,12 +466,12 @@ export async function sendCatalogToYcloud(args: {
     catalogId = FALLBACK_CATALOG_ID;
     r = await sendOne(ids[0], bodyForIndex(0), true);
   }
-  pushRow(ids[0], r, `1/${ids.length}`);
+  await pushRow(ids[0], r, `1/${ids.length}`);
 
   for (let i = 1; i < ids.length; i++) {
     await new Promise((resolve) => setTimeout(resolve, BETWEEN_SENDS_MS));
     const r2 = await sendOne(ids[i], bodyForIndex(i), false);
-    pushRow(ids[i], r2, `${i + 1}/${ids.length}`);
+    await pushRow(ids[i], r2, `${i + 1}/${ids.length}`);
   }
 
   return rows;
