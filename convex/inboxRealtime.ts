@@ -13,6 +13,7 @@ import { v } from 'convex/values';
 import { query, type QueryCtx } from './_generated/server';
 import { components } from './_generated/api';
 import { getConversationLastMessagePreview } from './lib/inboxMessagePreview';
+import { inboxStartOfTodayMs } from './lib/inboxHistoryCutoff';
 import { jsonSafeString } from './lib/jsonSafeString';
 
 type AllowedRole =
@@ -64,8 +65,13 @@ export const listConversations = query({
   handler: async (ctx, args) => {
     const { user, role } = await requireInboxUser(ctx);
     const limit = Math.min(Math.max(args.limit ?? 100, 1), 300);
+    const todayStart = inboxStartOfTodayMs();
 
     let convs = await ctx.db.query('conversations').collect();
+
+    convs = convs.filter(
+      (c) => (c.lastMessageAt ?? c._creationTime) >= todayStart,
+    );
 
     // Filtro por canal
     if (args.channel) {
@@ -182,11 +188,12 @@ export const listMessages = query({
   handler: async (ctx, args) => {
     await requireInboxUser(ctx);
     const limit = Math.min(Math.max(args.limit ?? 80, 1), 200);
+    const todayStart = inboxStartOfTodayMs();
 
     const list = await ctx.db
       .query('messages')
       .withIndex('by_conversation', (q) =>
-        q.eq('conversationId', args.conversationId),
+        q.eq('conversationId', args.conversationId).gte('createdAt', todayStart),
       )
       .order('desc')
       .take(limit);

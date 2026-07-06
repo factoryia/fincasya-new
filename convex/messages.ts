@@ -239,22 +239,24 @@ export const listRecent = query({
      * únicamente los que ya se entregaron.
      */
     beforeCreationTime: v.optional(v.number()),
+    /** Solo mensajes con `createdAt` >= este timestamp (inbox: ocultar histórico anterior). */
+    sinceCreatedAt: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
     const limit = Math.min(Math.max(args.limit ?? 50, 1), 150);
-    const { beforeCreatedAt, beforeCreationTime } = args;
+    const { beforeCreatedAt, beforeCreationTime, sinceCreatedAt } = args;
 
-    // Filtramos `deletedAt` ANTES de `take` para que una página nunca quede
-    // corta por mensajes borrados (eso hacía que el front cortara el scroll
-    // infinito y "no trajera todo el histórico"). Sobre-leemos cuando hay
-    // cursor para absorber los duplicados del mismo ms ya entregados.
     const rows = await ctx.db
       .query("messages")
       .withIndex("by_conversation", (q) => {
-        const base = q.eq("conversationId", args.conversationId);
-        return beforeCreatedAt != null
-          ? base.lte("createdAt", beforeCreatedAt)
-          : base;
+        let base = q.eq("conversationId", args.conversationId);
+        if (sinceCreatedAt != null) {
+          base = base.gte("createdAt", sinceCreatedAt);
+        }
+        if (beforeCreatedAt != null) {
+          base = base.lte("createdAt", beforeCreatedAt);
+        }
+        return base;
       })
       .order("desc")
       .filter((q) => q.eq(q.field("deletedAt"), undefined))
