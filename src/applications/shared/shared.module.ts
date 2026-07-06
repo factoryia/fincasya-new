@@ -6,6 +6,7 @@ import { BrevoEmailService } from './services/brevo-email.service';
 
 import { PdfService } from './services/pdf.service';
 import { ConvexSiteProxyService } from './services/convex-site-proxy.service';
+import { AudioWhatsappService } from './services/audio-whatsapp.service';
 
 @Module({
   providers: [
@@ -15,6 +16,7 @@ import { ConvexSiteProxyService } from './services/convex-site-proxy.service';
     GoogleCalendarService,
     BrevoEmailService,
     PdfService,
+    AudioWhatsappService,
   ],
   exports: [
     ConvexService,
@@ -23,6 +25,7 @@ import { ConvexSiteProxyService } from './services/convex-site-proxy.service';
     GoogleCalendarService,
     BrevoEmailService,
     PdfService,
+    AudioWhatsappService,
   ],
 })
 export class SharedModule {}

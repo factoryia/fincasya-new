@@ -1,7 +1,7 @@
 import { v } from "convex/values";
 import { action, type ActionCtx } from "./_generated/server";
 import { api, internal } from "./_generated/api";
-import { wamidFromYcloudSendResponse } from "./lib/ycloud/senders";
+import { wamidFromYcloudSendResponse, sendAudioToYcloud } from "./lib/ycloud/senders";
 
 async function resolveRetailerIdForSlug(
   ctx: ActionCtx,
@@ -323,11 +323,61 @@ export const sendMessage = action({
     }
 
     // Media: image, audio, document
-    // YCloud acepta "link" (URL directa) o "id" (de upload). Usamos link para mayor compatibilidad.
     if (!args.mediaUrl?.trim()) {
       throw new Error("mediaUrl requerido para tipo image/audio/document");
     }
 
+    const replyWamid = String(args.replyToWamid ?? "").trim();
+
+    if (args.type === "audio") {
+      const audioRes = await fetch(args.mediaUrl);
+      if (!audioRes.ok) {
+        throw new Error(
+          `No se pudo descargar el audio para WhatsApp: ${audioRes.status}`,
+        );
+      }
+      const audioBuffer = new Uint8Array(await audioRes.arrayBuffer());
+      const rawMime =
+        audioRes.headers.get("content-type") ||
+        (args.filename?.toLowerCase().endsWith(".m4a")
+          ? "audio/mp4"
+          : args.filename?.toLowerCase().endsWith(".mp3")
+            ? "audio/mpeg"
+            : "audio/ogg");
+
+      const sendResult = await sendAudioToYcloud({
+        to: args.phone,
+        audioBuffer,
+        mimeType: rawMime,
+        filename: args.filename,
+        wamid: replyWamid.length > 6 ? replyWamid : undefined,
+      });
+
+      await ctx.runMutation(internal.messages.insertAssistantMessageWithMedia, {
+        conversationId: args.conversationId,
+        content: caption,
+        type: "audio",
+        mediaUrl: args.mediaUrlForStorage ?? args.mediaUrl,
+        metadata: args.metadata,
+        createdAt: now,
+        sentByUserId: args.sentByUserId,
+        wamid: sendResult.wamid,
+        whatsappStatus: (sendResult.status as "sent" | undefined) ?? "sent",
+      });
+      await ctx.runMutation(internal.conversations.updateLastMessageAt, {
+        conversationId: args.conversationId,
+      });
+      if (args.sentByUserId) {
+        await ctx.runMutation(internal.conversationAudit.recordEvent, {
+          conversationId: args.conversationId,
+          eventType: "message_sent",
+          userId: args.sentByUserId,
+        });
+      }
+      return { ok: true };
+    }
+
+    // Imagen / documento: link (URL directa) o id (upload).
     const mediaPayload: Record<string, unknown> = {
       link: args.mediaUrl,
     };

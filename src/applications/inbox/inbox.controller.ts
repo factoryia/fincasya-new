@@ -165,6 +165,15 @@ export class InboxController {
   }
 
   /**
+   * Marca todas las escalaciones como atendidas y reinicia contadores de no leídos.
+   * POST /api/inbox/notifications/dismiss-all
+   */
+  @Post('notifications/dismiss-all')
+  async dismissAllNotifications() {
+    return this.inboxService.dismissAllInboxNotifications();
+  }
+
+  /**
    * Obtener una conversación por id (cabecera del chat sin depender del listado filtrado).
    * GET /api/inbox/:conversationId
    */

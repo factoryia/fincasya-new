@@ -411,6 +411,44 @@ export const markAsAttended = mutation({
   },
 });
 
+/**
+ * Quita todas las notificaciones del inbox: escalaciones pendientes y contadores
+ * de no leídos. Usado desde la campana «Cuentas por Atender».
+ */
+export const dismissAllInboxNotifications = mutation({
+  args: {},
+  handler: async (ctx) => {
+    const now = Date.now();
+    const convs = await ctx.db.query("conversations").collect();
+    let dismissedEscalations = 0;
+    let markedRead = 0;
+
+    for (const c of convs) {
+      const patch: {
+        attended?: boolean;
+        inboxUnreadCount?: number;
+        inboxLastReadAt?: number;
+      } = {};
+
+      if (c.status === "human" && c.attended !== true) {
+        patch.attended = true;
+        dismissedEscalations++;
+      }
+      if ((c.inboxUnreadCount ?? 0) > 0) {
+        patch.inboxUnreadCount = 0;
+        patch.inboxLastReadAt = now;
+        markedRead++;
+      }
+
+      if (Object.keys(patch).length > 0) {
+        await ctx.db.patch(c._id, patch);
+      }
+    }
+
+    return { dismissedEscalations, markedRead };
+  },
+});
+
 /** Marca la conversación como leída en el inbox (reinicia contador de no leídos). */
 export const markInboxRead = mutation({
   args: { conversationId: v.id("conversations") },

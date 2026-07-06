@@ -49,7 +49,7 @@ async function escalateChannelAiConversationsToHuman(
 
   for (const conversation of aiConversations) {
     if (conversation.channel !== channel) continue;
-    await ctx.db.patch(conversation._id, { status: 'human' });
+    await ctx.db.patch(conversation._id, { status: 'human', attended: true });
   }
 }
 

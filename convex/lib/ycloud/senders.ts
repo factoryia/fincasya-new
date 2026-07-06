@@ -270,6 +270,92 @@ export async function sendImageToYcloud(args: {
   return { wamid, status };
 }
 
+function normalizeWhatsAppAudioMime(
+  mimeType: string,
+  filename: string,
+): { mimeType: string; filename: string } {
+  const base = mimeType.split(";")[0].trim().toLowerCase() || "audio/ogg";
+  let mime = base;
+  let name = filename || "voice.ogg";
+
+  if (mime === "audio/webm" || mime === "video/webm") {
+    throw new Error(
+      "Formato WebM no compatible con WhatsApp. Vuelve a grabar el audio o envíalo desde Safari.",
+    );
+  } else if (mime === "audio/aac" || mime === "audio/x-m4a") {
+    mime = "audio/mp4";
+    if (!/\.m4a$/i.test(name)) name = name.replace(/\.\w+$/i, "") + ".m4a";
+  } else if (mime === "audio/mpeg" || mime === "audio/mp3") {
+    mime = "audio/mpeg";
+    if (!/\.mp3$/i.test(name)) name = name.replace(/\.\w+$/i, "") + ".mp3";
+  } else if (mime.includes("ogg")) {
+    mime = "audio/ogg";
+    if (!/\.ogg$/i.test(name)) name = name.replace(/\.\w+$/i, "") + ".ogg";
+  }
+
+  return { mimeType: mime, filename: name };
+}
+
+export async function sendAudioToYcloud(args: {
+  to: string;
+  audioBuffer: Uint8Array;
+  mimeType: string;
+  filename?: string;
+  wamid?: string;
+}): Promise<{ wamid?: string; status?: string }> {
+  const { apiKey, wabaNumber } = requireYcloudEnv();
+  const normalized = normalizeWhatsAppAudioMime(
+    args.mimeType,
+    args.filename || "voice.ogg",
+  );
+
+  const mediaId = await uploadMediaBufferToYcloud({
+    buffer: args.audioBuffer,
+    mimeType: normalized.mimeType,
+    filename: normalized.filename,
+  });
+
+  const body: Record<string, unknown> = {
+    from: wabaNumber,
+    to: args.to,
+    type: "audio",
+    audio: {
+      id: mediaId,
+      voice: true,
+    },
+  };
+  if (args.wamid) body.context = { message_id: args.wamid };
+
+  const res = await fetch(SEND_DIRECTLY, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json; charset=utf-8",
+      "X-API-Key": apiKey,
+    },
+    body: JSON.stringify(body),
+  });
+  const textRes = await res.text();
+  if (!res.ok) {
+    throw new Error(`YCloud audio send failed: ${res.status}: ${textRes}`);
+  }
+  const parsed = textRes ? JSON.parse(textRes) : {};
+  const wamid = wamidFromYcloudSendResponse(parsed);
+  const rawStatus = ((): unknown => {
+    if (typeof parsed !== "object" || !parsed) return undefined;
+    const o = parsed as Record<string, unknown>;
+    if (typeof o.status === "string") return o.status;
+    const nested = o.whatsappMessage;
+    if (nested && typeof nested === "object") {
+      const s = (nested as Record<string, unknown>).status;
+      if (typeof s === "string") return s;
+    }
+    return undefined;
+  })();
+  const status =
+    typeof rawStatus === "string" ? rawStatus.toLowerCase() : undefined;
+  return { wamid, status };
+}
+
 const BETWEEN_SENDS_MS = 320;
 
 /** Cuerpo cuando no hay línea de precio pero sí hay más fichas (sin numerar ni texto interno). */

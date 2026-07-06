@@ -15,6 +15,7 @@ import { FincasService } from '../fincas/fincas.service';
 import { mergeClientDataFromContractDetail } from '../bookings/resolve-contract-client-data';
 import { computeConfirmationFinancials } from '../fincas/confirmation-financials';
 import { PdfService, ReservationConfirmationData, ReservationPaymentMethod } from '../shared/services/pdf.service';
+import { AudioWhatsappService } from '../shared/services/audio-whatsapp.service';
 
 
 type QuickReplyTemplatePayload = {
@@ -34,6 +35,7 @@ export class InboxService {
     private readonly convexService: ConvexService,
     private readonly s3Service: S3Service,
     private readonly pdfService: PdfService,
+    private readonly audioWhatsappService: AudioWhatsappService,
     @Inject(forwardRef(() => BookingsSyncService))
     private readonly bookingsSyncService: BookingsSyncService,
     @Inject(forwardRef(() => FincasService))
@@ -437,10 +439,13 @@ export class InboxService {
       if (type === 'image') {
         fileToUpload = await this.pdfService.ensureImageCompatible(file);
       }
+      if (type === 'audio') {
+        fileToUpload = await this.audioWhatsappService.ensureCompatible(file);
+      }
       const publicUrl = await this.s3Service.uploadFile(
         fileToUpload,
         'inbox',
-        filename,
+        filename ?? fileToUpload.originalname,
       );
       filename = fileToUpload.originalname;
       mediaUrlForStorage = publicUrl;
@@ -1270,6 +1275,13 @@ export class InboxService {
     return this.convexService.mutation('conversations:markAsAttended', {
       conversationId,
     });
+  }
+
+  async dismissAllInboxNotifications() {
+    return this.convexService.mutation(
+      'conversations:dismissAllInboxNotifications',
+      {},
+    );
   }
 
   private async prepareReservationConfirmationData(

@@ -31,40 +31,28 @@ function assertPublicUrl(raw: string): URL {
 
 @Injectable()
 export class CorsProxyService {
-  async fetch(url: string): Promise<{ buffer: ArrayBuffer; contentType: string | null }> {
+  async fetch(
+    url: string,
+    options?: { method?: 'GET' | 'HEAD'; range?: string },
+  ): Promise<Response> {
     const parsed = assertPublicUrl(url);
+    const headers: Record<string, string> = {};
+    if (options?.range) {
+      headers.Range = options.range;
+    }
+
     const response = await fetch(parsed.toString(), {
-      method: 'GET',
+      method: options?.method ?? 'GET',
       cache: 'no-store',
+      headers: Object.keys(headers).length > 0 ? headers : undefined,
     });
 
-    if (!response.ok) {
+    if (!response.ok && response.status !== 206) {
       throw new BadRequestException(
         `Failed to fetch from url: ${response.statusText}`,
       );
     }
 
-    return {
-      buffer: await response.arrayBuffer(),
-      contentType: response.headers.get('content-type'),
-    };
-  }
-
-  async head(
-    url: string,
-  ): Promise<{ contentLength: string | null; contentType: string | null }> {
-    const parsed = assertPublicUrl(url);
-    const response = await fetch(parsed.toString(), { method: 'HEAD' });
-
-    if (!response.ok) {
-      throw new BadRequestException(
-        `Failed to HEAD from url: ${response.statusText}`,
-      );
-    }
-
-    return {
-      contentLength: response.headers.get('content-length'),
-      contentType: response.headers.get('content-type'),
-    };
+    return response;
   }
 }
