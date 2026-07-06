@@ -7,8 +7,10 @@ import {
   Req,
   Res,
 } from '@nestjs/common';
-import type { Request, Response } from 'express';
+import type { Request, Response as ExpressResponse } from 'express';
 import { CorsProxyService } from './cors-proxy.service';
+
+type FetchResponse = globalThis.Response;
 
 /**
  * En producción, nginx envía `/api/*` a Nest. El handler equivalente en
@@ -19,7 +21,7 @@ import { CorsProxyService } from './cors-proxy.service';
 export class CorsProxyController {
   constructor(private readonly corsProxy: CorsProxyService) {}
 
-  private setProxyHeaders(res: Response, upstream: Response) {
+  private setProxyHeaders(res: ExpressResponse, upstream: FetchResponse) {
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader(
       'Access-Control-Expose-Headers',
@@ -43,7 +45,7 @@ export class CorsProxyController {
   async get(
     @Query('url') url: string | undefined,
     @Req() req: Request,
-    @Res() res: Response,
+    @Res() res: ExpressResponse,
   ) {
     if (!url?.trim()) {
       throw new BadRequestException('Missing url parameter');
@@ -65,7 +67,7 @@ export class CorsProxyController {
   @Head()
   async head(
     @Query('url') url: string | undefined,
-    @Res() res: Response,
+    @Res() res: ExpressResponse,
   ) {
     if (!url?.trim()) {
       throw new BadRequestException('Missing url parameter');
