@@ -249,12 +249,17 @@ export const listRecent = query({
     const rows = await ctx.db
       .query("messages")
       .withIndex("by_conversation", (q) => {
-        let base = q.eq("conversationId", args.conversationId);
+        const base = q.eq("conversationId", args.conversationId);
+        if (sinceCreatedAt != null && beforeCreatedAt != null) {
+          return base
+            .gte("createdAt", sinceCreatedAt)
+            .lte("createdAt", beforeCreatedAt);
+        }
         if (sinceCreatedAt != null) {
-          base = base.gte("createdAt", sinceCreatedAt);
+          return base.gte("createdAt", sinceCreatedAt);
         }
         if (beforeCreatedAt != null) {
-          base = base.lte("createdAt", beforeCreatedAt);
+          return base.lte("createdAt", beforeCreatedAt);
         }
         return base;
       })
