@@ -763,6 +763,10 @@ export async function processInboundMessageV2(
     replyToWamid?: string;
     type?: "text" | "image" | "audio" | "video" | "document";
     mediaUrl?: string;
+    /** Reprocesar el último mensaje del cliente sin insertar uno nuevo (panel inbox). */
+    retryMode?: boolean;
+    existingMessageId?: Id<"messages">;
+    conversationId?: Id<"conversations">;
   },
   deps: {
     internal: any;
@@ -831,19 +835,37 @@ export async function processInboundMessageV2(
   const rawText = String(args.text ?? "").trim();
   if (/^(status|presence)\s*:\s*active$/i.test(rawText)) return;
 
+  const retryMode =
+    args.retryMode === true &&
+    args.existingMessageId != null &&
+    args.conversationId != null;
+
   const inboundWamidEarly = String(args.wamid ?? "").trim();
 
-  const contactId: Id<"contacts"> = await ctx.runMutation(
-    deps.internal.ycloud.getOrCreateContact,
-    { phone: args.phone, name: args.name },
-  );
-  const { conversationId } = await ctx.runMutation(
-    deps.internal.ycloud.getOrCreateConversation,
-    { contactId, channel: deps.channel ?? "whatsapp" },
-  );
+  let contactId: Id<"contacts">;
+  let conversationId: Id<"conversations">;
+
+  if (retryMode) {
+    const conv = (await ctx.runQuery(deps.api.conversations.getById, {
+      conversationId: args.conversationId!,
+    })) as { contactId: Id<"contacts"> } | null;
+    if (!conv) return;
+    conversationId = args.conversationId!;
+    contactId = conv.contactId;
+  } else {
+    contactId = await ctx.runMutation(
+      deps.internal.ycloud.getOrCreateContact,
+      { phone: args.phone, name: args.name },
+    );
+    const created = await ctx.runMutation(
+      deps.internal.ycloud.getOrCreateConversation,
+      { contactId, channel: deps.channel ?? "whatsapp" },
+    );
+    conversationId = created.conversationId;
+  }
 
   let finalContent = args.text;
-  if (args.type === "audio" && args.mediaUrl) {
+  if (!retryMode && args.type === "audio" && args.mediaUrl) {
     try {
       const transcript = await deps.transcribeAudio(args.mediaUrl, "FincasYa, fincas, reservas, Colombia");
       finalContent = `[Voz] ${transcript}`;
@@ -859,7 +881,10 @@ export async function processInboundMessageV2(
   if (replyToWamid) userMsgMetadata.replyToWamid = replyToWamid;
 
   let insertedMsgId: Id<"messages">;
-  if (inboundWamid.length > 6) {
+  if (retryMode && args.existingMessageId) {
+    insertedMsgId = args.existingMessageId;
+    finalContent = String(args.text ?? "").trim();
+  } else if (inboundWamid.length > 6) {
     const existing = (await ctx.runQuery(deps.internal.messages.getByWamid, {
       wamid: inboundWamid,
     })) as { _id: Id<"messages">; conversationId: Id<"conversations"> } | null;
@@ -897,17 +922,23 @@ export async function processInboundMessageV2(
     );
   }
 
-  await new Promise((r) => setTimeout(r, INBOUND_DEBOUNCE_MS));
+  if (!retryMode) {
+    await new Promise((r) => setTimeout(r, INBOUND_DEBOUNCE_MS));
+  }
 
   const conv = await ctx.runQuery(deps.api.conversations.getById, { conversationId });
-  if (!conv || (conv.lastMessageAt ?? 0) > now) return;
-
   const latestMsg = (await ctx.runQuery(deps.api.messages.getLatestUserMessage, {
     conversationId,
     scanLimit: 50,
-  })) as any;
-  if (!latestMsg || String(latestMsg._id) !== String(insertedMsgId)) return;
-  if (conv.status !== "ai") return;
+  })) as { _id: Id<"messages">; content?: string } | null;
+
+  if (!retryMode) {
+    if (!conv || (conv.lastMessageAt ?? 0) > now) return;
+    if (!latestMsg || String(latestMsg._id) !== String(insertedMsgId)) return;
+  } else if (!latestMsg) {
+    return;
+  }
+  if (!conv || conv.status !== "ai") return;
 
   const channel = deps.channel ?? "whatsapp";
   const channelAiEnabled = (await ctx.runQuery(

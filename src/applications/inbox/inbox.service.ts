@@ -362,6 +362,28 @@ export class InboxService {
     throw new BadRequestException('status debe ser ai, human o resolved');
   }
 
+  async retryBot(conversationId: string) {
+    const result = (await this.convexService.action('conversations:retryBot', {
+      conversationId,
+    })) as { ok?: boolean; reason?: string };
+
+    if (!result?.ok) {
+      const messages: Record<string, string> = {
+        not_found: 'Conversación no encontrada',
+        resolved: 'La conversación está resuelta; reábrela primero',
+        no_contact: 'El contacto no tiene teléfono vinculado',
+        ai_disabled:
+          'La IA está desactivada para este canal. Actívala en el panel de chats.',
+        no_user_message:
+          'No hay mensaje del cliente para procesar en esta conversación',
+      };
+      throw new BadRequestException(
+        messages[result.reason ?? ''] ?? 'No se pudo reintentar el bot',
+      );
+    }
+    return { ok: true };
+  }
+
   async setPriority(
     conversationId: string,
     priority: 'urgent' | 'low' | 'medium' | 'resolved',

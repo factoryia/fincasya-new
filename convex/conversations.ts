@@ -1,7 +1,7 @@
 import { v } from "convex/values";
 import type { Id } from "./_generated/dataModel";
-import { internalMutation, mutation, query } from "./_generated/server";
-import { internal } from "./_generated/api";
+import { action, internalMutation, mutation, query } from "./_generated/server";
+import { internal, api } from "./_generated/api";
 import {
   DEFAULT_OPERATIONAL_STATE,
   operationalStateValidator,
@@ -797,5 +797,122 @@ export const list = query({
       nextCursor: hasMore ? String(offset + limit) : null,
       hasMore,
     };
+  },
+});
+
+/**
+ * Reprocesa el último mensaje del cliente con el bot (sin esperar uno nuevo).
+ * Pone la conversación en modo IA y ejecuta el mismo pipeline que un inbound.
+ */
+export const retryBot = action({
+  args: { conversationId: v.id("conversations") },
+  handler: async (ctx, args) => {
+    const conv = await ctx.runQuery(api.conversations.getById, {
+      conversationId: args.conversationId,
+    });
+    if (!conv) {
+      return { ok: false as const, reason: "not_found" as const };
+    }
+    if (conv.status === "resolved") {
+      return { ok: false as const, reason: "resolved" as const };
+    }
+
+    const contact = await ctx.runQuery(api.contacts.getById, {
+      contactId: conv.contactId,
+    });
+    if (!contact?.phone) {
+      return { ok: false as const, reason: "no_contact" as const };
+    }
+
+    const channel = (conv.channel ?? "whatsapp") as "whatsapp" | "web";
+    const channelAiEnabled = (await ctx.runQuery(
+      internal.platformSettings.isChannelAiEnabledInternal,
+      { channel },
+    )) as boolean;
+    if (!channelAiEnabled) {
+      return { ok: false as const, reason: "ai_disabled" as const };
+    }
+
+    const latestMsg = (await ctx.runQuery(api.messages.getLatestUserMessage, {
+      conversationId: args.conversationId,
+      scanLimit: 50,
+    })) as {
+      _id: Id<"messages">;
+      content?: string;
+      type?: string;
+      mediaUrl?: string;
+    } | null;
+
+    const text = String(latestMsg?.content ?? "").trim();
+    if (!text) {
+      return { ok: false as const, reason: "no_user_message" as const };
+    }
+
+    await ctx.runMutation(api.conversations.setToAiPublic, {
+      conversationId: args.conversationId,
+    });
+
+    const { runBotTurn } = await import("./lib/bot/index");
+    const { processInboundMessageV2 } = await import("./lib/ycloud/inbound");
+    const { transcribeAudio } = await import("./lib/transcription");
+    const { classifyContractImage } = await import("./lib/imageClassifier");
+
+    await processInboundMessageV2(
+      ctx,
+      {
+        eventId: `retry_${args.conversationId}_${Date.now()}`,
+        phone: contact.phone,
+        name: contact.name ?? "Cliente",
+        text,
+        type: (latestMsg?.type as
+          | "text"
+          | "image"
+          | "audio"
+          | "video"
+          | "document"
+          | undefined) ?? "text",
+        mediaUrl: latestMsg?.mediaUrl,
+        retryMode: true,
+        existingMessageId: latestMsg!._id,
+        conversationId: args.conversationId,
+      },
+      {
+        internal,
+        api,
+        transcribeAudio,
+        classifyImage: classifyContractImage,
+        runBotTurn,
+        channel,
+        deliverText:
+          channel === "web"
+            ? async () => {}
+            : async (payload) => {
+                await ctx.runAction(internal.ycloud.sendWhatsAppMessage, payload);
+              },
+        deliverCatalog:
+          channel === "web"
+            ? async (payload) =>
+                payload.productRetailerIds.map((productRetailerId) => ({
+                  productRetailerId,
+                  ok: true,
+                }))
+            : async (payload) =>
+                (await ctx.runAction(internal.ycloud.sendWhatsAppCatalogList, {
+                  to: payload.to,
+                  productRetailerIds: payload.productRetailerIds,
+                  productQuoteLines: payload.productQuoteLines,
+                  bodyText: payload.bodyText,
+                  catalogId: payload.catalogId,
+                  wamid: payload.wamid,
+                  conversationId: payload.conversationId,
+                })) as Array<{
+                  productRetailerId: string;
+                  wamid?: string;
+                  ok?: boolean;
+                }>,
+      },
+    );
+
+    return { ok: true as const };
   },
 });

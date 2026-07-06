@@ -338,6 +338,15 @@ export class InboxController {
   }
 
   /**
+   * Reprocesa el último mensaje del cliente con el bot (beta / pruebas).
+   * POST /api/inbox/:conversationId/retry-bot
+   */
+  @Post(':conversationId/retry-bot')
+  async retryBot(@Param('conversationId') conversationId: string) {
+    return this.inboxService.retryBot(conversationId);
+  }
+
+  /**
    * Clasificar prioridad
    * PATCH /api/inbox/:conversationId/priority
    * Body: { "priority": "urgent" } | "low" | "medium" | "resolved"
