@@ -48,8 +48,10 @@ type YcloudMessageBody = {
   button?: { text?: string; payload?: string };
   interactive?: {
     type?: string;
+    body?: { text?: string };
     button_reply?: { title?: string; id?: string };
     list_reply?: { title?: string; description?: string; id?: string };
+    action?: { catalog_id?: string; product_retailer_id?: string };
   };
   location?: { latitude?: number; longitude?: number; name?: string; address?: string };
   order?: {
@@ -108,17 +110,32 @@ export function parseYcloudWhatsappBody(
     msgType = "text";
   } else if (evt.type === "button" && evt.button) {
     const label = String(evt.button.text ?? evt.button.payload ?? "").trim();
-    content = label || "[Respuesta de botón]";
+    if (!label) return null;
+    content = label;
     msgType = "text";
   } else if (evt.type === "interactive" && evt.interactive) {
     const ir = evt.interactive;
+    const interactiveType = String(ir.type ?? "").toLowerCase();
+
+    // Tarjetas de catálogo / producto (salientes o clic "Ver Finca"): no crear mensaje fantasma.
+    if (
+      interactiveType === "product" ||
+      interactiveType === "product_list" ||
+      interactiveType === "catalog_message"
+    ) {
+      return null;
+    }
+
     const label =
       ir.button_reply?.title ??
       ir.list_reply?.title ??
+      ir.list_reply?.description ??
       ir.button_reply?.id ??
       ir.list_reply?.id ??
       "";
-    content = String(label).trim() || "[Respuesta interactiva]";
+    const trimmed = String(label).trim();
+    if (!trimmed) return null;
+    content = trimmed;
     msgType = "text";
   } else if (evt.type === "location" && evt.location) {
     const name = String(evt.location.name ?? evt.location.address ?? "").trim();
