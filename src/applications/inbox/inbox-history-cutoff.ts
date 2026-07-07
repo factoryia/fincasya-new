@@ -1,9 +1,9 @@
 /** Zona horaria del equipo FincasYa (Colombia, UTC-5 sin DST). */
 export const INBOX_HISTORY_TIMEZONE = 'America/Bogota';
 
-export const INBOX_VISIBLE_HISTORY_DAYS = 7;
+/** Primera fecha visible en el inbox (medianoche Colombia). */
+export const INBOX_VISIBLE_SINCE_YMD = '2026-07-06';
 
-/** Medianoche de hoy en Colombia, en ms UTC. */
 export function inboxStartOfTodayMs(now = Date.now()): number {
   const ymd = new Intl.DateTimeFormat('en-CA', {
     timeZone: INBOX_HISTORY_TIMEZONE,
@@ -14,11 +14,6 @@ export function inboxStartOfTodayMs(now = Date.now()): number {
   return new Date(`${ymd}T00:00:00-05:00`).getTime();
 }
 
-export function inboxHistorySinceMs(
-  now = Date.now(),
-  days = INBOX_VISIBLE_HISTORY_DAYS,
-): number {
-  const startToday = inboxStartOfTodayMs(now);
-  const span = Math.max(1, Math.floor(days));
-  return startToday - (span - 1) * 24 * 60 * 60 * 1000;
+export function inboxHistorySinceMs(): number {
+  return new Date(`${INBOX_VISIBLE_SINCE_YMD}T00:00:00-05:00`).getTime();
 }
