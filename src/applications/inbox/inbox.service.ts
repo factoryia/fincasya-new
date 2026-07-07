@@ -9,7 +9,7 @@ import sharp from 'sharp';
 import * as path from 'path';
 import { promises as fs } from 'fs';
 import { ConvexService } from '../shared/services/convex.service';
-import { inboxStartOfTodayMs } from './inbox-history-cutoff';
+import { inboxHistorySinceMs } from './inbox-history-cutoff';
 import { S3Service } from '../shared/services/s3.service';
 import { BookingsSyncService } from '../bookings/bookings-sync.service';
 import { FincasService } from '../fincas/fincas.service';
@@ -88,10 +88,10 @@ export class InboxService {
     limit?: number;
     cursor?: string;
   }) {
-    const todayStart = inboxStartOfTodayMs();
+    const historySince = inboxHistorySinceMs();
     return this.convexService.query('conversations:list', {
       ...params,
-      lastMessageFrom: params.lastMessageFrom ?? todayStart,
+      lastMessageFrom: params.lastMessageFrom ?? historySince,
     });
   }
 
@@ -211,7 +211,7 @@ export class InboxService {
       limit: opts?.limit,
       beforeCreatedAt: opts?.beforeCreatedAt,
       beforeCreationTime: opts?.beforeCreationTime,
-      sinceCreatedAt: inboxStartOfTodayMs(),
+      sinceCreatedAt: inboxHistorySinceMs(),
     });
   }
 
