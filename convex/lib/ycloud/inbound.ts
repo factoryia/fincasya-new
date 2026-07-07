@@ -22,6 +22,7 @@ import {
   clientFlaggedUrgent,
   isWithinBusinessHours,
 } from "../businessHours";
+import type { DeliverTextResult } from "./assistantOutbound";
 
 async function isStillThisTailUserMessage(
   ctx: any,
@@ -786,7 +787,7 @@ export async function processInboundMessageV2(
       to: string;
       text: string;
       wamid?: string;
-    }) => Promise<void>;
+    }) => Promise<DeliverTextResult | void>;
     /** Envío de fichas de catálogo (WhatsApp). En canal web solo persiste en BD. */
     deliverCatalog?: (payload: {
       to: string;
@@ -805,8 +806,51 @@ export async function processInboundMessageV2(
   const deliverText =
     deps.deliverText ??
     (async (payload: { to: string; text: string; wamid?: string }) => {
-      await ctx.runAction(deps.internal.ycloud.sendWhatsAppMessage, payload);
+      return (await ctx.runAction(
+        deps.internal.ycloud.sendWhatsAppMessage,
+        payload,
+      )) as DeliverTextResult;
     });
+
+  const sendAssistantText = async (args: {
+    conversationId: Id<"conversations">;
+    to: string;
+    text: string;
+    wamid?: string;
+    createdAt?: number;
+    metadata?: Record<string, unknown>;
+  }) => {
+    const body = String(args.text ?? "").trim();
+    if (!body) return;
+    let sent: DeliverTextResult = {};
+    if ((deps.channel ?? "whatsapp") !== "web") {
+      sent = (await deliverText({
+        to: args.to,
+        text: body,
+        wamid: args.wamid,
+      })) ?? {};
+    }
+    const outboundWamid = String(sent.wamid ?? "").trim();
+    const rawStatus = String(sent.status ?? "").trim().toLowerCase();
+    const whatsappStatus =
+      rawStatus === "failed" ||
+      rawStatus === "accepted" ||
+      rawStatus === "sent" ||
+      rawStatus === "delivered" ||
+      rawStatus === "read"
+        ? rawStatus
+        : outboundWamid
+          ? ("sent" as const)
+          : undefined;
+    await ctx.runMutation(deps.internal.messages.insertAssistantMessage, {
+      conversationId: args.conversationId,
+      content: body,
+      createdAt: args.createdAt ?? Date.now(),
+      ...(args.metadata ? { metadata: args.metadata } : {}),
+      ...(outboundWamid.length > 6 ? { wamid: outboundWamid } : {}),
+      ...(whatsappStatus ? { whatsappStatus } : {}),
+    });
+  };
   const deliverCatalog =
     deps.deliverCatalog ??
     (async (payload: {
@@ -2316,16 +2360,13 @@ export async function processInboundMessageV2(
 
   if (result.replyText && !deferReplyForCatalog) {
     const replyWamid = String(args.wamid ?? "").trim();
-    await ctx.runMutation(deps.internal.messages.insertAssistantMessage, {
+    await sendAssistantText({
       conversationId,
-      content: result.replyText,
-      createdAt: Date.now(),
-      metadata: replyWamid.length > 6 ? { replyToWamid: replyWamid } : undefined,
-    });
-    await deliverText( {
       to: args.phone,
       text: result.replyText,
       wamid: args.wamid,
+      metadata:
+        replyWamid.length > 6 ? { replyToWamid: replyWamid } : undefined,
     });
   }
 
@@ -2344,12 +2385,8 @@ export async function processInboundMessageV2(
       const text = String(extra ?? "").trim();
       if (!text) continue;
       await new Promise((r) => setTimeout(r, 600));
-      await ctx.runMutation(deps.internal.messages.insertAssistantMessage, {
+      await sendAssistantText({
         conversationId,
-        content: text,
-        createdAt: Date.now(),
-      });
-      await deliverText( {
         to: args.phone,
         text,
       });
@@ -2548,12 +2585,8 @@ export async function processInboundMessageV2(
 
       // Hay fichas → ahora SÍ enviamos el pre-catálogo diferido + extras + fichas.
       if (preCatalogText) {
-        await ctx.runMutation(deps.internal.messages.insertAssistantMessage, {
+        await sendAssistantText({
           conversationId,
-          content: preCatalogText,
-          createdAt: Date.now(),
-        });
-        await deliverText( {
           to: args.phone,
           text: preCatalogText,
           wamid: args.wamid,
@@ -2563,12 +2596,8 @@ export async function processInboundMessageV2(
         const text = String(extra ?? "").trim();
         if (!text) continue;
         await new Promise((r) => setTimeout(r, 600));
-        await ctx.runMutation(deps.internal.messages.insertAssistantMessage, {
+        await sendAssistantText({
           conversationId,
-          content: text,
-          createdAt: Date.now(),
-        });
-        await deliverText( {
           to: args.phone,
           text,
         });

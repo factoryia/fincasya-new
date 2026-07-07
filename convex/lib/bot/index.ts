@@ -34,6 +34,7 @@ import { extractEntities } from "./extractor";
 import { recoverDatesFromUserHistory } from "./historyRecovery";
 import { detectPuenteReference } from "../colombiaPublicHolidays";
 import { transition } from "./transitions";
+import { dedupeGenerateReplyResult } from "../ycloud/assistantOutbound";
 import { generateReply } from "./replies";
 import { applyPetSelectionHeuristics } from "./petHeuristic";
 
@@ -795,20 +796,22 @@ export async function runBotTurn(input: BotTurnInput): Promise<BotTurnResult> {
   }
 
   // 4. Generar respuesta (puede ser 1 mensaje o un paquete de varios).
-  const generated = await generateReply({
-    currentPhase: effectivePhase,
-    transition: tr,
-    entities: updatedEntities,
-    incomingText: messageText,
-    conversationHistory: conversationHistory as CoreMessage[],
-    stayQuoteBlock,
-    stayQuoteTotals,
-    samePhaseTurnCount,
-    faqContext,
-    contactName,
-    tagFlags: input.tagFlags,
-    channel: input.channel,
-  });
+  const generated = dedupeGenerateReplyResult(
+    await generateReply({
+      currentPhase: effectivePhase,
+      transition: tr,
+      entities: updatedEntities,
+      incomingText: messageText,
+      conversationHistory: conversationHistory as CoreMessage[],
+      stayQuoteBlock,
+      stayQuoteTotals,
+      samePhaseTurnCount,
+      faqContext,
+      contactName,
+      tagFlags: input.tagFlags,
+      channel: input.channel,
+    }),
+  );
 
   // 4.5 Si en este turno se emitió el aviso de puente festivo O el aviso de
   // temporada especial (Navidad / Fin de año / Reyes), marcarlo como "ya
