@@ -10,6 +10,14 @@ export function normalizeSearchText(text: string): string {
     .trim();
 }
 
+/** Comparación `includes` insensible a mayúsculas y tildes. */
+export function normalizedIncludes(haystack: string, query: string): boolean {
+  const h = normalizeSearchText(haystack);
+  const q = normalizeSearchText(query);
+  if (!q) return true;
+  return h.includes(q);
+}
+
 function escapeRegex(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }

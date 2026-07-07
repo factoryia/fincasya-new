@@ -15,6 +15,7 @@ import { components } from './_generated/api';
 import { getConversationLastMessagePreview } from './lib/inboxMessagePreview';
 import { inboxHistorySinceMs } from './lib/inboxHistoryCutoff';
 import { jsonSafeString } from './lib/jsonSafeString';
+import { sortPropertyImages } from './lib/propertyImages';
 
 type AllowedRole =
   | 'admin'
@@ -230,7 +231,7 @@ export const listMessages = query({
         .query('propertyImages')
         .withIndex('by_property', (q) => q.eq('propertyId', propertyId as any))
         .collect();
-      const firstImg = images.sort((a, b) => (a.order ?? 0) - (b.order ?? 0))[0];
+      const firstImg = sortPropertyImages(images)[0];
       const enriched = {
         propertyName: property.title ?? '',
         location: property.location ?? '',

@@ -14,6 +14,20 @@ function escapeRegExp(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
+function normalizedIncludes(haystack: string, query: string): boolean {
+  const normalize = (text: string) =>
+    text
+      .normalize('NFKD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .replace(/ñ/g, 'n')
+      .toLowerCase()
+      .trim();
+  const h = normalize(haystack);
+  const q = normalize(query);
+  if (!q) return true;
+  return h.includes(q);
+}
+
 /** `{{` … `}}` cuyo interior, sin XML, coincide exactamente con key (p. ej. letras + nbsp) */
 function replaceByPlainInnerKey(
   xml: string,
@@ -490,9 +504,7 @@ Al confirmar tu pago, recibirás el *soporte oficial* junto con todos los detall
           const filtered =
             listDto.location
               ? results.filter((p: any) =>
-                  p.location
-                    ?.toLowerCase()
-                    .includes(listDto.location!.toLowerCase()),
+                  normalizedIncludes(p.location ?? '', listDto.location!),
                 )
               : results;
           return {

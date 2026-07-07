@@ -7,6 +7,10 @@ import {
 } from "./_generated/server";
 import type { Id } from "./_generated/dataModel";
 import { catalogPeopleCountForFilter } from "./lib/propertyCatalogCapacity";
+import {
+  fetchPropertyImages,
+  getPrimaryPropertyImageUrl,
+} from "./lib/propertyImages";
 
 /** Reglas de precio activas (misma idea que en `fincas.ts` / `calculateStayPrice`). */
 async function getActivePricingRulesForCatalog(
@@ -1039,12 +1043,8 @@ export const getPropertyByRetailerId = query({
         propertyId: link.propertyId,
       };
     }
-    const images = await ctx.db
-      .query("propertyImages")
-      .withIndex("by_property", (q) => q.eq("propertyId", link.propertyId))
-      .collect();
-    const sorted = images.sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
-    const imageUrl = sorted[0]?.url ?? "";
+    const sorted = await fetchPropertyImages(ctx, link.propertyId);
+    const imageUrl = getPrimaryPropertyImageUrl(sorted) ?? "";
     return {
       propertyName: property.title ?? "",
       location: property.location ?? "",

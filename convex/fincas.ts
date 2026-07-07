@@ -3,11 +3,19 @@ import { catalogPeopleCountForFilter } from './lib/propertyCatalogCapacity';
 import { normalizeDepartamentos } from './lib/colombiaDepartments';
 import { normalizePropertyLocation } from './lib/propertyLocation';
 import {
+  normalizedIncludes,
   parseCapacitySearchParts,
   propertyMatchesCapacitySearch,
   propertySearchRelevanceScore,
   textMatchesSearchTerm,
 } from './lib/searchText';
+import {
+  fetchPropertyImages,
+  getPrimaryPropertyImage,
+  getPrimaryPropertyImageUrl,
+  nextPropertyImageOrder,
+  sortPropertyImages,
+} from './lib/propertyImages';
 import { query, mutation } from './_generated/server';
 import { internal } from './_generated/api';
 
@@ -268,10 +276,7 @@ export const list = query({
             catalogLinks.map((link) => ctx.db.get(link.catalogId)),
           );
 
-          // Ordenar imágenes por el campo order
-          const sortedImages = images.sort(
-            (a, b) => (a.order ?? 0) - (b.order ?? 0),
-          );
+          const sortedImages = sortPropertyImages(images);
 
           return {
             ...property,
@@ -280,6 +285,7 @@ export const list = query({
             reservable: property.reservable ?? true,
             visibleInWhatsAppCatalog: property.visibleInWhatsAppCatalog ?? true,
             images: sortedImages.map((img) => img.url),
+            imageItems: sortedImages.map((img) => ({ id: img._id, url: img.url })),
             features: enrichedFeatures,
             featuredIcons: property.featuredIcons ?? [],
             pricing: await Promise.all(
@@ -412,7 +418,7 @@ export const getById = query({
     );
 
     // Ordenar imágenes por el campo order
-    const sortedImages = images.sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+    const sortedImages = sortPropertyImages(images);
 
     return {
       ...property,
@@ -709,11 +715,8 @@ export const findBySearchTerm = query({
 export const getPropertyImage = query({
   args: { propertyId: v.id('properties') },
   handler: async (ctx, args) => {
-    const images = await ctx.db
-      .query('propertyImages')
-      .withIndex('by_property', (q) => q.eq('propertyId', args.propertyId))
-      .first();
-    return images;
+    const images = await fetchPropertyImages(ctx, args.propertyId);
+    return getPrimaryPropertyImage(images);
   },
 });
 
@@ -889,7 +892,7 @@ export const getByCode = query({
     );
 
     // Ordenar imágenes por el campo order
-    const sortedImages = images.sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+    const sortedImages = sortPropertyImages(images);
 
     return {
       ...property,
@@ -1014,7 +1017,7 @@ export const getBySlug = query({
     );
 
     // Ordenar imágenes por el campo order
-    const sortedImages = images.sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+    const sortedImages = sortPropertyImages(images);
 
     return {
       ...property,
@@ -1172,14 +1175,14 @@ export const search = query({
 
     const propertiesWithDetails = await Promise.all(
       filtered.map(async (property) => {
-        const images = await ctx.db
-          .query('propertyImages')
-          .withIndex('by_property', (q) => q.eq('propertyId', property._id))
-          .first();
+        const sortedImages = await fetchPropertyImages(ctx, property._id);
+        const primaryUrl = getPrimaryPropertyImageUrl(sortedImages);
 
         return {
           ...property,
-          image: images?.url,
+          image: primaryUrl ?? undefined,
+          images: sortedImages.map((img) => img.url),
+          imageItems: sortedImages.map((img) => ({ id: img._id, url: img.url })),
         };
       }),
     );
@@ -1246,8 +1249,8 @@ export const searchAvailableByLocationAndDates = query({
   },
   handler: async (ctx, args) => {
     const limit = args.limit ?? 30;
-    const locLower = args.location.trim().toLowerCase();
-    if (!locLower) return [];
+    const locQuery = args.location.trim();
+    if (!locQuery) return [];
 
     const excludeSet = new Set(args.excludePropertyIds ?? []);
     const all = await ctx.db.query('properties').collect();
@@ -1256,7 +1259,7 @@ export const searchAvailableByLocationAndDates = query({
         p.active !== false &&
         p.visible !== false &&
         p.visibleInWhatsAppCatalog !== false &&
-        p.location.toLowerCase().includes(locLower) &&
+        normalizedIncludes(p.location, locQuery) &&
         !excludeSet.has(p._id),
     );
 
@@ -1330,15 +1333,13 @@ export const searchAvailableByLocationAndDates = query({
 
     const withDetails = await Promise.all(
       filteredAvailable.map(async (property) => {
-        const image = await ctx.db
-          .query('propertyImages')
-          .withIndex('by_property', (q: any) =>
-            q.eq('propertyId', property._id),
-          )
-          .first();
+        const sortedImages = await fetchPropertyImages(ctx, property._id);
+        const primaryUrl = getPrimaryPropertyImageUrl(sortedImages);
         return {
           ...property,
-          image: image?.url,
+          image: primaryUrl ?? undefined,
+          images: sortedImages.map((img) => img.url),
+          imageItems: sortedImages.map((img) => ({ id: img._id, url: img.url })),
         };
       }),
     );
@@ -1478,15 +1479,13 @@ export const searchAvailableByDates = query({
 
     const withDetails = await Promise.all(
       filteredAvailable.map(async (property) => {
-        const image = await ctx.db
-          .query('propertyImages')
-          .withIndex('by_property', (q: any) =>
-            q.eq('propertyId', property._id),
-          )
-          .first();
+        const sortedImages = await fetchPropertyImages(ctx, property._id);
+        const primaryUrl = getPrimaryPropertyImageUrl(sortedImages);
         return {
           ...property,
-          image: image?.url,
+          image: primaryUrl ?? undefined,
+          images: sortedImages.map((img) => img.url),
+          imageItems: sortedImages.map((img) => ({ id: img._id, url: img.url })),
         };
       }),
     );
@@ -2358,10 +2357,12 @@ export const addImage = mutation({
     order: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
+    const order =
+      args.order ?? (await nextPropertyImageOrder(ctx, args.propertyId));
     const imageId = await ctx.db.insert('propertyImages', {
       propertyId: args.propertyId,
       url: args.url,
-      order: args.order ?? 0,
+      order,
     });
 
     return imageId;
