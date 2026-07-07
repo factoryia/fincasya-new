@@ -13,6 +13,7 @@ import {
 } from "./lib/inboxContactDisplay";
 import { getConversationLastMessagePreview } from "./lib/inboxMessagePreview";
 import { jsonSafeString } from "./lib/jsonSafeString";
+import { setChannelAiEnabled } from "./lib/platformSettingsStore";
 
 function effectiveState(
   s: OperationalState | undefined,
@@ -561,11 +562,7 @@ export const setToAiPublic = mutation({
     }
     const channel = (prev.channel ?? "whatsapp") as "whatsapp" | "web";
     if (!(await isChannelAiEnabled(ctx, channel))) {
-      throw new Error(
-        channel === "web"
-          ? "La IA del chat web está desactivada. Actívala desde el panel de chats para usar el bot."
-          : "La IA de WhatsApp está desactivada. Actívala desde el panel de chats para usar el bot.",
-      );
+      await setChannelAiEnabled(ctx, channel, true);
     }
     const op = effectiveState(
       prev?.operationalState as OperationalState | undefined,
@@ -923,12 +920,16 @@ export const retryBot = action({
     }
 
     const channel = (conv.channel ?? "whatsapp") as "whatsapp" | "web";
-    const channelAiEnabled = (await ctx.runQuery(
+    let channelAiEnabled = (await ctx.runQuery(
       internal.platformSettings.isChannelAiEnabledInternal,
       { channel },
     )) as boolean;
     if (!channelAiEnabled) {
-      return { ok: false as const, reason: "ai_disabled" as const };
+      await ctx.runMutation(api.platformSettings.setChannelAiEnabledPublic, {
+        channel,
+        aiEnabled: true,
+      });
+      channelAiEnabled = true;
     }
 
     const latestMsg = (await ctx.runQuery(api.messages.getLatestUserMessage, {

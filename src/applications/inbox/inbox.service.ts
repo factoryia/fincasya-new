@@ -359,11 +359,7 @@ export class InboxService {
           ? settings?.webAiEnabled === true
           : settings?.whatsappAiEnabled === true;
       if (!channelEnabled) {
-        throw new BadRequestException(
-          channel === 'web'
-            ? 'La IA del chat web está desactivada. Actívala desde el panel de chats para usar el bot.'
-            : 'La IA de WhatsApp está desactivada. Actívala desde el panel de chats para usar el bot.',
-        );
+        await this.setChannelAiEnabled(channel, true);
       }
       return this.convexService.mutation('conversations:setToAiPublic', {
         conversationId,
