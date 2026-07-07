@@ -1148,6 +1148,12 @@ export default defineSchema({
     eventId: v.string(),
   }).index('by_event_id', ['eventId']),
 
+  /** Evita que el bot procese dos veces el mismo inbound (YCloud reintenta con otro eventId). */
+  ycloudInboundBotClaims: defineTable({
+    claimKey: v.string(),
+    createdAt: v.number(),
+  }).index('by_claim_key', ['claimKey']),
+
   /**
    * Mensajes de catálogo enviados por el bot (interactive product): wamid → product_retailer_id.
    * Permite resolver cuando el cliente responde citando una ficha (“Quiero esta”).

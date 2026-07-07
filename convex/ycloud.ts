@@ -6,7 +6,7 @@ import {
   internalQuery,
 } from "./_generated/server";
 import { internal, api } from "./_generated/api";
-import type { Id } from "./_generated/dataModel";
+import type { Doc, Id } from "./_generated/dataModel";
 import { transcribeAudio } from "./lib/transcription";
 import { classifyContractImage } from "./lib/imageClassifier";
 import {
@@ -37,6 +37,29 @@ export const recordProcessedEvent = internalMutation({
     if (existing) return { duplicate: true };
     await ctx.db.insert("ycloudProcessedEvents", { eventId: args.eventId });
     return { duplicate: false };
+  },
+});
+
+/**
+ * Claim atómico para que un inbound solo dispare UNA respuesta del bot.
+ * YCloud puede reenviar el mismo `wamid` con distinto `eventId`; sin esto,
+ * dos `processInboundMessage` en paralelo contestan dos veces al cliente.
+ */
+export const tryClaimInboundForBot = internalMutation({
+  args: { claimKey: v.string() },
+  handler: async (ctx, args) => {
+    const claimKey = String(args.claimKey ?? "").trim();
+    if (!claimKey) return { claimed: false as const };
+    const existing = await ctx.db
+      .query("ycloudInboundBotClaims")
+      .withIndex("by_claim_key", (q) => q.eq("claimKey", claimKey))
+      .first();
+    if (existing) return { claimed: false as const };
+    await ctx.db.insert("ycloudInboundBotClaims", {
+      claimKey,
+      createdAt: Date.now(),
+    });
+    return { claimed: true as const };
   },
 });
 
@@ -234,6 +257,49 @@ export const markOutboundAsHuman = internalMutation({
 });
 
 const OUTBOUND_WEBHOOK_METADATA = { source: "ycloud_outbound_webhook" as const };
+export const BOT_OUTBOUND_METADATA = { source: "bot_automation" as const };
+
+function messageMetadataRecord(
+  metadata: unknown,
+): Record<string, unknown> | undefined {
+  if (!metadata || typeof metadata !== "object" || Array.isArray(metadata)) {
+    return undefined;
+  }
+  return metadata as Record<string, unknown>;
+}
+
+/** Solo escalar a humano si el outbound NO es del bot automático. */
+function shouldMarkOutboundAsHuman(
+  convStatus: string | undefined,
+  existingMessage: {
+    sender?: string;
+    sentByUserId?: string;
+    metadata?: unknown;
+  } | null,
+): boolean {
+  if (existingMessage) {
+    const meta = messageMetadataRecord(existingMessage.metadata);
+    if (meta?.source === BOT_OUTBOUND_METADATA.source) return false;
+    if (
+      existingMessage.sender === "assistant" &&
+      !existingMessage.sentByUserId &&
+      meta?.source !== OUTBOUND_WEBHOOK_METADATA.source
+    ) {
+      return false;
+    }
+    return true;
+  }
+  // Eco nuevo sin registro previo: en modo bot asumimos envío automático.
+  return convStatus !== "ai";
+}
+
+async function readConversationStatus(
+  ctx: { db: { get: (id: Id<"conversations">) => Promise<unknown> } },
+  conversationId: Id<"conversations">,
+): Promise<string | undefined> {
+  const conv = (await ctx.db.get(conversationId)) as Doc<"conversations"> | null;
+  return conv?.status;
+}
 
 const JUNK_OUTBOUND_CONTENT = new Set([
   "[respuesta interactiva]",
@@ -292,7 +358,22 @@ export const recordOutboundFromWebhook = internalMutation({
         .withIndex("by_wamid", (q) => q.eq("wamid", wamid))
         .first();
       if (existing) {
-        await ctx.runMutation(internal.ycloud.markOutboundAsHuman, { phone });
+        const convStatus = await readConversationStatus(
+          ctx,
+          existing.conversationId,
+        );
+        if (
+          shouldMarkOutboundAsHuman(
+            convStatus,
+            existing as {
+              sender?: string;
+              sentByUserId?: string;
+              metadata?: unknown;
+            },
+          )
+        ) {
+          await ctx.runMutation(internal.ycloud.markOutboundAsHuman, { phone });
+        }
         return { ok: true as const, skipped: true as const };
       }
     }
@@ -305,7 +386,50 @@ export const recordOutboundFromWebhook = internalMutation({
       internal.ycloud.getOrCreateConversation,
       { contactId },
     );
+    const convStatus = await readConversationStatus(ctx, conversationId);
     const now = Date.now();
+
+    // El bot/inbox ya insertó el texto sin wamid; el webhook solo enlaza el wamid.
+    if (wamid.length > 6) {
+      const recent = await ctx.db
+        .query("messages")
+        .withIndex("by_conversation", (q) => q.eq("conversationId", conversationId))
+        .order("desc")
+        .take(30);
+      const normalizedIncoming = content.replace(/\s+/g, " ").trim();
+      const echo = recent.find((m) => {
+        if (m.sender !== "assistant") return false;
+        if (m.wamid && m.wamid.length > 6) return false;
+        const body = String(m.content ?? "").replace(/\s+/g, " ").trim();
+        if (body !== normalizedIncoming) return false;
+        const age = Math.abs(now - (m.createdAt ?? m._creationTime));
+        return age < 3 * 60 * 1000;
+      });
+      if (echo) {
+        await ctx.db.patch(echo._id, {
+          wamid,
+          ...(args.whatsappStatus ? { whatsappStatus: args.whatsappStatus } : {}),
+        });
+        if (
+          shouldMarkOutboundAsHuman(
+            convStatus,
+            echo as {
+              sender?: string;
+              sentByUserId?: string;
+              metadata?: unknown;
+            },
+          )
+        ) {
+          await ctx.runMutation(internal.ycloud.markOutboundAsHuman, { phone });
+        }
+        return {
+          ok: true as const,
+          skipped: true as const,
+          reason: "linked_existing" as const,
+        };
+      }
+    }
+
     const mt = args.messageType as YcloudMessageMediaType;
     const metadata = { ...OUTBOUND_WEBHOOK_METADATA };
 
@@ -334,7 +458,9 @@ export const recordOutboundFromWebhook = internalMutation({
     await ctx.runMutation(internal.conversations.updateLastMessageAt, {
       conversationId,
     });
-    await ctx.runMutation(internal.ycloud.markOutboundAsHuman, { phone });
+    if (shouldMarkOutboundAsHuman(convStatus, null)) {
+      await ctx.runMutation(internal.ycloud.markOutboundAsHuman, { phone });
+    }
     return { ok: true as const };
   },
 });

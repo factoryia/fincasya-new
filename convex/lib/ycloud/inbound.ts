@@ -846,7 +846,10 @@ export async function processInboundMessageV2(
       conversationId: args.conversationId,
       content: body,
       createdAt: args.createdAt ?? Date.now(),
-      ...(args.metadata ? { metadata: args.metadata } : {}),
+      metadata: {
+        ...(args.metadata ?? {}),
+        source: "bot_automation",
+      },
       ...(outboundWamid.length > 6 ? { wamid: outboundWamid } : {}),
       ...(whatsappStatus ? { whatsappStatus } : {}),
     });
@@ -995,6 +998,18 @@ export async function processInboundMessageV2(
   }
   if (!conv || conv.status !== "ai") return;
 
+  if (!retryMode) {
+    const claimKey =
+      inboundWamid.length > 6
+        ? `wamid:${inboundWamid}`
+        : `msg:${insertedMsgId}`;
+    const claim = (await ctx.runMutation(
+      deps.internal.ycloud.tryClaimInboundForBot,
+      { claimKey },
+    )) as { claimed: boolean };
+    if (!claim.claimed) return;
+  }
+
   // ───────────────────────────────────────────────────────────────────────
   // PRIORIDAD MÁXIMA: cliente con RESERVA VIGENTE o POR VENIR.
   //
@@ -1087,7 +1102,9 @@ export async function processInboundMessageV2(
     "reserva-activa",
   ];
   const hardEscalateTag = HARD_ESCALATE_TAGS.find((t) => convTags.includes(t));
-  if (hardEscalateTag) {
+  // Si el asesor dejó el chat en modo bot, las etiquetas son informativas: no
+  // forzar humano hasta que cambien el toggle manualmente.
+  if (hardEscalateTag && conv.status !== "ai") {
     const t0 = Date.now();
     const priority = hardEscalateTag === "cliente-grosero" ? "urgent" : "medium";
     await ctx.runMutation(deps.internal.conversations.escalate, {

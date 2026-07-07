@@ -538,7 +538,7 @@ function normalizeConversationTags(raw: string[]): string[] {
   return out;
 }
 
-/** Etiquetas de negocio (varias por conversación). */
+/** Etiquetas de negocio (varias por conversación). No modifica status ai/human. */
 export const setConversationTags = mutation({
   args: {
     conversationId: v.id("conversations"),
