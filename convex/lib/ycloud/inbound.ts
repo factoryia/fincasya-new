@@ -951,13 +951,6 @@ export async function processInboundMessageV2(
   }
   if (!conv || conv.status !== "ai") return;
 
-  const channel = deps.channel ?? "whatsapp";
-  const channelAiEnabled = (await ctx.runQuery(
-    deps.internal.platformSettings.isChannelAiEnabledInternal,
-    { channel },
-  )) as boolean;
-  if (!channelAiEnabled) return;
-
   // ───────────────────────────────────────────────────────────────────────
   // PRIORIDAD MÁXIMA: cliente con RESERVA VIGENTE o POR VENIR.
   //

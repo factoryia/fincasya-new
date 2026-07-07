@@ -344,23 +344,6 @@ export class InboxService {
 
   async setStatus(conversationId: string, status: 'ai' | 'human' | 'resolved', actorUserId?: string) {
     if (status === 'ai') {
-      const conv = await this.convexService.query('conversations:getById', {
-        conversationId,
-      });
-      if (!conv) {
-        throw new NotFoundException('Conversacion no encontrada');
-      }
-      const channel = ((conv as { channel?: string }).channel ?? 'whatsapp') as
-        | 'whatsapp'
-        | 'web';
-      const settings = await this.getAiSettings();
-      const channelEnabled =
-        channel === 'web'
-          ? settings?.webAiEnabled === true
-          : settings?.whatsappAiEnabled === true;
-      if (!channelEnabled) {
-        await this.setChannelAiEnabled(channel, true);
-      }
       return this.convexService.mutation('conversations:setToAiPublic', {
         conversationId,
       });

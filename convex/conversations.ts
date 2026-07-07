@@ -13,7 +13,6 @@ import {
 } from "./lib/inboxContactDisplay";
 import { getConversationLastMessagePreview } from "./lib/inboxMessagePreview";
 import { jsonSafeString } from "./lib/jsonSafeString";
-import { setChannelAiEnabled } from "./lib/platformSettingsStore";
 
 function effectiveState(
   s: OperationalState | undefined,
@@ -555,14 +554,9 @@ export const setConversationTags = mutation({
 export const setToAiPublic = mutation({
   args: { conversationId: v.id("conversations") },
   handler: async (ctx, args) => {
-    const { isChannelAiEnabled } = await import("./lib/platformAi");
     const prev = await ctx.db.get(args.conversationId);
     if (!prev) {
       throw new Error("Conversación no encontrada");
-    }
-    const channel = (prev.channel ?? "whatsapp") as "whatsapp" | "web";
-    if (!(await isChannelAiEnabled(ctx, channel))) {
-      await setChannelAiEnabled(ctx, channel, true);
     }
     const op = effectiveState(
       prev?.operationalState as OperationalState | undefined,
@@ -920,17 +914,6 @@ export const retryBot = action({
     }
 
     const channel = (conv.channel ?? "whatsapp") as "whatsapp" | "web";
-    let channelAiEnabled = (await ctx.runQuery(
-      internal.platformSettings.isChannelAiEnabledInternal,
-      { channel },
-    )) as boolean;
-    if (!channelAiEnabled) {
-      await ctx.runMutation(api.platformSettings.setChannelAiEnabledPublic, {
-        channel,
-        aiEnabled: true,
-      });
-      channelAiEnabled = true;
-    }
 
     const latestMsg = (await ctx.runQuery(api.messages.getLatestUserMessage, {
       conversationId: args.conversationId,
