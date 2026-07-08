@@ -11,7 +11,10 @@ import {
   contactMatchesInboxSearch,
   resolveConversationChannel,
 } from "./lib/inboxContactDisplay";
-import { getConversationLastMessagePreview } from "./lib/inboxMessagePreview";
+import {
+  effectiveInboxUnreadCount,
+  getConversationLastMessageMeta,
+} from "./lib/inboxMessagePreview";
 import { jsonSafeString } from "./lib/jsonSafeString";
 
 function effectiveState(
@@ -844,10 +847,10 @@ export const list = query({
     const withContact = await Promise.all(
       slice.map(async (c) => {
         const { inboxUnreadCount: _u, ...rest } = c;
-        const [contact, assignedUser, lastMessagePreview] = await Promise.all([
+        const [contact, assignedUser, lastMessage] = await Promise.all([
           ctx.db.get(c.contactId),
           withAssignedUser(ctx, c.assignedUserId),
-          getConversationLastMessagePreview(ctx, c._id),
+          getConversationLastMessageMeta(ctx, c._id),
         ]);
         return {
           ...rest,
@@ -862,8 +865,8 @@ export const list = query({
                 },
               }
             : {}),
-          lastMessagePreview,
-          unreadCount: _u ?? 0,
+          lastMessagePreview: lastMessage.preview,
+          unreadCount: effectiveInboxUnreadCount(_u, lastMessage.sender),
           operationalState: effectiveState(
             c.operationalState as OperationalState | undefined
           ),

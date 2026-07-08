@@ -12,7 +12,10 @@
 import { v } from 'convex/values';
 import { query, type QueryCtx } from './_generated/server';
 import { components } from './_generated/api';
-import { getConversationLastMessagePreview } from './lib/inboxMessagePreview';
+import {
+  effectiveInboxUnreadCount,
+  getConversationLastMessageMeta,
+} from './lib/inboxMessagePreview';
 import { inboxHistorySinceMs } from './lib/inboxHistoryCutoff';
 import { jsonSafeString } from './lib/jsonSafeString';
 import { sortPropertyImages } from './lib/propertyImages';
@@ -113,9 +116,9 @@ export const listConversations = query({
     // Enriquecer con el contacto y el último mensaje real (preview)
     const out = [] as Array<Record<string, unknown>>;
     for (const c of sliced) {
-      const [contact, lastMessagePreview] = await Promise.all([
+      const [contact, lastMessage] = await Promise.all([
         ctx.db.get(c.contactId),
-        getConversationLastMessagePreview(ctx, c._id),
+        getConversationLastMessageMeta(ctx, c._id),
       ]);
       const { inboxUnreadCount, ...rest } = c;
 
@@ -132,8 +135,11 @@ export const listConversations = query({
               },
             }
           : {}),
-        lastMessagePreview,
-        unreadCount: inboxUnreadCount ?? 0,
+        lastMessagePreview: lastMessage.preview,
+        unreadCount: effectiveInboxUnreadCount(
+          inboxUnreadCount,
+          lastMessage.sender,
+        ),
         contact: {
           name: jsonSafeString(
             (contact as { name?: string } | null)?.name ?? '',

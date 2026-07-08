@@ -86,8 +86,9 @@ export async function upsertGlobalAiEnabled(
     await escalateChannelAiConversationsToHuman(ctx, 'web');
     await escalateChannelAiConversationsToHuman(ctx, 'whatsapp');
   } else {
+    // WhatsApp: no reactivar conversaciones en masa.
+    // Se reactivan una a una cuando el cliente vuelve a escribir.
     await restoreChannelHumanConversationsToAi(ctx, 'web');
-    await restoreChannelHumanConversationsToAi(ctx, 'whatsapp');
   }
   return settingsId;
 }
@@ -128,7 +129,11 @@ export async function setChannelAiEnabled(
   if (!aiEnabled) {
     await escalateChannelAiConversationsToHuman(ctx, channel);
   } else {
-    await restoreChannelHumanConversationsToAi(ctx, channel);
+    // WhatsApp: no reactivar conversaciones en masa al encender el bot.
+    // Solo se pasa a IA cuando entre un nuevo mensaje del cliente.
+    if (channel !== 'whatsapp') {
+      await restoreChannelHumanConversationsToAi(ctx, channel);
+    }
   }
 
   return settingsId;

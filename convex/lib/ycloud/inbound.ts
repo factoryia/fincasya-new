@@ -52,7 +52,7 @@ async function isStillThisTailUserMessage(
   // estaba activo. Por eso lo removemos: confiamos solo en que el msg
   // insertado siga siendo el último mensaje DEL USUARIO.
   void _insertedAt;
-  const conv = await ctx.runQuery(deps.api.conversations.getById, { conversationId });
+  let conv = await ctx.runQuery(deps.api.conversations.getById, { conversationId });
   if (!conv) return false;
   const latest = (await ctx.runQuery(deps.api.messages.getLatestUserMessage, {
     conversationId,
@@ -891,6 +891,8 @@ export async function processInboundMessageV2(
 
   let contactId: Id<"contacts">;
   let conversationId: Id<"conversations">;
+  let isNewConversation = false;
+  let isReactivatedConversation = false;
 
   if (retryMode) {
     const conv = (await ctx.runQuery(deps.api.conversations.getById, {
@@ -899,6 +901,8 @@ export async function processInboundMessageV2(
     if (!conv) return;
     conversationId = args.conversationId!;
     contactId = conv.contactId;
+    isNewConversation = false;
+    isReactivatedConversation = false;
   } else {
     contactId = await ctx.runMutation(
       deps.internal.ycloud.getOrCreateContact,
@@ -909,6 +913,8 @@ export async function processInboundMessageV2(
       { contactId, channel: deps.channel ?? "whatsapp" },
     );
     conversationId = created.conversationId;
+    isNewConversation = Boolean(created.isNew);
+    isReactivatedConversation = Boolean(created.isReactivated);
   }
 
   let finalContent = args.text;
@@ -928,6 +934,11 @@ export async function processInboundMessageV2(
   if (replyToWamid) userMsgMetadata.replyToWamid = replyToWamid;
 
   let insertedMsgId: Id<"messages">;
+
+  // Se usa para evitar duplicar avisos "fuera de horario" cuando ya
+  // enviamos el mensaje temporal configurado por admin en el arranque.
+  let temporalMessageStartSent = false;
+  let temporalMessageWasSentForConversation = false;
   if (retryMode && args.existingMessageId) {
     insertedMsgId = args.existingMessageId;
     finalContent = String(args.text ?? "").trim();
@@ -984,7 +995,7 @@ export async function processInboundMessageV2(
     await new Promise((r) => setTimeout(r, INBOUND_DEBOUNCE_MS));
   }
 
-  const conv = await ctx.runQuery(deps.api.conversations.getById, { conversationId });
+  let conv = await ctx.runQuery(deps.api.conversations.getById, { conversationId });
   const latestMsg = (await ctx.runQuery(deps.api.messages.getLatestUserMessage, {
     conversationId,
     scanLimit: 50,
@@ -996,6 +1007,97 @@ export async function processInboundMessageV2(
   } else if (!latestMsg) {
     return;
   }
+
+  // ─── SCREENING DE ETIQUETAS PERSISTENTES (antes de promover human→ai) ─
+  // Debe correr mientras la conversación sigue en `human`; si promovemos a
+  // `ai` primero, etiquetas como `cliente-grosero` dejarían de escalar.
+  const convTags = Array.isArray(conv?.tags) ? conv.tags : [];
+  const HARD_ESCALATE_TAGS = [
+    "cliente-grosero",
+    "propietario",
+    "reserva-activa",
+  ];
+  const hardEscalateTag = HARD_ESCALATE_TAGS.find((t) => convTags.includes(t));
+  // Si el asesor dejó el chat en modo bot, las etiquetas son informativas: no
+  // forzar humano hasta que cambien el toggle manualmente.
+  if (hardEscalateTag && conv && conv.status !== "ai") {
+    const t0 = Date.now();
+    const priority = hardEscalateTag === "cliente-grosero" ? "urgent" : "medium";
+    await ctx.runMutation(deps.internal.conversations.escalate, {
+      conversationId,
+      operationalState: "requires_advisor" as const,
+      priority: priority as "urgent" | "medium",
+      assignedUserId:
+        process.env.CHATBOT_AUTO_ASSIGN_ADVISOR_ID?.trim() || undefined,
+    });
+    const handoffMsg =
+      hardEscalateTag === "cliente-grosero"
+        ? "Te conecto con un asesor para atenderte personalmente. Un agente te escribe en breve 🤝"
+        : hardEscalateTag === "propietario"
+          ? "¡Hola! 👋 Te conecto con el equipo administrativo para atenderte — un asesor te escribe en breve 🤝"
+          : "¡Hola! 👋 Veo que ya tienes una reserva con nosotros. Te conecto con un asesor para atenderte con prioridad 🤝";
+    await ctx.runMutation(deps.internal.messages.insertAssistantMessage, {
+      conversationId,
+      content: handoffMsg,
+      createdAt: t0,
+    });
+    await ctx.runMutation(deps.internal.messages.insertSystemMessage, {
+      conversationId,
+      content: `🏷️ Conversación etiquetada como "${hardEscalateTag}" — handoff automático al equipo correspondiente. La IA quedó en pausa.`,
+      createdAt: t0 + 5,
+      metadata: {
+        kind: "inbox_escalation_alert",
+        escalationReason: `tag_${hardEscalateTag.replace(/-/g, "_")}`,
+      },
+    });
+    await deliverText({
+      to: args.phone,
+      text: handoffMsg,
+      wamid: args.wamid,
+    });
+    await ctx.runMutation(deps.internal.conversations.updateLastMessageAt, {
+      conversationId,
+    });
+    if (priority === "urgent") {
+      await fireUrgentWebhookIfConfigured({
+        alertReason: `tag_${hardEscalateTag.replace(/-/g, "_")}`,
+        conversationId: String(conversationId),
+        contactPhone: args.phone,
+        contactName: args.name,
+        lastMessage: String(latestMsg.content ?? "").slice(0, 500),
+        team:
+          hardEscalateTag === "cliente-grosero"
+            ? "atencion-cliente"
+            : "operaciones",
+      });
+    }
+    return;
+  }
+
+  // Nuevo comportamiento WhatsApp:
+  // cuando el bot está activo NO reactivamos todas las conversaciones en masa;
+  // una conversación `human` pasa a `ai` solo cuando entra un mensaje nuevo del
+  // cliente y el canal WhatsApp tiene IA activa. Las asignadas a un asesor se
+  // quedan en humano (misma regla que al reactivar en masa el canal web).
+  if (
+    !retryMode &&
+    conv &&
+    conv.channel === "whatsapp" &&
+    conv.status === "human" &&
+    !conv.assignedUserId
+  ) {
+    const whatsappAiEnabled = (await ctx.runQuery(
+      deps.internal.platformSettings.isChannelAiEnabledInternal,
+      { channel: "whatsapp" },
+    )) as boolean;
+    if (whatsappAiEnabled) {
+      await ctx.runMutation(deps.internal.conversations.setToAi, {
+        conversationId,
+      });
+      conv = await ctx.runQuery(deps.api.conversations.getById, { conversationId });
+    }
+  }
+
   if (!conv || conv.status !== "ai") return;
 
   if (!retryMode) {
@@ -1083,78 +1185,6 @@ export async function processInboundMessageV2(
         bookingReference: activeBooking.reference,
       },
     });
-    return;
-  }
-
-  // ─── SCREENING DE ETIQUETAS PERSISTENTES ──────────────────────────────
-  // Algunas etiquetas que el equipo (o el bot) puede haber dejado sobre la
-  // conversación implican HANDOFF DURO inmediato — el bot no debe responder:
-  //   - `cliente-grosero`: previene volver a engañar / re-escalar al cliente.
-  //   - `propietario`: tag administrativo, dirigir al equipo administrativo.
-  //   - `reserva-activa`: caso operativo confirmado por el equipo aunque la
-  //     query de booking no lo haya pillado (datos desincronizados).
-  // El resto de etiquetas se traducen a `tagFlags` para que el LLM ajuste
-  // tono / paciencia / presión de cierre.
-  const convTags = Array.isArray(conv.tags) ? conv.tags : [];
-  const HARD_ESCALATE_TAGS = [
-    "cliente-grosero",
-    "propietario",
-    "reserva-activa",
-  ];
-  const hardEscalateTag = HARD_ESCALATE_TAGS.find((t) => convTags.includes(t));
-  // Si el asesor dejó el chat en modo bot, las etiquetas son informativas: no
-  // forzar humano hasta que cambien el toggle manualmente.
-  if (hardEscalateTag && conv.status !== "ai") {
-    const t0 = Date.now();
-    const priority = hardEscalateTag === "cliente-grosero" ? "urgent" : "medium";
-    await ctx.runMutation(deps.internal.conversations.escalate, {
-      conversationId,
-      operationalState: "requires_advisor" as const,
-      priority: priority as "urgent" | "medium",
-      assignedUserId:
-        process.env.CHATBOT_AUTO_ASSIGN_ADVISOR_ID?.trim() || undefined,
-    });
-    const handoffMsg =
-      hardEscalateTag === "cliente-grosero"
-        ? "Te conecto con un asesor para atenderte personalmente. Un agente te escribe en breve 🤝"
-        : hardEscalateTag === "propietario"
-          ? "¡Hola! 👋 Te conecto con el equipo administrativo para atenderte — un asesor te escribe en breve 🤝"
-          : "¡Hola! 👋 Veo que ya tienes una reserva con nosotros. Te conecto con un asesor para atenderte con prioridad 🤝";
-    await ctx.runMutation(deps.internal.messages.insertAssistantMessage, {
-      conversationId,
-      content: handoffMsg,
-      createdAt: t0,
-    });
-    await ctx.runMutation(deps.internal.messages.insertSystemMessage, {
-      conversationId,
-      content: `🏷️ Conversación etiquetada como "${hardEscalateTag}" — handoff automático al equipo correspondiente. La IA quedó en pausa.`,
-      createdAt: t0 + 5,
-      metadata: {
-        kind: "inbox_escalation_alert",
-        escalationReason: `tag_${hardEscalateTag.replace(/-/g, "_")}`,
-      },
-    });
-    await deliverText({
-      to: args.phone,
-      text: handoffMsg,
-      wamid: args.wamid,
-    });
-    await ctx.runMutation(deps.internal.conversations.updateLastMessageAt, {
-      conversationId,
-    });
-    if (priority === "urgent") {
-      await fireUrgentWebhookIfConfigured({
-        alertReason: `tag_${hardEscalateTag.replace(/-/g, "_")}`,
-        conversationId: String(conversationId),
-        contactPhone: args.phone,
-        contactName: args.name,
-        lastMessage: String(latestMsg.content ?? "").slice(0, 500),
-        team:
-          hardEscalateTag === "cliente-grosero"
-            ? "atencion-cliente"
-            : "operaciones",
-      });
-    }
     return;
   }
 
@@ -1268,6 +1298,38 @@ export async function processInboundMessageV2(
   // Quien YA autorizó alguna vez nunca vuelve a ver esta solicitud. El canal
   // web no pasa por este gate.
   // ═══════════════════════════════════════════════════════════════════════
+  if (
+    !retryMode &&
+    (isNewConversation || isReactivatedConversation) &&
+    (deps.channel ?? "whatsapp") === "whatsapp"
+  ) {
+    const temporalCfg = await ctx.runQuery(
+      deps.api.whatsappTemporalMessage.getActive,
+      {},
+    ) as null | { active?: boolean; content?: string };
+    const content = String(temporalCfg?.content ?? "").trim();
+    if (temporalCfg?.active === true && content.length > 0) {
+      const alreadySent = (await ctx.runMutation(
+        deps.internal.botSessions.markAlertFired,
+        {
+          conversationId,
+          phone: args.phone,
+          alertReason: "whatsapp_temporal_message_start_sent",
+        },
+      )) as boolean;
+      if (alreadySent) {
+        await sendAssistantText({
+          conversationId,
+          to: args.phone,
+          text: content,
+          wamid: args.wamid,
+          metadata: { source: "whatsapp_temporal_message_start" },
+        });
+        temporalMessageStartSent = true;
+      }
+    }
+  }
+
   if ((deps.channel ?? "whatsapp") === "whatsapp") {
     const consent = (await ctx.runQuery(deps.internal.contacts.getDataConsent, {
       contactId,
@@ -1609,6 +1671,12 @@ export async function processInboundMessageV2(
   const currentSamePhaseTurnCount = session?.samePhaseTurnCount ?? 0;
   const currentPhaseEnteredAt = session?.phaseEnteredAt ?? Date.now();
   let currentEntities = session?.entities ?? {};
+
+  // Persistimos el hecho de haber enviado el mensaje temporal en `botSessions`
+  // para poder reutilizarlo cuando el bot llegue al final del flujo.
+  temporalMessageWasSentForConversation = Array.isArray((session as any)?.firedAlerts)
+    ? (session as any).firedAlerts.includes("whatsapp_temporal_message_start_sent")
+    : false;
 
   // Texto de TODOS los mensajes recientes del cliente (no solo el turno
   // actual). Se usa para detectar filtros de zona que el cliente dijo turnos
@@ -2338,7 +2406,8 @@ export async function processInboundMessageV2(
   if (
     result.replyText &&
     action.type !== "escalate_human" &&
-    !isWithinBusinessHours(Date.now())
+    !isWithinBusinessHours(Date.now()) &&
+    !temporalMessageWasSentForConversation
   ) {
     const alreadyNotified = (await ctx.runMutation(
       deps.internal.botSessions.markAlertFired,
@@ -2409,6 +2478,40 @@ export async function processInboundMessageV2(
       });
     }
   }
+
+  // ─── CIERRE por mensaje temporal (fin del flujo) ──────────────────────
+  // Cuando el admin envía un mensaje temporal al inicio, el cliente debe
+  // recibir un cierre similar al final del flujo (ej. al completar contrato).
+  if (
+    temporalMessageWasSentForConversation &&
+    action.type === "escalate_human" &&
+    (action as any)?.reason === "contract_complete"
+  ) {
+    const alreadyClosing = (await ctx.runMutation(
+      deps.internal.botSessions.markAlertFired,
+      {
+        conversationId,
+        phone: args.phone,
+        alertReason: "whatsapp_temporal_message_closing_sent",
+      },
+    )) as boolean;
+
+    if (alreadyClosing) {
+      const closingText =
+        "Uno de nuestros asesores se comunicará contigo una vez nos encontremos dentro del horario laboral para continuar con tu proceso.";
+      await sendAssistantText({
+        conversationId,
+        to: args.phone,
+        text: closingText,
+        wamid: args.wamid,
+        metadata:
+          replyToWamid.length > 6
+            ? { source: "whatsapp_temporal_message_closing", replyToWamid }
+            : { source: "whatsapp_temporal_message_closing" },
+      });
+    }
+  }
+
   if (action.type === "send_catalog") {
     if (
       !(await isStillThisTailUserMessage(ctx, deps, conversationId, String(insertedMsgId), now))

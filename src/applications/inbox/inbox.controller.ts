@@ -84,6 +84,38 @@ export class InboxController {
     return this.inboxService.getAiSettings();
   }
 
+  @Get('whatsapp-temporal-message')
+  async getWhatsappTemporalMessage() {
+    return this.inboxService.getWhatsappTemporalMessageSettings();
+  }
+
+  @Patch('whatsapp-temporal-message')
+  @Roles(UserRole.ADMIN)
+  async setWhatsappTemporalMessage(
+    @Body()
+    body: {
+      enabled: boolean;
+      content: string;
+      validUntil?: number | null;
+    },
+  ) {
+    if (typeof body?.enabled !== 'boolean') {
+      throw new BadRequestException('enabled debe ser boolean');
+    }
+    if (typeof body?.content !== 'string') {
+      throw new BadRequestException('content debe ser string');
+    }
+    if (body.validUntil != null && typeof body.validUntil !== 'number') {
+      throw new BadRequestException('validUntil debe ser number|null');
+    }
+
+    return this.inboxService.setWhatsappTemporalMessageSettings({
+      enabled: body.enabled,
+      content: body.content,
+      validUntil: body.validUntil ?? null,
+    });
+  }
+
   @Patch('ai-settings')
   @Roles(UserRole.ADMIN)
   async setAiSettings(

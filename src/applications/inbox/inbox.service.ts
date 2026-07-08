@@ -154,6 +154,32 @@ export class InboxService {
     });
   }
 
+  /**
+   * Mensaje temporal automático WhatsApp (configurado por admin).
+   * GET: devuelve configuración + flag `active` calculado.
+   */
+  async getWhatsappTemporalMessageSettings() {
+    return this.convexService.query('whatsappTemporalMessage:getActive', {});
+  }
+
+  /**
+   * Actualiza el mensaje temporal WhatsApp (configurado por admin).
+   * Si `validUntil` viene vacío, se entiende "activo hasta deshabilitar".
+   */
+  async setWhatsappTemporalMessageSettings(payload: {
+    enabled: boolean;
+    content: string;
+    validUntil?: number | null;
+  }) {
+    const validUntil =
+      payload.validUntil == null ? undefined : Number(payload.validUntil);
+    return this.convexService.mutation('whatsappTemporalMessage:upsert', {
+      enabled: payload.enabled,
+      content: payload.content,
+      validUntil: Number.isFinite(validUntil ?? NaN) ? validUntil : undefined,
+    });
+  }
+
   async setAssignedUser(conversationId: string, assignedUserId: string | null, actorUserId?: string) {
     return this.convexService.mutation('conversations:setAssignedUser', {
       conversationId,

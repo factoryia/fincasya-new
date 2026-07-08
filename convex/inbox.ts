@@ -139,6 +139,9 @@ export const sendMessage = action({
         conversationId: args.conversationId,
       });
       if (args.sentByUserId) {
+        await ctx.runMutation(api.conversations.markInboxRead, {
+          conversationId: args.conversationId,
+        });
         await ctx.runMutation(internal.conversationAudit.recordEvent, {
           conversationId: args.conversationId,
           eventType: "message_sent",

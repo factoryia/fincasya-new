@@ -251,7 +251,13 @@ export const markOutboundAsHuman = internalMutation({
       .order("desc")
       .first();
     if (conv && (conv.status === "ai" || conv.status === "human")) {
-      await ctx.db.patch(conv._id, { status: "human", attended: false });
+      await ctx.db.patch(conv._id, {
+        status: "human",
+        attended: false,
+        // Si el asesor respondió desde WhatsApp, ya vio el hilo: limpiar no leídos.
+        inboxUnreadCount: 0,
+        inboxLastReadAt: Date.now(),
+      });
     }
   },
 });

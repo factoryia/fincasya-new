@@ -795,6 +795,27 @@ export default defineSchema({
     updatedByUserId: v.optional(v.string()),
   }).index('by_scope', ['scope']),
 
+  /**
+   * Mensaje temporal automático para WhatsApp.
+   * Un documento por deployment/global (scope='global') configurable desde el admin.
+   *
+   * Usado por el bot al iniciar una conversación nueva/reactivada:
+   * si existe y está activo (y/o dentro de vigencia), el sistema envía este
+   * mensaje antes de continuar con el flujo normal del chatbot.
+   */
+  whatsappTemporalMessage: defineTable({
+    scope: v.literal('global'),
+    enabled: v.boolean(),
+    content: v.string(),
+    /**
+     * Timestamp ms (Date.now()) hasta el cual el mensaje se considera activo.
+     * Si se omite/undefined, queda activo hasta que se deshabilite.
+     */
+    validUntil: v.optional(v.number()),
+    updatedAt: v.number(),
+    updatedByUserId: v.optional(v.string()),
+  }).index('by_scope', ['scope']),
+
   // Tabla de pagos
   payments: defineTable({
     bookingId: v.id('bookings'),
