@@ -185,6 +185,12 @@ export interface ReplyInput {
    */
   faqContext?: string | null;
   /**
+   * Ejemplos de TONO recuperados del playbook (`searchPlaybookForBot`). Si
+   * vienen, `contextualLlmReply` los inyecta como referencia de estilo few-shot
+   * (imitar el tono del equipo; NO copiar datos ni cambiar el flujo).
+   */
+  playbookContext?: string | null;
+  /**
    * Nombre del contacto (perfil de WhatsApp del cliente) tal como llega del
    * webhook de YCloud. Se usa SOLO para personalizar el saludo de bienvenida
    * y el short greeting del "first turn has content". El helper
@@ -387,6 +393,7 @@ export async function generateReply(
           stayQuoteBlock,
           samePhaseTurnCount: input.samePhaseTurnCount,
           faqContext: input.faqContext,
+          playbookContext: input.playbookContext,
           tagFlags: input.tagFlags,
           channel: input.channel,
         },
@@ -689,6 +696,7 @@ async function generateReplyText(input: ReplyInput): Promise<string> {
     stayQuoteBlock,
     samePhaseTurnCount,
     faqContext,
+    playbookContext,
   } = input;
 
   const alreadyGreeted =
@@ -740,6 +748,7 @@ async function generateReplyText(input: ReplyInput): Promise<string> {
     stayQuoteBlock,
     samePhaseTurnCount,
     faqContext,
+    playbookContext,
     tagFlags: input.tagFlags,
     channel: input.channel,
     alreadyGreeted,
@@ -1105,6 +1114,7 @@ async function generateReplyText(input: ReplyInput): Promise<string> {
         samePhaseTurnCount,
         contractMode: true,
         faqContext,
+        playbookContext,
         tagFlags: input.tagFlags,
         channel: input.channel,
       },
@@ -1134,6 +1144,7 @@ async function contextualLlmReply(
     samePhaseTurnCount?: number;
     contractMode?: boolean;
     faqContext?: string | null;
+    playbookContext?: string | null;
     tagFlags?: ConversationTagFlags;
     channel?: "whatsapp" | "web";
     alreadyGreeted?: boolean;
@@ -1153,6 +1164,7 @@ async function contextualLlmReply(
     stayQuoteBlock: opts.stayQuoteBlock,
     samePhaseTurnCount: opts.samePhaseTurnCount,
     ragContext: opts.faqContext,
+    playbookContext: opts.playbookContext,
     tagFlags: opts.tagFlags,
     channel: opts.channel,
     alreadyGreeted: opts.alreadyGreeted,

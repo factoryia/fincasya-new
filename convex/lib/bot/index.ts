@@ -80,6 +80,12 @@ export interface BotTurnInput {
    */
   faqContext?: string | null;
   /**
+   * Ejemplos de TONO pre-fetchados del playbook (`knowledge.searchPlaybookForBot`),
+   * ya filtrados por fase. Lo rellena `inbound.ts`. Se inyecta en el system
+   * prompt como referencia de estilo few-shot (imitar el tono del equipo).
+   */
+  playbookContext?: string | null;
+  /**
    * Nombre del contacto desde el perfil de WhatsApp (lo pasa YCloud en el
    * webhook). Se usa SOLO para personalizar el saludo de bienvenida. Si está
    * vacío o no es usable, el copy cae a "¡Hola!" sin nombre.
@@ -329,6 +335,7 @@ export async function runBotTurn(input: BotTurnInput): Promise<BotTurnResult> {
     currentSamePhaseTurnCount,
     currentPhaseEnteredAt,
     faqContext,
+    playbookContext,
     contactName,
     lastCatalogRetailerIds,
     resumeOngoingConversation,
@@ -836,6 +843,7 @@ export async function runBotTurn(input: BotTurnInput): Promise<BotTurnResult> {
       stayQuoteTotals,
       samePhaseTurnCount,
       faqContext,
+      playbookContext,
       contactName,
       tagFlags: input.tagFlags,
       channel: input.channel,

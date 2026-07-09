@@ -103,6 +103,29 @@ Hay **1 solo catálogo** (`catalogo_web`, default) con todas las fincas. El filt
 
 ---
 
+## Playbook de tono (`convex/lib/playbookSeed.ts` + namespace RAG `"playbook"`)
+
+Few-shot dinámico para que el bot hable como el equipo (no solo el párrafo
+estático `IDENTITY` "Tono: cálido"). En cada turno, `searchPlaybookForBot`
+recupera 1-2 ejemplos reales (situación → respuesta modelo) parecidos al mensaje
+del cliente y los inyecta como `playbookContext` en el system prompt.
+
+- **Reusa la MISMA instancia RAG** (`text-embedding-3-small`) con namespace
+  `"playbook"` — NO toca el namespace `"faq"`.
+- Se **embebe la situación + frases del cliente** (para el match); la respuesta
+  modelo viaja en `metadata` (no se embebe → no sesga el match).
+- **Filtro por fase**: solo recupera ejemplos de la MISMA fase del FSM (relleno
+  con `phase:"any"`); descarta otras fases → no contamina el flujo.
+- **El FSM manda el flujo; los ejemplos solo colorean el fraseo.** El prompt lo
+  enmarca: imita el TONO, NO copies datos (precios/fechas), NO cambies el flujo.
+  Los datos duros siguen viniendo de catálogo/FAQ/cotización, nunca del ejemplo.
+- Carril: `inbound.ts → index.ts → replies.ts → prompts.ts` (calca `faqContext`).
+- **Curación** (al añadir chats reales): anonimizar (sin tel/cédula/nombres), sin
+  cifras de precio, NUNCA "un asesor te &lt;verbo&gt;", etiquetar `phase`.
+- Re-sembrar tras editar: `bunx convex run knowledge:seedPlaybookEntries`.
+
+---
+
 ## Gotchas
 
 - **Fechas pasadas**: `transitions.ts` bloquea con `datesInPast` antes de cotizar.

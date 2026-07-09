@@ -2246,6 +2246,26 @@ export async function processInboundMessageV2(
     );
   }
 
+  // Pre-fetch del PLAYBOOK DE TONO: ejemplos de cómo responde el equipo en una
+  // situación parecida a la del cliente, filtrados por la fase actual del FSM.
+  // Se inyecta como referencia de estilo few-shot en el system prompt (el LLM
+  // imita el tono, no copia datos ni cambia el flujo). Degrada en silencio si
+  // falla (el bot sigue con su tono base).
+  let playbookContext: string | null = null;
+  try {
+    const pb = (await ctx.runAction(deps.api.knowledge.searchPlaybookForBot, {
+      query: textForTurn,
+      phase: currentPhase,
+    })) as { text?: string; count?: number } | null;
+    const pbText = String(pb?.text ?? "").trim();
+    if (pbText) playbookContext = pbText;
+  } catch (err) {
+    console.error(
+      "inbound: searchPlaybookForBot fallo (degradado, sigue sin tono):",
+      err,
+    );
+  }
+
   const result = await deps.runBotTurn({
     messageText: textForTurn,
     currentPhase,
@@ -2255,6 +2275,7 @@ export async function processInboundMessageV2(
     currentPhaseEnteredAt,
     resumeOngoingConversation,
     faqContext,
+    playbookContext,
     contactName: args.name,
     lastCatalogRetailerIds,
     tagFlags,

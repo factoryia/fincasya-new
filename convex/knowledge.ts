@@ -19,6 +19,7 @@ import {
 import { paginationOptsValidator } from 'convex/server';
 import { extractTextContent } from './lib/extractTextContent';
 import { FAQ_INITIAL_SEED } from './lib/faqSeed';
+import { PLAYBOOK_SEED } from './lib/playbookSeed';
 import rag from './rag';
 import type { Id } from './_generated/dataModel';
 import { api, internal } from './_generated/api';
@@ -34,6 +35,15 @@ const DEFAULT_NAMESPACE = 'fincas';
  * de políticas y no descripciones de propiedades.
  */
 export const FAQ_NAMESPACE = 'faq';
+
+/**
+ * Namespace del "playbook" de TONO: ejemplos few-shot (situación → respuesta
+ * modelo del equipo) que el bot recupera en tiempo real para responder con la
+ * voz de FincasYa. NO guarda datos duros ni controla el flujo (ver
+ * `./lib/playbookSeed.ts`). Fuente única de la semilla: `PLAYBOOK_SEED`.
+ * Re-sembrar tras editar: `bunx convex run knowledge:seedPlaybookEntries`.
+ */
+export const PLAYBOOK_NAMESPACE = 'playbook';
 
 // La semilla de FAQs (`FAQ_INITIAL_SEED`) vive en `./lib/faqSeed` — fuente
 // única de verdad. `knowledge.ts` la siembra en el RAG; `inbound.ts` la usa
@@ -761,6 +771,153 @@ export const seedFaqEntries = action({
         } as EntryMetadata,
       });
       keys.push(entry.key);
+      if (created) inserted += 1;
+      else reused += 1;
+    }
+
+    return { inserted, reused, keys };
+  },
+});
+
+/**
+ * Búsqueda del PLAYBOOK DE TONO para el bot (sin auth — corre en webhook).
+ *
+ * A diferencia de `searchFaqForBot` (que recupera HECHOS), esto recupera
+ * EJEMPLOS DE ESTILO: cómo respondería el equipo en una situación parecida a la
+ * del cliente. El texto que devuelve se inyecta en el system prompt como
+ * referencia de tono (few-shot), NO como datos ni como instrucción de flujo.
+ *
+ * - Embebemos situación + frases del cliente → matchea el mensaje entrante.
+ * - Preferimos ejemplos de la MISMA fase del FSM (con relleno de fase "any");
+ *   los de otra fase concreta se descartan para no contaminar el flujo.
+ * - Umbral 0.30 (más laxo que el FAQ): el tono matchea situaciones, no datos.
+ */
+export const searchPlaybookForBot = action({
+  args: {
+    query: v.string(),
+    /** Fase actual del FSM (para preferir ejemplos de la misma etapa). */
+    phase: v.optional(v.string()),
+    minScore: v.optional(v.number()),
+    limit: v.optional(v.number()),
+  },
+  handler: async (
+    ctx,
+    args,
+  ): Promise<{ text: string; count: number }> => {
+    const query = String(args.query ?? '').trim();
+    if (query.length < 3) return { text: '', count: 0 };
+
+    const minScore = args.minScore ?? 0.3;
+    const wantPhase = String(args.phase ?? '').trim();
+
+    try {
+      const searchResult = await rag.search(ctx, {
+        namespace: PLAYBOOK_NAMESPACE,
+        query,
+        // Traemos varios y filtramos por fase abajo (corpus pequeño).
+        limit: args.limit ?? 8,
+      });
+
+      const results = searchResult.results ?? [];
+      const entries = searchResult.entries ?? [];
+
+      // Mejor score por entry (un entry puede tener varios chunks).
+      const bestScoreByEntry = new Map<string, number>();
+      for (const r of results) {
+        const prev = bestScoreByEntry.get(r.entryId) ?? -1;
+        if (r.score > prev) bestScoreByEntry.set(r.entryId, r.score);
+      }
+
+      // Lee un campo string de metadata de forma segura (metadata es
+      // `Record<string, unknown>`; evita `no-base-to-string` sobre `unknown`).
+      const readStr = (v: unknown): string =>
+        typeof v === 'string' ? v.trim() : '';
+
+      type Candidate = {
+        score: number;
+        phase: string;
+        situation: string;
+        response: string;
+      };
+      const candidates: Candidate[] = entries
+        .map((e): Candidate => {
+          const md = (e.metadata ?? {}) as Record<string, unknown>;
+          return {
+            score: bestScoreByEntry.get(e.entryId) ?? 0,
+            phase: readStr(md.phase) || 'any',
+            situation: readStr(md.situation) || readStr(e.title),
+            response: readStr(md.response),
+          };
+        })
+        .filter((c) => c.response.length > 0 && c.score >= minScore);
+
+      // Preferimos MISMA fase; rellenamos con "any". Otras fases concretas se
+      // descartan a propósito (evita copiar el fraseo de otra etapa del flujo).
+      const byScore = (a: Candidate, b: Candidate): number => b.score - a.score;
+      const samePhase = candidates
+        .filter((c) => c.phase === wantPhase)
+        .sort(byScore);
+      const anyPhase = candidates
+        .filter((c) => c.phase === 'any' && c.phase !== wantPhase)
+        .sort(byScore);
+      const chosen = [...samePhase, ...anyPhase].slice(0, 2);
+
+      if (chosen.length === 0) return { text: '', count: 0 };
+
+      const text = chosen
+        .map(
+          (c, i) =>
+            `Ejemplo ${i + 1} — situación: ${c.situation}\nAsí lo diría el equipo:\n"${c.response}"`,
+        )
+        .join('\n\n———\n\n');
+
+      return { text, count: chosen.length };
+    } catch (err) {
+      console.error('searchPlaybookForBot fallo:', err);
+      return { text: '', count: 0 };
+    }
+  },
+});
+
+/**
+ * Siembra (idempotente) el PLAYBOOK DE TONO en el namespace `"playbook"`.
+ *
+ * Uso: `bunx convex run knowledge:seedPlaybookEntries`
+ *
+ * El `key` es estable por ejemplo, así que re-correrlo reemplaza el entry
+ * existente (no duplica). Fuente única de la semilla: `PLAYBOOK_SEED`.
+ */
+export const seedPlaybookEntries = action({
+  args: {
+    namespace: v.optional(v.string()),
+  },
+  handler: async (
+    ctx,
+    args,
+  ): Promise<{ inserted: number; reused: number; keys: string[] }> => {
+    const namespace = args.namespace ?? PLAYBOOK_NAMESPACE;
+    const keys: string[] = [];
+    let inserted = 0;
+    let reused = 0;
+
+    for (const ex of PLAYBOOK_SEED) {
+      // Embebemos situación + frases del cliente (lo que matchea el mensaje
+      // entrante). La respuesta modelo viaja SOLO en metadata (no se embebe),
+      // para que el match no se sesgue por el texto de la respuesta.
+      const text = [ex.situation, ...ex.clientExamples].join('\n');
+      const { created } = await rag.add(ctx, {
+        namespace,
+        text,
+        key: ex.key,
+        title: ex.situation.slice(0, 80),
+        metadata: {
+          phase: ex.phase,
+          situation: ex.situation,
+          response: ex.response,
+          tags: ex.tags,
+        },
+      });
+      keys.push(ex.key);
       if (created) inserted += 1;
       else reused += 1;
     }
