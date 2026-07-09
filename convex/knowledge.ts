@@ -19,7 +19,7 @@ import {
 import { paginationOptsValidator } from 'convex/server';
 import { extractTextContent } from './lib/extractTextContent';
 import { FAQ_INITIAL_SEED } from './lib/faqSeed';
-import { PLAYBOOK_SEED } from './lib/playbookSeed';
+import { PLAYBOOK_NAMESPACE } from './lib/playbookSeed';
 import rag from './rag';
 import type { Id } from './_generated/dataModel';
 import { api, internal } from './_generated/api';
@@ -36,14 +36,9 @@ const DEFAULT_NAMESPACE = 'fincas';
  */
 export const FAQ_NAMESPACE = 'faq';
 
-/**
- * Namespace del "playbook" de TONO: ejemplos few-shot (situación → respuesta
- * modelo del equipo) que el bot recupera en tiempo real para responder con la
- * voz de FincasYa. NO guarda datos duros ni controla el flujo (ver
- * `./lib/playbookSeed.ts`). Fuente única de la semilla: `PLAYBOOK_SEED`.
- * Re-sembrar tras editar: `bunx convex run knowledge:seedPlaybookEntries`.
- */
-export const PLAYBOOK_NAMESPACE = 'playbook';
+// El namespace del playbook (`PLAYBOOK_NAMESPACE`) vive en `./lib/playbookSeed`
+// para evitar ciclos de import (lo comparten `searchPlaybookForBot` aquí y el
+// CRUD admin en `convex/playbook.ts`).
 
 // La semilla de FAQs (`FAQ_INITIAL_SEED`) vive en `./lib/faqSeed` — fuente
 // única de verdad. `knowledge.ts` la siembra en el RAG; `inbound.ts` la usa
@@ -876,53 +871,6 @@ export const searchPlaybookForBot = action({
       console.error('searchPlaybookForBot fallo:', err);
       return { text: '', count: 0 };
     }
-  },
-});
-
-/**
- * Siembra (idempotente) el PLAYBOOK DE TONO en el namespace `"playbook"`.
- *
- * Uso: `bunx convex run knowledge:seedPlaybookEntries`
- *
- * El `key` es estable por ejemplo, así que re-correrlo reemplaza el entry
- * existente (no duplica). Fuente única de la semilla: `PLAYBOOK_SEED`.
- */
-export const seedPlaybookEntries = action({
-  args: {
-    namespace: v.optional(v.string()),
-  },
-  handler: async (
-    ctx,
-    args,
-  ): Promise<{ inserted: number; reused: number; keys: string[] }> => {
-    const namespace = args.namespace ?? PLAYBOOK_NAMESPACE;
-    const keys: string[] = [];
-    let inserted = 0;
-    let reused = 0;
-
-    for (const ex of PLAYBOOK_SEED) {
-      // Embebemos situación + frases del cliente (lo que matchea el mensaje
-      // entrante). La respuesta modelo viaja SOLO en metadata (no se embebe),
-      // para que el match no se sesgue por el texto de la respuesta.
-      const text = [ex.situation, ...ex.clientExamples].join('\n');
-      const { created } = await rag.add(ctx, {
-        namespace,
-        text,
-        key: ex.key,
-        title: ex.situation.slice(0, 80),
-        metadata: {
-          phase: ex.phase,
-          situation: ex.situation,
-          response: ex.response,
-          tags: ex.tags,
-        },
-      });
-      keys.push(ex.key);
-      if (created) inserted += 1;
-      else reused += 1;
-    }
-
-    return { inserted, reused, keys };
   },
 });
 

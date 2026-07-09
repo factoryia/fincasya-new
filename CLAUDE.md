@@ -122,7 +122,22 @@ del cliente y los inyecta como `playbookContext` en el system prompt.
 - Carril: `inbound.ts → index.ts → replies.ts → prompts.ts` (calca `faqContext`).
 - **Curación** (al añadir chats reales): anonimizar (sin tel/cédula/nombres), sin
   cifras de precio, NUNCA "un asesor te &lt;verbo&gt;", etiquetar `phase`.
-- Re-sembrar tras editar: `bunx convex run knowledge:seedPlaybookEntries`.
+
+**Módulo de entrenamiento** (fuente editable, NO solo la semilla en código):
+- Tabla `playbookExemplars` = fuente de verdad; el RAG es el índice DERIVADO (solo
+  los `enabled`). Al guardar/borrar se sincroniza (`convex/playbook.ts`).
+- CRUD + análisis con IA en `convex/playbook.ts` (internal), expuesto por
+  `/api/playbook/{list,upsert,delete,enabled,sync,conversations,conversation,analyze}`
+  en `http.ts` (X-API-Key, calca el patrón de knowledge).
+- Panel: `/admin/playbook` en **FincasYaWeb** — 3 tabs: Ejemplos (gestionar),
+  Nuevo/Editar, y **Desde conversaciones**: el asesor busca/selecciona
+  conversaciones REALES del sistema; `analyzeConversationsForDraft` las lee
+  completas (1ª msg → cierre) y propone ejemplos. **Aprende el tono SOLO de los
+  mensajes del asesor humano**, discriminados por `messages.sentByUserId`
+  (assistant + sentByUserId = humano; sin él = bot). NO se pega texto a mano.
+- `searchPlaybookForBot` sigue en `knowledge.ts` (junto a `searchFaqForBot`).
+- Sembrar/re-sembrar la semilla base: `bunx convex run playbook:seedFromCode`
+  (siembra la tabla + sincroniza al RAG; idempotente por `key`).
 
 ---
 

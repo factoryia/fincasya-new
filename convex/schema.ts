@@ -1715,4 +1715,29 @@ export default defineSchema({
     createdAt: v.number(),
   })
     .index('by_created', ['createdAt']),
+
+  // Ejemplos del PLAYBOOK DE TONO (few-shot). Fuente EDITABLE desde el panel;
+  // se sincroniza al RAG (namespace "playbook") para que el bot los recupere.
+  // Ver convex/playbook.ts y convex/lib/playbookSeed.ts.
+  playbookExemplars: defineTable({
+    /** Clave estable única (idempotencia con el RAG + edición). */
+    key: v.string(),
+    /** Fase del FSM ("welcome"…"done") o "any". */
+    phase: v.string(),
+    /** Descripción de la situación (se embebe para el match). */
+    situation: v.string(),
+    /** Frases típicas del cliente (mejoran el match). */
+    clientExamples: v.array(v.string()),
+    /** Respuesta modelo con el tono del equipo (lo que se inyecta). */
+    response: v.string(),
+    tags: v.array(v.string()),
+    /** Si false, se conserva en la tabla pero se SACA del índice RAG. */
+    enabled: v.boolean(),
+    /** Origen: "seed" | "manual" | "conversation". */
+    source: v.string(),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index('by_key', ['key'])
+    .index('by_enabled', ['enabled']),
 });

@@ -23,6 +23,13 @@
  * por el equipo. Tras editar: `bunx convex run knowledge:seedPlaybookEntries`.
  */
 
+/**
+ * Namespace del "playbook" de TONO en el RAG. Vive aquí (archivo sin deps) para
+ * que tanto `knowledge.ts` (búsqueda del bot) como `playbook.ts` (CRUD admin) lo
+ * importen sin crear ciclos.
+ */
+export const PLAYBOOK_NAMESPACE = "playbook";
+
 /** Fases del FSM del bot + "any" (aplica en cualquier fase). Igual a `BotPhase`
  *  pero declarado local para no acoplar la semilla al módulo del bot. */
 export type PlaybookPhase =

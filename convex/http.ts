@@ -786,6 +786,204 @@ http.route({
   }),
 });
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Endpoints REST del PLAYBOOK DE TONO (módulo de entrenamiento del bot).
+// Mismo patrón que la Base de Conocimiento: X-API-Key, proxeado por el front
+// (FincasYaWeb/app/api/playbook/*). Lógica en `convex/playbook.ts`.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Lista todos los ejemplos del playbook (habilitados primero). */
+http.route({
+  path: '/api/playbook/list',
+  method: 'GET',
+  handler: httpAction(async (ctx, request) => {
+    const denied = requireYCloudApiKey(request);
+    if (denied) return denied;
+    const items = await ctx.runQuery(internal.playbook.listForAdmin, {});
+    return jsonResponse({ items }, 200);
+  }),
+});
+
+/** Crea o edita un ejemplo (por `key`) y lo sincroniza al RAG. */
+http.route({
+  path: '/api/playbook/upsert',
+  method: 'POST',
+  handler: httpAction(async (ctx, request) => {
+    const denied = requireYCloudApiKey(request);
+    if (denied) return denied;
+
+    let body: {
+      key?: string;
+      phase?: string;
+      situation?: string;
+      clientExamples?: unknown;
+      response?: string;
+      tags?: unknown;
+      enabled?: boolean;
+      source?: string;
+    };
+    try {
+      body = (await request.json()) as typeof body;
+    } catch {
+      return jsonResponse({ error: 'Body JSON inválido' }, 400);
+    }
+
+    const situation = String(body?.situation ?? '').trim();
+    const response = String(body?.response ?? '').trim();
+    if (!situation || !response) {
+      return jsonResponse(
+        { error: 'Se requieren `situation` y `response`' },
+        400,
+      );
+    }
+    const toStringArray = (val: unknown): string[] =>
+      Array.isArray(val)
+        ? val.map((x) => String(x ?? '').trim()).filter(Boolean)
+        : [];
+
+    const result = await ctx.runAction(internal.playbook.upsertForAdmin, {
+      key: body?.key?.trim() || undefined,
+      phase: String(body?.phase ?? 'any').trim() || 'any',
+      situation,
+      clientExamples: toStringArray(body?.clientExamples),
+      response,
+      tags: toStringArray(body?.tags),
+      enabled: typeof body?.enabled === 'boolean' ? body.enabled : undefined,
+      source: body?.source?.trim() || undefined,
+    });
+    return jsonResponse(result, 200);
+  }),
+});
+
+/** Borra un ejemplo (tabla + RAG). */
+http.route({
+  path: '/api/playbook/delete',
+  method: 'POST',
+  handler: httpAction(async (ctx, request) => {
+    const denied = requireYCloudApiKey(request);
+    if (denied) return denied;
+    let body: { key?: string };
+    try {
+      body = (await request.json()) as typeof body;
+    } catch {
+      return jsonResponse({ error: 'Body JSON inválido' }, 400);
+    }
+    const key = String(body?.key ?? '').trim();
+    if (!key) return jsonResponse({ error: '`key` requerido' }, 400);
+    await ctx.runAction(internal.playbook.deleteForAdmin, { key });
+    return jsonResponse({ ok: true }, 200);
+  }),
+});
+
+/** Habilita/deshabilita un ejemplo (deshabilitado = fuera del índice). */
+http.route({
+  path: '/api/playbook/enabled',
+  method: 'POST',
+  handler: httpAction(async (ctx, request) => {
+    const denied = requireYCloudApiKey(request);
+    if (denied) return denied;
+    let body: { key?: string; enabled?: boolean };
+    try {
+      body = (await request.json()) as typeof body;
+    } catch {
+      return jsonResponse({ error: 'Body JSON inválido' }, 400);
+    }
+    const key = String(body?.key ?? '').trim();
+    if (!key) return jsonResponse({ error: '`key` requerido' }, 400);
+    if (typeof body?.enabled !== 'boolean') {
+      return jsonResponse({ error: '`enabled` (boolean) requerido' }, 400);
+    }
+    const result = await ctx.runAction(internal.playbook.setEnabledForAdmin, {
+      key,
+      enabled: body.enabled,
+    });
+    return jsonResponse(result, 200);
+  }),
+});
+
+/** Lista/busca conversaciones reales para el selector de entrenamiento. */
+http.route({
+  path: '/api/playbook/conversations',
+  method: 'GET',
+  handler: httpAction(async (ctx, request) => {
+    const denied = requireYCloudApiKey(request);
+    if (denied) return denied;
+    const url = new URL(request.url);
+    const search = url.searchParams.get('search')?.trim() || undefined;
+    const cursor = url.searchParams.get('cursor') || null;
+    const numItemsRaw = parseInt(url.searchParams.get('numItems') ?? '25', 10);
+    const numItems = Number.isFinite(numItemsRaw) ? numItemsRaw : 25;
+    const result = await ctx.runQuery(
+      internal.playbook.listConversationsForTraining,
+      { search, cursor, numItems },
+    );
+    return jsonResponse(result, 200);
+  }),
+});
+
+/** Mensajes de una conversación (preview antes de analizar). */
+http.route({
+  path: '/api/playbook/conversation',
+  method: 'GET',
+  handler: httpAction(async (ctx, request) => {
+    const denied = requireYCloudApiKey(request);
+    if (denied) return denied;
+    const url = new URL(request.url);
+    const conversationId = url.searchParams.get('conversationId')?.trim();
+    if (!conversationId) {
+      return jsonResponse({ error: '`conversationId` requerido' }, 400);
+    }
+    const data = await ctx.runQuery(
+      internal.playbook.getConversationMessagesForTraining,
+      { conversationId: conversationId as never },
+    );
+    if (!data) return jsonResponse({ error: 'Conversación no encontrada' }, 404);
+    return jsonResponse(data, 200);
+  }),
+});
+
+/** Analiza conversaciones seleccionadas con IA → borradores de ejemplos. */
+http.route({
+  path: '/api/playbook/analyze',
+  method: 'POST',
+  handler: httpAction(async (ctx, request) => {
+    const denied = requireYCloudApiKey(request);
+    if (denied) return denied;
+    let body: { conversationIds?: unknown };
+    try {
+      body = (await request.json()) as typeof body;
+    } catch {
+      return jsonResponse({ error: 'Body JSON inválido' }, 400);
+    }
+    const ids = Array.isArray(body?.conversationIds)
+      ? body.conversationIds.map((x) => String(x ?? '').trim()).filter(Boolean)
+      : [];
+    if (ids.length === 0) {
+      return jsonResponse(
+        { error: 'Selecciona al menos una conversación' },
+        400,
+      );
+    }
+    const result = await ctx.runAction(
+      internal.playbook.analyzeConversationsForDraft,
+      { conversationIds: ids as never },
+    );
+    return jsonResponse(result, 200);
+  }),
+});
+
+/** Re-sincroniza TODA la tabla con el RAG (reindexar). */
+http.route({
+  path: '/api/playbook/sync',
+  method: 'POST',
+  handler: httpAction(async (ctx, request) => {
+    const denied = requireYCloudApiKey(request);
+    if (denied) return denied;
+    const result = await ctx.runAction(internal.playbook.syncAllToRag, {});
+    return jsonResponse(result, 200);
+  }),
+});
+
 /** Ajustes globales del contrato (cuentas bancarias, cláusulas, etc.). */
 http.route({
   path: '/api/admin/contract-settings',
