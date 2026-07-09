@@ -270,8 +270,10 @@ export function followUpCatalogSentVagueMessage(): string {
 
 export const IDENTITY = `
 Eres Hernán, asesor comercial de FincasYa.com — plataforma de alquiler de fincas y casas campestres en Colombia.
-Tono: amable, cálido, profesional. Nunca robótico. Usa emojis con moderación.
+Tono: cercano, cálido y empático, como un asesor humano de confianza. Nunca robótico ni frío.
 Idioma: español colombiano.
+Antes de dar una política o restricción, reconoce brevemente lo que el cliente expresó o su situación.
+Si hay una limitación, explícala con empatía y ofrece alternativa cuando exista.
 Nunca inventes precios ni información técnica que no tengas en el contexto.
 `.trim();
 
@@ -280,8 +282,10 @@ Nunca inventes precios ni información técnica que no tengas en el contexto.
 export const IDENTITY_WEB = `
 Eres el asistente virtual de FincasYa.com — plataforma de alquiler de fincas y casas campestres en Colombia.
 NO te presentes con un nombre de persona (no eres "Hernán"); eres el asistente virtual del sitio.
-Tono: amable, cálido, profesional. Nunca robótico. Usa emojis con moderación.
+Tono: cercano, cálido y empático, como un asesor humano de confianza. Nunca robótico ni frío.
 Idioma: español colombiano.
+Antes de dar una política o restricción, reconoce brevemente lo que el cliente expresó o su situación.
+Si hay una limitación, explícala con empatía y ofrece alternativa cuando exista.
 Nunca inventes precios ni información técnica que no tengas en el contexto.
 `.trim();
 
@@ -292,11 +296,16 @@ export function identityForChannel(channel?: "whatsapp" | "web"): string {
 
 export const GLOBAL_RULES = `
 REGLAS GLOBALES:
-- Sé breve. Máximo 3-4 líneas por respuesta salvo que el cliente pida detalles.
+- Sé breve pero humano: 2-4 líneas salvo que el cliente pida detalles.
+- Primero demuestra que entendiste lo que el cliente acaba de decir; luego responde o pide el dato.
+- Si hay restricción (mínimo de noches, temporada, cupo, etc.), muestra empatía antes de la política y ofrece alternativa si existe.
+- Usa el nombre del cliente cuando lo tengas disponible.
+- No repitas saludos si ya saludaste antes en esta conversación.
 - No repitas preguntas que el cliente ya respondió.
 - No menciones campos técnicos como "isEvento", "checkIn", "cupo".
 - Si el cliente pregunta algo fuera de tema (fútbol, política, etc.), redirige amablemente.
 - Nunca muestres JSON, IDs internos, ni términos técnicos al cliente.
+- Usa emojis con moderación (1-2 por mensaje como máximo).
 `.trim();
 
 /**
@@ -477,6 +486,39 @@ export interface ContextSystemPromptOpts {
   tagFlags?: ConversationTagFlags;
   /** Canal: en `web` la identidad es "asistente virtual" (no "Hernán"). */
   channel?: "whatsapp" | "web";
+  /** Si ya hubo saludo del bot en el hilo, no volver a saludar. */
+  alreadyGreeted?: boolean;
+  /** Nombre del contacto para personalizar el tono. */
+  contactName?: string | null;
+}
+
+const GREETING_MARKERS =
+  /te escribe hern[aá]n|asistente virtual de fincasya|es un gusto saludarte|te saluda \*?hern[aá]n|soy tu \*?asistente virtual|^¡?hola\b/i;
+
+/** ¿El bot ya saludó en este hilo? */
+export function hasBotGreetedInHistory(
+  history: Array<{ role: string; content?: unknown }>,
+): boolean {
+  for (let i = history.length - 1; i >= 0; i--) {
+    const m = history[i];
+    if (m.role !== "assistant") continue;
+    const raw = m.content;
+    const content =
+      typeof raw === "string"
+        ? raw.trim()
+        : Array.isArray(raw)
+          ? raw
+              .map((p) =>
+                typeof p === "object" && p && "text" in p
+                  ? String((p as { text?: string }).text ?? "")
+                  : "",
+              )
+              .join(" ")
+              .trim()
+          : "";
+    if (content && GREETING_MARKERS.test(content)) return true;
+  }
+  return false;
 }
 
 /**
@@ -572,11 +614,22 @@ export function buildContextSystemPrompt(
     PET_RULES_KNOWLEDGE,
     "",
     "INSTRUCCIONES PARA TU RESPUESTA:",
-    "- Responde primero al mensaje del cliente (resolver duda, aclarar, reconocer cambio de plan).",
+    "- Responde primero al mensaje del cliente (reconoce su situación o inquietud antes de la política).",
     "- Cierra recordando brevemente el siguiente paso del proceso (lo de SIGUIENTE PASO de arriba), en una sola frase corta.",
-    "- Máximo 3 líneas. Tono natural, no robótico.",
+    "- Máximo 3-4 líneas. Tono natural, cordial y profesional — no plantilla fría.",
     "- Si el cliente saluda o repite algo, NO reenvíes los bloques largos que ya enviamos antes; solo recuerda el siguiente paso de forma breve.",
   );
+
+  if (opts.alreadyGreeted) {
+    sections.push(
+      "- Ya saludaste a este cliente en esta conversación: NO vuelvas a decir hola ni te presentes de nuevo.",
+    );
+  }
+
+  const firstName = firstNameForGreeting(opts.contactName);
+  if (firstName) {
+    sections.push(`- Puedes llamarlo/a "${firstName}" cuando encaje de forma natural.`);
+  }
 
   if (stuck) {
     sections.push(

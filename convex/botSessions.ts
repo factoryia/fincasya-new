@@ -83,6 +83,59 @@ export const findRecentCommercialByPhone = internalQuery({
  * Marca alertas como YA disparadas en la sesión (idempotencia para
  * `flagPriorityAlert`). Si la sesión no existe todavía, se crea vacía.
  */
+/** Tras toggle humano→bot en inbox: el próximo inbound reanuda contexto sin bienvenida. */
+export const setPendingResumeFromHuman = internalMutation({
+  args: {
+    conversationId: v.id("conversations"),
+    phone: v.string(),
+  },
+  handler: async (ctx, args) => {
+    const now = Date.now();
+    const existing = await ctx.db
+      .query("botSessions")
+      .withIndex("by_conversation", (q) =>
+        q.eq("conversationId", args.conversationId),
+      )
+      .first();
+    if (existing) {
+      await ctx.db.patch(existing._id, {
+        pendingResumeFromHuman: true,
+        updatedAt: now,
+      });
+      return;
+    }
+    await ctx.db.insert("botSessions", {
+      conversationId: args.conversationId,
+      phone: args.phone,
+      phase: "welcome",
+      entities: {},
+      turnCount: 0,
+      pendingResumeFromHuman: true,
+      createdAt: now,
+      updatedAt: now,
+    });
+  },
+});
+
+/** Lee y limpia el flag de reanudación manual (toggle humano→bot). */
+export const consumePendingResumeFromHuman = internalMutation({
+  args: { conversationId: v.id("conversations") },
+  handler: async (ctx, args) => {
+    const existing = await ctx.db
+      .query("botSessions")
+      .withIndex("by_conversation", (q) =>
+        q.eq("conversationId", args.conversationId),
+      )
+      .first();
+    if (!existing?.pendingResumeFromHuman) return false;
+    await ctx.db.patch(existing._id, {
+      pendingResumeFromHuman: undefined,
+      updatedAt: Date.now(),
+    });
+    return true;
+  },
+});
+
 export const markAlertFired = internalMutation({
   args: {
     conversationId: v.id("conversations"),

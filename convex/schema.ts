@@ -1435,6 +1435,8 @@ export default defineSchema({
      * estadía larga turno tras turno → alerta sola UNA vez).
      */
     firedAlerts: v.optional(v.array(v.string())),
+    /** Tras pasar manualmente de humano→bot en inbox: reanudar contexto en el próximo inbound. */
+    pendingResumeFromHuman: v.optional(v.boolean()),
     createdAt: v.number(),
     updatedAt: v.number(),
   })

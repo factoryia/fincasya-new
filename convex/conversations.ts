@@ -248,6 +248,23 @@ export const flagPriorityAlert = internalMutation({
 /**
  * Pasar a modo IA: la IA vuelve a responder automáticamente.
  */
+async function markBotResumeFromHumanIfNeeded(
+  ctx: { db: any; runMutation: any },
+  conversationId: Id<"conversations">,
+  prevStatus?: string,
+) {
+  if (prevStatus !== "human") return;
+  const conv = await ctx.db.get(conversationId);
+  if (!conv) return;
+  const contact = await ctx.db.get(conv.contactId);
+  const phone = String(contact?.phone ?? "").trim();
+  if (!phone) return;
+  await ctx.runMutation(internal.botSessions.setPendingResumeFromHuman, {
+    conversationId,
+    phone,
+  });
+}
+
 export const setToAi = internalMutation({
   args: { conversationId: v.id("conversations") },
   handler: async (ctx, args) => {
@@ -262,6 +279,7 @@ export const setToAi = internalMutation({
       patch.operationalState = DEFAULT_OPERATIONAL_STATE;
     }
     await ctx.db.patch(args.conversationId, patch);
+    await markBotResumeFromHumanIfNeeded(ctx, args.conversationId, prev?.status);
   },
 });
 
@@ -571,6 +589,7 @@ export const setToAiPublic = mutation({
       patch.operationalState = DEFAULT_OPERATIONAL_STATE;
     }
     await ctx.db.patch(args.conversationId, patch);
+    await markBotResumeFromHumanIfNeeded(ctx, args.conversationId, prev?.status);
   },
 });
 

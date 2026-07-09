@@ -37,6 +37,7 @@ import {
   buildContextSystemPrompt,
   LOOP_OFFER_HUMAN_MESSAGE,
   nextStepFriendlyQuestion,
+  hasBotGreetedInHistory,
 } from "./prompts";
 import {
   buildPuenteExplanationEs,
@@ -368,6 +369,10 @@ export async function generateReply(
 
   const text = await generateReplyText(input);
 
+  const alreadyGreeted =
+    hasBotGreetedInHistory(conversationHistory) ||
+    Boolean(input.resumeOngoingConversation);
+
   // Si el cliente envió datos útiles en el PRIMER mensaje (fase=welcome), el
   // flujo saltó el WELCOME_MESSAGE y respondió directamente con catálogo /
   // missing fields / puente. Anteponemos un saludo corto para que no se
@@ -383,7 +388,7 @@ export async function generateReply(
       // La transición avanzó más allá de welcome/collecting en el primer turno
       // (ej. el cliente nombró una finca puntual → va directo a pet_check).
       (tr.nextPhase !== "welcome" && tr.nextPhase !== "collecting"));
-  if (firstTurnHasContent && !input.resumeOngoingConversation) {
+  if (firstTurnHasContent && !input.resumeOngoingConversation && !alreadyGreeted) {
     const greeting = buildShortGreeting(input.contactName, input.channel);
     // Si además el cliente hizo una pregunta clara en su primer mensaje
     // (`faqContext` poblado por el RAG), la respondemos como PRIMERA burbuja
@@ -656,6 +661,10 @@ async function generateReplyText(input: ReplyInput): Promise<string> {
     faqContext,
   } = input;
 
+  const alreadyGreeted =
+    hasBotGreetedInHistory(conversationHistory) ||
+    Boolean(input.resumeOngoingConversation);
+
   // PAGINACIÓN DEL CATÁLOGO: si el cliente pidió "ver más opciones" y el
   // guard de `index.ts` sobrescribió `tr` con `action: send_catalog +
   // paginate: true`, devolvemos el texto pre-catálogo de paginación INMEDIA-
@@ -697,15 +706,19 @@ async function generateReplyText(input: ReplyInput): Promise<string> {
     currentPhase = "collecting";
   }
 
+  const llmContextOpts = {
+    stayQuoteBlock,
+    samePhaseTurnCount,
+    faqContext,
+    tagFlags: input.tagFlags,
+    channel: input.channel,
+    alreadyGreeted,
+    contactName: input.contactName,
+  };
+
   // Helper local: cae al LLM con contexto enriquecido cuando el static-text ya se envió.
   const fallback = (): Promise<string> =>
-    contextualLlmReply(currentPhase, entities, conversationHistory, incomingText, {
-      stayQuoteBlock,
-      samePhaseTurnCount,
-      faqContext,
-      tagFlags: input.tagFlags,
-      channel: input.channel,
-    });
+    contextualLlmReply(currentPhase, entities, conversationHistory, incomingText, llmContextOpts);
 
   // Si el static candidate ya se envió en los últimos turnos → ir directo al LLM.
   const respond = async (candidate: string, depth = 5): Promise<string> => {
@@ -771,7 +784,7 @@ async function generateReplyText(input: ReplyInput): Promise<string> {
   }
 
   // ── Bienvenida pura ───────────────────────────────────────────────────────
-  if (currentPhase === "welcome" && !input.resumeOngoingConversation) {
+  if (currentPhase === "welcome" && !input.resumeOngoingConversation && !alreadyGreeted) {
     // Personalizamos con el primer nombre del contacto (si YCloud lo trajo).
     // El anti-repetición compara contra el WELCOME_MESSAGE genérico (alias),
     // así que aunque el texto personalizado difiera en los primeros 50 chars
@@ -1078,6 +1091,8 @@ async function contextualLlmReply(
     faqContext?: string | null;
     tagFlags?: ConversationTagFlags;
     channel?: "whatsapp" | "web";
+    alreadyGreeted?: boolean;
+    contactName?: string | null;
   } = {},
 ): Promise<string> {
   // Anti-bucle suave: si el cliente lleva varios turnos atascado SIN APORTAR DATOS,
@@ -1095,6 +1110,8 @@ async function contextualLlmReply(
     ragContext: opts.faqContext,
     tagFlags: opts.tagFlags,
     channel: opts.channel,
+    alreadyGreeted: opts.alreadyGreeted,
+    contactName: opts.contactName,
   });
 
   const system = opts.contractMode
@@ -1109,8 +1126,8 @@ async function contextualLlmReply(
         ...history.slice(-10),
         { role: "user", content: userMessage },
       ],
-      temperature: 0.4,
-      maxTokens: 350,
+      temperature: 0.5,
+      maxTokens: 400,
     });
     const out = text.trim();
     // Defensa final: si el LLM por accidente reescribe un bloque ya enviado, lo cortamos.

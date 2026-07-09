@@ -27,6 +27,8 @@ import { bootstrapBotStateFromHistory } from "../bot/conversationBootstrap";
 
 /** Plantilla de consentimiento (Ley 1581) — deshabilitada por ahora. */
 const WHATSAPP_DATA_CONSENT_ENABLED = false;
+/** Mensaje temporal al iniciar conversación (admin) — deshabilitado en pruebas. */
+const WHATSAPP_TEMPORAL_START_MESSAGE_ENABLED = false;
 
 async function isStillThisTailUserMessage(
   ctx: any,
@@ -1106,6 +1108,14 @@ export async function processInboundMessageV2(
 
   if (!conv || conv.status !== "ai") return;
 
+  if (!retryMode && !resumingFromHuman) {
+    const manualResume = (await ctx.runMutation(
+      deps.internal.botSessions.consumePendingResumeFromHuman,
+      { conversationId },
+    )) as boolean;
+    if (manualResume) resumingFromHuman = true;
+  }
+
   if (!retryMode) {
     const claimKey =
       inboundWamid.length > 6
@@ -1305,6 +1315,7 @@ export async function processInboundMessageV2(
   // web no pasa por este gate.
   // ═══════════════════════════════════════════════════════════════════════
   if (
+    WHATSAPP_TEMPORAL_START_MESSAGE_ENABLED &&
     !retryMode &&
     (isNewConversation || isReactivatedConversation) &&
     (deps.channel ?? "whatsapp") === "whatsapp"
