@@ -124,6 +124,11 @@ export interface BotTurnInput {
    * viene, se asume whatsapp (comportamiento histórico).
    */
   channel?: "whatsapp" | "web";
+  /**
+   * Conversación en curso (asesor humano o historial previo): no enviar
+   * bienvenida genérica ni tratar como cliente nuevo.
+   */
+  resumeOngoingConversation?: boolean;
 }
 
 /** Si el cliente lleva más de N turnos consecutivos en la misma fase sin avanzar,
@@ -326,6 +331,7 @@ export async function runBotTurn(input: BotTurnInput): Promise<BotTurnResult> {
     faqContext,
     contactName,
     lastCatalogRetailerIds,
+    resumeOngoingConversation,
   } = input;
 
   // 1. Extraer entidades del mensaje actual
@@ -496,7 +502,11 @@ export async function runBotTurn(input: BotTurnInput): Promise<BotTurnResult> {
   // (no de la fase anterior) para que la lógica de `transition` no intente
   // avanzar usando la sesión vieja.
   const effectivePhase: BotPhase =
-    wantsNewQuote || autoRebroadcastCatalog ? "collecting" : currentPhase;
+    wantsNewQuote || autoRebroadcastCatalog
+      ? "collecting"
+      : resumeOngoingConversation && currentPhase === "welcome"
+        ? "collecting"
+        : currentPhase;
 
   updatedEntities = applyPetSelectionHeuristics(
     messageText,
@@ -810,6 +820,7 @@ export async function runBotTurn(input: BotTurnInput): Promise<BotTurnResult> {
       contactName,
       tagFlags: input.tagFlags,
       channel: input.channel,
+      resumeOngoingConversation,
     }),
   );
 

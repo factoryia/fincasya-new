@@ -4,6 +4,7 @@ import { internal, api } from "./_generated/api";
 import { transcribeAudio } from "./lib/transcription";
 import { classifyContractImage } from "./lib/imageClassifier";
 import { processInboundMessageV2 } from "./lib/ycloud/inbound";
+import { findContactByPhone } from "./lib/contactLookup";
 
 function webPhone(sessionId: string): string {
   return `web:${sessionId.trim()}`;
@@ -21,10 +22,7 @@ export const listMessagesForSession = internalQuery({
       return { conversationId: null, messages: [] as Array<Record<string, unknown>> };
     }
 
-    const contact = await ctx.db
-      .query("contacts")
-      .withIndex("by_phone", (q) => q.eq("phone", webPhone(sid)))
-      .unique();
+    const contact = await findContactByPhone(ctx, webPhone(sid));
     if (!contact) {
       return { conversationId: null, messages: [] as Array<Record<string, unknown>> };
     }

@@ -26,6 +26,10 @@ import {
   normalizeWhatsappPhone,
   type YcloudMessageMediaType,
 } from "./lib/ycloud/parseMessage";
+import {
+  findContactByPhone,
+  listContactsByPhone,
+} from "./lib/contactLookup";
 
 export const recordProcessedEvent = internalMutation({
   args: { eventId: v.string() },
@@ -123,10 +127,7 @@ export const persistInboundFromWebhook = internalMutation({
       phone,
       String(args.customerName ?? "").trim() || phone,
     );
-    const existingContact = await ctx.db
-      .query("contacts")
-      .withIndex("by_phone", (q) => q.eq("phone", phone))
-      .unique();
+    const existingContact = await findContactByPhone(ctx, phone);
     const now = Date.now();
     const contactId: Id<"contacts"> = existingContact
       ? existingContact._id
@@ -191,10 +192,7 @@ export const getOrCreateContact = internalMutation({
   args: { phone: v.string(), name: v.string() },
   handler: async (ctx, args) => {
     const displayName = displayNameForContact(args.phone, args.name);
-    const existing = await ctx.db
-      .query("contacts")
-      .withIndex("by_phone", (q) => q.eq("phone", args.phone))
-      .unique();
+    const existing = await findContactByPhone(ctx, args.phone);
     const now = Date.now();
     if (existing) {
       if (args.phone.startsWith("web:")) {
@@ -240,24 +238,24 @@ export const markOutboundAsHuman = internalMutation({
   handler: async (ctx, args) => {
     const phone = normalizeWhatsappPhone(args.phone);
     if (!phone) return;
-    const contact = await ctx.db
-      .query("contacts")
-      .withIndex("by_phone", (q) => q.eq("phone", phone))
-      .unique();
-    if (!contact) return;
-    const conv = await ctx.db
-      .query("conversations")
-      .withIndex("by_contact", (q) => q.eq("contactId", contact._id))
-      .order("desc")
-      .first();
-    if (conv && (conv.status === "ai" || conv.status === "human")) {
-      await ctx.db.patch(conv._id, {
-        status: "human",
-        attended: false,
-        // Si el asesor respondió desde WhatsApp, ya vio el hilo: limpiar no leídos.
-        inboxUnreadCount: 0,
-        inboxLastReadAt: Date.now(),
-      });
+    const contacts = await listContactsByPhone(ctx, phone);
+    if (contacts.length === 0) return;
+    const now = Date.now();
+    for (const contact of contacts) {
+      const conv = await ctx.db
+        .query("conversations")
+        .withIndex("by_contact", (q) => q.eq("contactId", contact._id))
+        .order("desc")
+        .first();
+      if (conv && (conv.status === "ai" || conv.status === "human")) {
+        await ctx.db.patch(conv._id, {
+          status: "human",
+          attended: false,
+          // Si el asesor respondió desde WhatsApp, ya vio el hilo: limpiar no leídos.
+          inboxUnreadCount: 0,
+          inboxLastReadAt: now,
+        });
+      }
     }
   },
 });

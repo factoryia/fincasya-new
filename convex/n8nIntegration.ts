@@ -2,6 +2,7 @@ import { v } from "convex/values";
 import { mutation, query } from "./_generated/server";
 import { internal } from "./_generated/api";
 import type { Id } from "./_generated/dataModel";
+import { findContactByPhone } from "./lib/contactLookup";
 
 /** Mismo criterio que el webhook YCloud: `evt.from` suele venir en E.164 con +. */
 function normalizeWhatsappPhone(raw: string): string {
@@ -171,10 +172,7 @@ export const getN8nBotReplyAllowed = query({
   ): Promise<{ runBot: boolean; conversationStatus: string | null }> => {
     const phone = normalizeWhatsappPhone(args.phone);
     if (!phone) return { runBot: true, conversationStatus: null };
-    const contact = await ctx.db
-      .query("contacts")
-      .withIndex("by_phone", (q) => q.eq("phone", phone))
-      .unique();
+    const contact = await findContactByPhone(ctx, phone);
     if (!contact) return { runBot: true, conversationStatus: null };
     const conv = await ctx.db
       .query("conversations")
@@ -207,10 +205,7 @@ export const resumeAiByPhoneFromN8n = mutation({
   ): Promise<{ ok: true } | { ok: false; reason: string }> => {
     const phone = normalizeWhatsappPhone(args.phone);
     if (!phone) return { ok: false, reason: "phone inválido" };
-    const contact = await ctx.db
-      .query("contacts")
-      .withIndex("by_phone", (q) => q.eq("phone", phone))
-      .unique();
+    const contact = await findContactByPhone(ctx, phone);
     if (!contact) return { ok: false, reason: "contacto no encontrado" };
     const conv = await ctx.db
       .query("conversations")

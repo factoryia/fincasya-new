@@ -23,6 +23,10 @@ import {
   isWithinBusinessHours,
 } from "../businessHours";
 import type { DeliverTextResult } from "./assistantOutbound";
+import { bootstrapBotStateFromHistory } from "../bot/conversationBootstrap";
+
+/** Plantilla de consentimiento (Ley 1581) — deshabilitada por ahora. */
+const WHATSAPP_DATA_CONSENT_ENABLED = false;
 
 async function isStillThisTailUserMessage(
   ctx: any,
@@ -893,6 +897,7 @@ export async function processInboundMessageV2(
   let conversationId: Id<"conversations">;
   let isNewConversation = false;
   let isReactivatedConversation = false;
+  let resumingFromHuman = false;
 
   if (retryMode) {
     const conv = (await ctx.runQuery(deps.api.conversations.getById, {
@@ -1091,6 +1096,7 @@ export async function processInboundMessageV2(
       { channel: "whatsapp" },
     )) as boolean;
     if (whatsappAiEnabled) {
+      resumingFromHuman = true;
       await ctx.runMutation(deps.internal.conversations.setToAi, {
         conversationId,
       });
@@ -1330,7 +1336,10 @@ export async function processInboundMessageV2(
     }
   }
 
-  if ((deps.channel ?? "whatsapp") === "whatsapp") {
+  if (
+    WHATSAPP_DATA_CONSENT_ENABLED &&
+    (deps.channel ?? "whatsapp") === "whatsapp"
+  ) {
     const consent = (await ctx.runQuery(deps.internal.contacts.getDataConsent, {
       contactId,
     })) as null | {
@@ -1667,7 +1676,7 @@ export async function processInboundMessageV2(
   }
 
   const session = await ctx.runQuery(deps.internal.botSessions.getByConversation, { conversationId });
-  const currentPhase = session?.phase ?? "welcome";
+  let currentPhase = session?.phase ?? "welcome";
   const currentSamePhaseTurnCount = session?.samePhaseTurnCount ?? 0;
   const currentPhaseEnteredAt = session?.phaseEnteredAt ?? Date.now();
   let currentEntities = session?.entities ?? {};
@@ -2075,7 +2084,7 @@ export async function processInboundMessageV2(
 
   const recentMsgs = (await ctx.runQuery(deps.api.messages.listRecent, {
     conversationId,
-    limit: 12,
+    limit: 30,
   })) as Array<{ sender?: string; content?: string }>;
   const history = recentMsgs
     .filter((m) => m.sender === "user" || m.sender === "assistant")
@@ -2083,6 +2092,20 @@ export async function processInboundMessageV2(
       role: (m.sender === "assistant" ? "assistant" : "user") as "user" | "assistant",
       content: String(m.content ?? ""),
     }));
+
+  const bootstrapped = await bootstrapBotStateFromHistory({
+    currentPhase,
+    currentEntities,
+    conversationHistory: history,
+    recentUserText,
+    forceResume:
+      retryMode ||
+      resumingFromHuman ||
+      (!isNewConversation && !isReactivatedConversation),
+  });
+  currentPhase = bootstrapped.phase;
+  currentEntities = bootstrapped.entities;
+  const resumeOngoingConversation = bootstrapped.resumeOngoingConversation;
 
   // Pre-fetch RAG (FAQs) si el mensaje parece una pregunta. Si no es pregunta,
   // ahorramos la llamada de embeddings + vector search.
@@ -2219,6 +2242,7 @@ export async function processInboundMessageV2(
     conversationHistory: history,
     currentSamePhaseTurnCount,
     currentPhaseEnteredAt,
+    resumeOngoingConversation,
     faqContext,
     contactName: args.name,
     lastCatalogRetailerIds,

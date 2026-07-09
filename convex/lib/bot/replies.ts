@@ -191,6 +191,8 @@ export interface ReplyInput {
    * sin nombre.
    */
   contactName?: string | null;
+  /** Reanudar conversación con historial: sin bienvenida genérica. */
+  resumeOngoingConversation?: boolean;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -381,7 +383,7 @@ export async function generateReply(
       // La transición avanzó más allá de welcome/collecting en el primer turno
       // (ej. el cliente nombró una finca puntual → va directo a pet_check).
       (tr.nextPhase !== "welcome" && tr.nextPhase !== "collecting"));
-  if (firstTurnHasContent) {
+  if (firstTurnHasContent && !input.resumeOngoingConversation) {
     const greeting = buildShortGreeting(input.contactName, input.channel);
     // Si además el cliente hizo una pregunta clara en su primer mensaje
     // (`faqContext` poblado por el RAG), la respondemos como PRIMERA burbuja
@@ -691,6 +693,9 @@ async function generateReplyText(input: ReplyInput): Promise<string> {
   if (firstTurnHasContent) {
     currentPhase = "collecting";
   }
+  if (input.resumeOngoingConversation && currentPhase === "welcome") {
+    currentPhase = "collecting";
+  }
 
   // Helper local: cae al LLM con contexto enriquecido cuando el static-text ya se envió.
   const fallback = (): Promise<string> =>
@@ -766,7 +771,7 @@ async function generateReplyText(input: ReplyInput): Promise<string> {
   }
 
   // ── Bienvenida pura ───────────────────────────────────────────────────────
-  if (currentPhase === "welcome") {
+  if (currentPhase === "welcome" && !input.resumeOngoingConversation) {
     // Personalizamos con el primer nombre del contacto (si YCloud lo trajo).
     // El anti-repetición compara contra el WELCOME_MESSAGE genérico (alias),
     // así que aunque el texto personalizado difiera en los primeros 50 chars

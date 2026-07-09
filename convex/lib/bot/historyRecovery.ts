@@ -58,12 +58,41 @@ export function recoverDatesFromUserHistory(
 
   const re =
     /(?:del\s*)?(\d{1,2})\s*al\s*(\d{1,2})\s*de\s*(enero|febrero|marzo|abril|mayo|junio|julio|agosto|septiembre|octubre|noviembre|diciembre)/i;
+  const reSlashRange =
+    /(\d{1,2})[/.-](\d{1,2})[/.-](\d{4})\s*[-–]\s*(\d{1,2})[/.-](\d{1,2})[/.-](\d{4})/;
 
   for (const m of userMsgs) {
     const t = String(m.content ?? "")
       .toLowerCase()
       .normalize("NFD")
       .replace(/\p{M}/gu, "");
+
+    const slash = t.match(reSlashRange);
+    if (slash) {
+      const d1 = parseInt(slash[1], 10);
+      const m1 = parseInt(slash[2], 10);
+      const y1 = parseInt(slash[3], 10);
+      const d2 = parseInt(slash[4], 10);
+      const m2 = parseInt(slash[5], 10);
+      const y2 = parseInt(slash[6], 10);
+      if (
+        d1 >= 1 &&
+        d1 <= 31 &&
+        d2 >= 1 &&
+        d2 <= 31 &&
+        m1 >= 1 &&
+        m1 <= 12 &&
+        m2 >= 1 &&
+        m2 <= 12
+      ) {
+        const checkIn = toYmd(y1, m1, d1);
+        const checkOut = toYmd(y2, m2, d2);
+        if (new Date(checkIn) < new Date(checkOut)) {
+          return { checkIn, checkOut };
+        }
+      }
+    }
+
     const match = t.match(re);
     if (!match) continue;
 
