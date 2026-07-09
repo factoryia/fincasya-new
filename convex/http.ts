@@ -913,11 +913,19 @@ http.route({
     const cursor = url.searchParams.get('cursor') || null;
     const numItemsRaw = parseInt(url.searchParams.get('numItems') ?? '25', 10);
     const numItems = Number.isFinite(numItemsRaw) ? numItemsRaw : 25;
-    const result = await ctx.runQuery(
-      internal.playbook.listConversationsForTraining,
-      { search, cursor, numItems },
-    );
-    return jsonResponse(result, 200);
+    try {
+      const result = await ctx.runQuery(
+        internal.playbook.listConversationsForTraining,
+        { search, cursor, numItems },
+      );
+      return jsonResponse(result, 200);
+    } catch (err) {
+      console.error('[playbook/conversations] error:', err);
+      return jsonResponse(
+        { error: 'No se pudieron listar las conversaciones' },
+        500,
+      );
+    }
   }),
 });
 

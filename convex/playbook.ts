@@ -68,17 +68,35 @@ function embedTextFor(situation: string, clientExamples: string[]): string {
 }
 
 /** Quita surrogates UTF-16 sueltos (medio emoji). Sin ellos, Convex no puede
- *  serializar el string a JSON ("unexpected end of hex escape"). `\p{Surrogate}`
- *  con flag `u` solo matchea surrogates SIN pareja (deja los emoji válidos). */
+ *  serializar el string a JSON ("unexpected end of hex escape"). Implementación
+ *  manual: no depende de `\p{Surrogate}` (soporte variable en runtimes). */
 function stripLoneSurrogates(str: string): string {
-  return str.replace(/\p{Surrogate}/gu, "");
+  if (!str) return "";
+  let out = "";
+  for (let i = 0; i < str.length; i++) {
+    const code = str.charCodeAt(i);
+    if (code >= 0xd800 && code <= 0xdbff) {
+      const next = i + 1 < str.length ? str.charCodeAt(i + 1) : 0;
+      if (next >= 0xdc00 && next <= 0xdfff) {
+        out += str[i] + str[i + 1];
+        i++;
+      }
+    } else if (code < 0xdc00 || code > 0xdfff) {
+      out += str[i];
+    }
+  }
+  return out;
 }
 
 /** Trunca por CODE POINTS (no parte pares de surrogates) y limpia sueltos. */
 function safeSlice(str: string, max: number): string {
-  const cps = Array.from(str);
-  const sliced = cps.length <= max ? str : cps.slice(0, max).join("");
-  return stripLoneSurrogates(sliced);
+  const cps = Array.from(stripLoneSurrogates(str));
+  return cps.length <= max ? cps.join("") : cps.slice(0, max).join("");
+}
+
+function sanitizeText(str: string, maxLen?: number): string {
+  const cleaned = stripLoneSurrogates(str ?? "");
+  return maxLen == null ? cleaned : safeSlice(cleaned, maxLen);
 }
 
 /** Genera una clave estable a partir de la situación (+ sufijo corto único). */
@@ -384,8 +402,8 @@ export const listConversationsForTraining = internalQuery({
     const items: TrainingConversation[] = [];
     for (const c of result.page) {
       const contact = await ctx.db.get(c.contactId);
-      const contactName = stripLoneSurrogates(contact?.name ?? "Sin nombre");
-      const phone = contact?.phone ?? "";
+      const contactName = sanitizeText(contact?.name ?? "Sin nombre");
+      const phone = sanitizeText(contact?.phone ?? "");
       if (search && !`${contactName} ${phone}`.toLowerCase().includes(search)) {
         continue;
       }
@@ -398,11 +416,11 @@ export const listConversationsForTraining = internalQuery({
         conversationId: c._id,
         contactName,
         phone,
-        channel: c.channel,
-        status: c.status,
-        tags: c.tags ?? [],
+        channel: sanitizeText(c.channel),
+        status: sanitizeText(c.status),
+        tags: (c.tags ?? []).map((tag) => sanitizeText(String(tag))),
         lastMessageAt: c.lastMessageAt ?? c.createdAt,
-        lastPreview: safeSlice(
+        lastPreview: sanitizeText(
           (lastMsg?.content ?? "").replace(/\s+/g, " ").trim(),
           90,
         ),
@@ -447,13 +465,13 @@ export const getConversationMessagesForTraining = internalQuery({
       .order("asc")
       .collect();
     return {
-      contactName: stripLoneSurrogates(contact?.name ?? "Sin nombre"),
-      phone: contact?.phone ?? "",
+      contactName: sanitizeText(contact?.name ?? "Sin nombre"),
+      phone: sanitizeText(contact?.phone ?? ""),
       messages: msgs.map((m) => ({
-        sender: m.sender,
+        sender: sanitizeText(m.sender),
         isHuman: m.sentByUserId != null,
-        content: stripLoneSurrogates(m.content),
-        type: m.type ?? "text",
+        content: sanitizeText(m.content),
+        type: sanitizeText(m.type ?? "text"),
         createdAt: m.createdAt,
       })),
     };
