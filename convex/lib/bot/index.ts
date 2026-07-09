@@ -31,7 +31,7 @@ import {
 } from "./entities";
 import { petsExceedLimitMessage } from "./prompts";
 import { extractEntities } from "./extractor";
-import { recoverDatesFromUserHistory } from "./historyRecovery";
+import { recoverDatesFromUserHistory, recoverRelativeDatesFromText, recoverRelativeDatesFromUserHistory } from "./historyRecovery";
 import { detectPuenteReference } from "../colombiaPublicHolidays";
 import { transition } from "./transitions";
 import { dedupeGenerateReplyResult } from "../ycloud/assistantOutbound";
@@ -447,6 +447,25 @@ export async function runBotTurn(input: BotTurnInput): Promise<BotTurnResult> {
     ...(!updatedEntities.checkIn && recovered.checkIn ? { checkIn: recovered.checkIn } : {}),
     ...(!updatedEntities.checkOut && recovered.checkOut ? { checkOut: recovered.checkOut } : {}),
   });
+
+  // Fechas coloquiales ("este fin de semana", "sábado al lunes") tienen prioridad
+  // sobre el extractor cuando el cliente las repite o aclara.
+  const nowMs = Date.now();
+  const relativeFromMsg = recoverRelativeDatesFromText(messageText, nowMs);
+  const relativeFromHistory = recoverRelativeDatesFromUserHistory(
+    conversationHistory,
+    nowMs,
+  );
+  const relative =
+    relativeFromMsg.checkIn && relativeFromMsg.checkOut
+      ? relativeFromMsg
+      : relativeFromHistory;
+  if (relative.checkIn && relative.checkOut) {
+    updatedEntities = mergeEntities(updatedEntities, {
+      checkIn: relative.checkIn,
+      checkOut: relative.checkOut,
+    });
+  }
 
   // Si las fechas cambiaron en este turno, el aviso de puente vuelve a ser válido
   // (porque el bloqueo aplicaba a las fechas anteriores).

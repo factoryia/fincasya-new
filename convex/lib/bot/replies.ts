@@ -209,6 +209,35 @@ function normalizeForCompare(s: string): string {
     .replace(/\s+/g, " ");
 }
 
+/** Cliente molesto, corrige algo o rechaza — preferir LLM contextual. */
+function isClientFrustratedOrPushingBack(text: string): boolean {
+  const t = normalizeForCompare(text);
+  return /\b(ya te dije|te estoy diciendo|como asi|que no|no me interesa|robot|pesimo|p[eé]simo|imposible|sin contexto|mal servicio|no entiend|hablando con un robot|vuelve y lo|otra vez lo mismo|que servicio)\b/.test(
+    t,
+  );
+}
+
+/** Mensaje con datos de reserva (fechas, cupo, etc.) — no interrumpir con FAQs. */
+function messageLooksLikeBookingDetails(text: string): boolean {
+  const t = normalizeForCompare(text);
+  return /\b(fin de semana|finde|sabado|domingo|lunes|entrando|salida|salir|personas|somos\s+\d+|noches|cupo|estad[ií]a|alquilar|finca)\b/.test(
+    t,
+  );
+}
+
+function shouldPreferContextualLlm(
+  incomingText: string,
+  history: CoreMessage[],
+  staticBlock?: string,
+): boolean {
+  if (isClientFrustratedOrPushingBack(incomingText)) return true;
+  if (messageLooksLikeBookingDetails(incomingText) && staticBlock?.includes("a partir de ma")) {
+    return true;
+  }
+  if (staticBlock && recentlySent(staticBlock, history, 2)) return true;
+  return false;
+}
+
 /**
  * Devuelve true si el bot envió un mensaje "muy parecido" en los últimos `depth`
  * mensajes del asistente. Compara los primeros 80 caracteres normalizados.
@@ -477,7 +506,8 @@ export async function generateReply(
   if (
     (currentPhase === "welcome" || currentPhase === "collecting") &&
     faqLiteralCompound.length >= 30 &&
-    text.trim().length > 0
+    text.trim().length > 0 &&
+    !messageLooksLikeBookingDetails(input.incomingText)
   ) {
     return { reply: faqLiteralCompound, extras: [text] };
   }
@@ -783,6 +813,10 @@ async function generateReplyText(input: ReplyInput): Promise<string> {
     return fallback();
   }
 
+  if (isClientFrustratedOrPushingBack(incomingText)) {
+    return fallback();
+  }
+
   // ── Bienvenida pura ───────────────────────────────────────────────────────
   if (currentPhase === "welcome" && !input.resumeOngoingConversation && !alreadyGreeted) {
     // Personalizamos con el primer nombre del contacto (si YCloud lo trajo).
@@ -822,10 +856,21 @@ async function generateReplyText(input: ReplyInput): Promise<string> {
     // generarlo). Repetir la pregunta de fechas es correcto y necesario; el
     // anti-bucle de `index.ts` (con `madeProgress` bloqueado por fechas
     // incoherentes) escala a un asesor si el cliente nunca las corrige.
-    // Fechas en el pasado: bloqueo igual de duro que `datesIncoherent`. Va
-    // PRIMERO porque "esas fechas ya pasaron" es lo más útil para el cliente.
-    if (tr.datesInPast) return datesInPastMessage();
-    if (tr.datesIncoherent) return datesIncoherentMessage(entities);
+    // Fechas en el pasado: si el cliente corrige o ya vimos el bloque, usar LLM.
+    if (tr.datesInPast) {
+      const staticMsg = datesInPastMessage();
+      if (shouldPreferContextualLlm(incomingText, conversationHistory, staticMsg)) {
+        return fallback();
+      }
+      return respond(staticMsg);
+    }
+    if (tr.datesIncoherent) {
+      const staticMsg = datesIncoherentMessage(entities);
+      if (shouldPreferContextualLlm(incomingText, conversationHistory, staticMsg)) {
+        return fallback();
+      }
+      return respond(staticMsg);
+    }
     const userSaysTheyAlreadyAnswered =
       /\b(ya te hab[ií]a dicho|ya te lo dije|ya te dije|eso ya te|pero si te dije|ya lo dije arriba)\b/i.test(
         incomingText,

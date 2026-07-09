@@ -25,15 +25,24 @@ const MODEL = "gpt-4.1-mini";
  * Hoy se inyecta para que el LLM las infiera.
  */
 function todayContext(): string {
-  const now = new Date();
-  const yyyy = now.getFullYear();
-  const mm = String(now.getMonth() + 1).padStart(2, "0");
-  const dd = String(now.getDate()).padStart(2, "0");
+  const nowMs = Date.now();
+  const parts = new Intl.DateTimeFormat("es-CO", {
+    timeZone: "America/Bogota",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(new Date(nowMs));
+  const get = (type: string) =>
+    parts.find((p) => p.type === type)?.value ?? "";
+  const yyyy = get("year");
+  const mm = get("month");
+  const dd = get("day");
   const meses = [
     "enero", "febrero", "marzo", "abril", "mayo", "junio",
     "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre",
   ];
-  return `Hoy es ${dd}/${mm}/${yyyy} (${meses[now.getMonth()]} ${yyyy}). Mes actual=${mm}, año=${yyyy}.`;
+  const monthIdx = Math.max(0, parseInt(mm, 10) - 1);
+  return `Hoy es ${dd}/${mm}/${yyyy} (${meses[monthIdx]} ${yyyy}) en Colombia (America/Bogota). Mes actual=${mm}, año=${yyyy}.`;
 }
 
 const MUNICIPALITIES_COL = [
@@ -52,7 +61,11 @@ Municipios válidos (Colombia): ${MUNICIPALITIES_COL}
 
 Reglas estrictas:
 - Fechas: SIEMPRE en formato YYYY-MM-DD.
-  Si el cliente da SOLO días, SIN nombrar el mes (ej "del 15 al 19"), asume mes actual ${new Date().toISOString().slice(5, 7)} y año ${new Date().getFullYear()}; y si esos días ya pasaron este mes, asume el mes siguiente.
+  Si el cliente dice "este fin de semana" / "este finde" → sábado y domingo próximos (check-in sábado, salida domingo).
+  Si dice "entrando el sábado y saliendo el domingo/lunes" → calcula esos días de la semana PRÓXIMOS según la fecha de hoy arriba.
+  Si dice solo "sábado" o "este sábado" sin salida → asume sábado a domingo (1 noche).
+  "Fin de semana" en Colombia = normalmente sábado–domingo salvo que diga otra salida.
+  Si el cliente da SOLO días, SIN nombrar el mes (ej "del 15 al 19"), asume mes actual según hoy en Colombia; y si esos días ya pasaron este mes, asume el mes siguiente.
   Si el cliente SÍ nombra el mes (ej "del 19 al 21 de mayo", "para agosto"), usa EXACTAMENTE ese mes — AUNQUE los días ya hayan pasado. NO lo adelantes al mes siguiente. (Un filtro aparte detecta las fechas pasadas y le avisa al cliente; tu trabajo es solo extraer lo que el cliente dijo, tal cual.)
 - cupo: número entero. Niños desde 2 años cuentan.
   Si el cliente da "X adultos y Y niños" / "X mayores y Y menores" / "X grandes y Y chicos",

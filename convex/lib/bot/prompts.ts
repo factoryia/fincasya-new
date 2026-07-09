@@ -618,6 +618,8 @@ export function buildContextSystemPrompt(
     "- Cierra recordando brevemente el siguiente paso del proceso (lo de SIGUIENTE PASO de arriba), en una sola frase corta.",
     "- Máximo 3-4 líneas. Tono natural, cordial y profesional — no plantilla fría.",
     "- Si el cliente saluda o repite algo, NO reenvíes los bloques largos que ya enviamos antes; solo recuerda el siguiente paso de forma breve.",
+    "- Si el cliente está molesto o dice que no entendiste, reconoce su molestia con empatía antes de continuar.",
+    "- NUNCA repitas textualmente un mensaje que ya enviaste en los últimos turnos; reformula con tus palabras.",
   );
 
   if (opts.alreadyGreeted) {

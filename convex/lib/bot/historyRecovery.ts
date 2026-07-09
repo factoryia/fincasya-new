@@ -3,6 +3,11 @@
  * no las re-emite en un turno corto ("no sé", "recomiéndame", etc.).
  */
 
+import {
+  bogotaWallClockNoon,
+  toYmdColombia,
+} from "../colombiaPublicHolidays";
+
 const MONTHS: Record<string, number> = {
   enero: 1,
   febrero: 2,
@@ -113,5 +118,130 @@ export function recoverDatesFromUserHistory(
     return { checkIn, checkOut };
   }
 
+  return {};
+}
+
+const WEEKDAY_INDEX: Record<string, number> = {
+  domingo: 0,
+  lunes: 1,
+  martes: 2,
+  miercoles: 3,
+  miércoles: 3,
+  jueves: 4,
+  viernes: 5,
+  sabado: 6,
+  sábado: 6,
+};
+
+function weekdayIndexFromMs(ms: number): number {
+  const short = new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/Bogota",
+    weekday: "short",
+  }).format(new Date(ms));
+  const map: Record<string, number> = {
+    Sun: 0,
+    Mon: 1,
+    Tue: 2,
+    Wed: 3,
+    Thu: 4,
+    Fri: 5,
+    Sat: 6,
+  };
+  return map[short] ?? 0;
+}
+
+function ymdToMs(ymd: string): number {
+  const [y, m, d] = ymd.split("-").map((x) => parseInt(x, 10));
+  return bogotaWallClockNoon(y, m, d).getTime();
+}
+
+function ymdAddDays(ymd: string, days: number): string {
+  return toYmdColombia(ymdToMs(ymd) + days * 86_400_000);
+}
+
+/** Próximo día de la semana (check-in mínimo mañana en calendario Bogotá). */
+function nextWeekdayYmd(refMs: number, targetWd: number): string {
+  const todayYmd = toYmdColombia(refMs);
+  for (let add = 1; add <= 14; add++) {
+    const ymd = ymdAddDays(todayYmd, add);
+    if (weekdayIndexFromMs(ymdToMs(ymd)) === targetWd) return ymd;
+  }
+  return ymdAddDays(todayYmd, 7);
+}
+
+function resolveCheckOutAfterCheckIn(checkIn: string, targetOutWd: number): string {
+  const checkInWd = weekdayIndexFromMs(ymdToMs(checkIn));
+  let days = (targetOutWd - checkInWd + 7) % 7;
+  if (days === 0) days = 7;
+  return ymdAddDays(checkIn, days);
+}
+
+/**
+ * Interpreta fechas relativas coloquiales ("este fin de semana", "entrando el
+ * sábado y saliendo el lunes") en zona horaria Colombia.
+ */
+export function recoverRelativeDatesFromText(
+  text: string,
+  refMs: number,
+): { checkIn?: string; checkOut?: string } {
+  const t = String(text ?? "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/\p{M}/gu, "");
+
+  if (
+    /este finde|este fin de semana|para este fin de semana|este finde semana/.test(
+      t,
+    )
+  ) {
+    const checkIn = nextWeekdayYmd(refMs, 6);
+    return { checkIn, checkOut: ymdAddDays(checkIn, 1) };
+  }
+
+  const inOut = t.match(
+    /entrando?\s+(?:el\s+)?(lunes|martes|miercoles|miércoles|jueves|viernes|sabado|sábado|domingo).*?(?:saliendo?|salida|salir)\s+(?:el\s+)?(lunes|martes|miercoles|miércoles|jueves|viernes|sabado|sábado|domingo)/,
+  );
+  if (inOut) {
+    const wIn = WEEKDAY_INDEX[inOut[1]];
+    const wOut = WEEKDAY_INDEX[inOut[2]];
+    if (wIn != null && wOut != null) {
+      const checkIn = nextWeekdayYmd(refMs, wIn);
+      const checkOut = resolveCheckOutAfterCheckIn(checkIn, wOut);
+      return { checkIn, checkOut };
+    }
+  }
+
+  const rangeWd = t.match(
+    /(?:el\s+)?(lunes|martes|miercoles|miércoles|jueves|viernes|sabado|sábado|domingo)\s+(?:al|y|hasta)\s+(?:el\s+)?(lunes|martes|miercoles|miércoles|jueves|viernes|sabado|sábado|domingo)/,
+  );
+  if (rangeWd) {
+    const wIn = WEEKDAY_INDEX[rangeWd[1]];
+    const wOut = WEEKDAY_INDEX[rangeWd[2]];
+    if (wIn != null && wOut != null) {
+      const checkIn = nextWeekdayYmd(refMs, wIn);
+      const checkOut = resolveCheckOutAfterCheckIn(checkIn, wOut);
+      return { checkIn, checkOut };
+    }
+  }
+
+  const soloSabado = t.match(/\b(?:este\s+)?(?:el\s+)?(sabado|sábado)\b/);
+  if (soloSabado && !inOut && !rangeWd) {
+    const checkIn = nextWeekdayYmd(refMs, 6);
+    return { checkIn, checkOut: ymdAddDays(checkIn, 1) };
+  }
+
+  return {};
+}
+
+/** Busca fechas relativas en mensajes recientes del cliente (más nuevo primero). */
+export function recoverRelativeDatesFromUserHistory(
+  history: Array<{ role: string; content: string }>,
+  refMs: number,
+): { checkIn?: string; checkOut?: string } {
+  for (const m of [...history].reverse()) {
+    if (m.role !== "user") continue;
+    const found = recoverRelativeDatesFromText(m.content, refMs);
+    if (found.checkIn && found.checkOut) return found;
+  }
   return {};
 }
