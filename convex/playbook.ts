@@ -9,14 +9,13 @@
  *
  * Todas las funciones admin son `internal*` y se exponen por `convex/http.ts`
  * con `X-API-Key` (mismo patrón que la Base de Conocimiento). `seedFromCode` es
- * pública para poder correrla por CLI (`bunx convex run playbook:seedFromCode`).
+ * `internalAction` — se expone por `POST /api/playbook/seed` (admin).
  */
 
 import { v } from "convex/values";
 import { generateText } from "ai";
 import { openai } from "@ai-sdk/openai";
 import {
-  action,
   internalAction,
   internalMutation,
   internalQuery,
@@ -97,6 +96,29 @@ function safeSlice(str: string, max: number): string {
 function sanitizeText(str: string, maxLen?: number): string {
   const cleaned = stripLoneSurrogates(str ?? "");
   return maxLen == null ? cleaned : safeSlice(cleaned, maxLen);
+}
+
+function messageMetadataRecord(
+  metadata: unknown,
+): Record<string, unknown> | undefined {
+  if (!metadata || typeof metadata !== "object" || Array.isArray(metadata)) {
+    return undefined;
+  }
+  return metadata as Record<string, unknown>;
+}
+
+/** Asesor humano = inbox (`sentByUserId`) o celular vía Coexistence (webhook). */
+function isHumanAdvisorMessage(m: {
+  sender?: string;
+  sentByUserId?: string | null;
+  metadata?: unknown;
+}): boolean {
+  if (m.sender !== "assistant") return false;
+  if (m.sentByUserId != null) return true;
+  const meta = messageMetadataRecord(m.metadata);
+  if (meta?.source === "bot_automation") return false;
+  if (meta?.source === "ycloud_outbound_webhook") return true;
+  return false;
 }
 
 /** Genera una clave estable a partir de la situación (+ sufijo corto único). */
@@ -469,7 +491,7 @@ export const getConversationMessagesForTraining = internalQuery({
       phone: sanitizeText(contact?.phone ?? ""),
       messages: msgs.map((m) => ({
         sender: sanitizeText(m.sender),
-        isHuman: m.sentByUserId != null,
+        isHuman: isHumanAdvisorMessage(m),
         content: sanitizeText(m.content),
         type: sanitizeText(m.type ?? "text"),
         createdAt: m.createdAt,
@@ -484,10 +506,17 @@ type Draft = {
   clientExamples: string[];
   response: string;
   tags: string[];
+  /** Conversación de origen (trazabilidad + dedupe al guardar). */
+  sourceConversationId?: string;
 };
 
+const TRANSCRIPT_MAX_CHARS = 8000;
+const TRANSCRIPT_TRUNCATION_NOTE =
+  "\n\n[... conversación truncada: se omitió el medio para conservar inicio y cierre ...]\n\n";
+
 /** Transcript etiquetado (Cliente / Asesor humano / Bot). Ignora system y
- *  vacíos. Cap de caracteres para acotar el costo del LLM. */
+ *  vacíos. Cap de caracteres para acotar el costo del LLM. Si excede el límite,
+ *  conserva cabeza + cola (el cierre con objeciones/contrato suele estar al final). */
 function buildTranscript(messages: TrainingMessage[]): string {
   const lines: string[] = [];
   for (const m of messages) {
@@ -497,7 +526,32 @@ function buildTranscript(messages: TrainingMessage[]): string {
     const who = m.sender === "user" ? "Cliente" : m.isHuman ? "Asesor" : "Bot";
     lines.push(`${who}: ${content}`);
   }
-  return safeSlice(lines.join("\n"), 8000);
+  const full = lines.join("\n");
+  if (full.length <= TRANSCRIPT_MAX_CHARS) return full;
+
+  const budget =
+    TRANSCRIPT_MAX_CHARS - TRANSCRIPT_TRUNCATION_NOTE.length;
+  const headBudget = Math.floor(budget * 0.45);
+  const tailBudget = budget - headBudget;
+
+  let head = "";
+  for (const line of lines) {
+    const next = head ? `${head}\n${line}` : line;
+    if (next.length > headBudget) break;
+    head = next;
+  }
+
+  let tailLines: string[] = [];
+  let tailLen = 0;
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const line = lines[i];
+    const add = tailLen === 0 ? line.length : line.length + 1;
+    if (tailLen + add > tailBudget) break;
+    tailLines.unshift(line);
+    tailLen += add;
+  }
+
+  return `${head}${TRANSCRIPT_TRUNCATION_NOTE}${tailLines.join("\n")}`;
 }
 
 /** Corre el LLM sobre un transcript y devuelve 1..N ejemplos (borradores). */
@@ -599,7 +653,9 @@ export const analyzeConversationsForDraft = internalAction({
       if (!conv) continue;
       const transcript = buildTranscript(conv.messages);
       const drafts = await draftsFromTranscript(transcript);
-      all.push(...drafts);
+      for (const draft of drafts) {
+        all.push({ ...draft, sourceConversationId: String(id) });
+      }
     }
     return { drafts: all };
   },
@@ -607,10 +663,9 @@ export const analyzeConversationsForDraft = internalAction({
 
 /**
  * Siembra los ejemplos base (`PLAYBOOK_SEED`) EN LA TABLA y los sincroniza al
- * RAG. Idempotente por `key`. Pública para correrla por CLI:
- *   bunx convex run playbook:seedFromCode
+ * RAG. Idempotente por `key`. Admin: `POST /api/playbook/seed`.
  */
-export const seedFromCode = action({
+export const seedFromCode = internalAction({
   args: {},
   handler: async (ctx): Promise<{ seeded: number }> => {
     let seeded = 0;

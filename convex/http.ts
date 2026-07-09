@@ -992,6 +992,18 @@ http.route({
   }),
 });
 
+/** Siembra ejemplos base (`PLAYBOOK_SEED`) en tabla + RAG. */
+http.route({
+  path: '/api/playbook/seed',
+  method: 'POST',
+  handler: httpAction(async (ctx, request) => {
+    const denied = requireYCloudApiKey(request);
+    if (denied) return denied;
+    const result = await ctx.runAction(internal.playbook.seedFromCode, {});
+    return jsonResponse(result, 200);
+  }),
+});
+
 /** Ajustes globales del contrato (cuentas bancarias, cláusulas, etc.). */
 http.route({
   path: '/api/admin/contract-settings',

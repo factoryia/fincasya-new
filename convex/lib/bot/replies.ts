@@ -185,11 +185,13 @@ export interface ReplyInput {
    */
   faqContext?: string | null;
   /**
-   * Ejemplos de TONO recuperados del playbook (`searchPlaybookForBot`). Si
-   * vienen, `contextualLlmReply` los inyecta como referencia de estilo few-shot
-   * (imitar el tono del equipo; NO copiar datos ni cambiar el flujo).
+   * Fragmentos del playbook (`searchPlaybookForBot`). Lazy vía callback.
    */
+  fetchPlaybookContext?: () => Promise<string | null>;
+  /** @deprecated Usar `fetchPlaybookContext`. */
   playbookContext?: string | null;
+  /** Se invoca cuando el LLM recibió ejemplos del playbook en este turno. */
+  onPlaybookUsed?: () => void;
   /**
    * Nombre del contacto (perfil de WhatsApp del cliente) tal como llega del
    * webhook de YCloud. Se usa SOLO para personalizar el saludo de bienvenida
@@ -319,6 +321,8 @@ export type GenerateReplyResult = {
   /** Mensajes a enviar DESPUÉS de `reply`, en orden, con delay corto entre
    *  cada uno. `undefined` o vacío cuando solo hay un mensaje. */
   extras?: string[];
+  /** true si el LLM recibió ejemplos del playbook en este turno. */
+  playbookUsed?: boolean;
 };
 
 /**
@@ -365,6 +369,13 @@ export async function generateReply(
   input: ReplyInput,
 ): Promise<GenerateReplyResult> {
   const { currentPhase, transition: tr, entities, conversationHistory, stayQuoteBlock } = input;
+  let playbookUsed = false;
+  const inputWithPlaybookTracking: ReplyInput = {
+    ...input,
+    onPlaybookUsed: () => {
+      playbookUsed = true;
+    },
+  };
 
   // Detección del paquete "tras confirmar mascotas → contrato".
   // Se descompone en 2-3 burbujas: (1) reglas/info de mascotas si aplica,
@@ -393,17 +404,20 @@ export async function generateReply(
           stayQuoteBlock,
           samePhaseTurnCount: input.samePhaseTurnCount,
           faqContext: input.faqContext,
+          fetchPlaybookContext: input.fetchPlaybookContext,
           playbookContext: input.playbookContext,
           tagFlags: input.tagFlags,
           channel: input.channel,
+          onPlaybookUsed: inputWithPlaybookTracking.onPlaybookUsed,
         },
       );
-      return { reply: single };
+      if (single.playbookUsed) playbookUsed = true;
+      return { reply: single.text, playbookUsed };
     }
     return buildContractHandoffPacket(entities, stayQuoteBlock, input.stayQuoteTotals);
   }
 
-  const text = await generateReplyText(input);
+  const text = await generateReplyText(inputWithPlaybookTracking);
 
   const alreadyGreeted =
     hasBotGreetedInHistory(conversationHistory) ||
@@ -435,9 +449,10 @@ export async function generateReply(
       return {
         reply: [greeting, "", faqFirstTurn].join("\n"),
         extras: [text],
+        playbookUsed,
       };
     }
-    return { reply: [greeting, "", text].join("\n") };
+    return { reply: [greeting, "", text].join("\n"), playbookUsed };
   }
 
   // ── Burst con pregunta + dato de flujo ────────────────────────────────────
@@ -495,7 +510,7 @@ export async function generateReply(
     const extras = personalServicioExtra
       ? [text, personalServicioExtra]
       : [text];
-    return { reply: faqLiteralCompound, extras };
+    return { reply: faqLiteralCompound, extras, playbookUsed };
   }
 
   // ── Pregunta FAQ durante welcome / collecting ─────────────────────────────
@@ -516,14 +531,14 @@ export async function generateReply(
     text.trim().length > 0 &&
     !messageLooksLikeBookingDetails(input.incomingText)
   ) {
-    return { reply: faqLiteralCompound, extras: [text] };
+    return { reply: faqLiteralCompound, extras: [text], playbookUsed };
   }
 
   if (personalServicioExtra) {
-    return { reply: text, extras: [personalServicioExtra] };
+    return { reply: text, extras: [personalServicioExtra], playbookUsed };
   }
 
-  return { reply: text };
+  return { reply: text, playbookUsed };
 }
 
 /**
@@ -748,16 +763,27 @@ async function generateReplyText(input: ReplyInput): Promise<string> {
     stayQuoteBlock,
     samePhaseTurnCount,
     faqContext,
+    fetchPlaybookContext: input.fetchPlaybookContext,
     playbookContext,
     tagFlags: input.tagFlags,
     channel: input.channel,
     alreadyGreeted,
     contactName: input.contactName,
+    onPlaybookUsed: input.onPlaybookUsed,
   };
 
   // Helper local: cae al LLM con contexto enriquecido cuando el static-text ya se envió.
-  const fallback = (): Promise<string> =>
-    contextualLlmReply(currentPhase, entities, conversationHistory, incomingText, llmContextOpts);
+  const fallback = async (): Promise<string> => {
+    const r = await contextualLlmReply(
+      currentPhase,
+      entities,
+      conversationHistory,
+      incomingText,
+      llmContextOpts,
+    );
+    if (r.playbookUsed) input.onPlaybookUsed?.();
+    return r.text;
+  };
 
   // Si el static candidate ya se envió en los últimos turnos → ir directo al LLM.
   const respond = async (candidate: string, depth = 5): Promise<string> => {
@@ -1104,7 +1130,7 @@ async function generateReplyText(input: ReplyInput): Promise<string> {
       return CONTRACT_REQUEST_MESSAGE;
     }
     // Datos parciales → LLM contextual con sistema de contrato (más rico que el viejo).
-    return contextualLlmReply(
+    const contractReply = await contextualLlmReply(
       currentPhase,
       entities,
       conversationHistory,
@@ -1114,11 +1140,15 @@ async function generateReplyText(input: ReplyInput): Promise<string> {
         samePhaseTurnCount,
         contractMode: true,
         faqContext,
+        fetchPlaybookContext: input.fetchPlaybookContext,
         playbookContext,
         tagFlags: input.tagFlags,
         channel: input.channel,
+        onPlaybookUsed: input.onPlaybookUsed,
       },
     );
+    if (contractReply.playbookUsed) input.onPlaybookUsed?.();
+    return contractReply.text;
   }
 
   // ── Done ─────────────────────────────────────────────────────────────────
@@ -1144,19 +1174,36 @@ async function contextualLlmReply(
     samePhaseTurnCount?: number;
     contractMode?: boolean;
     faqContext?: string | null;
+    fetchPlaybookContext?: () => Promise<string | null>;
     playbookContext?: string | null;
     tagFlags?: ConversationTagFlags;
     channel?: "whatsapp" | "web";
     alreadyGreeted?: boolean;
     contactName?: string | null;
+    onPlaybookUsed?: () => void;
   } = {},
-): Promise<string> {
+): Promise<{ text: string; playbookUsed: boolean }> {
   // Anti-bucle suave: si el cliente lleva varios turnos atascado SIN APORTAR DATOS,
   // ofrecer humano una vez. `samePhaseTurnCount` ya es "inteligente" (resetea con
   // progreso), así que aquí solo confirmamos que no se ofreció humano hace poco.
   if ((opts.samePhaseTurnCount ?? 0) >= 4) {
     if (!recentlySent(LOOP_OFFER_HUMAN_MESSAGE, history, 12)) {
-      return LOOP_OFFER_HUMAN_MESSAGE;
+      return { text: LOOP_OFFER_HUMAN_MESSAGE, playbookUsed: false };
+    }
+  }
+
+  let playbookContext = String(opts.playbookContext ?? "").trim();
+  let playbookUsed = playbookContext.length > 0;
+  if (!playbookContext && opts.fetchPlaybookContext) {
+    try {
+      const fetched = String((await opts.fetchPlaybookContext()) ?? "").trim();
+      if (fetched) {
+        playbookContext = fetched;
+        playbookUsed = true;
+        opts.onPlaybookUsed?.();
+      }
+    } catch (err) {
+      console.error("[contextualLlmReply] fetchPlaybookContext falló:", err);
     }
   }
 
@@ -1164,7 +1211,7 @@ async function contextualLlmReply(
     stayQuoteBlock: opts.stayQuoteBlock,
     samePhaseTurnCount: opts.samePhaseTurnCount,
     ragContext: opts.faqContext,
-    playbookContext: opts.playbookContext,
+    playbookContext: playbookContext || null,
     tagFlags: opts.tagFlags,
     channel: opts.channel,
     alreadyGreeted: opts.alreadyGreeted,
@@ -1189,13 +1236,19 @@ async function contextualLlmReply(
     const out = text.trim();
     // Defensa final: si el LLM por accidente reescribe un bloque ya enviado, lo cortamos.
     if (wasJustSent(out, history, 4)) {
-      return "Perdona, ¿puedes contarme un poco más? Quiero ayudarte sin pedirte lo mismo otra vez 🙏";
+      return {
+        text: "Perdona, ¿puedes contarme un poco más? Quiero ayudarte sin pedirte lo mismo otra vez 🙏",
+        playbookUsed,
+      };
     }
-    return out;
+    return { text: out, playbookUsed };
   } catch (err) {
     // OpenAI falló (timeout, 429, 5xx, sin cupo). Logueamos para diagnosticar
     // — si esto aparece seguido, revisar la cuenta de OpenAI (cuota/billing).
     console.error("[contextualLlmReply] generateText falló — fallback técnico:", err);
-    return "Perdona, tuve un problema técnico. ¿Puedes repetir tu mensaje? 🙏";
+    return {
+      text: "Perdona, tuve un problema técnico. ¿Puedes repetir tu mensaje? 🙏",
+      playbookUsed,
+    };
   }
 }

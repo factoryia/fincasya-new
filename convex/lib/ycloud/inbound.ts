@@ -2246,25 +2246,24 @@ export async function processInboundMessageV2(
     );
   }
 
-  // Pre-fetch del PLAYBOOK DE TONO: ejemplos de cómo responde el equipo en una
-  // situación parecida a la del cliente, filtrados por la fase actual del FSM.
-  // Se inyecta como referencia de estilo few-shot en el system prompt (el LLM
-  // imita el tono, no copia datos ni cambia el flujo). Degrada en silencio si
-  // falla (el bot sigue con su tono base).
-  let playbookContext: string | null = null;
-  try {
-    const pb = (await ctx.runAction(deps.api.knowledge.searchPlaybookForBot, {
-      query: textForTurn,
-      phase: currentPhase,
-    })) as { text?: string; count?: number } | null;
-    const pbText = String(pb?.text ?? "").trim();
-    if (pbText) playbookContext = pbText;
-  } catch (err) {
-    console.error(
-      "inbound: searchPlaybookForBot fallo (degradado, sigue sin tono):",
-      err,
-    );
-  }
+  // Pre-fetch del PLAYBOOK DE TONO: lazy vía `fetchPlaybookContext` (solo si
+  // el turno usa LLM contextual — mismo patrón que `fetchStayQuote`).
+  const fetchPlaybookContext = async (): Promise<string | null> => {
+    try {
+      const pb = (await ctx.runAction(deps.api.knowledge.searchPlaybookForBot, {
+        query: textForTurn,
+        phase: currentPhase,
+      })) as { text?: string; count?: number } | null;
+      const pbText = String(pb?.text ?? "").trim();
+      return pbText || null;
+    } catch (err) {
+      console.error(
+        "inbound: searchPlaybookForBot fallo (degradado, sigue sin tono):",
+        err,
+      );
+      return null;
+    }
+  };
 
   const result = await deps.runBotTurn({
     messageText: textForTurn,
@@ -2275,7 +2274,7 @@ export async function processInboundMessageV2(
     currentPhaseEnteredAt,
     resumeOngoingConversation,
     faqContext,
-    playbookContext,
+    fetchPlaybookContext,
     contactName: args.name,
     lastCatalogRetailerIds,
     tagFlags,
@@ -2507,8 +2506,10 @@ export async function processInboundMessageV2(
       to: args.phone,
       text: result.replyText,
       wamid: args.wamid,
-      metadata:
-        replyWamid.length > 6 ? { replyToWamid: replyWamid } : undefined,
+      metadata: {
+        ...(replyWamid.length > 6 ? { replyToWamid: replyWamid } : {}),
+        ...(result.playbookUsed ? { playbookUsed: true } : {}),
+      },
     });
   }
 

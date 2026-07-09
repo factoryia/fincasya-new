@@ -80,10 +80,12 @@ export interface BotTurnInput {
    */
   faqContext?: string | null;
   /**
-   * Ejemplos de TONO pre-fetchados del playbook (`knowledge.searchPlaybookForBot`),
-   * ya filtrados por fase. Lo rellena `inbound.ts`. Se inyecta en el system
-   * prompt como referencia de estilo few-shot (imitar el tono del equipo).
+   * Ejemplos de TONO del playbook (`searchPlaybookForBot`), filtrados por fase.
+   * Lazy: solo se consulta cuando el turno va a usar LLM contextual (mismo
+   * patrón que `fetchStayQuote`).
    */
+  fetchPlaybookContext?: () => Promise<string | null>;
+  /** @deprecated Usar `fetchPlaybookContext`. Solo para tests. */
   playbookContext?: string | null;
   /**
    * Nombre del contacto desde el perfil de WhatsApp (lo pasa YCloud en el
@@ -335,7 +337,7 @@ export async function runBotTurn(input: BotTurnInput): Promise<BotTurnResult> {
     currentSamePhaseTurnCount,
     currentPhaseEnteredAt,
     faqContext,
-    playbookContext,
+    fetchPlaybookContext,
     contactName,
     lastCatalogRetailerIds,
     resumeOngoingConversation,
@@ -843,7 +845,7 @@ export async function runBotTurn(input: BotTurnInput): Promise<BotTurnResult> {
       stayQuoteTotals,
       samePhaseTurnCount,
       faqContext,
-      playbookContext,
+      fetchPlaybookContext,
       contactName,
       tagFlags: input.tagFlags,
       channel: input.channel,
@@ -873,6 +875,7 @@ export async function runBotTurn(input: BotTurnInput): Promise<BotTurnResult> {
     updatedEntities: finalEntities,
     samePhaseTurnCount,
     phaseEnteredAt,
+    playbookUsed: generated.playbookUsed === true,
   };
 }
 

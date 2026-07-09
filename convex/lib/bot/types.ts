@@ -210,4 +210,6 @@ export interface BotTurnResult {
   samePhaseTurnCount: number;
   /** Timestamp cuando se entró a la fase actual. */
   phaseEnteredAt: number;
+  /** true si este turno inyectó ejemplos del playbook en el LLM. */
+  playbookUsed?: boolean;
 }
