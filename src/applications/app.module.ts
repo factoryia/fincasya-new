@@ -6,6 +6,7 @@ import { CategoryZoneTemplatesModule } from './category-zone-templates/category-
 import { FincasModule } from './fincas/fincas.module';
 import { InboxModule } from './inbox/inbox.module';
 import { KnowledgeModule } from './knowledge/knowledge.module';
+import { PlaybookModule } from './playbook/playbook.module';
 import { UsersModule } from './users/users.module';
 import { ReviewsModule } from './reviews/reviews.module';
 import { QuienesSomosModule } from './quienes-somos/quienes-somos.module';
@@ -34,6 +35,7 @@ import { ScheduleModule } from '@nestjs/schedule';
     FincasModule,
     InboxModule,
     KnowledgeModule,
+    PlaybookModule,
     UsersModule,
     ReviewsModule,
     QuienesSomosModule,
