@@ -8,6 +8,7 @@
 
 import type { BotEntities, BotPhase, ConversationTagFlags } from "./types";
 import { countNights, normalizePlanType } from "./entities";
+import { guessHonorific } from "./honorific";
 
 /**
  * Cuando faltan 2+ campos simultáneamente, agrupa las preguntas en UN solo mensaje.
@@ -336,6 +337,8 @@ REGLAS GLOBALES:
 - Nunca muestres JSON, IDs internos, ni términos técnicos al cliente.
 - Usa emojis con moderación (1-2 por mensaje como máximo).
 - El equipo de FincasYa son EXPERTOS, no "asesores". NUNCA uses la palabra "asesor" con el cliente: di "experto", "nuestro equipo de expertos" o "el equipo".
+- TRATO FORMAL: háblale al cliente de USTED (no "tú"). Ej.: "le ayudo", "compártame", "¿qué fechas tiene?", "su plan". Nunca tutees.
+- Si te doy el nombre del cliente con "Señor" o "Señora" adelante, úsalo TAL CUAL (ej. "Señor Juan"). Si te doy solo el nombre, úsalo sin título. NUNCA inventes "Señor/Señora" por tu cuenta.
 `.trim();
 
 /**
@@ -703,9 +706,11 @@ export function buildContextSystemPrompt(
     );
   }
 
-  const firstName = firstNameForGreeting(opts.contactName);
-  if (firstName) {
-    sections.push(`- Puedes llamarlo/a "${firstName}" cuando encaje de forma natural.`);
+  const greetingName = respectfulGreetingName(opts.contactName);
+  if (greetingName) {
+    sections.push(
+      `- Dirígete al cliente como "${greetingName}" cuando encaje de forma natural (SIEMPRE de usted, nunca tú).`,
+    );
   }
 
   if (stuck) {
@@ -844,35 +849,50 @@ export function firstNameForGreeting(rawName?: string | null): string | null {
  * Mantenemos `WELCOME_MESSAGE` (sin nombre) como alias para el chequeo de
  * anti-repetición y para call sites legacy.
  */
+/**
+ * Nombre para dirigirse al cliente de forma respetuosa: "Señor Juan" /
+ * "Señora María" (según `guessHonorific`); si el género es desconocido/ambiguo,
+ * usa solo el nombre; si no hay nombre usable, devuelve null.
+ */
+export function respectfulGreetingName(
+  contactName?: string | null,
+): string | null {
+  const first = firstNameForGreeting(contactName);
+  if (!first) return null;
+  const hon = guessHonorific(first);
+  return hon ? `${hon} ${first}` : first;
+}
+
 export function buildWelcomeMessage(
   contactName?: string | null,
   channel?: "whatsapp" | "web",
 ): string {
-  const first = firstNameForGreeting(contactName);
+  const name = respectfulGreetingName(contactName);
   // En el WIDGET WEB el bot se presenta como "asistente virtual de FincasYa"
   // (no como "Hernán", que es la persona/marca del canal de WhatsApp). El
   // cliente del widget sabe que está chateando con un bot del sitio.
+  // Trato FORMAL (usted + Señor/Señora): así habla el equipo de FincasYa.
   const isWeb = channel === "web";
   const opener = isWeb
-    ? first
-      ? `¡Hola ${first}! 👋 Soy tu *asistente virtual de FincasYa* 🏡✨`
-      : `¡Hola! 👋 Soy tu *asistente virtual de FincasYa* 🏡✨`
-    : first
-      ? `¡Hola ${first}! Es un gusto saludarte. Te escribe Hernán de FincasYa.com 🏡✨`
-      : `¡Hola! Es un gusto saludarte. Te escribe Hernán de FincasYa.com 🏡✨`;
+    ? name
+      ? `¡Hola ${name}! 👋 Soy su *asistente virtual de FincasYa* 🏡✨`
+      : `¡Hola! 👋 Soy su *asistente virtual de FincasYa* 🏡✨`
+    : name
+      ? `¡Hola ${name}! Es un gusto saludarle. Le escribe Hernán de FincasYa.com 🏡✨`
+      : `¡Hola! Es un gusto saludarle. Le escribe Hernán de FincasYa.com 🏡✨`;
   return `${opener}
 
-Tenemos opciones espectaculares de fincas listas para ti 🤩 y quiero ayudarte a encontrar la ideal según tu plan.
+Tenemos opciones espectaculares de fincas listas para usted 🤩 y quiero ayudarle a encontrar la ideal según su plan.
 
-Compárteme por favor:
+Compártame por favor:
 📅 Fechas: entrada y salida
 👨‍👩‍👧‍👦 Cupo: número de personas (desde los 2 años)
 🏡 Tipo de grupo: familiar, amigos o empresarial
-📍 Ubicación: municipio o zona de preferencia (si ya tienes una en mente)
+📍 Ubicación: municipio o zona de preferencia (si ya tiene una en mente)
 
-Con esto te envío opciones disponibles, fotos, precios y promociones ajustadas a lo que buscas 🔥
+Con esto le envío opciones disponibles, fotos, precios y promociones ajustadas a lo que busca 🔥
 
-Estoy atento para ayudarte a reservar tu finca perfecta ✨
+Estoy atento para ayudarle a reservar su finca perfecta ✨
 `;
 }
 
@@ -887,15 +907,15 @@ export function buildShortGreeting(
   contactName?: string | null,
   channel?: "whatsapp" | "web",
 ): string {
-  const first = firstNameForGreeting(contactName);
+  const name = respectfulGreetingName(contactName);
   if (channel === "web") {
-    return first
-      ? `👋 ¡Hola ${first}! Soy tu *asistente virtual de FincasYa*.`
-      : `👋 ¡Hola! Soy tu *asistente virtual de FincasYa*.`;
+    return name
+      ? `👋 ¡Hola ${name}! Soy su *asistente virtual de FincasYa*.`
+      : `👋 ¡Hola! Soy su *asistente virtual de FincasYa*.`;
   }
-  return first
-    ? `🙋‍♂️ ¡Hola ${first}! Te saluda *Hernán* de FincasYa.com.`
-    : `🙋‍♂️ ¡Hola! Te saluda *Hernán* de FincasYa.com.`;
+  return name
+    ? `🙋‍♂️ ¡Hola ${name}! Le saluda *Hernán* de FincasYa.com.`
+    : `🙋‍♂️ ¡Hola! Le saluda *Hernán* de FincasYa.com.`;
 }
 
 /** Pregunta específica según qué campo falta. */
