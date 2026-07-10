@@ -1126,6 +1126,7 @@ export async function processInboundMessageV2(
         conversationId,
         alertReason: 'human_mode_inbox',
         priority: 'medium' as const,
+        tag: 'modo-humano',
         inboxMessage: `👤 Cliente escribió (modo humano). Mensaje: "${String(latestMsg?.content ?? '').slice(0, 200)}"`,
       });
     }
