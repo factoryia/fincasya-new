@@ -3122,11 +3122,11 @@ export async function processInboundMessageV2(
       // opciones, pero las fichas reales no van a aparecer. Escalamos a humano
       // con un mensaje específico para que el cliente NO quede esperando.
       const noResultsMsg = [
-        'Por ahora no tengo opciones exactas para esos requisitos en el catálogo 🤔',
+        '¡Gracias por escribirnos! 🙌 Para tus fechas y tu plan queremos darte las mejores opciones.',
         '',
-        '*Te conecto con un experto* para evaluar disponibilidad especial y opciones personalizadas según tus fechas y tipo de plan 🤝',
+        '*Te conectamos con un experto* que revisa la disponibilidad y te arma opciones personalizadas 🤝',
         '',
-        'un experto te escribirá en breve para ayudarte ✨',
+        'En unos minutos un experto te escribe para ayudarte ✨',
       ].join('\n');
       await ctx.runMutation(deps.internal.conversations.escalate, {
         conversationId,

@@ -175,8 +175,8 @@ export interface ReplyInput {
    */
   tagFlags?: ConversationTagFlags;
   /**
-   * Canal de la conversación. En `web` el saludo es "asistente virtual de
-   * FincasYa"; en `whatsapp`, "Hernán". Default = whatsapp.
+   * Canal de la conversación. En web y WhatsApp el saludo es "asistente
+   * virtual de FincasYa". Default = whatsapp.
    */
   channel?: "whatsapp" | "web";
   /**

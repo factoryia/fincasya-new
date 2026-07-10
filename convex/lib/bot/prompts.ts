@@ -6,8 +6,8 @@
  * Nada de esto vive en la BD ni es editable desde el frontend.
  */
 
-import type { BotEntities, BotPhase, ConversationTagFlags } from "./types";
-import { countNights, normalizePlanType } from "./entities";
+import type { BotEntities, BotPhase, ConversationTagFlags } from './types';
+import { countNights, normalizePlanType } from './entities';
 
 /**
  * Cuando faltan 2+ campos simultáneamente, agrupa las preguntas en UN solo mensaje.
@@ -16,14 +16,18 @@ import { countNights, normalizePlanType } from "./entities";
 export function missingFieldsBundle(e: BotEntities): string | null {
   const missing: string[] = [];
 
-  if (!e.location) missing.push("📍 *Municipio o zona* de preferencia (o te recomiendo yo)");
-  if (!e.checkIn || !e.checkOut) missing.push("📅 *Fecha de entrada y salida*");
-  if (e.cupo === undefined || e.cupo <= 0) missing.push("👥 *Cuántas personas* van en total");
-  if (!normalizePlanType(e.planType)) missing.push("🏡 *Tipo de grupo*: familiar, amigos o empresarial");
-  if (e.isEvento === undefined) missing.push("🎉 ¿*Solo descanso* o habrá evento/celebración?");
+  if (!e.location)
+    missing.push('📍 *Municipio o zona* de preferencia (o te recomiendo yo)');
+  if (!e.checkIn || !e.checkOut) missing.push('📅 *Fecha de entrada y salida*');
+  if (e.cupo === undefined || e.cupo <= 0)
+    missing.push('👥 *Cuántas personas* van en total');
+  if (!normalizePlanType(e.planType))
+    missing.push('🏡 *Tipo de grupo*: familiar, amigos o empresarial');
+  if (e.isEvento === undefined)
+    missing.push('🎉 ¿*Solo descanso* o habrá evento/celebración?');
 
   if (missing.length <= 1) return null;
-  return `Para mostrarte las mejores opciones me faltan algunos datos 😊\n\n${missing.map((m) => `• ${m}`).join("\n")}`;
+  return `Para mostrarte las mejores opciones me faltan algunos datos 😊\n\n${missing.map((m) => `• ${m}`).join('\n')}`;
 }
 
 /**
@@ -35,21 +39,21 @@ export function missingFieldsHuman(e: BotEntities): string[] {
   const out: string[] = [];
   if (!e.location)
     out.push(
-      "a qué municipio o zona quieren ir (o si prefieren que tú les recomiendes)",
+      'a qué municipio o zona quieren ir (o si prefieren que tú les recomiendes)',
     );
-  if (!e.checkIn || !e.checkOut) out.push("las fechas de entrada y salida");
+  if (!e.checkIn || !e.checkOut) out.push('las fechas de entrada y salida');
   if (e.cupo === undefined || e.cupo <= 0)
-    out.push("cuántas personas van en total");
+    out.push('cuántas personas van en total');
   if (!normalizePlanType(e.planType))
-    out.push("si el plan es familiar, con amigos o empresarial");
+    out.push('si el plan es familiar, con amigos o empresarial');
   if (e.isEvento === undefined)
-    out.push("si es solo descanso o si habrá un evento o celebración");
+    out.push('si es solo descanso o si habrá un evento o celebración');
   if (e.isEvento === true) {
     if (e.eventPeopleCount === undefined || e.eventPeopleCount <= 0)
-      out.push("cuántas personas van al evento (dormir + pasadía)");
+      out.push('cuántas personas van al evento (dormir + pasadía)');
     if (!e.eventLogistics)
       out.push(
-        "la logística del evento (sonido/DJ, banda en vivo, o solo el sonido básico de la finca)",
+        'la logística del evento (sonido/DJ, banda en vivo, o solo el sonido básico de la finca)',
       );
   }
   return out;
@@ -58,16 +62,16 @@ export function missingFieldsHuman(e: BotEntities): string[] {
 /** Lista keys de los campos del catálogo que aún faltan, en orden. */
 function listMissingCatalogFields(e: BotEntities): Array<keyof BotEntities> {
   const out: Array<keyof BotEntities> = [];
-  if (!e.location) out.push("location");
-  if (!e.checkIn) out.push("checkIn");
-  if (!e.checkOut) out.push("checkOut");
-  if (e.cupo === undefined || e.cupo <= 0) out.push("cupo");
-  if (!normalizePlanType(e.planType)) out.push("planType");
-  if (e.isEvento === undefined) out.push("isEvento");
+  if (!e.location) out.push('location');
+  if (!e.checkIn) out.push('checkIn');
+  if (!e.checkOut) out.push('checkOut');
+  if (e.cupo === undefined || e.cupo <= 0) out.push('cupo');
+  if (!normalizePlanType(e.planType)) out.push('planType');
+  if (e.isEvento === undefined) out.push('isEvento');
   if (e.isEvento === true) {
     if (e.eventPeopleCount === undefined || e.eventPeopleCount <= 0)
-      out.push("eventPeopleCount");
-    if (!e.eventLogistics) out.push("eventLogistics");
+      out.push('eventPeopleCount');
+    if (!e.eventLogistics) out.push('eventLogistics');
   }
   return out;
 }
@@ -82,18 +86,19 @@ function listMissingCatalogFields(e: BotEntities): Array<keyof BotEntities> {
 export function combinedQuestionForMissing(e: BotEntities): string | null {
   const missing = listMissingCatalogFields(e);
   // Tratar checkIn+checkOut como un solo "campo fechas".
-  const datesMissing = missing.includes("checkIn") || missing.includes("checkOut");
+  const datesMissing =
+    missing.includes('checkIn') || missing.includes('checkOut');
   const slotKeys = new Set<string>(
-    missing.filter((m) => m !== "checkIn" && m !== "checkOut"),
+    missing.filter((m) => m !== 'checkIn' && m !== 'checkOut'),
   );
-  if (datesMissing) slotKeys.add("dates");
+  if (datesMissing) slotKeys.add('dates');
 
   if (slotKeys.size !== 2) return null;
 
   const has = (k: string) => slotKeys.has(k);
 
   // planType + isEvento (los 2 últimos)
-  if (has("planType") && has("isEvento")) {
+  if (has('planType') && has('isEvento')) {
     return (
       `¿Van en plan *familiar*, con *amigos* o *empresarial*? ` +
       `Y cuéntame: ¿es *solo descanso* o también con *evento/celebración* en la finca? 🏡🎉`
@@ -101,23 +106,23 @@ export function combinedQuestionForMissing(e: BotEntities): string | null {
   }
 
   // eventPeopleCount + eventLogistics (cuando el cliente confirma evento por primera vez)
-  if (has("eventPeopleCount") && has("eventLogistics")) {
+  if (has('eventPeopleCount') && has('eventLogistics')) {
     return [
-      "¡Genial, evento confirmado! 🎉 Para enviarte las mejores opciones necesito un par de datos:",
-      "",
-      "👥 *Personas*: ¿cuántas van en total? (Dormir + pasadía)",
-      "",
-      "🎵 *Logística*: ¿llevarás algo de esto?",
-      "  🎧 Sonido profesional / DJ / iluminación",
-      "  🎸 Banda en vivo o grupos musicales (mariachis, etc.)",
-      "  🏡 O solo el sonido básico de la finca",
-      "",
-      "Cuéntame y te comparto las opciones disponibles 🤝",
-    ].join("\n");
+      '¡Genial, evento confirmado! 🎉 Para enviarte las mejores opciones necesito un par de datos:',
+      '',
+      '👥 *Personas*: ¿cuántas van en total? (Dormir + pasadía)',
+      '',
+      '🎵 *Logística*: ¿llevarás algo de esto?',
+      '  🎧 Sonido profesional / DJ / iluminación',
+      '  🎸 Banda en vivo o grupos musicales (mariachis, etc.)',
+      '  🏡 O solo el sonido básico de la finca',
+      '',
+      'Cuéntame y te comparto las opciones disponibles 🤝',
+    ].join('\n');
   }
 
   // cupo + planType
-  if (has("cupo") && has("planType")) {
+  if (has('cupo') && has('planType')) {
     return (
       `¿Cuántas *personas* van en total? ` +
       `Y cuéntanos: ¿van en plan *familiar*, con *amigos* o *empresarial*? 👥🏡`
@@ -125,7 +130,7 @@ export function combinedQuestionForMissing(e: BotEntities): string | null {
   }
 
   // cupo + isEvento
-  if (has("cupo") && has("isEvento")) {
+  if (has('cupo') && has('isEvento')) {
     return (
       `¿Cuántas *personas* van en total? ` +
       `Y cuéntanos: ¿es *solo descanso* o también con *evento/celebración*? 👥🎉`
@@ -133,7 +138,7 @@ export function combinedQuestionForMissing(e: BotEntities): string | null {
   }
 
   // location + planType
-  if (has("location") && has("planType")) {
+  if (has('location') && has('planType')) {
     return (
       `¿A qué *municipio o zona* quieren ir? (o te recomiendo yo). ` +
       `Y cuéntame: ¿el plan es *familiar*, con *amigos* o *empresarial*? 📍🏡`
@@ -141,7 +146,7 @@ export function combinedQuestionForMissing(e: BotEntities): string | null {
   }
 
   // location + isEvento
-  if (has("location") && has("isEvento")) {
+  if (has('location') && has('isEvento')) {
     return (
       `¿A qué *municipio o zona* quieren ir? (o te recomiendo yo). ` +
       `Y cuéntame: ¿es *solo descanso* o también con *evento/celebración*? 📍🎉`
@@ -149,7 +154,7 @@ export function combinedQuestionForMissing(e: BotEntities): string | null {
   }
 
   // location + dates
-  if (has("location") && has("dates")) {
+  if (has('location') && has('dates')) {
     return (
       `¿A qué *municipio o zona* quieren ir? (o te recomiendo yo). ` +
       `Y cuéntame: ¿qué *fechas* tienes en mente (entrada y salida)? 📍📅`
@@ -157,7 +162,7 @@ export function combinedQuestionForMissing(e: BotEntities): string | null {
   }
 
   // dates + cupo
-  if (has("dates") && has("cupo")) {
+  if (has('dates') && has('cupo')) {
     return (
       `¿Qué *fechas* tienes en mente (entrada y salida)? ` +
       `Y cuéntame: ¿cuántas *personas* van en total? 📅👥`
@@ -165,7 +170,7 @@ export function combinedQuestionForMissing(e: BotEntities): string | null {
   }
 
   // dates + planType
-  if (has("dates") && has("planType")) {
+  if (has('dates') && has('planType')) {
     return (
       `¿Qué *fechas* tienes en mente (entrada y salida)? ` +
       `Y cuéntame: ¿el plan es *familiar*, con *amigos* o *empresarial*? 📅🏡`
@@ -173,7 +178,7 @@ export function combinedQuestionForMissing(e: BotEntities): string | null {
   }
 
   // dates + isEvento
-  if (has("dates") && has("isEvento")) {
+  if (has('dates') && has('isEvento')) {
     return (
       `¿Qué *fechas* tienes en mente (entrada y salida)? ` +
       `Y cuéntame: ¿es *solo descanso* o también con *evento/celebración*? 📅🎉`
@@ -185,11 +190,11 @@ export function combinedQuestionForMissing(e: BotEntities): string | null {
 
 /** Fragmentos muy cortos o poco claros (después del saludo inicial). */
 export function isVagueShortMessage(raw: string): boolean {
-  const t = String(raw ?? "")
+  const t = String(raw ?? '')
     .trim()
     .toLowerCase()
-    .normalize("NFD")
-    .replace(/\p{M}/gu, "");
+    .normalize('NFD')
+    .replace(/\p{M}/gu, '');
 
   if (t.length === 0 || t.length > 120) return false;
 
@@ -210,7 +215,7 @@ export function isVagueShortMessage(raw: string): boolean {
 
 function formatYmdForDisplay(iso?: string): string | null {
   if (!iso || !/^\d{4}-\d{2}-\d{2}/.test(iso.trim())) return null;
-  const [y, m, d] = iso.trim().slice(0, 10).split("-");
+  const [y, m, d] = iso.trim().slice(0, 10).split('-');
   return `${d}/${m}/${y}`;
 }
 
@@ -239,7 +244,7 @@ export function followUpCollectingRecapMessage(
     lines.push(
       `Para mostrarte fincas 🏡 y validar las opciones disponibles ✅, ¿nos puedes confirmar los datos que te pedimos anteriormente? 📋✨`,
     );
-    return lines.filter(Boolean).join("\n");
+    return lines.filter(Boolean).join('\n');
   }
 
   const di = formatYmdForDisplay(entities.checkIn);
@@ -248,41 +253,49 @@ export function followUpCollectingRecapMessage(
   else if (di) lines.push(`📅 Entrada ${di} (confirmemos salida si falta)`);
   else lines.push(`📅 Fechas: aún pendientes`);
 
-  if (entities.cupo !== undefined) lines.push(`👥 Cupo: *${entities.cupo} personas*`);
+  if (entities.cupo !== undefined)
+    lines.push(`👥 Cupo: *${entities.cupo} personas*`);
   else lines.push(`👥 Cupo: pendiente`);
 
   if (entities.location) {
-    const locLabel = entities.location === "RECOMENDADAS" ? "recomendadas por nosotros" : entities.location;
+    const locLabel =
+      entities.location === 'RECOMENDADAS'
+        ? 'recomendadas por nosotros'
+        : entities.location;
     lines.push(`📍 Municipio/zona: *${locLabel}*`);
   } else lines.push(`📍 Municipio/zona: pendiente`);
 
-  if (entities.planType)
-    lines.push(`👨‍👩‍👧‍👦 Tipo de grupo: *${entities.planType}*`);
-  else lines.push(`👨‍👩‍👧‍👦 Tipo de grupo (familiar / amigos / empresarial): pendiente`);
+  if (entities.planType) lines.push(`👨‍👩‍👧‍👦 Tipo de grupo: *${entities.planType}*`);
+  else
+    lines.push(`👨‍👩‍👧‍👦 Tipo de grupo (familiar / amigos / empresarial): pendiente`);
 
   if (entities.isEvento !== undefined)
-    lines.push(entities.isEvento ? `🎉 Con evento o celebración` : `🏖️ Solo descanso (sin evento)`);
+    lines.push(
+      entities.isEvento
+        ? `🎉 Con evento o celebración`
+        : `🏖️ Solo descanso (sin evento)`,
+    );
   else lines.push(`🎉 ¿Solo descanso o con evento/celebración?: pendiente`);
 
-  lines.push("");
+  lines.push('');
   const ask =
-    missingField === "location"
+    missingField === 'location'
       ? `Para validar *opciones reales disponibles*, dime el municipio o si prefieres que te sugiera zonas 😉`
-      : missingField === "checkIn"
+      : missingField === 'checkIn'
         ? `¿Me confirmas las *fechas de entrada y salida*? 📅`
-        : missingField === "checkOut"
+        : missingField === 'checkOut'
           ? `¿Cuál sería tu *fecha de salida*? 📅`
-          : missingField === "cupo"
+          : missingField === 'cupo'
             ? `¿Cuántas *personas* van en total? 👨‍👩‍👧‍👦`
-            : missingField === "planType"
+            : missingField === 'planType'
               ? `¿Van en plan *familiar*, con *amigos* o es un grupo *empresarial*? 👨‍👩‍👧‍👦`
-              : missingField === "isEvento"
+              : missingField === 'isEvento'
                 ? `¿Van *solo de descanso* o también *evento/celebración* en la finca? 🎊`
                 : `¿Puedes *confirmar todo lo de arriba* o indicarme qué falta cambiar? ✨`;
 
   lines.push(ask);
 
-  return lines.join("\n");
+  return lines.join('\n');
 }
 
 /** Ya se envió catálogo pero el cliente saluda sin elegir finca. */
@@ -298,33 +311,26 @@ export function followUpCatalogSentVagueMessage(): string {
 // ─────────────────────────────────────────────────────────────────────────────
 
 export const IDENTITY = `
-Eres Hernán, experto comercial de FincasYa.com — plataforma de alquiler de fincas y casas campestres en Colombia.
-Tono: cercano, cálido y empático, como un experto humano de confianza. Nunca robótico ni frío.
-Idioma: español colombiano.
-Antes de dar una política o restricción, reconoce brevemente lo que el cliente expresó o su situación.
-Si hay una limitación, explícala con empatía y ofrece alternativa cuando exista.
-Nunca inventes precios ni información técnica que no tengas en el contexto.
-`.trim();
-
-/** Identidad para el WIDGET WEB: el bot es "asistente virtual de FincasYa",
- *  NO "Hernán" (que es la persona/marca del canal de WhatsApp). */
-export const IDENTITY_WEB = `
 Eres el asistente virtual de FincasYa.com — plataforma de alquiler de fincas y casas campestres en Colombia.
-NO te presentes con un nombre de persona (no eres "Hernán"); eres el asistente virtual del sitio.
-Tono: cercano, cálido y empático, como un experto humano de confianza. Nunca robótico ni frío.
+NO te presentes con un nombre de persona (no eres "Hernán" ni otro humano); eres el asistente virtual del equipo.
+Tono: cercano, cálido y cordial — usa frases como "es un gusto atenderte", "con mucho gusto", "es un placer ayudarte". Nunca seco, frío ni robótico.
 Idioma: español colombiano.
 Antes de dar una política o restricción, reconoce brevemente lo que el cliente expresó o su situación.
 Si hay una limitación, explícala con empatía y ofrece alternativa cuando exista.
 Nunca inventes precios ni información técnica que no tengas en el contexto.
 `.trim();
 
-/** Devuelve la identidad correcta según el canal. */
-export function identityForChannel(channel?: "whatsapp" | "web"): string {
-  return channel === "web" ? IDENTITY_WEB : IDENTITY;
+/** @deprecated Usar IDENTITY — web y WhatsApp comparten la misma identidad de asistente virtual. */
+export const IDENTITY_WEB = IDENTITY;
+
+/** Devuelve la identidad del asistente virtual (igual en web y WhatsApp). */
+export function identityForChannel(_channel?: 'whatsapp' | 'web'): string {
+  return IDENTITY;
 }
 
 export const GLOBAL_RULES = `
 REGLAS GLOBALES:
+- SIEMPRE que inicie una conversación, saluda con el titulo Señor/Señora
 - Sé breve pero humano: 2-4 líneas salvo que el cliente pida detalles.
 - Primero demuestra que entendiste lo que el cliente acaba de decir; luego responde o pide el dato.
 - Si hay restricción (mínimo de noches, temporada, cupo, etc.), muestra empatía antes de la política y ofrece alternativa si existe.
@@ -337,7 +343,9 @@ REGLAS GLOBALES:
 - Usa emojis con moderación (1-2 por mensaje como máximo).
 - El equipo de FincasYa son EXPERTOS, no "asesores". NUNCA uses la palabra "asesor" con el cliente: di "experto", "nuestro equipo de expertos" o "el equipo".
 - TRATO CERCANO (TUTEO): háblale al cliente de TÚ, como nuestros asesores reales. Ej.: "te comparto", "cuéntame qué fechas tienes", "tu plan", "te ayudamos", "quedamos atentos 🙏". NUNCA de usted: nada de "le ayudo", "su plan", "compártame", "cuéntanos", "¿qué fechas tiene?".
-- Cuando te dé el nombre del cliente con "Señor" o "Señora" adelante (ej. "Señora Adriana"), úsalo TAL CUAL: el título es señal de respeto, PERO sigues TUTEANDO ("Señora Adriana, ¿qué fechas tienes?"). Si te doy solo el nombre, úsalo sin título. NUNCA inventes el género por tu cuenta.
+- CORDIALIDAD (OBLIGATORIO): responde siempre con calidez humana. Usa frases como "es un gusto atenderte", "con mucho gusto", "es un placer ayudarte", "¡qué bueno que nos escribes!". NO empieces solo con "Claro", "Ok" o "Listo" — combínalo con calidez: "¡Claro que sí! Es un gusto atenderte…". Nunca suenes seco ni mecánico.
+- IDENTIDAD: eres el *asistente virtual* de FincasYa. NUNCA digas que te llamas Hernán ni te presentes como una persona humana del equipo.
+- OBLIGATORIO — SALUDO CON TÍTULO: cuando te dé el nombre con "Señor" o "Señora" adelante (ej. "Señora Adriana"), SIEMPRE abre tu respuesta dirigiéndote así ("¡Hola Señora Adriana! ..." o "Señora Adriana, ..."), aunque ya hayas saludado antes en la conversación. El título Señor/Señora es OBLIGATORIO en el saludo; el resto del mensaje SIEMPRE tuteando ("Señora Adriana, ¿qué fechas tienes?"). Si te doy solo el nombre (sin título), úsalo sin inventar el género.
 - Habla como EQUIPO de FincasYa (nosotros): "te ayudamos", "te enviamos", "te recomendamos", "quedamos atentos", "tenemos", "manejamos". La 1ª persona ("te comparto") también es natural. Lo esencial: SIEMPRE tuteando al cliente.
 `.trim();
 
@@ -402,7 +410,7 @@ REGLAS ANTI-INVENCIÓN (CRÍTICAS):
 
 function fmtYmd(iso?: string): string | null {
   if (!iso || !/^\d{4}-\d{2}-\d{2}/.test(iso.trim())) return null;
-  const [y, m, d] = iso.trim().slice(0, 10).split("-");
+  const [y, m, d] = iso.trim().slice(0, 10).split('-');
   return `${d}/${m}/${y}`;
 }
 
@@ -416,18 +424,21 @@ export function entitiesSummaryHuman(e: BotEntities): string {
   if (e.cupo !== undefined) lines.push(`- Personas: ${e.cupo}`);
   if (e.location)
     lines.push(
-      `- Municipio/zona: ${e.location === "RECOMENDADAS" ? "sin preferencia (recomendar)" : e.location}`,
+      `- Municipio/zona: ${e.location === 'RECOMENDADAS' ? 'sin preferencia (recomendar)' : e.location}`,
     );
   if (e.planType) lines.push(`- Tipo de grupo: ${e.planType}`);
   if (e.isEvento !== undefined)
-    lines.push(`- Plan: ${e.isEvento ? "evento/celebración" : "solo descanso"}`);
+    lines.push(
+      `- Plan: ${e.isEvento ? 'evento/celebración' : 'solo descanso'}`,
+    );
   if (e.isEvento === true && e.eventPeopleCount !== undefined)
     lines.push(`- Personas del evento (total): ${e.eventPeopleCount}`);
   if (e.isEvento === true && e.eventLogistics)
     lines.push(
-      `- Logística del evento: ${e.eventLogistics === "extra" ? "lleva sonido pro / banda / DJ" : "solo sonido básico de la finca"}`,
+      `- Logística del evento: ${e.eventLogistics === 'extra' ? 'lleva sonido pro / banda / DJ' : 'solo sonido básico de la finca'}`,
     );
-  if (e.selectedPropertyName) lines.push(`- Finca elegida: ${e.selectedPropertyName}`);
+  if (e.selectedPropertyName)
+    lines.push(`- Finca elegida: ${e.selectedPropertyName}`);
   if (e.hasPets !== undefined) {
     if (e.hasPets) lines.push(`- Mascotas: sí (${e.petCount ?? 1})`);
     else lines.push(`- Mascotas: no`);
@@ -437,64 +448,77 @@ export function entitiesSummaryHuman(e: BotEntities): string {
   if (e.contractEmail) lines.push(`- Correo: ${e.contractEmail}`);
   if (e.contractPhone) lines.push(`- Teléfono: ${e.contractPhone}`);
   if (e.contractAddress) lines.push(`- Dirección: ${e.contractAddress}`);
-  return lines.join("\n");
+  return lines.join('\n');
 }
 
 /** Texto del dato puntual que está faltando para avanzar el FSM. */
 function nextStepHint(phase: BotPhase, e: BotEntities): string {
-  if (phase === "welcome" || phase === "collecting") {
-    if (!e.location) return "Falta el municipio (o decir que recomendamos).";
-    if (!e.checkIn || !e.checkOut) return "Faltan las fechas de entrada y salida.";
-    if (e.cupo === undefined || e.cupo <= 0) return "Falta cuántas personas van.";
-    if (!e.planType) return "Falta el tipo de grupo (familiar/amigos/empresarial).";
-    if (e.isEvento === undefined) return "Falta saber si es solo descanso o con evento.";
-    if (e.isEvento === true && (e.eventPeopleCount === undefined || e.eventPeopleCount <= 0))
-      return "Falta cuántas personas van al evento (dormir + pasadía).";
-    if (e.isEvento === true && !e.eventLogistics)
-      return "Falta la logística del evento (sonido pro/DJ, banda en vivo o solo sonido básico).";
-    return "Ya tenemos todos los datos: enviar catálogo en el siguiente turno.";
-  }
-  if (phase === "catalog_sent") {
-    return "El catálogo ya se envió. El cliente debe elegir una finca de las opciones que recibió.";
-  }
-  if (phase === "property_selected" || phase === "pet_check") {
-    if (e.hasPets === undefined) return "Falta confirmar si lleva mascotas y cuántas.";
+  if (phase === 'welcome' || phase === 'collecting') {
+    if (!e.location) return 'Falta el municipio (o decir que recomendamos).';
+    if (!e.checkIn || !e.checkOut)
+      return 'Faltan las fechas de entrada y salida.';
+    if (e.cupo === undefined || e.cupo <= 0)
+      return 'Falta cuántas personas van.';
+    if (!e.planType)
+      return 'Falta el tipo de grupo (familiar/amigos/empresarial).';
+    if (e.isEvento === undefined)
+      return 'Falta saber si es solo descanso o con evento.';
     if (
-      e.hasPets === true &&
-      (e.petCount === undefined || e.petCount <= 0)
-    ) {
-      return "Falta saber cuántas mascotas.";
+      e.isEvento === true &&
+      (e.eventPeopleCount === undefined || e.eventPeopleCount <= 0)
+    )
+      return 'Falta cuántas personas van al evento (dormir + pasadía).';
+    if (e.isEvento === true && !e.eventLogistics)
+      return 'Falta la logística del evento (sonido pro/DJ, banda en vivo o solo sonido básico).';
+    return 'Ya tenemos todos los datos: enviar catálogo en el siguiente turno.';
+  }
+  if (phase === 'catalog_sent') {
+    return 'El catálogo ya se envió. El cliente debe elegir una finca de las opciones que recibió.';
+  }
+  if (phase === 'property_selected' || phase === 'pet_check') {
+    if (e.hasPets === undefined)
+      return 'Falta confirmar si lleva mascotas y cuántas.';
+    if (e.hasPets === true && (e.petCount === undefined || e.petCount <= 0)) {
+      return 'Falta saber cuántas mascotas.';
     }
-    return "Mascotas confirmadas; ahora mostramos las reglas y pedimos confirmación.";
+    return 'Mascotas confirmadas; ahora mostramos las reglas y pedimos confirmación.';
   }
-  if (phase === "pet_rules_shown") {
-    return "Cliente vio las reglas de mascotas. Esperando que confirme para mostrar el resumen con totales.";
+  if (phase === 'pet_rules_shown') {
+    return 'Cliente vio las reglas de mascotas. Esperando que confirme para mostrar el resumen con totales.';
   }
-  if (phase === "contract") {
+  if (phase === 'contract') {
     const missing: string[] = [];
-    if (!e.contractName) missing.push("nombre completo");
-    if (!e.contractCedula) missing.push("cédula (número + ciudad de expedición + foto)");
-    if (!e.contractEmail) missing.push("correo electrónico");
-    if (!e.contractPhone && !e.contractAddress) missing.push("teléfono o dirección");
-    if (missing.length === 0) return "Datos completos: el contrato está listo para procesar.";
-    return `Faltan estos datos del contrato: ${missing.join(", ")}.`;
+    if (!e.contractName) missing.push('nombre completo');
+    if (!e.contractCedula)
+      missing.push('cédula (número + ciudad de expedición + foto)');
+    if (!e.contractEmail) missing.push('correo electrónico');
+    if (!e.contractPhone && !e.contractAddress)
+      missing.push('teléfono o dirección');
+    if (missing.length === 0)
+      return 'Datos completos: el contrato está listo para procesar.';
+    return `Faltan estos datos del contrato: ${missing.join(', ')}.`;
   }
-  if (phase === "done") return "Reserva en proceso, escalada a un experto humano.";
-  return "";
+  if (phase === 'done')
+    return 'Reserva en proceso, escalada a un experto humano.';
+  return '';
 }
 
 const PHASE_GOAL: Record<BotPhase, string> = {
-  welcome: "Saludar y empezar a recolectar datos para mostrar fincas disponibles.",
-  collecting: "Recolectar municipio, fechas, personas, tipo de grupo y si hay evento.",
-  catalog_sent: "El cliente debe elegir una de las fincas que recibió por catálogo.",
-  property_selected: "Confirmar mascotas para la finca elegida.",
-  pet_check: "Confirmar si lleva mascotas y cuántas.",
+  welcome:
+    'Saludar y empezar a recolectar datos para mostrar fincas disponibles.',
+  collecting:
+    'Recolectar municipio, fechas, personas, tipo de grupo y si hay evento.',
+  catalog_sent:
+    'El cliente debe elegir una de las fincas que recibió por catálogo.',
+  property_selected: 'Confirmar mascotas para la finca elegida.',
+  pet_check: 'Confirmar si lleva mascotas y cuántas.',
   pet_rules_shown:
-    "Se mostraron las reglas de mascotas; esperar confirmación del cliente para mostrar el resumen con totales.",
+    'Se mostraron las reglas de mascotas; esperar confirmación del cliente para mostrar el resumen con totales.',
   quote_shown:
-    "Se mostró el resumen con el total; esperar confirmación del cliente para pedir los datos del contrato.",
-  contract: "Recolectar nombre, cédula, correo, teléfono y dirección para el contrato.",
-  done: "Cliente entregó datos del contrato; esperando que un experto humano lo contacte.",
+    'Se mostró el resumen con el total; esperar confirmación del cliente para pedir los datos del contrato.',
+  contract:
+    'Recolectar nombre, cédula, correo, teléfono y dirección para el contrato.',
+  done: 'Cliente entregó datos del contrato; esperando que un experto humano lo contacte.',
 };
 
 export interface ContextSystemPromptOpts {
@@ -531,8 +555,8 @@ export interface ContextSystemPromptOpts {
    * (VIP → personalizado, complicado → cauteloso, recurrente → como conocido).
    */
   tagFlags?: ConversationTagFlags;
-  /** Canal: en `web` la identidad es "asistente virtual" (no "Hernán"). */
-  channel?: "whatsapp" | "web";
+  /** Canal (web o WhatsApp): misma identidad de asistente virtual. */
+  channel?: 'whatsapp' | 'web';
   /** Si ya hubo saludo del bot en el hilo, no volver a saludar. */
   alreadyGreeted?: boolean;
   /** Nombre del contacto para personalizar el tono. */
@@ -540,7 +564,7 @@ export interface ContextSystemPromptOpts {
 }
 
 const GREETING_MARKERS =
-  /te escribe hern[aá]n|asistente virtual de fincasya|es un gusto saludarte|te saluda \*?hern[aá]n|soy tu \*?asistente virtual|^¡?hola\b/i;
+  /asistente virtual de fincasya|es un gusto atenderte|es un gusto saludarte|soy tu \*?asistente virtual|soy el \*?asistente virtual|^¡?hola\b/i;
 
 /** ¿El bot ya saludó en este hilo? */
 export function hasBotGreetedInHistory(
@@ -548,21 +572,21 @@ export function hasBotGreetedInHistory(
 ): boolean {
   for (let i = history.length - 1; i >= 0; i--) {
     const m = history[i];
-    if (m.role !== "assistant") continue;
+    if (m.role !== 'assistant') continue;
     const raw = m.content;
     const content =
-      typeof raw === "string"
+      typeof raw === 'string'
         ? raw.trim()
         : Array.isArray(raw)
           ? raw
               .map((p) =>
-                typeof p === "object" && p && "text" in p
-                  ? String((p as { text?: string }).text ?? "")
-                  : "",
+                typeof p === 'object' && p && 'text' in p
+                  ? String((p as { text?: string }).text ?? '')
+                  : '',
               )
-              .join(" ")
+              .join(' ')
               .trim()
-          : "";
+          : '';
     if (content && GREETING_MARKERS.test(content)) return true;
   }
   return false;
@@ -584,38 +608,42 @@ export function buildContextSystemPrompt(
 
   const sections: string[] = [
     identityForChannel(opts.channel),
-    "",
+    '',
     GLOBAL_RULES,
-    "",
+    '',
     ANTI_HALLUCINATION_RULES,
-    "",
-    "ESTADO ACTUAL DE LA CONVERSACIÓN:",
+    '',
+    'ESTADO ACTUAL DE LA CONVERSACIÓN:',
     `- Fase del proceso: ${phase}`,
-    `- Objetivo de esta fase: ${PHASE_GOAL[phase] ?? ""}`,
+    `- Objetivo de esta fase: ${PHASE_GOAL[phase] ?? ''}`,
   ];
 
   if (summary) {
-    sections.push("", "DATOS YA CONFIRMADOS POR EL CLIENTE:", summary);
+    sections.push('', 'DATOS YA CONFIRMADOS POR EL CLIENTE:', summary);
   } else {
-    sections.push("", "DATOS YA CONFIRMADOS: ninguno todavía.");
+    sections.push('', 'DATOS YA CONFIRMADOS: ninguno todavía.');
   }
 
   if (hint) {
-    sections.push("", `SIGUIENTE PASO: ${hint}`);
+    sections.push('', `SIGUIENTE PASO: ${hint}`);
   }
 
   if (opts.propertyContext && opts.propertyContext.trim()) {
-    sections.push("", "DATOS VERIFICADOS DE LA FINCA SELECCIONADA:", opts.propertyContext.trim());
+    sections.push(
+      '',
+      'DATOS VERIFICADOS DE LA FINCA SELECCIONADA:',
+      opts.propertyContext.trim(),
+    );
   }
 
   if (opts.stayQuoteBlock && opts.stayQuoteBlock.trim()) {
-    sections.push("", "COTIZACIÓN VIGENTE:", opts.stayQuoteBlock.trim());
+    sections.push('', 'COTIZACIÓN VIGENTE:', opts.stayQuoteBlock.trim());
   }
 
   if (opts.ragContext && opts.ragContext.trim()) {
     sections.push(
-      "",
-      "INFO VERIFICADA DESDE LA BASE DE CONOCIMIENTO (RAG) — RESPONDER usando estos fragmentos cuando el cliente pregunte sobre estos temas. NO inventar más allá de lo que dice aquí:",
+      '',
+      'INFO VERIFICADA DESDE LA BASE DE CONOCIMIENTO (RAG) — RESPONDER usando estos fragmentos cuando el cliente pregunte sobre estos temas. NO inventar más allá de lo que dice aquí:',
       opts.ragContext.trim(),
     );
   }
@@ -624,8 +652,8 @@ export function buildContextSystemPrompt(
   // equipo, no QUÉ datos dar ni cómo mover el flujo — de ahí el marco explícito.
   if (opts.playbookContext && opts.playbookContext.trim()) {
     sections.push(
-      "",
-      "EJEMPLOS DE TONO DEL EQUIPO (few-shot) — imita el ESTILO, el registro y la calidez de estos ejemplos reales. Reglas: (1) NO copies su texto literal; (2) NO uses datos que aparezcan en ellos (precios, nombres, fechas, montos): esos salen solo de las secciones verificadas de arriba; (3) NO cambies el siguiente paso del flujo por lo que digan. Solo aprende CÓMO se dice:",
+      '',
+      'EJEMPLOS DE TONO DEL EQUIPO (few-shot) — imita el ESTILO, el registro y la calidez de estos ejemplos reales. Reglas: (1) NO copies su texto literal; (2) NO uses datos que aparezcan en ellos (precios, nombres, fechas, montos): esos salen solo de las secciones verificadas de arriba; (3) NO cambies el siguiente paso del flujo por lo que digan. Solo aprende CÓMO se dice:',
       opts.playbookContext.trim(),
     );
   }
@@ -635,19 +663,19 @@ export function buildContextSystemPrompt(
   // viñetas cuando el bot debe pedir datos en la fase de recolección.
   if (opts.collectingAsk && opts.collectingAsk.length > 0) {
     sections.push(
-      "",
-      "TU TAREA ESTE TURNO — PEDIR LOS DATOS QUE FALTAN, TUTEANDO y con el tono cálido del equipo.",
-      "Datos que aún faltan para poder mostrar opciones al cliente: " +
-        opts.collectingAsk.join("; ") +
-        ".",
-      "FORMATO OBLIGATORIO (es WhatsApp — NUNCA un párrafo corrido; usa saltos de línea REALES entre cada dato):",
-      "- Línea 1: saludo o reconocimiento cálido y breve.",
-      "- Después, UNA LÍNEA APARTE por cada dato que falta, cada una empezando con su emoji: 📍 municipio/zona, 📅 fechas, 👥 personas, 🏡 tipo de plan (familiar/amigos/empresarial), 🎉 evento. JAMÁS pongas dos preguntas en el mismo renglón.",
-      "- Última línea: invitación corta a que te cuente.",
-      "Ejemplo del FORMATO (adapta el texto pero respeta EXACTAMENTE los saltos de línea):",
-      "¡Perfecto! Para mostrarte las mejores opciones cuéntame 😊\n📅 ¿Qué fechas tienes en mente (entrada y salida)?\n👥 ¿Cuántas personas van en total?\nCon eso te comparto de una las fincas ideales ✨",
+      '',
+      'TU TAREA ESTE TURNO — PEDIR LOS DATOS QUE FALTAN, TUTEANDO y con el tono cálido del equipo.',
+      'Datos que aún faltan para poder mostrar opciones al cliente: ' +
+        opts.collectingAsk.join('; ') +
+        '.',
+      'FORMATO OBLIGATORIO (es WhatsApp — NUNCA un párrafo corrido; usa saltos de línea REALES entre cada dato):',
+      '- Línea 1: saludo o reconocimiento cálido y breve.',
+      '- Después, UNA LÍNEA APARTE por cada dato que falta, cada una empezando con su emoji: 📍 municipio/zona, 📅 fechas, 👥 personas, 🏡 tipo de plan (familiar/amigos/empresarial), 🎉 evento. JAMÁS pongas dos preguntas en el mismo renglón.',
+      '- Última línea: invitación corta a que te cuente.',
+      'Ejemplo del FORMATO (adapta el texto pero respeta EXACTAMENTE los saltos de línea):',
+      '¡Es un gusto atenderte! Para mostrarte las mejores opciones cuéntame 😊\n📅 ¿Qué fechas tienes en mente (entrada y salida)?\n👥 ¿Cuántas personas van en total?\nCon eso te comparto de una las fincas ideales ✨',
       "- Que suene natural y humano, imitando el tono de los ejemplos de arriba si los hay. NO uses viñetas con '•', NO numeres (1. 2. 3.), NO enumeres fincas.",
-      "- NO inventes datos ni des precios. NO vuelvas a pedir datos que ya conoces (ver el resumen de arriba).",
+      '- NO inventes datos ni des precios. NO vuelvas a pedir datos que ya conoces (ver el resumen de arriba).',
     );
   }
 
@@ -659,74 +687,77 @@ export function buildContextSystemPrompt(
     const tagLines: string[] = [];
     if (opts.tagFlags.isVip) {
       tagLines.push(
-        "- *Cliente IMPORTANTE o ESPECIAL* → trátalo con prioridad: tono cálido y personalizado, evita frases genéricas, sé proactivo, dale el mejor servicio. Si ya tiene datos confirmados, no se los pidas otra vez.",
+        '- *Cliente IMPORTANTE o ESPECIAL* → trátalo con prioridad: tono cálido y personalizado, evita frases genéricas, sé proactivo, dale el mejor servicio. Si ya tiene datos confirmados, no se los pidas otra vez.',
       );
     }
     if (opts.tagFlags.isDifficult) {
       tagLines.push(
-        "- *Cliente COMPLICADO* → tono cauteloso. NO presiones el cierre. Deja más espacio entre preguntas, evita asumir respuestas, sé MUY explícito en confirmaciones (\"¿confirmamos X?\") antes de avanzar.",
+        '- *Cliente COMPLICADO* → tono cauteloso. NO presiones el cierre. Deja más espacio entre preguntas, evita asumir respuestas, sé MUY explícito en confirmaciones ("¿confirmamos X?") antes de avanzar.',
       );
     }
     if (opts.tagFlags.isReturning) {
       tagLines.push(
-        "- *Cliente RECURRENTE* → ya nos conoce. Salúdalo como conocido (\"¡Hola otra vez!\"); NO repitas información que ya te dieron en sesiones previas; si ya tienes contexto (finca, fechas) menciona que lo retomas desde ahí; ve directo al grano sin reexplicar nada.",
+        '- *Cliente RECURRENTE* → ya nos conoce. Salúdalo como conocido ("¡Hola otra vez!"); NO repitas información que ya te dieron en sesiones previas; si ya tienes contexto (finca, fechas) menciona que lo retomas desde ahí; ve directo al grano sin reexplicar nada.',
       );
     }
     if (tagLines.length > 0) {
       sections.push(
-        "",
-        "ETIQUETAS ACTIVAS DEL CONTACTO — AJUSTA TU COMPORTAMIENTO:",
-        tagLines.join("\n"),
+        '',
+        'ETIQUETAS ACTIVAS DEL CONTACTO — AJUSTA TU COMPORTAMIENTO:',
+        tagLines.join('\n'),
       );
     }
   }
 
   sections.push(
-    "",
-    "REGLAS DE NEGOCIO FIJAS (úsalas cuando el cliente pregunte):",
-    "- Reserva: el cliente abona 50% para asegurar la fecha; el resto se paga según el contrato.",
-    "- Respaldo legal: RNT 163658, FincasYa.com.",
-    "- Ubicación exacta de la finca: solo se entrega después de firmar contrato y pagar el abono.",
-    "- Fechas: se trabajan en formato día/mes/año en el chat.",
-    "",
+    '',
+    'REGLAS DE NEGOCIO FIJAS (úsalas cuando el cliente pregunte):',
+    '- Reserva: el cliente abona 50% para asegurar la fecha; el resto se paga según el contrato.',
+    '- Respaldo legal: RNT 163658, FincasYa.com.',
+    '- Ubicación exacta de la finca: solo se entrega después de firmar contrato y pagar el abono.',
+    '- Fechas: se trabajan en formato día/mes/año en el chat.',
+    '',
     PET_RULES_KNOWLEDGE,
-    "",
-    "INSTRUCCIONES PARA TU RESPUESTA:",
-    "- Responde primero al mensaje del cliente (reconoce su situación o inquietud antes de la política).",
-    "- Cierra recordando brevemente el siguiente paso del proceso (lo de SIGUIENTE PASO de arriba), en una sola frase corta.",
-    "- Máximo 3-4 líneas. Tono natural, cordial y profesional — no plantilla fría.",
-    "- Si el cliente saluda o repite algo, NO reenvíes los bloques largos que ya enviamos antes; solo recuerda el siguiente paso de forma breve.",
-    "- Si ya informaste que un experto atenderá o continuará el proceso, NO repitas esa idea en turnos siguientes; avanza con el flujo o responde solo lo que preguntó.",
-    "- NUNCA uses frases como \"aquí estoy para acompañarte mientras tu experto retoma\" ni variantes si ya enviaste un acuse de espera en esta conversación.",
-    "- Si el cliente está molesto o dice que no entendiste, reconoce su molestia con empatía antes de continuar.",
-    "- NUNCA repitas textualmente un mensaje que ya enviaste en los últimos turnos; reformula con tus palabras.",
+    '',
+    'INSTRUCCIONES PARA TU RESPUESTA:',
+    '- Responde primero al mensaje del cliente (reconoce su situación o inquietud antes de la política).',
+    '- Abre con calidez cuando corresponda: "Es un gusto atenderte", "Con mucho gusto", "Es un placer ayudarte" — nunca sueltes solo "Claro" o "Ok".',
+    '- Cierra recordando brevemente el siguiente paso del proceso (lo de SIGUIENTE PASO de arriba), en una sola frase corta.',
+    '- Máximo 3-4 líneas. Tono natural, cordial y profesional — no plantilla fría.',
+    '- Si el cliente saluda o repite algo, NO reenvíes los bloques largos que ya enviamos antes; solo recuerda el siguiente paso de forma breve.',
+    '- Si ya informaste que un experto atenderá o continuará el proceso, NO repitas esa idea en turnos siguientes; avanza con el flujo o responde solo lo que preguntó.',
+    '- NUNCA uses frases como "aquí estoy para acompañarte mientras tu experto retoma" ni variantes si ya enviaste un acuse de espera en esta conversación.',
+    '- Si el cliente está molesto o dice que no entendiste, reconoce su molestia con empatía antes de continuar.',
+    '- NUNCA repitas textualmente un mensaje que ya enviaste en los últimos turnos; reformula con tus palabras.',
   );
 
   if (opts.alreadyGreeted) {
     sections.push(
-      "- Ya saludaste a este cliente en esta conversación: NO vuelvas a decir hola ni te presentes de nuevo.",
+      '- Ya saludaste a este cliente en esta conversación: NO vuelvas a decir hola ni te presentes de nuevo.',
     );
   }
 
-  const greetingName = respectfulGreetingName(opts.contactName, entities.clientGender);
+  const greetingName = respectfulGreetingName(
+    opts.contactName,
+    entities.clientGender,
+  );
   if (greetingName) {
     sections.push(
-      `- Dirígete al cliente como "${greetingName}" cuando encaje de forma natural (TUTEANDO, nunca de usted).`,
+      `- OBLIGATORIO: ABRE tu respuesta dirigiéndote a la clienta/al cliente como "${greetingName}" (el título Señor/Señora es obligatorio en el saludo), y sigue TUTEANDO en el resto ("${greetingName}, ¿qué fechas tienes?"). Hazlo aunque ya hayas saludado antes. Nunca de usted.`,
     );
   }
 
   if (stuck) {
     sections.push(
-      "- ⚠️ El cliente lleva varios turnos sin avanzar. Sé MUY breve, pregunta solo el dato puntual que falta y, si no lo da en el siguiente turno, ofrece pasarlo con un experto humano.",
+      '- ⚠️ El cliente lleva varios turnos sin avanzar. Sé MUY breve, pregunta solo el dato puntual que falta y, si no lo da en el siguiente turno, ofrece pasarlo con un experto humano.',
     );
   }
 
-  return sections.join("\n");
+  return sections.join('\n');
 }
 
 /** Mensaje cuando se detecta bucle de repetición y se ofrece humano. */
-export const LOOP_OFFER_HUMAN_MESSAGE =
-  `Veo que estamos dando vueltas 🙏 ¿Prefieres que te conecte con un experto humano para terminar esto más rápido? Solo responde *sí* y te paso con alguien del equipo ✨`;
+export const LOOP_OFFER_HUMAN_MESSAGE = `Veo que estamos dando vueltas 🙏 ¿Prefieres que te conecte con un experto humano para terminar esto más rápido? Solo responde *sí* y te paso con alguien del equipo ✨`;
 
 /**
  * Mensaje cuando el cliente declara más mascotas de las que el bot maneja
@@ -737,12 +768,12 @@ export const LOOP_OFFER_HUMAN_MESSAGE =
 export function petsExceedLimitMessage(petCount: number): string {
   const n = Math.max(0, Math.floor(petCount));
   return [
-    `Para *${n} mascota${n === 1 ? "" : "s"}* necesito que un experto te confirme las condiciones especiales 🤝`,
-    "",
-    "Nuestro bot maneja hasta *3 mascotas* automáticamente. Para grupos más grandes evaluamos caso por caso: aseo extra, disponibilidad de fincas con espacio suficiente, depósito ajustado, etc.",
-    "",
-    "Un experto te escribirá en breve para terminar tu reserva ✨",
-  ].join("\n");
+    `Para *${n} mascota${n === 1 ? '' : 's'}* necesito que un experto te confirme las condiciones especiales 🤝`,
+    '',
+    'Nuestro bot maneja hasta *3 mascotas* automáticamente. Para grupos más grandes evaluamos caso por caso: aseo extra, disponibilidad de fincas con espacio suficiente, depósito ajustado, etc.',
+    '',
+    'Un experto te escribirá en breve para terminar tu reserva ✨',
+  ].join('\n');
 }
 
 /**
@@ -759,45 +790,48 @@ export function nextStepFriendlyQuestion(
   missingField?: keyof BotEntities,
 ): string {
   // pet_check / property_selected → preguntar mascotas si aún no respondió.
-  if (phase === "pet_check" || phase === "property_selected") {
+  if (phase === 'pet_check' || phase === 'property_selected') {
     if (entities.hasPets === undefined) {
       return `¿Me confirmas si llevas *mascotas* (y cuántas) o sin ellas? 🐾`;
     }
-    if (entities.hasPets === true && (entities.petCount === undefined || entities.petCount <= 0)) {
+    if (
+      entities.hasPets === true &&
+      (entities.petCount === undefined || entities.petCount <= 0)
+    ) {
       return `¿*Cuántas mascotas* en total? (Solo el número) 🐾`;
     }
     return `¿Avanzamos con los datos del contrato? 📋`;
   }
 
   // pet_rules_shown → esperando confirmación sí/no.
-  if (phase === "pet_rules_shown") {
+  if (phase === 'pet_rules_shown') {
     return `¿Estás de acuerdo con las condiciones de mascotas? Responde *sí* y te paso el resumen 🤝`;
   }
 
   // contract → recordar que faltan datos del contrato.
-  if (phase === "contract") {
+  if (phase === 'contract') {
     const missing: string[] = [];
-    if (!entities.contractName) missing.push("nombre completo");
-    if (!entities.contractCedula) missing.push("cédula");
-    if (!entities.contractEmail) missing.push("correo");
+    if (!entities.contractName) missing.push('nombre completo');
+    if (!entities.contractCedula) missing.push('cédula');
+    if (!entities.contractEmail) missing.push('correo');
     if (!entities.contractPhone && !entities.contractAddress)
-      missing.push("teléfono o dirección");
+      missing.push('teléfono o dirección');
     if (missing.length === 0) {
       return `¿Confirmamos para enviarte el contrato? ✨`;
     }
     if (missing.length === 1) {
       return `¿Me compartes tu *${missing[0]}* para avanzar con el contrato? 📋`;
     }
-    return `¿Me compartes tus *datos del contrato* (${missing.join(", ")}) para terminar la reserva? 📋`;
+    return `¿Me compartes tus *datos del contrato* (${missing.join(', ')}) para terminar la reserva? 📋`;
   }
 
   // catalog_sent → ya enviamos catálogo, pedir elección.
-  if (phase === "catalog_sent") {
+  if (phase === 'catalog_sent') {
     return `¿Cuál de las opciones que te envié te llamó la atención? 🏡`;
   }
 
   // collecting / welcome → pedir el dato puntual que falta.
-  if (phase === "collecting" || phase === "welcome") {
+  if (phase === 'collecting' || phase === 'welcome') {
     if (missingField) return missingFieldQuestion(missingField, entities);
     return `¡Listo! Te comparto las opciones disponibles 🏡✨`;
   }
@@ -826,20 +860,20 @@ export function nextStepFriendlyQuestion(
  *   - Longitud útil: 2..20 caracteres. Fuera de eso → null (probable basura).
  */
 export function firstNameForGreeting(rawName?: string | null): string | null {
-  const raw = String(rawName ?? "").trim();
+  const raw = String(rawName ?? '').trim();
   if (!raw) return null;
   // Teléfonos o cadenas sin letras → descartar.
   if (/^[\d+\-\s()]+$/.test(raw)) return null;
   const cleaned = raw
-    .replace(/[^\p{L}\p{N}\s'\-.]/gu, "")
-    .replace(/\s+/g, " ")
+    .replace(/[^\p{L}\p{N}\s'\-.]/gu, '')
+    .replace(/\s+/g, ' ')
     .trim();
   if (!cleaned) return null;
-  const firstWord = cleaned.split(" ")[0];
+  const firstWord = cleaned.split(' ')[0];
   if (firstWord.length < 2 || firstWord.length > 20) return null;
   return (
-    firstWord.charAt(0).toLocaleUpperCase("es-CO") +
-    firstWord.slice(1).toLocaleLowerCase("es-CO")
+    firstWord.charAt(0).toLocaleUpperCase('es-CO') +
+    firstWord.slice(1).toLocaleLowerCase('es-CO')
   );
 }
 
@@ -860,32 +894,24 @@ export function firstNameForGreeting(rawName?: string | null): string | null {
  */
 export function respectfulGreetingName(
   contactName?: string | null,
-  gender?: "male" | "female" | null,
+  gender?: 'male' | 'female' | null,
 ): string | null {
   const first = firstNameForGreeting(contactName);
   if (!first) return null;
-  const hon = gender === "male" ? "Señor" : gender === "female" ? "Señora" : null;
+  const hon =
+    gender === 'male' ? 'Señor' : gender === 'female' ? 'Señora' : null;
   return hon ? `${hon} ${first}` : first;
 }
 
 export function buildWelcomeMessage(
   contactName?: string | null,
-  channel?: "whatsapp" | "web",
-  gender?: "male" | "female" | null,
+  _channel?: 'whatsapp' | 'web',
+  gender?: 'male' | 'female' | null,
 ): string {
   const name = respectfulGreetingName(contactName, gender);
-  // En el WIDGET WEB el bot se presenta como "asistente virtual de FincasYa"
-  // (no como "Hernán", que es la persona/marca del canal de WhatsApp). El
-  // cliente del widget sabe que está chateando con un bot del sitio.
-  // Trato CERCANO (tuteo): así hablan los asesores reales de FincasYa.
-  const isWeb = channel === "web";
-  const opener = isWeb
-    ? name
-      ? `¡Hola ${name}! 👋 Soy tu *asistente virtual de FincasYa* 🏡✨`
-      : `¡Hola! 👋 Soy tu *asistente virtual de FincasYa* 🏡✨`
-    : name
-      ? `¡Hola ${name}! Gusto saludarte. Te escribe Hernán de FincasYa.com 🏡✨`
-      : `¡Hola! Gusto saludarte. Te escribe Hernán de FincasYa.com 🏡✨`;
+  const opener = name
+    ? `¡Hola ${name}! 👋 Es un gusto atenderte. Soy el *asistente virtual de FincasYa* 🏡✨`
+    : `¡Hola! 👋 Es un gusto atenderte. Soy el *asistente virtual de FincasYa* 🏡✨`;
   return `${opener}
 
 Tenemos opciones espectaculares de fincas listas para ti 🤩 y queremos ayudarte a encontrar la ideal según tu plan.
@@ -917,18 +943,13 @@ export const WELCOME_MESSAGE = buildWelcomeMessage();
  */
 export function buildShortGreeting(
   contactName?: string | null,
-  channel?: "whatsapp" | "web",
-  gender?: "male" | "female" | null,
+  _channel?: 'whatsapp' | 'web',
+  gender?: 'male' | 'female' | null,
 ): string {
   const name = respectfulGreetingName(contactName, gender);
-  if (channel === "web") {
-    return name
-      ? `👋 ¡Hola ${name}! Soy tu *asistente virtual de FincasYa*.`
-      : `👋 ¡Hola! Soy tu *asistente virtual de FincasYa*.`;
-  }
   return name
-    ? `🙋‍♂️ ¡Hola ${name}! Te saluda *Hernán* de FincasYa.com.`
-    : `🙋‍♂️ ¡Hola! Te saluda *Hernán* de FincasYa.com.`;
+    ? `👋 ¡Hola ${name}! Es un gusto atenderte — soy el *asistente virtual de FincasYa*.`
+    : `👋 ¡Hola! Es un gusto atenderte — soy el *asistente virtual de FincasYa*.`;
 }
 
 /** Pregunta específica según qué campo falta. */
@@ -937,37 +958,37 @@ export function missingFieldQuestion(
   entities: BotEntities,
 ): string {
   switch (field) {
-    case "location":
-      return "¿A qué municipio o zona de Colombia quieres ir? (Melgar, Girardot, Anapoima, etc.) Si no tienes preferencia, te recomiendo yo 😊";
-    case "checkIn":
-      return "¿Qué fechas tienes en mente? Dime la fecha de *entrada* y *salida* 📅";
-    case "checkOut":
+    case 'location':
+      return '¿A qué municipio o zona de Colombia quieres ir? (Melgar, Girardot, Anapoima, etc.) Si no tienes preferencia, te recomiendo yo 😊';
+    case 'checkIn':
+      return '¿Qué fechas tienes en mente? Dime la fecha de *entrada* y *salida* 📅';
+    case 'checkOut':
       return [
         `Ya tengo tu fecha de entrada (${entities.checkIn}) 📅`,
-        "",
-        "¿Te quedas a *dormir*? Cuéntame la *fecha de salida* (o cuántas noches).",
-        "Y si era un plan de *un solo día* sin pernoctar, también dímelo 🙌",
-      ].join("\n");
-    case "cupo":
-      return "¿Cuántas personas van en total? 👨‍👩‍👧‍👦";
-    case "planType":
-      return "¿Su plan es *familiar*, con *amigos* o *empresarial*? (Así te muestro fincas que mejor encajan) 👨‍👩‍👧‍👦";
-    case "isEvento":
-      return "¿Van *solo de descanso* o también tendrán *evento o celebración* en la finca? (cumpleaños, fiesta, reunión, etc.) 🎉";
-    case "eventPeopleCount":
-      return "Cuéntame del evento: ¿*cuántas personas en total* van? (Las que se quedan a dormir + las que van solo por el día/pasadía) 🎉👥";
-    case "eventLogistics":
+        '',
+        '¿Te quedas a *dormir*? Cuéntame la *fecha de salida* (o cuántas noches).',
+        'Y si era un plan de *un solo día* sin pernoctar, también dímelo 🙌',
+      ].join('\n');
+    case 'cupo':
+      return '¿Cuántas personas van en total? 👨‍👩‍👧‍👦';
+    case 'planType':
+      return '¿Su plan es *familiar*, con *amigos* o *empresarial*? (Así te muestro fincas que mejor encajan) 👨‍👩‍👧‍👦';
+    case 'isEvento':
+      return '¿Van *solo de descanso* o también tendrán *evento o celebración* en la finca? (cumpleaños, fiesta, reunión, etc.) 🎉';
+    case 'eventPeopleCount':
+      return 'Cuéntame del evento: ¿*cuántas personas en total* van? (Las que se quedan a dormir + las que van solo por el día/pasadía) 🎉👥';
+    case 'eventLogistics':
       return [
-        "Para el evento, ¿qué tipo de logística vas a tener? 🎵",
-        "",
-        "🎧 *Sonido profesional / DJ / iluminación*",
-        "🎸 *Banda en vivo* o grupos musicales (mariachis, etc.)",
-        "🏡 O solo el *sonido básico de la finca* (departir tranquilos)",
-        "",
-        "Dime cuál opción es la que aplica 🤝",
-      ].join("\n");
+        'Para el evento, ¿qué tipo de logística vas a tener? 🎵',
+        '',
+        '🎧 *Sonido profesional / DJ / iluminación*',
+        '🎸 *Banda en vivo* o grupos musicales (mariachis, etc.)',
+        '🏡 O solo el *sonido básico de la finca* (departir tranquilos)',
+        '',
+        'Dime cuál opción es la que aplica 🤝',
+      ].join('\n');
     default:
-      return "¿Puedes completar el dato que me falta para buscarte las mejores fincas? 😊";
+      return '¿Puedes completar el dato que me falta para buscarte las mejores fincas? 😊';
   }
 }
 
@@ -983,9 +1004,9 @@ export function datesIncoherentMessage(entities: BotEntities): string {
   ) {
     return [
       `Veo que pusiste el *mismo día* de entrada y de salida (${entities.checkIn}) 😅`,
-      "",
-      "Para una reserva de hospedaje necesito al menos *una noche*. ¿Me confirmas la *fecha de salida*? (o dime cuántas noches te quedarías) 🗓️",
-    ].join("\n");
+      '',
+      'Para una reserva de hospedaje necesito al menos *una noche*. ¿Me confirmas la *fecha de salida*? (o dime cuántas noches te quedarías) 🗓️',
+    ].join('\n');
   }
   return `Parece que la fecha de salida (${entities.checkOut}) es antes de la de entrada (${entities.checkIn}) 😅 ¿Me confirmas las fechas correctas?`;
 }
@@ -996,11 +1017,11 @@ export function datesIncoherentMessage(entities: BotEntities): string {
  */
 export function datesInPastMessage(): string {
   return [
-    "Claro 😊",
-    "Las fechas que mencionas no están disponibles para reservar — la llegada debe ser *a partir de mañana* (no aceptamos ingresos el mismo día ni fechas pasadas).",
-    "",
-    "Por favor indícanos nuevas fechas de llegada y salida para ayudarte a revisar las opciones disponibles 🏡✨",
-  ].join("\n");
+    'Claro 😊',
+    'Las fechas que mencionas no están disponibles para reservar — la llegada debe ser *a partir de mañana* (no aceptamos ingresos el mismo día ni fechas pasadas).',
+    '',
+    'Por favor indícanos nuevas fechas de llegada y salida para ayudarte a revisar las opciones disponibles 🏡✨',
+  ].join('\n');
 }
 
 /** Texto breve ANTES de enviar el catálogo (sin repetir fechas, cupo ni municipio).
@@ -1009,11 +1030,11 @@ export function datesInPastMessage(): string {
 export function preCatalogText(_entities?: BotEntities): string {
   void _entities;
   return [
-    "¡Con mucho gusto! Estas son algunas de nuestras fincas para tus fechas 🏡✨",
-    "",
-    "💰 Los valores son *aproximados* por noche y pueden variar según la *temporada*.",
-    "👉 Cuéntanos *cuál te llama la atención* y con gusto te ayudamos con la reserva 🤝",
-  ].join("\n");
+    '¡Con mucho gusto! Estas son algunas de nuestras fincas para tus fechas 🏡✨',
+    '',
+    '💰 Los valores son *aproximados* por noche y pueden variar según la *temporada*.',
+    '👉 Cuéntanos *cuál te llama la atención* y con gusto te ayudamos con la reserva 🤝',
+  ].join('\n');
 }
 
 /** Pregunta de mascotas. */
@@ -1035,24 +1056,24 @@ Ten en cuenta que la mayoría de fincas cobran un adicional por mascota y alguna
  * y que el seed `faq:mascotas-politica` (RAG) para consistencia total.
  */
 export function petFeesSummaryForQuote(entities: BotEntities): string {
-  if (!entities.hasPets) return "";
+  if (!entities.hasPets) return '';
   return [
-    "✨🐶 Tus mascotas son bienvenidas en la mayoría de nuestras opciones de alojamiento 🐾",
-    "",
-    "💰 Depósito reembolsable: $100.000 por cada mascota.",
-    "✅️ Tarifa de ingreso: $30.000 a partir de la 3ª mascota.",
-    "",
-    "🧹 Limpieza adicional: si viajas con 3 o más mascotas, se cobrará una tarifa de aseo de $70.000.",
-    "",
-    "📌 Recomendaciones importantes:",
-    "• 🚫 No ingresar las mascotas a la piscina.",
-    "• 🐾 Evitar orina o pelaje en zonas interiores.",
-    "• 🛋️ No subirlas a muebles ni camas.",
-    "• 🦴 Cuidar que no muerdan implementos de la casa.",
-    "• 💩 Recoger sus necesidades constantemente.",
-    "",
-    "❗ Recuerda: el incumplimiento de estas recomendaciones puede generar descuentos en el depósito. Confiamos en tu especial cuidado para que disfrutes tu estadía al máximo junto a tus peluditos. 💚",
-  ].join("\n");
+    '✨🐶 Tus mascotas son bienvenidas en la mayoría de nuestras opciones de alojamiento 🐾',
+    '',
+    '💰 Depósito reembolsable: $100.000 por cada mascota.',
+    '✅️ Tarifa de ingreso: $30.000 a partir de la 3ª mascota.',
+    '',
+    '🧹 Limpieza adicional: si viajas con 3 o más mascotas, se cobrará una tarifa de aseo de $70.000.',
+    '',
+    '📌 Recomendaciones importantes:',
+    '• 🚫 No ingresar las mascotas a la piscina.',
+    '• 🐾 Evitar orina o pelaje en zonas interiores.',
+    '• 🛋️ No subirlas a muebles ni camas.',
+    '• 🦴 Cuidar que no muerdan implementos de la casa.',
+    '• 💩 Recoger sus necesidades constantemente.',
+    '',
+    '❗ Recuerda: el incumplimiento de estas recomendaciones puede generar descuentos en el depósito. Confiamos en tu especial cuidado para que disfrutes tu estadía al máximo junto a tus peluditos. 💚',
+  ].join('\n');
 }
 
 /** Mensaje de cotización. */
@@ -1069,21 +1090,25 @@ export function quoteMessage(
   const total = totalAlojamiento + petExtra;
 
   const fmt = (n: number) =>
-    new Intl.NumberFormat("es-CO", { style: "currency", currency: "COP", maximumFractionDigits: 0 }).format(n);
+    new Intl.NumberFormat('es-CO', {
+      style: 'currency',
+      currency: 'COP',
+      maximumFractionDigits: 0,
+    }).format(n);
 
   return [
     `🏡 *${entities.selectedPropertyName}*`,
-    `📅 ${entities.checkIn} → ${entities.checkOut} (${noches} ${noches === 1 ? "noche" : "noches"})`,
+    `📅 ${entities.checkIn} → ${entities.checkOut} (${noches} ${noches === 1 ? 'noche' : 'noches'})`,
     `👥 ${entities.cupo} personas | Temporada: ${season}`,
     `💰 ${fmt(pricePerNight)}/noche × ${noches} = *${fmt(totalAlojamiento)}*`,
     entities.hasPets
       ? `🐾 Adicional mascotas: ${fmt(80_000)}/mascota/noche × ${entities.petCount ?? 1} × ${noches} = ${fmt(petExtra)}`
-      : "",
+      : '',
     `━━━━━━━━━━━━━━━━━━━`,
     `*Total: ${fmt(total)}*`,
   ]
     .filter(Boolean)
-    .join("\n");
+    .join('\n');
 }
 
 /** Mensaje solicitando datos del contrato. */
@@ -1108,57 +1133,60 @@ export const CONTRACT_REQUEST_MESSAGE = `¡Excelente elección! ✨ Para formali
 // ─────────────────────────────────────────────────────────────────────────────
 
 /** System prompt para respuestas en fase `collecting` (aclaraciones, ambigüedades). */
-export function collectingSystemPrompt(entities: BotEntities, missingField?: keyof BotEntities): string {
+export function collectingSystemPrompt(
+  entities: BotEntities,
+  missingField?: keyof BotEntities,
+): string {
   return [
     IDENTITY,
-    "",
+    '',
     GLOBAL_RULES,
-    "",
-    "FASE ACTUAL: Recolectando datos para buscar fincas.",
+    '',
+    'FASE ACTUAL: Recolectando datos para buscar fincas.',
     missingField
       ? `DATO QUE FALTA: ${missingField}. Tu respuesta debe pedir SOLO ese dato, de forma natural.`
-      : "Ya tienes todos los datos. Confirma al cliente que vas a buscarle las fincas.",
-    "",
-    "Datos ya recolectados:",
+      : 'Ya tienes todos los datos. Confirma al cliente que vas a buscarle las fincas.',
+    '',
+    'Datos ya recolectados:',
     JSON.stringify(entities, null, 2),
-    "",
-    "PROHIBIDO: mencionar municipios técnicos, IDs, o campos JSON.",
-  ].join("\n");
+    '',
+    'PROHIBIDO: mencionar municipios técnicos, IDs, o campos JSON.',
+  ].join('\n');
 }
 
 /** System prompt para respuestas en fase `catalog_sent`. */
 export const CATALOG_SENT_SYSTEM = [
   IDENTITY,
-  "",
+  '',
   GLOBAL_RULES,
-  "",
-  "FASE ACTUAL: El catálogo de fincas ya fue enviado.",
-  "El cliente debe elegir una finca. Si pregunta por detalles de una opción, responde breve y concreto.",
-  "PROHIBIDO: preguntar si quiere ayuda con la reserva o si quiere continuar cuando ya mostró interés por una finca o ya dio fechas: es redundante.",
-  "No envíes el catálogo de nuevo.",
-].join("\n");
+  '',
+  'FASE ACTUAL: El catálogo de fincas ya fue enviado.',
+  'El cliente debe elegir una finca. Si pregunta por detalles de una opción, responde breve y concreto.',
+  'PROHIBIDO: preguntar si quiere ayuda con la reserva o si quiere continuar cuando ya mostró interés por una finca o ya dio fechas: es redundante.',
+  'No envíes el catálogo de nuevo.',
+].join('\n');
 
 /** System prompt para fase `contract`. */
 export function contractSystemPrompt(entities: BotEntities): string {
   const missing = contractMissingFields(entities);
   return [
     IDENTITY,
-    "",
+    '',
     GLOBAL_RULES,
-    "",
-    "FASE ACTUAL: Recolectando datos del contrato.",
-    "",
-    "🚫 PROHIBIDO ABSOLUTAMENTE EN ESTA FASE:",
+    '',
+    'FASE ACTUAL: Recolectando datos del contrato.',
+    '',
+    '🚫 PROHIBIDO ABSOLUTAMENTE EN ESTA FASE:',
     "- NO reenvíes el resumen / la cotización / el desglose de precios. El resumen ya se envió en la fase quote_shown como mensaje estructurado del bot. Si el cliente pide ver el resumen otra vez, responde **literalmente**: 'El resumen ya te lo compartí; el total exacto lo confirmamos al firmar el contrato 📋' y vuelve a pedir los datos del contrato que falten.",
     "- NO calcules nada numérico: alojamiento, depósito, tarifa, total, abono, 50%, IVA. Si el cliente pregunta '¿cuánto sería?' o '¿cuánto es el abono?', responde **literalmente**: 'El total exacto lo confirmamos en el contrato 📋' y NO inventes cifras.",
     "- NO escribas listas tipo 'Alojamiento 2 noches: $X', 'Depósito mascotas: $Y', 'Total: $Z'. Eso lo hizo el bot en su mensaje estructurado de quote_shown; tú **solo** pides datos del contrato.",
     "- NO menciones '50%', 'abono', 'porcentaje', 'cuota'.",
-    "",
+    '',
     missing.length > 0
-      ? `Datos que aún faltan: ${missing.join(", ")}. Pídelos de forma amable, uno por uno si es posible. Si el cliente intenta desviarse al resumen / pago, retoma con los datos del contrato.`
-      : "Ya tienes todos los datos del contrato. Agradece y confirma que procesarás la reserva. NO menciones precios.",
-    "",
-    "Datos del contrato recolectados hasta ahora:",
+      ? `Datos que aún faltan: ${missing.join(', ')}. Pídelos de forma amable, uno por uno si es posible. Si el cliente intenta desviarse al resumen / pago, retoma con los datos del contrato.`
+      : 'Ya tienes todos los datos del contrato. Agradece y confirma que procesarás la reserva. NO menciones precios.',
+    '',
+    'Datos del contrato recolectados hasta ahora:',
     JSON.stringify(
       {
         nombre: entities.contractName,
@@ -1170,14 +1198,16 @@ export function contractSystemPrompt(entities: BotEntities): string {
       null,
       2,
     ),
-  ].join("\n");
+  ].join('\n');
 }
 
 function contractMissingFields(e: BotEntities): string[] {
   const fields: string[] = [];
-  if (!e.contractName) fields.push("nombre completo");
-  if (!e.contractCedula) fields.push("cédula (número + ciudad de expedición + foto)");
-  if (!e.contractEmail) fields.push("correo electrónico");
-  if (!e.contractPhone && !e.contractAddress) fields.push("teléfono o dirección");
+  if (!e.contractName) fields.push('nombre completo');
+  if (!e.contractCedula)
+    fields.push('cédula (número + ciudad de expedición + foto)');
+  if (!e.contractEmail) fields.push('correo electrónico');
+  if (!e.contractPhone && !e.contractAddress)
+    fields.push('teléfono o dirección');
   return fields;
 }

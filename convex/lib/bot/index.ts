@@ -128,9 +128,8 @@ export interface BotTurnInput {
    */
   tagFlags?: ConversationTagFlags;
   /**
-   * Canal de la conversación. En `web` (widget del sitio) el bot se presenta
-   * como "asistente virtual de FincasYa"; en `whatsapp` como "Hernán". Si no
-   * viene, se asume whatsapp (comportamiento histórico).
+   * Canal de la conversación (`web` widget o `whatsapp`). En ambos el bot se
+   * presenta como *asistente virtual de FincasYa* (no como persona humana).
    */
   channel?: "whatsapp" | "web";
   /**
