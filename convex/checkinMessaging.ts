@@ -15,8 +15,10 @@ import {
   ALL_TEMPLATES,
   buildBodyParams,
   buildRegisterPayload,
+  assertBodyParamsCount,
   buildSendComponents,
   CHECKIN_TEMPLATES,
+  formatTemplateSendError,
   getTemplateDef,
   MANUAL_TEMPLATE_KEYS,
   renderTemplateBody,
@@ -256,13 +258,23 @@ export const sendTemplateToConversation = action({
     if (!to) throw new Error("El contacto no tiene un teléfono válido.");
 
     const bodyParams = (args.bodyParams ?? []).map((p) => String(p ?? ""));
-    const components = buildSendComponents(def, bodyParams);
-    const { wamid, status } = await sendTemplateToYcloud({
-      to,
-      templateName: def.name,
-      languageCode: def.language,
-      ...(components ? { components } : { bodyParams }),
-    });
+    assertBodyParamsCount(def, bodyParams);
+
+    let wamid: string | undefined;
+    let status: string | undefined;
+    try {
+      const components = buildSendComponents(def, bodyParams);
+      const sent = await sendTemplateToYcloud({
+        to,
+        templateName: def.name,
+        languageCode: def.language,
+        ...(components ? { components } : { bodyParams }),
+      });
+      wamid = sent.wamid;
+      status = sent.status;
+    } catch (err) {
+      throw new Error(formatTemplateSendError(err, def));
+    }
 
     const tplButtons = (def.buttons ?? (def.button ? [def.button] : [])).map(
       (b) => ({ type: b.type, text: b.text }),

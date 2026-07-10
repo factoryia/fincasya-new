@@ -366,6 +366,52 @@ function buildPersonalServicioInfo(): string {
  * o varios (paquete tras `pet_check` → contrato, que se descompone en mascotas /
  * resumen / pedido de datos para evitar el muro de texto en WhatsApp).
  */
+/** ¿El cliente ya aportó ALGÚN dato real de la reserva (no solo intención vaga)? */
+function clientGaveCatalogData(e: BotEntities): boolean {
+  return (
+    !!e.location ||
+    !!e.checkIn ||
+    !!e.checkOut ||
+    (e.cupo ?? 0) > 0 ||
+    e.isEvento !== undefined ||
+    !!e.planType ||
+    !!e.selectedPropertyName ||
+    !!e.selectedPropertyRetailerId
+  );
+}
+
+/**
+ * ¿Es el primer turno (fase `welcome`) pero el cliente YA trajo contenido real
+ * (datos de reserva o el flujo avanzó)? En ese caso saltamos la BIENVENIDA
+ * larga y solo anteponemos un saludo corto.
+ *
+ * ⚠️ CLAVE: si el cliente NO dio datos —intención vaga tipo "quiero alquilar
+ * una finca", "buenos días para una finca"— esto es FALSE aunque `missingField`
+ * exista, para que se envíe la BIENVENIDA COMPLETA (que saluda con el estilo
+ * FincasYa y lista lo que necesitamos), en vez del pedido de datos a secas sin
+ * saludo. `missingField != null` es casi siempre cierto en `collecting`, así que
+ * SOLO cuenta como "contenido" cuando el cliente aportó algún dato.
+ */
+function isFirstTurnWithRealContent(
+  phase: BotPhase,
+  tr: TransitionResult,
+  e: BotEntities,
+): boolean {
+  if (phase !== "welcome") return false;
+  if (tr.action.type === "send_catalog") return true;
+  if (tr.nextPhase !== "welcome" && tr.nextPhase !== "collecting") return true;
+  if (
+    tr.catalogPuenteOneNight === true ||
+    tr.catalogSpecialSeason != null ||
+    tr.datesIncoherent === true ||
+    tr.datesInPast === true
+  ) {
+    return true;
+  }
+  if (tr.missingField != null && clientGaveCatalogData(e)) return true;
+  return false;
+}
+
 export async function generateReply(
   input: ReplyInput,
 ): Promise<GenerateReplyResult> {
@@ -428,19 +474,9 @@ export async function generateReply(
   // flujo saltó el WELCOME_MESSAGE y respondió directamente con catálogo /
   // missing fields / puente. Anteponemos un saludo corto para que no se
   // sienta brusco.
-  const firstTurnHasContent =
-    currentPhase === "welcome" &&
-    (tr.missingField != null ||
-      tr.catalogPuenteOneNight === true ||
-      tr.catalogSpecialSeason != null ||
-      tr.datesIncoherent === true ||
-      tr.datesInPast === true ||
-      tr.action.type === "send_catalog" ||
-      // La transición avanzó más allá de welcome/collecting en el primer turno
-      // (ej. el cliente nombró una finca puntual → va directo a pet_check).
-      (tr.nextPhase !== "welcome" && tr.nextPhase !== "collecting"));
+  const firstTurnHasContent = isFirstTurnWithRealContent(currentPhase, tr, entities);
   if (firstTurnHasContent && !input.resumeOngoingConversation && !alreadyGreeted) {
-    const greeting = buildShortGreeting(input.contactName, input.channel);
+    const greeting = buildShortGreeting(input.contactName, input.channel, entities.clientGender);
     // Si además el cliente hizo una pregunta clara en su primer mensaje
     // (`faqContext` poblado por el RAG), la respondemos como PRIMERA burbuja
     // (con el saludo corto) y dejamos los datos faltantes como segunda. Sin
@@ -730,10 +766,10 @@ async function generateReplyText(input: ReplyInput): Promise<string> {
     tr.action.paginate === true
   ) {
     return [
-      "Aquí van *más opciones* 🏡✨",
+      "¡Claro! Aquí van *más opciones* 🏡✨",
       "",
-      "💰 Cada tarjeta muestra el valor por noche en temporada actual.",
-      "👉 Cuéntame *cuál te llama la atención* y te ayudo con la reserva 🤝",
+      "💰 Los valores son *aproximados* por noche y pueden variar según la *temporada*.",
+      "👉 Cuéntanos *cuál te llama la atención* y con gusto te ayudamos con la reserva 🤝",
     ].join("\n");
   }
 
@@ -742,17 +778,7 @@ async function generateReplyText(input: ReplyInput): Promise<string> {
   // `collecting` para el resto del flujo (catálogo, missing fields, puente,
   // etc.). El saludo corto se prepende en el wrapper `generateReply`.
   let currentPhase: BotPhase = input.currentPhase;
-  const firstTurnHasContent =
-    currentPhase === "welcome" &&
-    (tr.missingField != null ||
-      tr.catalogPuenteOneNight === true ||
-      tr.catalogSpecialSeason != null ||
-      tr.datesIncoherent === true ||
-      tr.datesInPast === true ||
-      tr.action.type === "send_catalog" ||
-      // La transición avanzó más allá de welcome/collecting en el primer turno
-      // (ej. el cliente nombró una finca puntual → va directo a pet_check).
-      (tr.nextPhase !== "welcome" && tr.nextPhase !== "collecting"));
+  const firstTurnHasContent = isFirstTurnWithRealContent(input.currentPhase, tr, entities);
   if (firstTurnHasContent) {
     currentPhase = "collecting";
   }
@@ -860,7 +886,7 @@ async function generateReplyText(input: ReplyInput): Promise<string> {
     // así que aunque el texto personalizado difiera en los primeros 50 chars
     // el chequeo `wasJustSent` no genera falso positivo aquí (welcome solo
     // se emite una vez por sesión normalmente).
-    return respond(buildWelcomeMessage(input.contactName, input.channel));
+    return respond(buildWelcomeMessage(input.contactName, input.channel, entities.clientGender));
   }
 
   // NOTA: el paso `quote_shown → contract` cae al branch `contract` más abajo

@@ -343,12 +343,18 @@ export class InboxService {
     bodyParams: string[],
     sentByUserId?: string,
   ) {
-    return this.convexService.action('checkinMessaging:sendTemplateToConversation', {
-      conversationId,
-      templateKey,
-      bodyParams,
-      sentByUserId,
-    });
+    try {
+      return await this.convexService.action('checkinMessaging:sendTemplateToConversation', {
+        conversationId,
+        templateKey,
+        bodyParams,
+        sentByUserId,
+      });
+    } catch (err) {
+      const msg =
+        err instanceof Error ? err.message : 'No se pudo enviar la plantilla de WhatsApp';
+      throw new BadRequestException(msg);
+    }
   }
 
   async sendQuickTemplateToConversation(conversationId: string, templateId: string) {

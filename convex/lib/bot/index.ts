@@ -30,7 +30,7 @@ import {
   mergeEntities,
 } from "./entities";
 import { petsExceedLimitMessage } from "./prompts";
-import { STAGE1_CATALOG_PICK_HANDOFF_MSG } from "../businessHours";
+import { stage1CatalogPickHandoffMsg } from "../businessHours";
 import { extractEntities } from "./extractor";
 import { recoverDatesFromUserHistory, recoverRelativeDatesFromText, recoverRelativeDatesFromUserHistory } from "./historyRecovery";
 import { detectPuenteReference } from "../colombiaPublicHolidays";
@@ -349,6 +349,7 @@ export async function runBotTurn(input: BotTurnInput): Promise<BotTurnResult> {
     messageText,
     currentEntities,
     conversationHistory,
+    contactName,
   );
 
   // 1.3 Resolución de "puente festivo": si el cliente dijo algo como "segundo
@@ -401,6 +402,7 @@ export async function runBotTurn(input: BotTurnInput): Promise<BotTurnResult> {
       contractEmail: currentEntities.contractEmail,
       contractPhone: currentEntities.contractPhone,
       contractAddress: currentEntities.contractAddress,
+      clientGender: currentEntities.clientGender,
     };
   }
 
@@ -434,6 +436,7 @@ export async function runBotTurn(input: BotTurnInput): Promise<BotTurnResult> {
     petCount: extracted.petCount,
     eventPeopleCount: extracted.eventPeopleCount,
     eventLogistics: extracted.eventLogistics,
+    clientGender: extracted.clientGender,
     ...(extracted.contractFields ?? {}),
   });
 
@@ -722,7 +725,7 @@ export async function runBotTurn(input: BotTurnInput): Promise<BotTurnResult> {
     tr.action.reason === "stage1_catalog_pick"
   ) {
     return {
-      replyText: STAGE1_CATALOG_PICK_HANDOFF_MSG,
+      replyText: stage1CatalogPickHandoffMsg(Date.now()),
       action: tr.action,
       nextPhase: effectivePhase,
       updatedEntities,

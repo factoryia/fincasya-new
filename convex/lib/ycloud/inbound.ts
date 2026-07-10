@@ -2865,19 +2865,19 @@ export async function processInboundMessageV2(
         !someMatchRequested && titlesForLocCheck.length > 0;
       const preCatalogText = isFallbackOnly
         ? [
-            `Por el momento no tengo fincas disponibles en *${action.location}* para esas fechas 😔`,
+            `Por el momento no tenemos fincas disponibles en *${action.location}* para esas fechas 😔`,
             '',
-            'Pero te comparto algunas opciones cercanas que podrían interesarte 🏡✨',
+            'Pero con gusto te compartimos algunas opciones cercanas que podrían gustarte 🏡✨',
             '',
-            '💰 Cada tarjeta muestra el valor *por noche* en temporada actual.',
-            '👉 Cuéntame *cuál te llama la atención* y te ayudo con la reserva 🤝',
+            '💰 Los valores son *aproximados* por noche y pueden variar según la *temporada*.',
+            '👉 Cuéntanos *cuál te llama la atención* y con gusto te ayudamos con la reserva 🤝',
           ].join('\n')
         : categoryCollection
           ? [
-              `✨ Te comparto nuestras opciones de *${categoryCollection.label}* 🏡`,
+              `✨ Con mucho gusto te compartimos nuestras opciones de *${categoryCollection.label}* 🏡`,
               '',
-              '💰 Cada tarjeta muestra el valor *por noche* en temporada actual.',
-              '👉 Cuéntame *cuál te llama la atención* y te ayudo con la reserva 🤝',
+              '💰 Los valores son *aproximados* por noche y pueden variar según la *temporada*.',
+              '👉 Cuéntanos *cuál te llama la atención* y con gusto te ayudamos con la reserva 🤝',
             ].join('\n')
           : result.replyText;
 
@@ -2983,7 +2983,7 @@ export async function processInboundMessageV2(
       if (action.isEvento !== true) {
         const tClose = Date.now() + 50;
         const closeMsg =
-          '✨ Perfecto, estas son las *fincas disponibles*. Dime *cuál te gustó* o si quieres información adicional 🤝';
+          '✨ Estas son algunas de nuestras fincas para tus fechas 🏡 Recuerde que los valores son *aproximados* y pueden variar según la *temporada*. Cuéntanos *cuál te gustó más* o si deseas información adicional y con gusto te ayudamos 🤝';
         await ctx.runMutation(deps.internal.messages.insertAssistantMessage, {
           conversationId,
           content: closeMsg,

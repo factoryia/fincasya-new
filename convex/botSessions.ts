@@ -230,6 +230,9 @@ export const upsert = internalMutation({
       contractEmail: v.optional(v.string()),
       contractPhone: v.optional(v.string()),
       contractAddress: v.optional(v.string()),
+      clientGender: v.optional(
+        v.union(v.literal("male"), v.literal("female")),
+      ),
     }),
     turnCount: v.number(),
     phaseEnteredAt: v.optional(v.number()),

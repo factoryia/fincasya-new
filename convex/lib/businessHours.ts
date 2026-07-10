@@ -4,28 +4,38 @@
  *   - Saltar el aviso para emergencias (que sí se atienden 24/7).
  *
  * Horario oficial FincasYa (confirmado jul 2026):
- *   Lunes–Viernes 7:00 AM – 5:00 PM
- *   Sábados 7:00 AM – 3:00 PM
- *   Domingos cerrado
- * Zona: America/Bogota.
- *
- * Env vars (opcionales; los defaults ya reflejan el horario oficial):
- *   BUSINESS_HOURS_START       ej. "07:00"  (Lun–Vie)
- *   BUSINESS_HOURS_END         ej. "17:00"  (Lun–Vie)
- *   BUSINESS_HOURS_SAT_END     ej. "15:00"  (Sáb)
- *   BUSINESS_HOURS_DAYS        ej. "Mon,Tue,Wed,Thu,Fri,Sat"
- *   BUSINESS_HOURS_TZ          ej. "America/Bogota"
+ *   Lunes–Viernes 7:00 AM – 8:30 PM
+ *   Sábados 7:00 AM – 4:00 PM
+ *   Domingos 9:00 AM – 4:00 PM
+ *   Lunes (y días) festivos 9:00 AM – 2:00 PM
+ * Zona: America/Bogota. Para ajustar el horario edita `BUSINESS_SCHEDULE` /
+ * `HOLIDAY_SCHEDULE` abajo (los emojis/labels van en `BUSINESS_HOURS_SCHEDULE_*`).
  */
 
-const DEFAULT_WEEKDAY_START = "07:00";
-const DEFAULT_WEEKDAY_END = "17:00";
-const DEFAULT_SAT_END = "15:00";
-const DEFAULT_DAYS = "Mon,Tue,Wed,Thu,Fri,Sat";
+import { isColombiaPublicHolidayYmd, toYmdColombia } from "./colombiaPublicHolidays";
+
 const DEFAULT_TZ = "America/Bogota";
+
+/**
+ * Horario de atención por día de la semana (0=Dom … 6=Sáb) en America/Bogota.
+ * `null` = cerrado ese día. Los días FESTIVOS de Colombia usan `HOLIDAY_SCHEDULE`
+ * (tienen prioridad sobre el día de la semana).
+ */
+const BUSINESS_SCHEDULE: Record<number, { start: string; end: string } | null> = {
+  0: { start: "09:00", end: "16:00" }, // Domingo
+  1: { start: "07:00", end: "20:30" }, // Lunes
+  2: { start: "07:00", end: "20:30" }, // Martes
+  3: { start: "07:00", end: "20:30" }, // Miércoles
+  4: { start: "07:00", end: "20:30" }, // Jueves
+  5: { start: "07:00", end: "20:30" }, // Viernes
+  6: { start: "07:00", end: "16:00" }, // Sábado
+};
+/** Horario cuando el día es festivo en Colombia (aplica cualquier día festivo). */
+const HOLIDAY_SCHEDULE = { start: "09:00", end: "14:00" };
 
 /** Texto corto del horario — usar en copys del bot (continuidad asesor, stage1, etc.). */
 export const BUSINESS_HOURS_SCHEDULE_SHORT =
-  "L-V 7:00 AM–5:00 PM, Sáb 7:00 AM–3:00 PM";
+  "L-V 7:00 AM–8:30 PM, Sáb 7:00 AM–4:00 PM, Dom 9:00 AM–4:00 PM";
 
 /** Acuse cuando hay asesor activo o la conversación espera humano (horario laboral). */
 export const ADVISOR_CONTINUITY_WITHIN_HOURS = [
@@ -51,11 +61,37 @@ export const ADVISOR_CONTINUITY_AFTER_HOURS = [
 export const TEMPORAL_MESSAGE_CLOSING =
   "Uno de nuestros asesores de Fincas Ya se comunicará contigo en horario laboral para continuar con tu proceso. Muchas gracias por tu paciencia 🤝";
 
-export const STAGE1_CATALOG_PICK_HANDOFF_MSG = [
-  "¡Excelente elección! 🤩 Gracias por elegir con FincasYa 🏡",
-  "Vamos a validar la disponibilidad de esta opción para tus fechas y uno de nuestros asesores te ampliará toda la información ✅",
-  `Nuestro horario de atención es ${BUSINESS_HOURS_SCHEDULE_SHORT} 🤝 Quedamos muy atentos.`,
-].join(" ");
+/** Horario detallado — se muestra SOLO cuando el cliente escribe fuera de horario. */
+export const BUSINESS_HOURS_SCHEDULE_FULL = [
+  "🕖 Lunes a viernes: 7:00 a. m. a 8:30 p. m.",
+  "🕖 Sábados: 7:00 a. m. a 4:00 p. m.",
+  "🕘 Domingos: 9:00 a. m. a 4:00 p. m.",
+  "🕘 Lunes festivos: 9:00 a. m. a 2:00 p. m.",
+].join("\n");
+
+/**
+ * Mensaje de hand-off al elegir/preguntar por una finca (Etapa 1).
+ *
+ * Muestra los horarios SOLO cuando el cliente escribe FUERA de horario. Si
+ * estamos DENTRO de horario, no listamos horarios (un experto continúa en
+ * breve). Determinado por `isWithinBusinessHours(nowMs)`.
+ */
+export function stage1CatalogPickHandoffMsg(nowMs: number): string {
+  if (isWithinBusinessHours(nowMs)) {
+    return [
+      "¡Excelente elección! 🤩 Gracias por escribirnos a FincasYa 🏡",
+      "Ya recibimos tu solicitud. En breve uno de nuestros expertos te ampliará toda la información y te ayudará con la reserva ✅ Quedamos muy atentos 🤝",
+    ].join(" ");
+  }
+  return [
+    "¡Excelente elección! 🤩 Gracias por escribirnos a FincasYa 🏡",
+    "",
+    "En este momento nuestro equipo está fuera de horario, pero tu solicitud ya quedó registrada y apenas iniciemos nuestra jornada uno de nuestros expertos continuará atendiéndote 💙",
+    "",
+    "Te atendemos en estos horarios:",
+    BUSINESS_HOURS_SCHEDULE_FULL,
+  ].join("\n");
+}
 
 const DAY_MAP: Record<string, number> = {
   sun: 0,
@@ -91,15 +127,6 @@ function parseHHMM(s: string): { h: number; m: number } | null {
   return { h, m: mm };
 }
 
-function parseDays(csv: string): Set<number> {
-  const out = new Set<number>();
-  for (const raw of csv.split(",")) {
-    const key = raw.trim().toLowerCase();
-    if (key in DAY_MAP) out.add(DAY_MAP[key]);
-  }
-  return out;
-}
-
 function bogotaLocalParts(nowMs: number): { dayNum: number; hour: number; minute: number } | null {
   const tz = process.env.BUSINESS_HOURS_TZ ?? DEFAULT_TZ;
   const parts = new Intl.DateTimeFormat("en-US", {
@@ -129,26 +156,19 @@ function bogotaLocalParts(nowMs: number): { dayNum: number; hour: number; minute
  * Sáb 7-15 Bogotá).
  */
 export function isWithinBusinessHours(nowMs: number): boolean {
-  const start =
-    parseHHMM(process.env.BUSINESS_HOURS_START ?? DEFAULT_WEEKDAY_START) ??
-    parseHHMM(DEFAULT_WEEKDAY_START)!;
-  const weekdayEnd =
-    parseHHMM(process.env.BUSINESS_HOURS_END ?? DEFAULT_WEEKDAY_END) ??
-    parseHHMM(DEFAULT_WEEKDAY_END)!;
-  const satEnd =
-    parseHHMM(process.env.BUSINESS_HOURS_SAT_END ?? DEFAULT_SAT_END) ??
-    parseHHMM(DEFAULT_SAT_END)!;
-  const days = parseDays(process.env.BUSINESS_HOURS_DAYS ?? DEFAULT_DAYS);
-
   const local = bogotaLocalParts(nowMs);
   if (!local) return true;
-  if (!days.has(local.dayNum)) return false;
-
-  const end = local.dayNum === 6 ? satEnd : weekdayEnd;
+  // Los festivos de Colombia tienen su propio horario, sin importar el día.
+  const isHoliday = isColombiaPublicHolidayYmd(toYmdColombia(nowMs));
+  const sched = isHoliday ? HOLIDAY_SCHEDULE : BUSINESS_SCHEDULE[local.dayNum];
+  if (!sched) return false; // día cerrado
+  const start = parseHHMM(sched.start);
+  const end = parseHHMM(sched.end);
+  if (!start || !end) return true; // horario mal formado → no bloquear
   const nowMinutes = local.hour * 60 + local.minute;
-  const startMinutes = start.h * 60 + start.m;
-  const endMinutes = end.h * 60 + end.m;
-  return nowMinutes >= startMinutes && nowMinutes < endMinutes;
+  return (
+    nowMinutes >= start.h * 60 + start.m && nowMinutes < end.h * 60 + end.m
+  );
 }
 
 /**

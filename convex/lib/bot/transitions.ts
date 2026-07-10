@@ -19,9 +19,23 @@ import {
   type SpecialSeasonInfo,
 } from "../colombiaPublicHolidays";
 
-/** Etapa 1 (piloto): al elegir finca post-catálogo, escalar a humano en vez de pet_check+. */
+/**
+ * ETAPA 1 (piloto ACTIVO) — el flujo del bot llega HASTA enviar el catálogo.
+ * Cuando el cliente elige o pregunta por una finca del catálogo, en vez de
+ * continuar (mascotas → cotización → contrato) la conversación pasa a un
+ * EXPERTO humano (`escalate_human` + `stage1CatalogPickHandoffMsg`, que muestra
+ * los horarios solo si el cliente escribe fuera de horario).
+ *
+ * ⚠️ El flujo posterior (pet_check, quote, contract) NO se eliminó: sigue todo
+ * en el código, solo OCULTO tras este flag. Para reactivar el bot completo
+ * (que vuelva a manejar mascotas/cotización/contrato), poner esta constante en
+ * `false`. El env `BOT_STAGE1_HANDOFF="0"` también fuerza el flujo completo.
+ */
+const BOT_STOPS_AFTER_CATALOG = true;
+
 function isStage1HandoffEnabled(): boolean {
-  return process.env.BOT_STAGE1_HANDOFF === "1";
+  if (process.env.BOT_STAGE1_HANDOFF === "0") return false;
+  return BOT_STOPS_AFTER_CATALOG;
 }
 
 function stage1CatalogPickHandoff(phase: BotPhase): TransitionResult {
@@ -342,8 +356,10 @@ function transitionCollecting(
     };
   }
 
-  // Todos los datos listos → enviar catálogo
-  const loc = entities.location!;
+  // Mínimo listo (fechas + cupo) → enviar catálogo. El municipio es opcional:
+  // si el cliente no lo dio, mandamos RECOMENDADAS (variedad de zonas) en vez
+  // de quedarnos pidiéndolo.
+  const loc = (entities.location ?? "").trim() || "RECOMENDADAS";
   return {
     nextPhase: "catalog_sent",
     action: {

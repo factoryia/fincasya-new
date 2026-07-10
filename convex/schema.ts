@@ -1431,6 +1431,10 @@ export default defineSchema({
       contractEmail: v.optional(v.string()),
       contractPhone: v.optional(v.string()),
       contractAddress: v.optional(v.string()),
+      /** Género probable del cliente (IA) → trato "Señor"/"Señora". */
+      clientGender: v.optional(
+        v.union(v.literal("male"), v.literal("female")),
+      ),
     }),
     turnCount: v.number(),
     /** Timestamp en que se entró a la fase actual (para detectar bucles). */

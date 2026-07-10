@@ -67,6 +67,14 @@ export interface BotEntities {
   contractEmail?: string;
   contractPhone?: string;
   contractAddress?: string;
+  /**
+   * Género probable del cliente, inferido por el extractor LLM del NOMBRE del
+   * perfil de WhatsApp (y de cómo se refiere a sí mismo). Se usa para el trato
+   * formal "Señor"/"Señora". Se infiere una vez y persiste entre turnos. Si el
+   * LLM no lo puede determinar (nombre unisex/ambiguo), se omite y el saludo usa
+   * SOLO el nombre a secas (sin título) — no hay listas ni heurística de respaldo.
+   */
+  clientGender?: "male" | "female";
 }
 
 /** Datos mínimos para poder enviar el catálogo. */
@@ -138,6 +146,13 @@ export interface ExtractedEntities {
    * escalaba por la palabra "persona", el LLM ahora lo entiende como cupo).
    */
   requestsHumanAgent?: boolean;
+  /**
+   * Género PROBABLE del cliente inferido del nombre del perfil de WhatsApp (y de
+   * cómo se refiere a sí mismo). "male" | "female". Alimenta el trato formal
+   * "Señor"/"Señora". Se emite SIEMPRE que el nombre lo permita, aunque el
+   * mensaje sea solo un saludo. Se omite si el nombre es unisex/ambiguo.
+   */
+  clientGender?: "male" | "female";
 }
 
 /** Qué acción debe ejecutar el orquestador después de generar el reply. */

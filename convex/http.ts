@@ -1109,9 +1109,27 @@ http.route({
     if (!text) {
       return jsonResponse({ error: '`text` requerido' }, 400);
     }
+    if (text.length > 4000) {
+      return jsonResponse({ error: 'Mensaje demasiado largo' }, 400);
+    }
+    const name = displayName ?? '';
+    if (name.length < 2) {
+      return jsonResponse(
+        { error: 'Indica tu nombre para iniciar el chat (mínimo 2 caracteres).' },
+        400,
+      );
+    }
+    if (/^visitante(\s+web)?$/i.test(name)) {
+      return jsonResponse(
+        { error: 'Indica tu nombre real para una atención personalizada.' },
+        400,
+      );
+    }
 
     try {
-      await ctx.runAction(internal.webChat.processWebInboundMessage, {
+      // Responder al instante: el bot procesa en background (debounce ~7 s).
+      // Antes se hacía await del action completo y el input quedaba bloqueado.
+      await ctx.scheduler.runAfter(0, internal.webChat.processWebInboundMessage, {
         sessionId,
         text,
         displayName,

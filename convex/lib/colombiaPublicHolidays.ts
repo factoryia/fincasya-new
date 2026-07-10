@@ -434,14 +434,16 @@ export function buildPuenteShortNoticeEs(
 ): string {
   const holidayYmd = findHolidayInPuenteWindow(checkIn, checkOut);
   const explanation = holidayYmd
-    ? `📅 El *${ymdToHumanLongEs(holidayYmd)}* es *festivo* en Colombia, así que esas fechas forman un *puente* (fin de semana largo de alta demanda).`
-    : "📅 Las fechas que elegiste caen en un *puente festivo* (fin de semana largo de alta demanda).";
+    ? `📅 El *${ymdToHumanLongEs(holidayYmd)}* es *festivo* en Colombia, así que esas fechas forman un *puente* (fin de semana largo, de alta demanda).`
+    : "📅 Las fechas que elegiste caen en un *puente festivo* (fin de semana largo, de alta demanda).";
   return [
+    "¡Con mucho gusto te ayudamos! 😊",
+    "",
     explanation,
     "",
-    "Por eso, para fechas de puente manejamos una estadía *mínima de 2 noches*.",
+    "Por esa alta demanda, en fechas de puente manejamos una estadía *mínima de 2 noches*.",
     "",
-    "Si prefieres *una sola noche*, con gusto te muestro opciones entre semana o en un fin de semana sin festivo ✨",
+    "Si prefieres *una sola noche*, con gusto te mostramos opciones entre semana o en un fin de semana sin festivo ✨",
   ].join("\n");
 }
 
@@ -459,14 +461,14 @@ export function buildPuenteExplanationEs(
     ? `📅 El *${ymdToHumanLongEs(holidayYmd)}* es un *día festivo* en Colombia.`
     : "📅 Las fechas que elegiste incluyen un *día festivo* en Colombia.";
   return [
-    "¡Claro, te explico! 😊",
+    "¡Claro, con gusto te explicamos! 😊",
     "",
     dateLine,
     "Cuando un festivo cae pegado al fin de semana se arma un *puente*: un fin de semana largo de 3 días con muchísima demanda de fincas.",
     "",
     "Por esa alta demanda, en fechas de puente pedimos una estadía *mínima de 2 noches*.",
     "",
-    "Si te sirve *una sola noche*, te muestro opciones entre semana o en un fin de semana sin festivo ✨",
+    "Si te sirve *una sola noche*, con gusto te mostramos opciones entre semana o en un fin de semana sin festivo ✨",
   ].join("\n");
 }
 
@@ -483,8 +485,8 @@ export function buildPuenteFollowUpConversationEs(
     ? ` (el *${ymdToHumanLongEs(holidayYmd)}* es festivo)`
     : "";
   return (
-    `¡Claro que sí! 😊 Para una cotización de *una sola noche*${ref} te recomiendo fechas entre semana ` +
-    "o un fin de semana sin festivo. Cuéntame qué *fecha de entrada y salida* prefieres y te muestro las opciones 📅"
+    `¡Claro que sí! 😊 Para una cotización de *una sola noche*${ref} te recomendamos fechas entre semana ` +
+    "o un fin de semana sin festivo. Cuéntame qué *fecha de entrada y salida* prefieres y con gusto te mostramos las opciones 📅"
   );
 }
 
@@ -503,9 +505,9 @@ export function buildPuenteShortReminderEs(
     ? `el *${ymdToHumanLongEs(holidayYmd)}* es festivo`
     : "esas fechas son puente festivo";
   return [
-    `Recuerda: ${ref}, y en *puente* manejamos una estadía *mínima de 2 noches*.`,
+    `Te recordamos: ${ref}, y en *puente* manejamos una estadía *mínima de 2 noches*.`,
     "",
-    "📅 Envíame una *fecha de salida* que sume al menos 2 noches y con gusto te comparto el catálogo 🙌",
+    "📅 Envíanos una *fecha de salida* que sume al menos 2 noches y con gusto te compartimos el catálogo 🙌",
   ].join("\n");
 }
 

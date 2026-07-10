@@ -183,6 +183,15 @@ Reglas estrictas:
     "no" si dice "no", "cancela", "olvídalo", "mejor no", "todavía no", "negativo".
     null si la respuesta es ambigua, una pregunta, o no es respuesta directa a algo del bot.
   Solo lo defines si el ÚLTIMO mensaje del asistente contenía una pregunta de confirmación.
+- clientGender: "male" | "female" — género PROBABLE del cliente, para el trato
+  formal Señor/Señora. Infiérelo del "Nombre del perfil del cliente" (arriba) y,
+  si aplica, de cómo se refiere a sí mismo en el mensaje.
+  ⚠️ Es una propiedad de la PERSONA, NO del mensaje: emítelo SIEMPRE que el
+  nombre lo permita, AUNQUE el mensaje sea solo un saludo ("Hola", "Buenas").
+  Ejemplos "male": "Juan", "Pep", "Pepito", "Camilo", "Andrés", "Hernán".
+  Ejemplos "female": "María", "Pepita", "Carolina", "Luz", "Adriana".
+  Si el nombre es unisex, iniciales, un negocio, o no permite inferir el género
+  con seguridad (ej. "Alex", "Cris", "Guadalupe"), OMITE el campo (no adivines).
 - requestsHumanAgent: true | false — true SOLO si el cliente pide EXPLÍCITAMENTE hablar
   con un humano / asesor / agente / persona real, o expresa que el bot no le sirve.
   Ejemplos true: "quiero hablar con un asesor", "pásame con alguien real", "necesito
@@ -221,6 +230,7 @@ export async function extractEntities(
   messageText: string,
   currentEntities: BotEntities,
   conversationHistory: Array<{ role: "user" | "assistant"; content: string }>,
+  contactName?: string | null,
 ): Promise<ExtractedEntities> {
   if (!messageText.trim()) return {};
 
@@ -231,7 +241,14 @@ export async function extractEntities(
     .map((m) => `${m.role === "assistant" ? "Asistente" : "Cliente"}: ${m.content}`)
     .join("\n");
 
+  // El nombre del perfil de WhatsApp sirve para inferir `clientGender` (trato
+  // Señor/Señora). Solo lo inyectamos si NO parece un teléfono/basura.
+  const nameForPrompt = String(contactName ?? "").trim();
+  const usableName =
+    nameForPrompt && !/^[\d+\-\s()]+$/.test(nameForPrompt) ? nameForPrompt : "";
+
   const prompt = [
+    usableName ? `Nombre del perfil del cliente (WhatsApp): "${usableName}"` : "",
     historyLines ? `Historial reciente:\n${historyLines}` : "",
     contextSummary ? `Valores ya confirmados en sesión: ${contextSummary}` : "",
     `Mensaje actual del cliente: "${messageText}"`,
@@ -268,6 +285,17 @@ export async function extractEntities(
  * Esto evita que el FSM marque el contrato como "completo" con datos basura.
  */
 function sanitizeExtracted(p: ExtractedEntities): ExtractedEntities {
+  // Género: solo "male"/"female". Cualquier otra cosa (unisex, "unknown", null,
+  // string libre) → omitir el campo, para que el saludo caiga a la heurística.
+  if (
+    p.clientGender !== undefined &&
+    p.clientGender !== "male" &&
+    p.clientGender !== "female"
+  ) {
+    p = { ...p };
+    delete p.clientGender;
+  }
+
   // Normalizar `excludedRegions`: el LLM puede devolver minúsculas, duplicados
   // o valores fuera del set permitido. Dejamos solo LLANOS/TOLIMA/CUNDINAMARCA
   // /COSTA en mayúsculas y sin repetir. Si queda vacío, OMITIMOS el campo (no

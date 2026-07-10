@@ -308,7 +308,9 @@ export function buildSendComponents(
   }
 
   if (def.button.type === "url") {
-    const linkIdx = def.paramKeys.indexOf("linkCheckin");
+    const linkIdx = def.paramKeys.findIndex((k) =>
+      k === "linkCheckin" || k === "linkAnfitrion",
+    );
     const linkVal = linkIdx >= 0 ? (bodyParams[linkIdx] ?? "") : "";
     const suffix = linkVal.split("/").filter(Boolean).pop() ?? "";
     components.push({
@@ -332,4 +334,41 @@ export function renderTemplateBody(
     out = out.replaceAll(`{{${i + 1}}}`, val);
   });
   return out;
+}
+
+export function assertBodyParamsCount(
+  def: TemplateDef,
+  bodyParams: string[],
+): void {
+  if (bodyParams.length !== def.paramKeys.length) {
+    throw new Error(
+      `La plantilla "${def.name}" requiere ${def.paramKeys.length} variables (${def.paramKeys.join(", ")}); recibidas: ${bodyParams.length}.`,
+    );
+  }
+}
+
+/** Mensaje legible cuando YCloud/Meta rechaza el envío de plantilla. */
+export function formatTemplateSendError(
+  err: unknown,
+  def: TemplateDef,
+): string {
+  const raw = err instanceof Error ? err.message : String(err);
+  if (/not found|does not exist|132001|template name/i.test(raw)) {
+    return (
+      `La plantilla "${def.name}" no está aprobada en Meta/WhatsApp. ` +
+      `Regístrala desde Admin → Reservas → Registrar plantillas (clave: ${def.key}). ` +
+      `Detalle: ${raw}`
+    );
+  }
+  if (/132000|number of parameters|param count|expected number of params/i.test(raw)) {
+    return (
+      `Las variables no coinciden con la plantilla aprobada en Meta ` +
+      `(${def.paramKeys.length} esperadas: ${def.paramKeys.join(", ")}). ` +
+      `Si acabas de cambiar el texto, vuelve a registrarla en Meta. Detalle: ${raw}`
+    );
+  }
+  if (/132015|132016|132017|template paused|template disabled|quality/i.test(raw)) {
+    return `La plantilla "${def.name}" está pausada o deshabilitada en Meta. Detalle: ${raw}`;
+  }
+  return raw;
 }

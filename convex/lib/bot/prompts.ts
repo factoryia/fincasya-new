@@ -8,7 +8,6 @@
 
 import type { BotEntities, BotPhase, ConversationTagFlags } from "./types";
 import { countNights, normalizePlanType } from "./entities";
-import { guessHonorific } from "./honorific";
 
 /**
  * Cuando faltan 2+ campos simultáneamente, agrupa las preguntas en UN solo mensaje.
@@ -19,7 +18,7 @@ export function missingFieldsBundle(e: BotEntities): string | null {
 
   if (!e.location) missing.push("📍 *Municipio o zona* de preferencia (o te recomiendo yo)");
   if (!e.checkIn || !e.checkOut) missing.push("📅 *Fecha de entrada y salida*");
-  if (e.cupo === undefined || e.cupo <= 0) missing.push("👥 *Cuántas personas* van (niños desde 2 años cuentan)");
+  if (e.cupo === undefined || e.cupo <= 0) missing.push("👥 *Cuántas personas* van en total");
   if (!normalizePlanType(e.planType)) missing.push("🏡 *Tipo de grupo*: familiar, amigos o empresarial");
   if (e.isEvento === undefined) missing.push("🎉 ¿*Solo descanso* o habrá evento/celebración?");
 
@@ -40,7 +39,7 @@ export function missingFieldsHuman(e: BotEntities): string[] {
     );
   if (!e.checkIn || !e.checkOut) out.push("las fechas de entrada y salida");
   if (e.cupo === undefined || e.cupo <= 0)
-    out.push("cuántas personas van en total (los niños desde 2 años cuentan)");
+    out.push("cuántas personas van en total");
   if (!normalizePlanType(e.planType))
     out.push("si el plan es familiar, con amigos o empresarial");
   if (e.isEvento === undefined)
@@ -120,16 +119,16 @@ export function combinedQuestionForMissing(e: BotEntities): string | null {
   // cupo + planType
   if (has("cupo") && has("planType")) {
     return (
-      `¿Cuántas *personas* van en total? (niños desde 2 años cuentan) ` +
-      `Y cuéntame: ¿van en plan *familiar*, con *amigos* o *empresarial*? 👥🏡`
+      `¿Cuántas *personas* van en total? ` +
+      `Y cuéntanos: ¿van en plan *familiar*, con *amigos* o *empresarial*? 👥🏡`
     );
   }
 
   // cupo + isEvento
   if (has("cupo") && has("isEvento")) {
     return (
-      `¿Cuántas *personas* van en total? (niños desde 2 años cuentan) ` +
-      `Y cuéntame: ¿es *solo descanso* o también con *evento/celebración*? 👥🎉`
+      `¿Cuántas *personas* van en total? ` +
+      `Y cuéntanos: ¿es *solo descanso* o también con *evento/celebración*? 👥🎉`
     );
   }
 
@@ -337,8 +336,9 @@ REGLAS GLOBALES:
 - Nunca muestres JSON, IDs internos, ni términos técnicos al cliente.
 - Usa emojis con moderación (1-2 por mensaje como máximo).
 - El equipo de FincasYa son EXPERTOS, no "asesores". NUNCA uses la palabra "asesor" con el cliente: di "experto", "nuestro equipo de expertos" o "el equipo".
-- TRATO FORMAL: háblale al cliente de USTED (no "tú"). Ej.: "le ayudo", "compártame", "¿qué fechas tiene?", "su plan". Nunca tutees.
-- Si te doy el nombre del cliente con "Señor" o "Señora" adelante, úsalo TAL CUAL (ej. "Señor Juan"). Si te doy solo el nombre, úsalo sin título. NUNCA inventes "Señor/Señora" por tu cuenta.
+- TRATO CERCANO (TUTEO): háblale al cliente de TÚ, como nuestros asesores reales. Ej.: "te comparto", "cuéntame qué fechas tienes", "tu plan", "te ayudamos", "quedamos atentos 🙏". NUNCA de usted: nada de "le ayudo", "su plan", "compártame", "cuéntanos", "¿qué fechas tiene?".
+- Usa el primer nombre del cliente cuando lo tengas (ej. "¡Hola Juan!"), SIN "Señor/Señora", "Don/Doña" ni títulos formales.
+- Habla como EQUIPO de FincasYa (nosotros): "te ayudamos", "te enviamos", "te recomendamos", "quedamos atentos", "tenemos", "manejamos". La 1ª persona ("te comparto") también es natural. Lo esencial: SIEMPRE tuteando al cliente.
 `.trim();
 
 /**
@@ -636,15 +636,17 @@ export function buildContextSystemPrompt(
   if (opts.collectingAsk && opts.collectingAsk.length > 0) {
     sections.push(
       "",
-      "TU TAREA ESTE TURNO — PEDIR LOS DATOS QUE FALTAN, con el tono cálido del equipo.",
-      "Datos que aún faltan para poder mostrarle opciones al cliente: " +
+      "TU TAREA ESTE TURNO — PEDIR LOS DATOS QUE FALTAN, TUTEANDO y con el tono cálido del equipo.",
+      "Datos que aún faltan para poder mostrar opciones al cliente: " +
         opts.collectingAsk.join("; ") +
         ".",
-      "FORMATO (es WhatsApp — hazlo fácil de leer, NO un párrafo corrido):",
-      "- Abre con un saludo o reconocimiento cálido y breve (1 línea).",
-      "- Luego pide cada dato en su PROPIA LÍNEA (con salto de línea real), empezando cada una con un emoji relevante: 📍 para municipio/zona, 📅 para fechas, 👥 para personas, 🏡 para el tipo de plan (familiar/amigos/empresarial), 🎉 para si hay evento.",
+      "FORMATO OBLIGATORIO (es WhatsApp — NUNCA un párrafo corrido; usa saltos de línea REALES entre cada dato):",
+      "- Línea 1: saludo o reconocimiento cálido y breve.",
+      "- Después, UNA LÍNEA APARTE por cada dato que falta, cada una empezando con su emoji: 📍 municipio/zona, 📅 fechas, 👥 personas, 🏡 tipo de plan (familiar/amigos/empresarial), 🎉 evento. JAMÁS pongas dos preguntas en el mismo renglón.",
+      "- Última línea: invitación corta a que te cuente.",
+      "Ejemplo del FORMATO (adapta el texto pero respeta EXACTAMENTE los saltos de línea):",
+      "¡Perfecto! Para mostrarte las mejores opciones cuéntame 😊\n📅 ¿Qué fechas tienes en mente (entrada y salida)?\n👥 ¿Cuántas personas van en total?\nCon eso te comparto de una las fincas ideales ✨",
       "- Que suene natural y humano, imitando el tono de los ejemplos de arriba si los hay. NO uses viñetas con '•', NO numeres (1. 2. 3.), NO enumeres fincas.",
-      "- Cierra con 1 línea corta invitándolo a contarte.",
       "- NO inventes datos ni des precios. NO vuelvas a pedir datos que ya conoces (ver el resumen de arriba).",
     );
   }
@@ -706,10 +708,10 @@ export function buildContextSystemPrompt(
     );
   }
 
-  const greetingName = respectfulGreetingName(opts.contactName);
+  const greetingName = respectfulGreetingName(opts.contactName, entities.clientGender);
   if (greetingName) {
     sections.push(
-      `- Dirígete al cliente como "${greetingName}" cuando encaje de forma natural (SIEMPRE de usted, nunca tú).`,
+      `- Dirígete al cliente como "${greetingName}" cuando encaje de forma natural (TUTEANDO, nunca de usted).`,
     );
   }
 
@@ -850,49 +852,58 @@ export function firstNameForGreeting(rawName?: string | null): string | null {
  * anti-repetición y para call sites legacy.
  */
 /**
- * Nombre para dirigirse al cliente de forma respetuosa: "Señor Juan" /
- * "Señora María" (según `guessHonorific`); si el género es desconocido/ambiguo,
- * usa solo el nombre; si no hay nombre usable, devuelve null.
+ * Nombre para saludar al cliente, TUTEANDO: solo el primer nombre ("Juan").
+ *
+ * El equipo de FincasYa trata al cliente de TÚ, como sus asesores reales — sin
+ * "Señor/Señora" ni títulos. El parámetro `gender` se conserva por compatibilidad
+ * (lo infiere el extractor) pero YA NO se usa para un título. Devuelve solo el
+ * nombre, o null si no hay un nombre usable.
  */
 export function respectfulGreetingName(
   contactName?: string | null,
+  gender?: "male" | "female" | null,
 ): string | null {
-  const first = firstNameForGreeting(contactName);
-  if (!first) return null;
-  const hon = guessHonorific(first);
-  return hon ? `${hon} ${first}` : first;
+  void gender;
+  return firstNameForGreeting(contactName);
 }
 
 export function buildWelcomeMessage(
   contactName?: string | null,
   channel?: "whatsapp" | "web",
+  gender?: "male" | "female" | null,
 ): string {
-  const name = respectfulGreetingName(contactName);
+  const name = respectfulGreetingName(contactName, gender);
   // En el WIDGET WEB el bot se presenta como "asistente virtual de FincasYa"
   // (no como "Hernán", que es la persona/marca del canal de WhatsApp). El
   // cliente del widget sabe que está chateando con un bot del sitio.
-  // Trato FORMAL (usted + Señor/Señora): así habla el equipo de FincasYa.
+  // Trato CERCANO (tuteo): así hablan los asesores reales de FincasYa.
   const isWeb = channel === "web";
   const opener = isWeb
     ? name
-      ? `¡Hola ${name}! 👋 Soy su *asistente virtual de FincasYa* 🏡✨`
-      : `¡Hola! 👋 Soy su *asistente virtual de FincasYa* 🏡✨`
+      ? `¡Hola ${name}! 👋 Soy tu *asistente virtual de FincasYa* 🏡✨`
+      : `¡Hola! 👋 Soy tu *asistente virtual de FincasYa* 🏡✨`
     : name
-      ? `¡Hola ${name}! Es un gusto saludarle. Le escribe Hernán de FincasYa.com 🏡✨`
-      : `¡Hola! Es un gusto saludarle. Le escribe Hernán de FincasYa.com 🏡✨`;
+      ? `¡Hola ${name}! Gusto saludarte. Te escribe Hernán de FincasYa.com 🏡✨`
+      : `¡Hola! Gusto saludarte. Te escribe Hernán de FincasYa.com 🏡✨`;
   return `${opener}
 
-Tenemos opciones espectaculares de fincas listas para usted 🤩 y quiero ayudarle a encontrar la ideal según su plan.
+Tenemos opciones espectaculares de fincas listas para ti 🤩 y queremos ayudarte a encontrar la ideal según tu plan.
 
-Compártame por favor:
-📅 Fechas: entrada y salida
-👨‍👩‍👧‍👦 Cupo: número de personas (desde los 2 años)
-🏡 Tipo de grupo: familiar, amigos o empresarial
-📍 Ubicación: municipio o zona de preferencia (si ya tiene una en mente)
+Para agilizar tu proceso, cuéntanos por favor:
+📅 Fecha probable de ingreso y salida
+📍 Municipio o zona de preferencia (o con gusto te recomendamos)
+👥 Número de personas en total
+🫂 Si es plan familiar, con amigos o empresarial
+🪅 Si es evento, fiesta familiar o reunión empresarial
+🐕 Si traes mascotas, cuéntanos cuántas
+📄 Si ya tienes una reserva con nosotros, tu número de confirmación (CR)
+🏡 Si eres propietario y deseas vincular tu finca para alquiler o venta
 
-Con esto le envío opciones disponibles, fotos, precios y promociones ajustadas a lo que busca 🔥
+Con esto te enviamos opciones disponibles, fotos, precios y promociones ajustadas a lo que buscas 🔥
 
-Estoy atento para ayudarle a reservar su finca perfecta ✨
+🕛 Horarios de atención: 07:30 AM a 07:00 PM
+
+Quedamos atentos para ayudarte a reservar tu finca perfecta ✨
 `;
 }
 
@@ -906,16 +917,17 @@ export const WELCOME_MESSAGE = buildWelcomeMessage();
 export function buildShortGreeting(
   contactName?: string | null,
   channel?: "whatsapp" | "web",
+  gender?: "male" | "female" | null,
 ): string {
-  const name = respectfulGreetingName(contactName);
+  const name = respectfulGreetingName(contactName, gender);
   if (channel === "web") {
     return name
-      ? `👋 ¡Hola ${name}! Soy su *asistente virtual de FincasYa*.`
-      : `👋 ¡Hola! Soy su *asistente virtual de FincasYa*.`;
+      ? `👋 ¡Hola ${name}! Soy tu *asistente virtual de FincasYa*.`
+      : `👋 ¡Hola! Soy tu *asistente virtual de FincasYa*.`;
   }
   return name
-    ? `🙋‍♂️ ¡Hola ${name}! Le saluda *Hernán* de FincasYa.com.`
-    : `🙋‍♂️ ¡Hola! Le saluda *Hernán* de FincasYa.com.`;
+    ? `🙋‍♂️ ¡Hola ${name}! Te saluda *Hernán* de FincasYa.com.`
+    : `🙋‍♂️ ¡Hola! Te saluda *Hernán* de FincasYa.com.`;
 }
 
 /** Pregunta específica según qué campo falta. */
@@ -936,7 +948,7 @@ export function missingFieldQuestion(
         "Y si era un plan de *un solo día* sin pernoctar, también dímelo 🙌",
       ].join("\n");
     case "cupo":
-      return "¿Cuántas personas van en total? (niños de 2 años en adelante cuentan) 👨‍👩‍👧‍👦";
+      return "¿Cuántas personas van en total? 👨‍👩‍👧‍👦";
     case "planType":
       return "¿Su plan es *familiar*, con *amigos* o *empresarial*? (Así te muestro fincas que mejor encajan) 👨‍👩‍👧‍👦";
     case "isEvento":
@@ -996,10 +1008,10 @@ export function datesInPastMessage(): string {
 export function preCatalogText(_entities?: BotEntities): string {
   void _entities;
   return [
-    "Te comparto las opciones disponibles 🏡✨",
+    "¡Con mucho gusto! Estas son algunas de nuestras fincas para tus fechas 🏡✨",
     "",
-    "💰 Cada tarjeta muestra el valor *por noche* en temporada actual.",
-    "👉 Cuéntame *cuál te llama la atención* y te ayudo con la reserva 🤝",
+    "💰 Los valores son *aproximados* por noche y pueden variar según la *temporada*.",
+    "👉 Cuéntanos *cuál te llama la atención* y con gusto te ayudamos con la reserva 🤝",
   ].join("\n");
 }
 

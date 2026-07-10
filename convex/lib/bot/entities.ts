@@ -67,25 +67,27 @@ export function mergeEntities(
 }
 
 /**
- * Orden: ubicación → fechas → cupo → tipo de grupo → evento vs solo descanso → catálogo.
+ * MÍNIMO para enviar el catálogo (el "filtro"): **FECHAS + PERSONAS**.
  *
- * NOTA: los detalles del evento (`eventPeopleCount`, `eventLogistics`) NO se
- * piden antes del catálogo. La política comercial es: **mostrar primero las
- * fincas** disponibles para la capacidad básica del cliente, y SOLO DESPUÉS
- * (cuando ya vio opciones reales) preguntar los detalles del evento que el
- * asesor necesita para confirmar el precio del evento. Esto evita el patrón
- * "responde 4 preguntas → escalada inmediata sin ver ni una finca" que pasaba
- * antes cuando los filtros estrictos no traían matches.
+ * Solo estos dos datos son OBLIGATORIOS para mostrar fincas. Todo lo demás es
+ * OPCIONAL y solo refina el filtro si el cliente lo da:
+ *   - `location`: si lo da, filtramos por ese municipio/zona; si NO, mostramos
+ *     RECOMENDADAS (variedad de zonas). El bot NO se queda trabado pidiéndolo.
+ *   - `planType` / `isEvento`: se capturan si el cliente los menciona, pero NO
+ *     bloquean el catálogo. (isEvento ausente → catálogo amplio; los detalles
+ *     del evento —`eventPeopleCount`, `eventLogistics`— se piden DESPUÉS, cuando
+ *     el cliente ya vio opciones reales.)
+ *
+ * Política comercial (decisión del equipo): "mostrar PRIMERO las fincas con lo
+ * mínimo (fechas + cupo); si dan lugar o más, se filtra con eso". Evita el
+ * patrón "responde 5 preguntas → nunca ve una finca".
  */
 export function firstMissingCatalogField(
   e: BotEntities,
 ): keyof BotEntities | null {
-  if (!e.location) return "location";
   if (!e.checkIn) return "checkIn";
   if (!e.checkOut) return "checkOut";
   if (e.cupo === undefined || e.cupo <= 0) return "cupo";
-  if (!normalizePlanType(e.planType)) return "planType";
-  if (e.isEvento === undefined) return "isEvento";
   return null;
 }
 
