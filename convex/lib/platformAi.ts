@@ -6,6 +6,8 @@ type PlatformSettingsRow = {
   aiEnabled?: boolean;
   webAiEnabled?: boolean;
   whatsappAiEnabled?: boolean;
+  /** Si true, el bot solo responde conversaciones NUEVAS (no las antiguas). */
+  botOnlyNewConversations?: boolean;
   updatedAt?: number;
   updatedByUserId?: string;
 };

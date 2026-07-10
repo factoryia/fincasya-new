@@ -7,6 +7,7 @@ import {
   inferRetailerIdFromCatalogTitle,
 } from '../bot/entities';
 import {
+  ADVISOR_ACTIVITY_WINDOW_MS,
   INBOUND_DEBOUNCE_MS,
   MAX_CATALOG_PRODUCTS_PER_SEND,
 } from './constants';
@@ -1119,9 +1120,30 @@ export async function processInboundMessageV2(
     return;
   }
 
+  // "Solo conversaciones nuevas": el bot NO responde chats antiguos. Aviso en
+  // inbox (sin etiqueta visible) para que el equipo retome manualmente.
+  if (!retryMode && !isNewConversation && conv) {
+    const botOnlyNew = (await ctx.runQuery(
+      deps.internal.platformSettings.isBotOnlyNewConversationsInternal,
+      {},
+    )) as boolean;
+    if (botOnlyNew) {
+      await ctx.runMutation(deps.internal.conversations.flagPriorityAlert, {
+        conversationId,
+        alertReason: 'bot_only_new_silence',
+        priority: 'medium' as const,
+        tag: '',
+        inboxMessage: `🤫 Cliente escribió en una conversación ya iniciada con el equipo. Regla activa: la IA solo atiende conversaciones nuevas — el bot se mantuvo en SILENCIO. Retomar manualmente. Mensaje: "${String(latestMsg?.content ?? '').slice(0, 200)}"`,
+      });
+      await ctx.runMutation(deps.internal.conversations.updateLastMessageAt, {
+        conversationId,
+      });
+      return;
+    }
+  }
+
   // Conversación en modo IA pero con asesor humano activo (celular o inbox):
   // el bot NO debe responder ni enviar plantillas. Forzar humano y salir.
-  const ADVISOR_ACTIVITY_WINDOW_MS = 48 * 60 * 60 * 1000;
   if (conv && conv.status === 'ai') {
     const hasAdvisorActivity =
       !!conv.assignedUserId ||
@@ -1140,7 +1162,7 @@ export async function processInboundMessageV2(
         conversationId,
         alertReason: 'advisor_active_bot_blocked',
         priority: 'medium' as const,
-        tag: 'continuidad-asesor',
+        tag: '',
         inboxMessage: `👤 Bot bloqueado: hay actividad de asesor humano en las últimas 48 h. El cliente escribió pero la IA no respondió. Mensaje: "${String(latestMsg?.content ?? '').slice(0, 200)}"`,
       });
       await ctx.runMutation(deps.internal.conversations.updateLastMessageAt, {
