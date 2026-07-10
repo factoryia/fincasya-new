@@ -11,7 +11,11 @@ export async function getOrCreateConversationForContact(
 ) {
   const now = Date.now();
   const aiEnabled = await isChannelAiEnabled(ctx, channel);
-  const initialStatus = defaultConversationStatus(aiEnabled);
+  // WhatsApp: siempre arranca en humano aunque el bot global esté ON.
+  // El bot solo toma un chat cuando un admin lo pone en modo IA (toggle del
+  // header) o cuando entra un mensaje y el canal tiene bot global activo.
+  const initialStatus =
+    channel === "whatsapp" ? "human" : defaultConversationStatus(aiEnabled);
   const all = await ctx.db
     .query("conversations")
     .withIndex("by_contact", (q: any) => q.eq("contactId", contactId))

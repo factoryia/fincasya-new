@@ -136,10 +136,11 @@ export const listConversations = query({
             }
           : {}),
         lastMessagePreview: lastMessage.preview,
-        unreadCount: effectiveInboxUnreadCount(
-          inboxUnreadCount,
-          lastMessage.sender,
-        ),
+        unreadCount: effectiveInboxUnreadCount(inboxUnreadCount, {
+          lastMessageSender: lastMessage.sender,
+          inboxLastReadAt: c.inboxLastReadAt,
+          lastContactMessageAt: lastMessage.lastContactMessageAt,
+        }),
         contact: {
           name: jsonSafeString(
             (contact as { name?: string } | null)?.name ?? '',

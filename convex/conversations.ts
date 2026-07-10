@@ -885,7 +885,11 @@ export const list = query({
               }
             : {}),
           lastMessagePreview: lastMessage.preview,
-          unreadCount: effectiveInboxUnreadCount(_u, lastMessage.sender),
+          unreadCount: effectiveInboxUnreadCount(_u, {
+            lastMessageSender: lastMessage.sender,
+            inboxLastReadAt: c.inboxLastReadAt,
+            lastContactMessageAt: lastMessage.lastContactMessageAt,
+          }),
           operationalState: effectiveState(
             c.operationalState as OperationalState | undefined
           ),
