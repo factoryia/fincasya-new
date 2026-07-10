@@ -337,7 +337,7 @@ REGLAS GLOBALES:
 - Usa emojis con moderación (1-2 por mensaje como máximo).
 - El equipo de FincasYa son EXPERTOS, no "asesores". NUNCA uses la palabra "asesor" con el cliente: di "experto", "nuestro equipo de expertos" o "el equipo".
 - TRATO CERCANO (TUTEO): háblale al cliente de TÚ, como nuestros asesores reales. Ej.: "te comparto", "cuéntame qué fechas tienes", "tu plan", "te ayudamos", "quedamos atentos 🙏". NUNCA de usted: nada de "le ayudo", "su plan", "compártame", "cuéntanos", "¿qué fechas tiene?".
-- Usa el primer nombre del cliente cuando lo tengas (ej. "¡Hola Juan!"), SIN "Señor/Señora", "Don/Doña" ni títulos formales.
+- Cuando te dé el nombre del cliente con "Señor" o "Señora" adelante (ej. "Señora Adriana"), úsalo TAL CUAL: el título es señal de respeto, PERO sigues TUTEANDO ("Señora Adriana, ¿qué fechas tienes?"). Si te doy solo el nombre, úsalo sin título. NUNCA inventes el género por tu cuenta.
 - Habla como EQUIPO de FincasYa (nosotros): "te ayudamos", "te enviamos", "te recomendamos", "quedamos atentos", "tenemos", "manejamos". La 1ª persona ("te comparto") también es natural. Lo esencial: SIEMPRE tuteando al cliente.
 `.trim();
 
@@ -852,19 +852,20 @@ export function firstNameForGreeting(rawName?: string | null): string | null {
  * anti-repetición y para call sites legacy.
  */
 /**
- * Nombre para saludar al cliente, TUTEANDO: solo el primer nombre ("Juan").
- *
- * El equipo de FincasYa trata al cliente de TÚ, como sus asesores reales — sin
- * "Señor/Señora" ni títulos. El parámetro `gender` se conserva por compatibilidad
- * (lo infiere el extractor) pero YA NO se usa para un título. Devuelve solo el
- * nombre, o null si no hay un nombre usable.
+ * Nombre para saludar al cliente de forma respetuosa pero cercana:
+ * "Señora Adriana" / "Señor Juan" — el TÍTULO (según el género que infiere la
+ * IA en `clientGender`) combinado con TUTEO en el resto del mensaje. Si la IA
+ * no pudo determinar el género (nombre unisex/ambiguo), usa solo el nombre, sin
+ * título. Si no hay nombre usable, devuelve null.
  */
 export function respectfulGreetingName(
   contactName?: string | null,
   gender?: "male" | "female" | null,
 ): string | null {
-  void gender;
-  return firstNameForGreeting(contactName);
+  const first = firstNameForGreeting(contactName);
+  if (!first) return null;
+  const hon = gender === "male" ? "Señor" : gender === "female" ? "Señora" : null;
+  return hon ? `${hon} ${first}` : first;
 }
 
 export function buildWelcomeMessage(
