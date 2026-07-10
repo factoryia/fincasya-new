@@ -362,6 +362,30 @@ export const getLatestUserMessage = query({
   },
 });
 
+/** ¿Hay mensajes de asesor humano en la ventana dada? (inbox o celular vía webhook). */
+export const hasRecentHumanAdvisorMessages = internalQuery({
+  args: {
+    conversationId: v.id("conversations"),
+    sinceMs: v.number(),
+  },
+  handler: async (ctx, args) => {
+    const rows = await ctx.db
+      .query("messages")
+      .withIndex("by_conversation", (q) =>
+        q.eq("conversationId", args.conversationId).gte("createdAt", args.sinceMs),
+      )
+      .order("desc")
+      .take(80);
+    for (const m of rows) {
+      if (m.sender !== "assistant" || m.deletedAt != null) continue;
+      if (m.sentByUserId != null) return true;
+      const meta = m.metadata as { source?: string } | undefined;
+      if (meta?.source === "ycloud_outbound_webhook") return true;
+    }
+    return false;
+  },
+});
+
 export const updateMessageContent = internalMutation({
   args: {
     messageId: v.id("messages"),

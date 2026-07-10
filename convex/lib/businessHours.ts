@@ -3,20 +3,43 @@
  *   - Anexar un acuse cuando el cliente escribe FUERA de horario.
  *   - Saltar el aviso para emergencias (que sí se atienden 24/7).
  *
- * Configurable vía env vars; valores por defecto: Lunes-Sábado 8:00 - 18:00
- * hora de Colombia (America/Bogota).
+ * Horario oficial FincasYa (confirmado jul 2026):
+ *   Lunes–Viernes 7:00 AM – 5:00 PM
+ *   Sábados 7:00 AM – 3:00 PM
+ *   Domingos cerrado
+ * Zona: America/Bogota.
  *
- * Env vars:
- *   BUSINESS_HOURS_START   ej. "08:00"
- *   BUSINESS_HOURS_END     ej. "18:00"
- *   BUSINESS_HOURS_DAYS    ej. "Mon,Tue,Wed,Thu,Fri,Sat" (caso-insensible)
- *   BUSINESS_HOURS_TZ      ej. "America/Bogota"
+ * Env vars (opcionales; los defaults ya reflejan el horario oficial):
+ *   BUSINESS_HOURS_START       ej. "07:00"  (Lun–Vie)
+ *   BUSINESS_HOURS_END         ej. "17:00"  (Lun–Vie)
+ *   BUSINESS_HOURS_SAT_END     ej. "15:00"  (Sáb)
+ *   BUSINESS_HOURS_DAYS        ej. "Mon,Tue,Wed,Thu,Fri,Sat"
+ *   BUSINESS_HOURS_TZ          ej. "America/Bogota"
  */
 
-const DEFAULT_START = "08:00";
-const DEFAULT_END = "18:00";
+const DEFAULT_WEEKDAY_START = "07:00";
+const DEFAULT_WEEKDAY_END = "17:00";
+const DEFAULT_SAT_END = "15:00";
 const DEFAULT_DAYS = "Mon,Tue,Wed,Thu,Fri,Sat";
 const DEFAULT_TZ = "America/Bogota";
+
+/** Texto corto del horario — usar en copys del bot (continuidad asesor, stage1, etc.). */
+export const BUSINESS_HOURS_SCHEDULE_SHORT =
+  "L-V 7:00 AM–5:00 PM, Sáb 7:00 AM–3:00 PM";
+
+export const ADVISOR_CONTINUITY_AFTER_HOURS = [
+  "Hola, ¡gusto saludarte nuevamente! ☺️ Ya recibimos tu mensaje ✅",
+  `En este momento estamos fuera de nuestro horario de atención (${BUSINESS_HOURS_SCHEDULE_SHORT}). Mañana tu asesor continuará acompañándote con tu proceso 🤝 Quedamos muy atentos.`,
+].join(" ");
+
+export const ADVISOR_CONTINUITY_WITHIN_HOURS =
+  "Hola, ¡gusto saludarte nuevamente! ☺️ Ya recibimos tu mensaje ✅ Tu asesor continuará acompañándote con tu proceso 🤝 Quedamos muy atentos.";
+
+export const STAGE1_CATALOG_PICK_HANDOFF_MSG = [
+  "¡Excelente elección! 🤩 Gracias por elegir con FincasYa 🏡",
+  "Vamos a validar la disponibilidad de esta opción para tus fechas y uno de nuestros asesores te ampliará toda la información ✅",
+  `Nuestro horario de atención es ${BUSINESS_HOURS_SCHEDULE_SHORT} 🤝 Quedamos muy atentos.`,
+].join(" ");
 
 const DAY_MAP: Record<string, number> = {
   sun: 0,
@@ -61,21 +84,8 @@ function parseDays(csv: string): Set<number> {
   return out;
 }
 
-/**
- * ¿Es horario laboral ahora mismo (en la zona horaria configurada)? Si las
- * env vars están mal formadas se cae a los defaults (Lun-Sáb 8-18 Bogotá).
- */
-export function isWithinBusinessHours(nowMs: number): boolean {
-  const start =
-    parseHHMM(process.env.BUSINESS_HOURS_START ?? DEFAULT_START) ??
-    parseHHMM(DEFAULT_START)!;
-  const end =
-    parseHHMM(process.env.BUSINESS_HOURS_END ?? DEFAULT_END) ??
-    parseHHMM(DEFAULT_END)!;
-  const days = parseDays(process.env.BUSINESS_HOURS_DAYS ?? DEFAULT_DAYS);
+function bogotaLocalParts(nowMs: number): { dayNum: number; hour: number; minute: number } | null {
   const tz = process.env.BUSINESS_HOURS_TZ ?? DEFAULT_TZ;
-
-  // Hora local en la TZ configurada
   const parts = new Intl.DateTimeFormat("en-US", {
     timeZone: tz,
     weekday: "short",
@@ -89,12 +99,37 @@ export function isWithinBusinessHours(nowMs: number): boolean {
   const hourStr = String(parts.find((p) => p.type === "hour")?.value ?? "00");
   const minStr = String(parts.find((p) => p.type === "minute")?.value ?? "00");
   const dayNum = DAY_MAP[wd];
-  if (dayNum === undefined) return true; // si algo se rompe, default a "dentro de horario" (no anunciar)
-  if (!days.has(dayNum)) return false;
+  if (dayNum === undefined) return null;
+  return {
+    dayNum,
+    hour: parseInt(hourStr, 10),
+    minute: parseInt(minStr, 10),
+  };
+}
 
-  const h = parseInt(hourStr, 10);
-  const m = parseInt(minStr, 10);
-  const nowMinutes = h * 60 + m;
+/**
+ * ¿Es horario laboral ahora mismo (en la zona horaria configurada)? Si las
+ * env vars están mal formadas se cae a los defaults oficiales (L-V 7-17,
+ * Sáb 7-15 Bogotá).
+ */
+export function isWithinBusinessHours(nowMs: number): boolean {
+  const start =
+    parseHHMM(process.env.BUSINESS_HOURS_START ?? DEFAULT_WEEKDAY_START) ??
+    parseHHMM(DEFAULT_WEEKDAY_START)!;
+  const weekdayEnd =
+    parseHHMM(process.env.BUSINESS_HOURS_END ?? DEFAULT_WEEKDAY_END) ??
+    parseHHMM(DEFAULT_WEEKDAY_END)!;
+  const satEnd =
+    parseHHMM(process.env.BUSINESS_HOURS_SAT_END ?? DEFAULT_SAT_END) ??
+    parseHHMM(DEFAULT_SAT_END)!;
+  const days = parseDays(process.env.BUSINESS_HOURS_DAYS ?? DEFAULT_DAYS);
+
+  const local = bogotaLocalParts(nowMs);
+  if (!local) return true;
+  if (!days.has(local.dayNum)) return false;
+
+  const end = local.dayNum === 6 ? satEnd : weekdayEnd;
+  const nowMinutes = local.hour * 60 + local.minute;
   const startMinutes = start.h * 60 + start.m;
   const endMinutes = end.h * 60 + end.m;
   return nowMinutes >= startMinutes && nowMinutes < endMinutes;
@@ -116,7 +151,7 @@ export function isWithinBusinessHours(nowMs: number): boolean {
 export const AFTER_HOURS_NOTICE = [
   "",
   "",
-  "📅 Nuestro horario de atención es de Lunes a Viernes, de 7:00 AM a 5:00 PM, y Sábados de 7:00 AM a 3:00 PM (hora Colombia).",
+  `📅 Nuestro horario de atención es de Lunes a Viernes, de 7:00 AM a 5:00 PM, y Sábados de 7:00 AM a 3:00 PM (hora Colombia).`,
   "",
   "Si nos escribes fuera de este horario, tu mensaje seguirá siendo recibido con normalidad 🙌",
   "Puedes continuar enviando la información de tu viaje o reserva para ir avanzando en el proceso.",

@@ -19,6 +19,18 @@ import {
   type SpecialSeasonInfo,
 } from "../colombiaPublicHolidays";
 
+/** Etapa 1 (piloto): al elegir finca post-catálogo, escalar a humano en vez de pet_check+. */
+function isStage1HandoffEnabled(): boolean {
+  return process.env.BOT_STAGE1_HANDOFF === "1";
+}
+
+function stage1CatalogPickHandoff(phase: BotPhase): TransitionResult {
+  return {
+    nextPhase: phase,
+    action: { type: "escalate_human", reason: "stage1_catalog_pick" },
+  };
+}
+
 export interface TransitionResult {
   nextPhase: BotPhase;
   action: BotAction;
@@ -85,6 +97,9 @@ export function transition(
       entities.selectedPropertyRetailerId ||
       entities.catalogUserPickedReply;
     if (picked) {
+      if (isStage1HandoffEnabled()) {
+        return stage1CatalogPickHandoff("catalog_sent");
+      }
       // Si en el MISMO turno el cliente ya entregó info de mascotas (burst tipo
       // "Quiero esta + Tengo 3 mascotas"), saltamos pet_check para no volver a
       // preguntar lo mismo.
@@ -106,6 +121,9 @@ export function transition(
 
   // ── PROPERTY_SELECTED ─────────────────────────────────────────────────────
   if (phase === "property_selected") {
+    if (isStage1HandoffEnabled()) {
+      return stage1CatalogPickHandoff("property_selected");
+    }
     if (entities.hasPets !== undefined) {
       return { nextPhase: "contract", action: { type: "reply_only" } };
     }
@@ -302,7 +320,10 @@ function transitionCollecting(
     }
     // Finca + fechas + cupo OK → flujo de reserva (igual que catalog_sent +
     // finca elegida): según el estado de mascotas vamos a pet_rules_shown /
-    // quote_shown / pet_check.
+    // quote_shown / pet_check — salvo etapa 1 (handoff al elegir finca).
+    if (isStage1HandoffEnabled()) {
+      return stage1CatalogPickHandoff("collecting");
+    }
     if (entities.hasPets === true && (entities.petCount ?? 0) > 0) {
       return { nextPhase: "pet_rules_shown", action: { type: "reply_only" } };
     }

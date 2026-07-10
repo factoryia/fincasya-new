@@ -19,6 +19,8 @@ import {
 } from "../faqSeed";
 import {
   AFTER_HOURS_NOTICE,
+  ADVISOR_CONTINUITY_AFTER_HOURS,
+  ADVISOR_CONTINUITY_WITHIN_HOURS,
   clientFlaggedUrgent,
   isWithinBusinessHours,
 } from "../businessHours";
@@ -1078,6 +1080,57 @@ export async function processInboundMessageV2(
             : "operaciones",
       });
     }
+    return;
+  }
+
+  // ─── CONTINUIDAD DE ASESOR (antes de promover human→ai) ───────────────
+  // Si hay asesor asignado o actividad humana en las últimas 48 h, el bot NO
+  // retoma la conversación. Se envía un acuse idempotente al cliente y alerta
+  // blanda en inbox para que el asesor continúe.
+  const ADVISOR_ACTIVITY_WINDOW_MS = 48 * 60 * 60 * 1000;
+  const needsAdvisorContinuity =
+    conv &&
+    conv.status === "human" &&
+    (conv.assignedUserId ||
+      (await ctx.runQuery(deps.internal.messages.hasRecentHumanAdvisorMessages, {
+        conversationId,
+        sinceMs: Date.now() - ADVISOR_ACTIVITY_WINDOW_MS,
+      })));
+  if (needsAdvisorContinuity) {
+    const shouldNotifyClient = (await ctx.runMutation(
+      deps.internal.botSessions.markAlertFired,
+      {
+        conversationId,
+        phone: args.phone,
+        alertReason: "advisor_continuity_notice",
+      },
+    )) as boolean;
+    if (shouldNotifyClient) {
+      const continuityMsg = isWithinBusinessHours(Date.now())
+        ? ADVISOR_CONTINUITY_WITHIN_HOURS
+        : ADVISOR_CONTINUITY_AFTER_HOURS;
+      const t0 = Date.now();
+      await ctx.runMutation(deps.internal.messages.insertAssistantMessage, {
+        conversationId,
+        content: continuityMsg,
+        createdAt: t0,
+      });
+      await deliverText({
+        to: args.phone,
+        text: continuityMsg,
+        wamid: args.wamid,
+      });
+    }
+    await ctx.runMutation(deps.internal.conversations.flagPriorityAlert, {
+      conversationId,
+      alertReason: "advisor_continuity_inbox",
+      priority: "medium" as const,
+      tag: "continuidad-asesor",
+      inboxMessage: `👤 Cliente escribió con asesor activo o asignado (últimas 48 h). El bot no retomó — continúa el seguimiento humano. Mensaje: "${String(latestMsg?.content ?? "").slice(0, 200)}"`,
+    });
+    await ctx.runMutation(deps.internal.conversations.updateLastMessageAt, {
+      conversationId,
+    });
     return;
   }
 
@@ -3055,7 +3108,9 @@ export async function processInboundMessageV2(
                   ? "📎 Cliente envió archivo/foto en fase post-catálogo. Revisar (cédula, comprobante, doc). La IA quedó en pausa."
                   : reason === "client_requested"
                     ? "📣 El cliente pidió hablar con un asesor. Revisar conversación y contactar. La IA quedó en pausa."
-                    : "ℹ️ Conversación pasada a asesor humano. La IA quedó en pausa.";
+                    : reason === "stage1_catalog_pick"
+                      ? "🏡 Etapa 1 — el cliente eligió una finca del catálogo. Validar disponibilidad y ampliar información. La IA quedó en pausa."
+                      : "ℹ️ Conversación pasada a asesor humano. La IA quedó en pausa.";
     await ctx.runMutation(deps.internal.messages.insertSystemMessage, {
       conversationId,
       content: alertBody,

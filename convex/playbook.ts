@@ -677,7 +677,7 @@ export const seedFromCode = internalAction({
         clientExamples: ex.clientExamples,
         response: ex.response,
         tags: ex.tags,
-        enabled: true,
+        enabled: ex.enabled ?? true,
         source: "seed",
       };
       await ctx.runMutation(internal.playbook._upsertRow, row);

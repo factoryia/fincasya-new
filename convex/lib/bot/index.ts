@@ -30,6 +30,7 @@ import {
   mergeEntities,
 } from "./entities";
 import { petsExceedLimitMessage } from "./prompts";
+import { STAGE1_CATALOG_PICK_HANDOFF_MSG } from "../businessHours";
 import { extractEntities } from "./extractor";
 import { recoverDatesFromUserHistory, recoverRelativeDatesFromText, recoverRelativeDatesFromUserHistory } from "./historyRecovery";
 import { detectPuenteReference } from "../colombiaPublicHolidays";
@@ -714,6 +715,21 @@ export async function runBotTurn(input: BotTurnInput): Promise<BotTurnResult> {
   const samePhaseTurnCount =
     phaseChanged || madeProgress ? 0 : (currentSamePhaseTurnCount ?? 0) + 1;
   const phaseEnteredAt = phaseChanged ? now : (currentPhaseEnteredAt ?? now);
+
+  // 3.54 Etapa 1 (piloto): al elegir finca, handoff a humano con copy fijo.
+  if (
+    tr.action.type === "escalate_human" &&
+    tr.action.reason === "stage1_catalog_pick"
+  ) {
+    return {
+      replyText: STAGE1_CATALOG_PICK_HANDOFF_MSG,
+      action: tr.action,
+      nextPhase: effectivePhase,
+      updatedEntities,
+      samePhaseTurnCount,
+      phaseEnteredAt,
+    };
+  }
 
   // 3.55 Política de mascotas: el bot maneja hasta MAX_PETS_AUTO_HANDLING (3)
   // automáticamente. Si el cliente declara más, escalamos a un asesor humano

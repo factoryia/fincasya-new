@@ -168,7 +168,8 @@ export type BotAction =
         | "catalog_no_results"
         | "event_after_catalog"
         | "media_post_catalog"
-        | "client_requested";
+        | "client_requested"
+        | "stage1_catalog_pick";
     };
 
 /**
