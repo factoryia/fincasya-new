@@ -31,8 +31,8 @@ import { bootstrapBotStateFromHistory } from '../bot/conversationBootstrap';
 
 /** Plantilla de consentimiento (Ley 1581) — deshabilitada por ahora. */
 const WHATSAPP_DATA_CONSENT_ENABLED = false;
-/** Mensaje temporal al iniciar conversación (admin). */
-const WHATSAPP_TEMPORAL_START_MESSAGE_ENABLED = true;
+/** Mensaje temporal al iniciar conversación (admin) — OFF hasta validar con equipo. */
+const WHATSAPP_TEMPORAL_START_MESSAGE_ENABLED = false;
 
 async function isStillThisTailUserMessage(
   ctx: any,
@@ -1113,27 +1113,41 @@ export async function processInboundMessageV2(
 
   // Conversación en modo humano: el asesor atiende. Sin bot ni mensajes automáticos al cliente.
   if (conv && conv.status === 'human') {
-    const shouldPingInbox = (await ctx.runMutation(
-      deps.internal.botSessions.markAlertFired,
-      {
-        conversationId,
-        phone: args.phone,
-        alertReason: 'human_mode_client_message',
-      },
-    )) as boolean;
-    if (shouldPingInbox && !conv.attended) {
-      await ctx.runMutation(deps.internal.conversations.flagPriorityAlert, {
-        conversationId,
-        alertReason: 'human_mode_inbox',
-        priority: 'medium' as const,
-        tag: 'modo-humano',
-        inboxMessage: `👤 Cliente escribió (modo humano). Mensaje: "${String(latestMsg?.content ?? '').slice(0, 200)}"`,
-      });
-    }
     await ctx.runMutation(deps.internal.conversations.updateLastMessageAt, {
       conversationId,
     });
     return;
+  }
+
+  // Conversación en modo IA pero con asesor humano activo (celular o inbox):
+  // el bot NO debe responder ni enviar plantillas. Forzar humano y salir.
+  const ADVISOR_ACTIVITY_WINDOW_MS = 48 * 60 * 60 * 1000;
+  if (conv && conv.status === 'ai') {
+    const hasAdvisorActivity =
+      !!conv.assignedUserId ||
+      ((await ctx.runQuery(
+        deps.internal.messages.hasRecentHumanAdvisorMessages,
+        {
+          conversationId,
+          sinceMs: Date.now() - ADVISOR_ACTIVITY_WINDOW_MS,
+        },
+      )) as boolean);
+    if (hasAdvisorActivity) {
+      await ctx.runMutation(deps.internal.conversations.escalate, {
+        conversationId,
+      });
+      await ctx.runMutation(deps.internal.conversations.flagPriorityAlert, {
+        conversationId,
+        alertReason: 'advisor_active_bot_blocked',
+        priority: 'medium' as const,
+        tag: 'continuidad-asesor',
+        inboxMessage: `👤 Bot bloqueado: hay actividad de asesor humano en las últimas 48 h. El cliente escribió pero la IA no respondió. Mensaje: "${String(latestMsg?.content ?? '').slice(0, 200)}"`,
+      });
+      await ctx.runMutation(deps.internal.conversations.updateLastMessageAt, {
+        conversationId,
+      });
+      return;
+    }
   }
 
   if (!conv || conv.status !== 'ai') return;

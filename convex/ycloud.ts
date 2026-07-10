@@ -374,7 +374,9 @@ export const recordOutboundFromWebhook = internalMutation({
               sentByUserId?: string;
               metadata?: unknown;
             },
-          )
+          ) ||
+          messageMetadataRecord(existing.metadata)?.source ===
+            OUTBOUND_WEBHOOK_METADATA.source
         ) {
           await ctx.runMutation(internal.ycloud.markOutboundAsHuman, { phone });
         }
@@ -422,7 +424,10 @@ export const recordOutboundFromWebhook = internalMutation({
               sentByUserId?: string;
               metadata?: unknown;
             },
-          )
+          ) ||
+          messageMetadataRecord(
+            (echo as { metadata?: unknown }).metadata,
+          )?.source === OUTBOUND_WEBHOOK_METADATA.source
         ) {
           await ctx.runMutation(internal.ycloud.markOutboundAsHuman, { phone });
         }
@@ -462,9 +467,8 @@ export const recordOutboundFromWebhook = internalMutation({
     await ctx.runMutation(internal.conversations.updateLastMessageAt, {
       conversationId,
     });
-    if (shouldMarkOutboundAsHuman(convStatus, null)) {
-      await ctx.runMutation(internal.ycloud.markOutboundAsHuman, { phone });
-    }
+    // Eco de celular / YCloud dashboard: siempre humano (nunca bot_automation).
+    await ctx.runMutation(internal.ycloud.markOutboundAsHuman, { phone });
     return { ok: true as const };
   },
 });
