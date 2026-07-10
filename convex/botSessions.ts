@@ -5,6 +5,7 @@
  */
 
 import { v } from "convex/values";
+import type { Id } from "./_generated/dataModel";
 import { internalMutation, internalQuery } from "./_generated/server";
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -114,6 +115,31 @@ export const setPendingResumeFromHuman = internalMutation({
       createdAt: now,
       updatedAt: now,
     });
+  },
+});
+
+/** Limpia el flag de reanudación manual al pasar a modo humano. */
+export async function clearPendingResumeFromHumanDb(
+  ctx: { db: any },
+  conversationId: Id<"conversations">,
+) {
+  const existing = await ctx.db
+    .query("botSessions")
+    .withIndex("by_conversation", (q: any) =>
+      q.eq("conversationId", conversationId),
+    )
+    .first();
+  if (!existing?.pendingResumeFromHuman) return;
+  await ctx.db.patch(existing._id, {
+    pendingResumeFromHuman: undefined,
+    updatedAt: Date.now(),
+  });
+}
+
+export const clearPendingResumeFromHuman = internalMutation({
+  args: { conversationId: v.id("conversations") },
+  handler: async (ctx, args) => {
+    await clearPendingResumeFromHumanDb(ctx, args.conversationId);
   },
 });
 

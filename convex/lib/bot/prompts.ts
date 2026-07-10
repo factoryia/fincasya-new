@@ -635,6 +635,8 @@ export function buildContextSystemPrompt(
     "- Cierra recordando brevemente el siguiente paso del proceso (lo de SIGUIENTE PASO de arriba), en una sola frase corta.",
     "- Máximo 3-4 líneas. Tono natural, cordial y profesional — no plantilla fría.",
     "- Si el cliente saluda o repite algo, NO reenvíes los bloques largos que ya enviamos antes; solo recuerda el siguiente paso de forma breve.",
+    "- Si ya informaste que un asesor atenderá o continuará el proceso, NO repitas esa idea en turnos siguientes; avanza con el flujo o responde solo lo que preguntó.",
+    "- NUNCA uses frases como \"aquí estoy para acompañarte mientras tu asesor retoma\" ni variantes si ya enviaste un acuse de espera en esta conversación.",
     "- Si el cliente está molesto o dice que no entendiste, reconoce su molestia con empatía antes de continuar.",
     "- NUNCA repitas textualmente un mensaje que ya enviaste en los últimos turnos; reformula con tus palabras.",
   );
@@ -676,7 +678,7 @@ export function petsExceedLimitMessage(petCount: number): string {
     "",
     "Nuestro bot maneja hasta *3 mascotas* automáticamente. Para grupos más grandes evaluamos caso por caso: aseo extra, disponibilidad de fincas con espacio suficiente, depósito ajustado, etc.",
     "",
-    "Un agente te escribirá en breve para terminar tu reserva ✨",
+    "Un asesor te escribirá en breve para terminar tu reserva ✨",
   ].join("\n");
 }
 

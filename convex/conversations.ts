@@ -102,6 +102,9 @@ export const escalate = internalMutation({
       assignedUserId: args.assignedUserId,
       ...(args.priority != null ? { priority: args.priority } : {}),
     });
+    await ctx.runMutation(internal.botSessions.clearPendingResumeFromHuman, {
+      conversationId: args.conversationId,
+    });
   },
 });
 
@@ -401,6 +404,9 @@ export const escalateToHuman = mutation({
       status: "human",
       attended: false,
       operationalState: "requires_advisor",
+    });
+    await ctx.runMutation(internal.botSessions.clearPendingResumeFromHuman, {
+      conversationId: args.conversationId,
     });
 
     // Push al staff

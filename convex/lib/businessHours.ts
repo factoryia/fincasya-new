@@ -27,13 +27,29 @@ const DEFAULT_TZ = "America/Bogota";
 export const BUSINESS_HOURS_SCHEDULE_SHORT =
   "L-V 7:00 AM–5:00 PM, Sáb 7:00 AM–3:00 PM";
 
-export const ADVISOR_CONTINUITY_AFTER_HOURS = [
-  "Hola, ¡gusto saludarte nuevamente! ☺️ Ya recibimos tu mensaje ✅",
-  `En este momento estamos fuera de nuestro horario de atención (${BUSINESS_HOURS_SCHEDULE_SHORT}). Mañana tu asesor continuará acompañándote con tu proceso 🤝 Quedamos muy atentos.`,
+/** Acuse cuando hay asesor activo o la conversación espera humano (horario laboral). */
+export const ADVISOR_CONTINUITY_WITHIN_HOURS = [
+  "¡Hola! Gracias por escribirnos 😊",
+  "Ya hemos recibido y atendido tu mensaje ✅",
+  "En un momento un asesor de *Fincas Ya* estará contigo.",
+  "Esto puede tomar unos minutos, pero en breve recibirás atención personalizada.",
+  "Muchas gracias por esperar 🤝",
+  "Somos *Fincas Ya* — con gusto te acompañamos.",
 ].join(" ");
 
-export const ADVISOR_CONTINUITY_WITHIN_HOURS =
-  "Hola, ¡gusto saludarte nuevamente! ☺️ Ya recibimos tu mensaje ✅ Tu asesor continuará acompañándote con tu proceso 🤝 Quedamos muy atentos.";
+/** Acuse fuera de horario cuando hay asesor activo o la conversación espera humano. */
+export const ADVISOR_CONTINUITY_AFTER_HOURS = [
+  "¡Hola! Gracias por escribirnos 😊",
+  "Ya hemos recibido tu mensaje ✅",
+  `En este momento estamos fuera de nuestro horario de atención (${BUSINESS_HOURS_SCHEDULE_SHORT}).`,
+  "Tu solicitud quedó registrada y un asesor de *Fincas Ya* continuará contigo al iniciar el próximo horario laboral.",
+  "Muchas gracias por esperar 🤝",
+  "Somos *Fincas Ya* — con gusto te acompañamos.",
+].join(" ");
+
+/** Cierre al finalizar flujo con mensaje temporal activo. */
+export const TEMPORAL_MESSAGE_CLOSING =
+  "Uno de nuestros asesores de Fincas Ya se comunicará contigo en horario laboral para continuar con tu proceso. Muchas gracias por tu paciencia 🤝";
 
 export const STAGE1_CATALOG_PICK_HANDOFF_MSG = [
   "¡Excelente elección! 🤩 Gracias por elegir con FincasYa 🏡",

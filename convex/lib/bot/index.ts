@@ -372,7 +372,7 @@ export async function runBotTurn(input: BotTurnInput): Promise<BotTurnResult> {
   if (extracted.requestsHumanAgent === true) {
     return {
       replyText:
-        "Perfecto, te comunico con un asesor 🤝 Un agente te escribirá en breve para ayudarte ✨",
+        "Perfecto, te comunico con un asesor 🤝 Te escribirá en breve para ayudarte ✨",
       action: { type: "escalate_human", reason: "client_requested" },
       nextPhase: currentPhase,
       updatedEntities: currentEntities,
@@ -788,7 +788,7 @@ export async function runBotTurn(input: BotTurnInput): Promise<BotTurnResult> {
       replyText: [
         "¡Perfecto! Con los datos del evento que me diste te conecto con un asesor para confirmarte el *precio final* y la *disponibilidad* del evento 🎉",
         "",
-        "Un agente te escribirá en breve para finalizar los detalles 🤝 ✨",
+        "Un asesor te escribirá en breve para finalizar los detalles 🤝 ✨",
       ].join("\n"),
       action: { type: "escalate_human", reason: "event_after_catalog" },
       nextPhase: effectivePhase,

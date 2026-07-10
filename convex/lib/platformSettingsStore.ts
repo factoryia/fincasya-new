@@ -1,4 +1,5 @@
 import type { Id } from '../_generated/dataModel';
+import { clearPendingResumeFromHumanDb } from '../botSessions';
 import {
   AiChannel,
   GLOBAL_PLATFORM_SCOPE,
@@ -50,6 +51,7 @@ async function escalateChannelAiConversationsToHuman(
   for (const conversation of aiConversations) {
     if (conversation.channel !== channel) continue;
     await ctx.db.patch(conversation._id, { status: 'human', attended: true });
+    await clearPendingResumeFromHumanDb(ctx, conversation._id);
   }
 }
 
@@ -87,7 +89,6 @@ export async function upsertGlobalAiEnabled(
     await escalateChannelAiConversationsToHuman(ctx, 'whatsapp');
   } else {
     // WhatsApp: no reactivar conversaciones en masa.
-    // Se reactivan una a una cuando el cliente vuelve a escribir.
     await restoreChannelHumanConversationsToAi(ctx, 'web');
   }
   return settingsId;
@@ -130,7 +131,6 @@ export async function setChannelAiEnabled(
     await escalateChannelAiConversationsToHuman(ctx, channel);
   } else {
     // WhatsApp: no reactivar conversaciones en masa al encender el bot.
-    // Solo se pasa a IA cuando entre un nuevo mensaje del cliente.
     if (channel !== 'whatsapp') {
       await restoreChannelHumanConversationsToAi(ctx, channel);
     }

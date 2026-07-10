@@ -1,41 +1,43 @@
-import type { Id } from "../../_generated/dataModel";
-import type { BotEntities } from "../bot/types";
+import type { Id } from '../../_generated/dataModel';
+import type { BotEntities } from '../bot/types';
 import {
   capacityCeilForCupo,
   capacityCeilRelaxedForCupo,
   countNights,
   inferRetailerIdFromCatalogTitle,
-} from "../bot/entities";
-import { INBOUND_DEBOUNCE_MS, MAX_CATALOG_PRODUCTS_PER_SEND } from "./constants";
+} from '../bot/entities';
+import {
+  INBOUND_DEBOUNCE_MS,
+  MAX_CATALOG_PRODUCTS_PER_SEND,
+} from './constants';
 import {
   buildBodyParams,
   getTemplateDef,
   renderTemplateBody,
-} from "./templateCatalog";
+} from './templateCatalog';
 import {
   getFaqTextByKey,
   localFaqFallback,
   localFaqMatchesForText,
-} from "../faqSeed";
+} from '../faqSeed';
 import {
   AFTER_HOURS_NOTICE,
-  ADVISOR_CONTINUITY_AFTER_HOURS,
-  ADVISOR_CONTINUITY_WITHIN_HOURS,
   clientFlaggedUrgent,
   isWithinBusinessHours,
-} from "../businessHours";
-import type { DeliverTextResult } from "./assistantOutbound";
-import { bootstrapBotStateFromHistory } from "../bot/conversationBootstrap";
+  TEMPORAL_MESSAGE_CLOSING,
+} from '../businessHours';
+import type { DeliverTextResult } from './assistantOutbound';
+import { bootstrapBotStateFromHistory } from '../bot/conversationBootstrap';
 
 /** Plantilla de consentimiento (Ley 1581) — deshabilitada por ahora. */
 const WHATSAPP_DATA_CONSENT_ENABLED = false;
-/** Mensaje temporal al iniciar conversación (admin) — deshabilitado en pruebas. */
-const WHATSAPP_TEMPORAL_START_MESSAGE_ENABLED = false;
+/** Mensaje temporal al iniciar conversación (admin). */
+const WHATSAPP_TEMPORAL_START_MESSAGE_ENABLED = true;
 
 async function isStillThisTailUserMessage(
   ctx: any,
   deps: { api: any },
-  conversationId: Id<"conversations">,
+  conversationId: Id<'conversations'>,
   insertedMsgId: string,
   _insertedAt: number,
 ): Promise<boolean> {
@@ -60,7 +62,9 @@ async function isStillThisTailUserMessage(
   // estaba activo. Por eso lo removemos: confiamos solo en que el msg
   // insertado siga siendo el último mensaje DEL USUARIO.
   void _insertedAt;
-  let conv = await ctx.runQuery(deps.api.conversations.getById, { conversationId });
+  let conv = await ctx.runQuery(deps.api.conversations.getById, {
+    conversationId,
+  });
   if (!conv) return false;
   const latest = (await ctx.runQuery(deps.api.messages.getLatestUserMessage, {
     conversationId,
@@ -105,10 +109,10 @@ async function isStillThisTailUserMessage(
  * "alrededores" (el cliente sin preferencia ve el cap normal, no expandido).
  */
 function wantsExpandedSearch(text: string): boolean {
-  const t = String(text ?? "")
+  const t = String(text ?? '')
     .toLowerCase()
-    .normalize("NFD")
-    .replace(/\p{M}/gu, "");
+    .normalize('NFD')
+    .replace(/\p{M}/gu, '');
   if (t.length === 0 || t.length > 240) return false;
   return (
     /\b(alrededor(es)?|por\s+los?\s+alrededor(es)?|en\s+los?\s+alrededor(es)?)\b/.test(
@@ -136,10 +140,10 @@ function wantsExpandedSearch(text: string): boolean {
  * cliente quiere un único día, sin pernoctar).
  */
 function looksLikePasadia(text: string): boolean {
-  const t = String(text ?? "")
+  const t = String(text ?? '')
     .toLowerCase()
-    .normalize("NFD")
-    .replace(/\p{M}/gu, "");
+    .normalize('NFD')
+    .replace(/\p{M}/gu, '');
   if (t.length === 0 || t.length > 240) return false;
   return (
     /\bpasa?d[ií]as?\b/.test(t) ||
@@ -173,9 +177,9 @@ function lastAssistantMsgIsPasadiaOffer(
   msgs: Array<{ sender?: string; content?: string }>,
 ): boolean {
   for (let i = msgs.length - 1; i >= 0; i--) {
-    if (msgs[i].sender === "assistant") {
-      const c = String(msgs[i].content ?? "").toLowerCase();
-      return c.includes("pasad") && c.includes("martes a jueves");
+    if (msgs[i].sender === 'assistant') {
+      const c = String(msgs[i].content ?? '').toLowerCase();
+      return c.includes('pasad') && c.includes('martes a jueves');
     }
   }
   return false;
@@ -194,94 +198,94 @@ const CATALOG_EXPANDED_LIMIT = 25;
  */
 const REGIONS = {
   LLANOS: [
-    "villavicencio",
-    "restrepo",
-    "san martin",
-    "granada",
-    "cumaral",
-    "apiay",
-    "paratebueno",
-    "puerto lopez",
-    "puerto gaitan",
-    "guamal",
-    "barranca de upia",
-    "barranca",
-    "acacias",
-    "meta",
+    'villavicencio',
+    'restrepo',
+    'san martin',
+    'granada',
+    'cumaral',
+    'apiay',
+    'paratebueno',
+    'puerto lopez',
+    'puerto gaitan',
+    'guamal',
+    'barranca de upia',
+    'barranca',
+    'acacias',
+    'meta',
   ],
   TOLIMA: [
-    "flandes",
-    "carmen de apicala",
-    "honda",
-    "herveo",
-    "lerida",
-    "ortega",
-    "melgar",
-    "armero",
-    "san antonio",
-    "icononzo",
-    "venadillo",
-    "ambalema",
-    "villarica",
-    "libano",
-    "valle de san juan",
-    "alvarado",
-    "cunday",
-    "anzoategui",
-    "murillo",
-    "san luis",
-    "prado",
-    "santa isabel",
-    "suarez",
-    "piedras",
-    "planadas",
-    "ibague",
-    "tolima",
+    'flandes',
+    'carmen de apicala',
+    'honda',
+    'herveo',
+    'lerida',
+    'ortega',
+    'melgar',
+    'armero',
+    'san antonio',
+    'icononzo',
+    'venadillo',
+    'ambalema',
+    'villarica',
+    'libano',
+    'valle de san juan',
+    'alvarado',
+    'cunday',
+    'anzoategui',
+    'murillo',
+    'san luis',
+    'prado',
+    'santa isabel',
+    'suarez',
+    'piedras',
+    'planadas',
+    'ibague',
+    'tolima',
   ],
   CUNDINAMARCA: [
-    "nilo",
-    "tocaima",
-    "girardot",
-    "villapinzon",
-    "zipaquira",
-    "facatativa",
-    "choconta",
-    "cogua",
-    "tabio",
-    "guaduas",
-    "bojaca",
-    "gachala",
-    "la mesa",
-    "pacho",
-    "san cayetano",
-    "soacha",
-    "la calera",
-    "puerto salgar",
-    "villeta",
-    "la pena",
-    "caqueza",
-    "funza",
-    "yacopi",
-    "nemocon",
-    "anapoima",
-    "viota",
-    "tenjo",
-    "cundinamarca",
+    'nilo',
+    'tocaima',
+    'girardot',
+    'villapinzon',
+    'zipaquira',
+    'facatativa',
+    'choconta',
+    'cogua',
+    'tabio',
+    'guaduas',
+    'bojaca',
+    'gachala',
+    'la mesa',
+    'pacho',
+    'san cayetano',
+    'soacha',
+    'la calera',
+    'puerto salgar',
+    'villeta',
+    'la pena',
+    'caqueza',
+    'funza',
+    'yacopi',
+    'nemocon',
+    'anapoima',
+    'viota',
+    'tenjo',
+    'cundinamarca',
   ],
   COSTA: [
-    "cartagena",
-    "santa marta",
-    "barranquilla",
-    "islas del rosario",
-    "covenas",
-    "tolu",
-    "san bernardo",
-    "san andres",
-    "providencia",
-    "riohacha",
-    "palomino",
-    "costa",
-    "caribe",
+    'cartagena',
+    'santa marta',
+    'barranquilla',
+    'islas del rosario',
+    'covenas',
+    'tolu',
+    'san bernardo',
+    'san andres',
+    'providencia',
+    'riohacha',
+    'palomino',
+    'costa',
+    'caribe',
   ],
 };
 
@@ -321,10 +325,10 @@ const ZONE_EXCLUSIONS: Array<{
   },
 ];
 function detectExcludedZoneKeywords(text: string): string[] {
-  const t = String(text ?? "")
+  const t = String(text ?? '')
     .toLowerCase()
-    .normalize("NFD")
-    .replace(/\p{M}/gu, "");
+    .normalize('NFD')
+    .replace(/\p{M}/gu, '');
   const out = new Set<string>();
   for (const rule of ZONE_EXCLUSIONS) {
     if (rule.triggerRegex.test(t)) {
@@ -354,8 +358,7 @@ const ZONE_INCLUSIONS: Array<{
 }> = [
   {
     // "cerca a bogota", "cerca de bogota", "cerca por bogota", "alrededor de bogota"
-    triggerRegex:
-      /\b(?<!no\s)cerca\s+(a|de|por)\s+(bogota|la\s+capital)\b/i,
+    triggerRegex: /\b(?<!no\s)cerca\s+(a|de|por)\s+(bogota|la\s+capital)\b/i,
     restrictToLocationKeywords: REGIONS.CUNDINAMARCA,
   },
   {
@@ -384,10 +387,10 @@ const ZONE_INCLUSIONS: Array<{
   },
 ];
 function detectRestrictedZoneKeywords(text: string): string[] {
-  const t = String(text ?? "")
+  const t = String(text ?? '')
     .toLowerCase()
-    .normalize("NFD")
-    .replace(/\p{M}/gu, "");
+    .normalize('NFD')
+    .replace(/\p{M}/gu, '');
   const out = new Set<string>();
   for (const rule of ZONE_INCLUSIONS) {
     if (rule.triggerRegex.test(t)) {
@@ -403,9 +406,9 @@ function detectRestrictedZoneKeywords(text: string): string[] {
  * código, se expande solo por keywords de ubicación.
  */
 const REGION_TO_DEPT_CODE: Record<string, string | null> = {
-  LLANOS: "META",
-  TOLIMA: "TOLIMA",
-  CUNDINAMARCA: "CUNDINAMARCA",
+  LLANOS: 'META',
+  TOLIMA: 'TOLIMA',
+  CUNDINAMARCA: 'CUNDINAMARCA',
   COSTA: null,
 };
 
@@ -419,12 +422,12 @@ const REGION_TO_DEPT_CODE: Record<string, string | null> = {
 function departmentExpansionForMunicipality(
   location: string | undefined,
 ): { keywords: string[]; deptCodes: string[] } | null {
-  const norm = String(location ?? "")
+  const norm = String(location ?? '')
     .toLowerCase()
-    .normalize("NFD")
-    .replace(/\p{M}/gu, "")
+    .normalize('NFD')
+    .replace(/\p{M}/gu, '')
     .trim();
-  if (!norm || norm === "recomendadas") return null;
+  if (!norm || norm === 'recomendadas') return null;
   for (const [region, kws] of Object.entries(REGIONS)) {
     const hit = kws.some((kw) => kw === norm || norm.includes(kw));
     if (hit) {
@@ -437,9 +440,22 @@ function departmentExpansionForMunicipality(
 
 /** Keywords de ubicación del Eje Cafetero (para la colección homónima). */
 const EJE_CAFETERO_KEYWORDS = [
-  "pereira", "armenia", "manizales", "salento", "montenegro", "quimbaya",
-  "calarca", "filandia", "circasia", "chinchina", "santa rosa de cabal",
-  "marsella", "eje cafetero", "quindio", "risaralda", "caldas",
+  'pereira',
+  'armenia',
+  'manizales',
+  'salento',
+  'montenegro',
+  'quimbaya',
+  'calarca',
+  'filandia',
+  'circasia',
+  'chinchina',
+  'santa rosa de cabal',
+  'marsella',
+  'eje cafetero',
+  'quindio',
+  'risaralda',
+  'caldas',
 ];
 
 /**
@@ -469,9 +485,9 @@ const CATEGORY_COLLECTIONS: Array<{
     // "destinos de playa", "fincas de playa", "en la playa", "frente al mar"
     triggerRegex:
       /\b(destinos?\s+de\s+playa|fincas?\s+(?:de|en|con)\s+playa|de\s+playa|en\s+la\s+playa|frente\s+al\s+mar|cerca\s+(?:a|al|del)\s+mar|con\s+playa)\b/i,
-    label: "Destinos de Playa",
+    label: 'Destinos de Playa',
     categoryMatch: {
-      filterTags: ["playa", "santa-marta"],
+      filterTags: ['playa', 'santa-marta'],
       locationKeywords: REGIONS.COSTA,
     },
   },
@@ -479,19 +495,19 @@ const CATEGORY_COLLECTIONS: Array<{
     // "de lujo", "lujosas", "luxury", "alta gama", "exclusivas", "premium"
     triggerRegex:
       /\b(de\s+lujo|lujos[ao]s?|luxury|alta\s+gama|exclusiv[ao]s?|premium|gama\s+alta)\b/i,
-    label: "Fincas de Lujo",
+    label: 'Fincas de Lujo',
     categoryMatch: {
-      filterTags: ["luxury"],
-      categories: ["LUJO", "PREMIUM"],
+      filterTags: ['luxury'],
+      categories: ['LUJO', 'PREMIUM'],
     },
   },
   {
     // "eje cafetero", "zona cafetera", "region cafetera"
     triggerRegex:
       /\b(eje\s+cafetero|zona\s+cafetera|region\s+cafetera|paisaje\s+cafetero)\b/i,
-    label: "Eje Cafetero",
+    label: 'Eje Cafetero',
     categoryMatch: {
-      filterTags: ["eje-cafetero"],
+      filterTags: ['eje-cafetero'],
       locationKeywords: EJE_CAFETERO_KEYWORDS,
     },
   },
@@ -500,9 +516,9 @@ const CATEGORY_COLLECTIONS: Array<{
     // (trigger explícito para no chocar con el flujo `isEvento` normal).
     triggerRegex:
       /\b(fincas?\s+para\s+eventos?|salon\s+de\s+eventos?|finca\s+de\s+eventos?|para\s+(?:hacer\s+)?(?:un\s+)?evento\s+grande|para\s+celebraciones?\s+grandes?)\b/i,
-    label: "Fincas para Eventos",
+    label: 'Fincas para Eventos',
     categoryMatch: {
-      filterTags: ["eventos"],
+      filterTags: ['eventos'],
       requireEventsCapable: true,
     },
   },
@@ -516,10 +532,10 @@ const CATEGORY_COLLECTIONS: Array<{
 function detectCategoryCollection(
   text: string,
 ): { label: string; categoryMatch: CategoryMatch } | null {
-  const t = String(text ?? "")
+  const t = String(text ?? '')
     .toLowerCase()
-    .normalize("NFD")
-    .replace(/\p{M}/gu, "");
+    .normalize('NFD')
+    .replace(/\p{M}/gu, '');
   for (const c of CATEGORY_COLLECTIONS) {
     if (c.triggerRegex.test(t)) {
       return { label: c.label, categoryMatch: c.categoryMatch };
@@ -549,10 +565,10 @@ function detectCategoryCollection(
  * de ubicación de la finca en vez de procesar los datos del contrato.
  */
 function looksLikeContractData(text: string): boolean {
-  const t = String(text ?? "")
+  const t = String(text ?? '')
     .toLowerCase()
-    .normalize("NFD")
-    .replace(/\p{M}/gu, "");
+    .normalize('NFD')
+    .replace(/\p{M}/gu, '');
   let hits = 0;
   if (/\bnombre\s+completo\b/.test(t)) hits += 1;
   if (/\bcedula\b/.test(t)) hits += 1;
@@ -566,7 +582,7 @@ function extractQuestionLinesArray(text: string): string[] {
   // El cliente entregando sus datos del contrato NO es una pregunta — aunque
   // alguna línea ("Dirección de residencia: …") tenga una keyword FAQ-y.
   if (looksLikeContractData(text)) return [];
-  const lines = String(text ?? "")
+  const lines = String(text ?? '')
     .split(/\n+/)
     .map((l) => l.trim())
     .filter(Boolean);
@@ -608,7 +624,7 @@ const HANDOFF_REGEXES: RegExp[] = [
 
 function botPromisedHandoff(text: string): boolean {
   if (!text) return false;
-  const t = text.toLowerCase().normalize("NFD").replace(/\p{M}/gu, "");
+  const t = text.toLowerCase().normalize('NFD').replace(/\p{M}/gu, '');
   return HANDOFF_REGEXES.some((re) => re.test(t));
 }
 
@@ -627,36 +643,36 @@ async function fireUrgentWebhookIfConfigured(payload: {
   contactPhone: string;
   contactName?: string | null;
   lastMessage: string;
-  team?: "ventas" | "operaciones" | "administracion" | "atencion-cliente";
+  team?: 'ventas' | 'operaciones' | 'administracion' | 'atencion-cliente';
   extra?: Record<string, unknown>;
 }): Promise<void> {
   const url = process.env.URGENT_ALERTS_WEBHOOK_URL?.trim();
   if (!url) return;
   try {
     await fetch(url, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         ...payload,
-        priority: "urgent",
+        priority: 'urgent',
         firedAt: Date.now(),
-        source: "fincasya-bot",
+        source: 'fincasya-bot',
       }),
     });
   } catch (err) {
     console.error(
-      "[urgent-webhook] fallo (la escalación a inbox sí quedó):",
+      '[urgent-webhook] fallo (la escalación a inbox sí quedó):',
       err,
     );
   }
 }
 
 function looksLikeQuestion(text: string): boolean {
-  const t = String(text ?? "").trim();
+  const t = String(text ?? '').trim();
   if (t.length < 4 || t.length > 250) return false;
-  if (t.includes("?") || t.includes("¿")) return true;
+  if (t.includes('?') || t.includes('¿')) return true;
 
-  const lower = t.toLowerCase().normalize("NFD").replace(/\p{M}/gu, "");
+  const lower = t.toLowerCase().normalize('NFD').replace(/\p{M}/gu, '');
 
   // FILTRO / preferencia, NO pregunta: "que no sea en los llanos", "que sea
   // cerca a Bogotá", "que tenga piscina", "que quede cerca". El "que" aquí es
@@ -752,13 +768,13 @@ function mergeTrailingUserBurst(
   const parts: string[] = [];
   for (let i = msgs.length - 1; i >= 0; i--) {
     const m = msgs[i];
-    if (m.sender === "assistant") break;
-    if (m.sender === "user") {
-      const t = String(m.content ?? "").trim();
+    if (m.sender === 'assistant') break;
+    if (m.sender === 'user') {
+      const t = String(m.content ?? '').trim();
       if (t) parts.unshift(t);
     }
   }
-  return parts.join("\n");
+  return parts.join('\n');
 }
 
 export async function processInboundMessageV2(
@@ -770,12 +786,12 @@ export async function processInboundMessageV2(
     text: string;
     wamid?: string;
     replyToWamid?: string;
-    type?: "text" | "image" | "audio" | "video" | "document";
+    type?: 'text' | 'image' | 'audio' | 'video' | 'document';
     mediaUrl?: string;
     /** Reprocesar el último mensaje del cliente sin insertar uno nuevo (panel inbox). */
     retryMode?: boolean;
-    existingMessageId?: Id<"messages">;
-    conversationId?: Id<"conversations">;
+    existingMessageId?: Id<'messages'>;
+    conversationId?: Id<'conversations'>;
   },
   deps: {
     internal: any;
@@ -788,7 +804,7 @@ export async function processInboundMessageV2(
      */
     classifyImage?: (
       url: string,
-    ) => Promise<"cedula" | "comprobante" | "otro" | null>;
+    ) => Promise<'cedula' | 'comprobante' | 'otro' | null>;
     runBotTurn: (input: any) => Promise<any>;
     /** Envío de texto al cliente (WhatsApp). En canal web es no-op. */
     deliverText?: (payload: {
@@ -804,11 +820,11 @@ export async function processInboundMessageV2(
       bodyText?: string;
       catalogId?: string;
       wamid?: string;
-      conversationId: Id<"conversations">;
+      conversationId: Id<'conversations'>;
     }) => Promise<
       Array<{ productRetailerId: string; wamid?: string; ok?: boolean }>
     >;
-    channel?: "whatsapp" | "web";
+    channel?: 'whatsapp' | 'web';
   },
 ) {
   const deliverText =
@@ -821,34 +837,37 @@ export async function processInboundMessageV2(
     });
 
   const sendAssistantText = async (args: {
-    conversationId: Id<"conversations">;
+    conversationId: Id<'conversations'>;
     to: string;
     text: string;
     wamid?: string;
     createdAt?: number;
     metadata?: Record<string, unknown>;
   }) => {
-    const body = String(args.text ?? "").trim();
+    const body = String(args.text ?? '').trim();
     if (!body) return;
     let sent: DeliverTextResult = {};
-    if ((deps.channel ?? "whatsapp") !== "web") {
-      sent = (await deliverText({
-        to: args.to,
-        text: body,
-        wamid: args.wamid,
-      })) ?? {};
+    if ((deps.channel ?? 'whatsapp') !== 'web') {
+      sent =
+        (await deliverText({
+          to: args.to,
+          text: body,
+          wamid: args.wamid,
+        })) ?? {};
     }
-    const outboundWamid = String(sent.wamid ?? "").trim();
-    const rawStatus = String(sent.status ?? "").trim().toLowerCase();
+    const outboundWamid = String(sent.wamid ?? '').trim();
+    const rawStatus = String(sent.status ?? '')
+      .trim()
+      .toLowerCase();
     const whatsappStatus =
-      rawStatus === "failed" ||
-      rawStatus === "accepted" ||
-      rawStatus === "sent" ||
-      rawStatus === "delivered" ||
-      rawStatus === "read"
+      rawStatus === 'failed' ||
+      rawStatus === 'accepted' ||
+      rawStatus === 'sent' ||
+      rawStatus === 'delivered' ||
+      rawStatus === 'read'
         ? rawStatus
         : outboundWamid
-          ? ("sent" as const)
+          ? ('sent' as const)
           : undefined;
     await ctx.runMutation(deps.internal.messages.insertAssistantMessage, {
       conversationId: args.conversationId,
@@ -856,7 +875,7 @@ export async function processInboundMessageV2(
       createdAt: args.createdAt ?? Date.now(),
       metadata: {
         ...(args.metadata ?? {}),
-        source: "bot_automation",
+        source: 'bot_automation',
       },
       ...(outboundWamid.length > 6 ? { wamid: outboundWamid } : {}),
       ...(whatsappStatus ? { whatsappStatus } : {}),
@@ -871,7 +890,7 @@ export async function processInboundMessageV2(
       bodyText?: string;
       catalogId?: string;
       wamid?: string;
-      conversationId: Id<"conversations">;
+      conversationId: Id<'conversations'>;
     }) =>
       (await ctx.runAction(deps.internal.ycloud.sendWhatsAppCatalogList, {
         to: payload.to,
@@ -887,7 +906,7 @@ export async function processInboundMessageV2(
         ok?: boolean;
       }>);
 
-  const rawText = String(args.text ?? "").trim();
+  const rawText = String(args.text ?? '').trim();
   if (/^(status|presence)\s*:\s*active$/i.test(rawText)) return;
 
   const retryMode =
@@ -895,10 +914,10 @@ export async function processInboundMessageV2(
     args.existingMessageId != null &&
     args.conversationId != null;
 
-  const inboundWamidEarly = String(args.wamid ?? "").trim();
+  const inboundWamidEarly = String(args.wamid ?? '').trim();
 
-  let contactId: Id<"contacts">;
-  let conversationId: Id<"conversations">;
+  let contactId: Id<'contacts'>;
+  let conversationId: Id<'conversations'>;
   let isNewConversation = false;
   let isReactivatedConversation = false;
   let resumingFromHuman = false;
@@ -906,20 +925,20 @@ export async function processInboundMessageV2(
   if (retryMode) {
     const conv = (await ctx.runQuery(deps.api.conversations.getById, {
       conversationId: args.conversationId!,
-    })) as { contactId: Id<"contacts"> } | null;
+    })) as { contactId: Id<'contacts'> } | null;
     if (!conv) return;
     conversationId = args.conversationId!;
     contactId = conv.contactId;
     isNewConversation = false;
     isReactivatedConversation = false;
   } else {
-    contactId = await ctx.runMutation(
-      deps.internal.ycloud.getOrCreateContact,
-      { phone: args.phone, name: args.name },
-    );
+    contactId = await ctx.runMutation(deps.internal.ycloud.getOrCreateContact, {
+      phone: args.phone,
+      name: args.name,
+    });
     const created = await ctx.runMutation(
       deps.internal.ycloud.getOrCreateConversation,
-      { contactId, channel: deps.channel ?? "whatsapp" },
+      { contactId, channel: deps.channel ?? 'whatsapp' },
     );
     conversationId = created.conversationId;
     isNewConversation = Boolean(created.isNew);
@@ -927,22 +946,25 @@ export async function processInboundMessageV2(
   }
 
   let finalContent = args.text;
-  if (!retryMode && args.type === "audio" && args.mediaUrl) {
+  if (!retryMode && args.type === 'audio' && args.mediaUrl) {
     try {
-      const transcript = await deps.transcribeAudio(args.mediaUrl, "FincasYa, fincas, reservas, Colombia");
+      const transcript = await deps.transcribeAudio(
+        args.mediaUrl,
+        'FincasYa, fincas, reservas, Colombia',
+      );
       finalContent = `[Voz] ${transcript}`;
     } catch {
-      finalContent = "[Audio] (no se pudo transcribir)";
+      finalContent = '[Audio] (no se pudo transcribir)';
     }
   }
 
   const now = Date.now();
-  const replyToWamid = String(args.replyToWamid ?? "").trim();
+  const replyToWamid = String(args.replyToWamid ?? '').trim();
   const inboundWamid = inboundWamidEarly;
   const userMsgMetadata: Record<string, string> = {};
   if (replyToWamid) userMsgMetadata.replyToWamid = replyToWamid;
 
-  let insertedMsgId: Id<"messages">;
+  let insertedMsgId: Id<'messages'>;
 
   // Se usa para evitar duplicar avisos "fuera de horario" cuando ya
   // enviamos el mensaje temporal configurado por admin en el arranque.
@@ -950,22 +972,22 @@ export async function processInboundMessageV2(
   let temporalMessageWasSentForConversation = false;
   if (retryMode && args.existingMessageId) {
     insertedMsgId = args.existingMessageId;
-    finalContent = String(args.text ?? "").trim();
-    if (!finalContent && args.type === "audio" && args.mediaUrl) {
+    finalContent = String(args.text ?? '').trim();
+    if (!finalContent && args.type === 'audio' && args.mediaUrl) {
       try {
         const transcript = await deps.transcribeAudio(
           args.mediaUrl,
-          "FincasYa, fincas, reservas, Colombia",
+          'FincasYa, fincas, reservas, Colombia',
         );
         finalContent = `[Voz] ${transcript}`;
       } catch {
-        finalContent = "[Audio] (no se pudo transcribir)";
+        finalContent = '[Audio] (no se pudo transcribir)';
       }
     }
   } else if (inboundWamid.length > 6) {
     const existing = (await ctx.runQuery(deps.internal.messages.getByWamid, {
       wamid: inboundWamid,
-    })) as { _id: Id<"messages">; conversationId: Id<"conversations"> } | null;
+    })) as { _id: Id<'messages'>; conversationId: Id<'conversations'> } | null;
     if (existing && existing.conversationId === conversationId) {
       insertedMsgId = existing._id;
     } else {
@@ -1004,11 +1026,16 @@ export async function processInboundMessageV2(
     await new Promise((r) => setTimeout(r, INBOUND_DEBOUNCE_MS));
   }
 
-  let conv = await ctx.runQuery(deps.api.conversations.getById, { conversationId });
-  const latestMsg = (await ctx.runQuery(deps.api.messages.getLatestUserMessage, {
+  let conv = await ctx.runQuery(deps.api.conversations.getById, {
     conversationId,
-    scanLimit: 50,
-  })) as { _id: Id<"messages">; content?: string } | null;
+  });
+  const latestMsg = (await ctx.runQuery(
+    deps.api.messages.getLatestUserMessage,
+    {
+      conversationId,
+      scanLimit: 50,
+    },
+  )) as { _id: Id<'messages'>; content?: string } | null;
 
   if (!retryMode) {
     if (!conv || (conv.lastMessageAt ?? 0) > now) return;
@@ -1022,29 +1049,30 @@ export async function processInboundMessageV2(
   // `ai` primero, etiquetas como `cliente-grosero` dejarían de escalar.
   const convTags = Array.isArray(conv?.tags) ? conv.tags : [];
   const HARD_ESCALATE_TAGS = [
-    "cliente-grosero",
-    "propietario",
-    "reserva-activa",
+    'cliente-grosero',
+    'propietario',
+    'reserva-activa',
   ];
   const hardEscalateTag = HARD_ESCALATE_TAGS.find((t) => convTags.includes(t));
   // Si el asesor dejó el chat en modo bot, las etiquetas son informativas: no
   // forzar humano hasta que cambien el toggle manualmente.
-  if (hardEscalateTag && conv && conv.status !== "ai") {
+  if (hardEscalateTag && conv && conv.status !== 'ai') {
     const t0 = Date.now();
-    const priority = hardEscalateTag === "cliente-grosero" ? "urgent" : "medium";
+    const priority =
+      hardEscalateTag === 'cliente-grosero' ? 'urgent' : 'medium';
     await ctx.runMutation(deps.internal.conversations.escalate, {
       conversationId,
-      operationalState: "requires_advisor" as const,
-      priority: priority as "urgent" | "medium",
+      operationalState: 'requires_advisor' as const,
+      priority: priority as 'urgent' | 'medium',
       assignedUserId:
         process.env.CHATBOT_AUTO_ASSIGN_ADVISOR_ID?.trim() || undefined,
     });
     const handoffMsg =
-      hardEscalateTag === "cliente-grosero"
-        ? "Te conecto con un asesor para atenderte personalmente. Un agente te escribe en breve 🤝"
-        : hardEscalateTag === "propietario"
-          ? "¡Hola! 👋 Te conecto con el equipo administrativo para atenderte — un asesor te escribe en breve 🤝"
-          : "¡Hola! 👋 Veo que ya tienes una reserva con nosotros. Te conecto con un asesor para atenderte con prioridad 🤝";
+      hardEscalateTag === 'cliente-grosero'
+        ? 'Te conecto con un asesor para atenderte personalmente. Te escribirá en breve 🤝'
+        : hardEscalateTag === 'propietario'
+          ? '¡Hola! 👋 Te conecto con el equipo administrativo para atenderte — un asesor te escribe en breve 🤝'
+          : '¡Hola! 👋 Veo que ya tienes una reserva con nosotros. Te conecto con un asesor para atenderte con prioridad 🤝';
     await ctx.runMutation(deps.internal.messages.insertAssistantMessage, {
       conversationId,
       content: handoffMsg,
@@ -1055,8 +1083,8 @@ export async function processInboundMessageV2(
       content: `🏷️ Conversación etiquetada como "${hardEscalateTag}" — handoff automático al equipo correspondiente. La IA quedó en pausa.`,
       createdAt: t0 + 5,
       metadata: {
-        kind: "inbox_escalation_alert",
-        escalationReason: `tag_${hardEscalateTag.replace(/-/g, "_")}`,
+        kind: 'inbox_escalation_alert',
+        escalationReason: `tag_${hardEscalateTag.replace(/-/g, '_')}`,
       },
     });
     await deliverText({
@@ -1067,99 +1095,53 @@ export async function processInboundMessageV2(
     await ctx.runMutation(deps.internal.conversations.updateLastMessageAt, {
       conversationId,
     });
-    if (priority === "urgent") {
+    if (priority === 'urgent') {
       await fireUrgentWebhookIfConfigured({
-        alertReason: `tag_${hardEscalateTag.replace(/-/g, "_")}`,
+        alertReason: `tag_${hardEscalateTag.replace(/-/g, '_')}`,
         conversationId: String(conversationId),
         contactPhone: args.phone,
         contactName: args.name,
-        lastMessage: String(latestMsg.content ?? "").slice(0, 500),
+        lastMessage: String(latestMsg.content ?? '').slice(0, 500),
         team:
-          hardEscalateTag === "cliente-grosero"
-            ? "atencion-cliente"
-            : "operaciones",
+          hardEscalateTag === 'cliente-grosero'
+            ? 'atencion-cliente'
+            : 'operaciones',
       });
     }
     return;
   }
 
-  // ─── CONTINUIDAD DE ASESOR (antes de promover human→ai) ───────────────
-  // Si hay asesor asignado o actividad humana en las últimas 48 h, el bot NO
-  // retoma la conversación. Se envía un acuse idempotente al cliente y alerta
-  // blanda en inbox para que el asesor continúe.
-  const ADVISOR_ACTIVITY_WINDOW_MS = 48 * 60 * 60 * 1000;
-  const needsAdvisorContinuity =
-    conv &&
-    conv.status === "human" &&
-    (conv.assignedUserId ||
-      (await ctx.runQuery(deps.internal.messages.hasRecentHumanAdvisorMessages, {
-        conversationId,
-        sinceMs: Date.now() - ADVISOR_ACTIVITY_WINDOW_MS,
-      })));
-  if (needsAdvisorContinuity) {
-    const shouldNotifyClient = (await ctx.runMutation(
+  // Conversación en modo humano: el asesor atiende. Sin bot ni mensajes automáticos al cliente.
+  if (conv && conv.status === 'human') {
+    const shouldPingInbox = (await ctx.runMutation(
       deps.internal.botSessions.markAlertFired,
       {
         conversationId,
         phone: args.phone,
-        alertReason: "advisor_continuity_notice",
+        alertReason: 'human_mode_client_message',
       },
     )) as boolean;
-    if (shouldNotifyClient) {
-      const continuityMsg = isWithinBusinessHours(Date.now())
-        ? ADVISOR_CONTINUITY_WITHIN_HOURS
-        : ADVISOR_CONTINUITY_AFTER_HOURS;
-      const t0 = Date.now();
-      await ctx.runMutation(deps.internal.messages.insertAssistantMessage, {
+    if (shouldPingInbox && !conv.attended) {
+      await ctx.runMutation(deps.internal.conversations.flagPriorityAlert, {
         conversationId,
-        content: continuityMsg,
-        createdAt: t0,
-      });
-      await deliverText({
-        to: args.phone,
-        text: continuityMsg,
-        wamid: args.wamid,
+        alertReason: 'human_mode_inbox',
+        priority: 'medium' as const,
+        inboxMessage: `👤 Cliente escribió (modo humano). Mensaje: "${String(latestMsg?.content ?? '').slice(0, 200)}"`,
       });
     }
-    await ctx.runMutation(deps.internal.conversations.flagPriorityAlert, {
-      conversationId,
-      alertReason: "advisor_continuity_inbox",
-      priority: "medium" as const,
-      tag: "continuidad-asesor",
-      inboxMessage: `👤 Cliente escribió con asesor activo o asignado (últimas 48 h). El bot no retomó — continúa el seguimiento humano. Mensaje: "${String(latestMsg?.content ?? "").slice(0, 200)}"`,
-    });
     await ctx.runMutation(deps.internal.conversations.updateLastMessageAt, {
       conversationId,
     });
     return;
   }
 
-  // Nuevo comportamiento WhatsApp:
-  // cuando el bot está activo NO reactivamos todas las conversaciones en masa;
-  // una conversación `human` pasa a `ai` solo cuando entra un mensaje nuevo del
-  // cliente y el canal WhatsApp tiene IA activa. Las asignadas a un asesor se
-  // quedan en humano (misma regla que al reactivar en masa el canal web).
-  if (
-    !retryMode &&
-    conv &&
-    conv.channel === "whatsapp" &&
-    conv.status === "human" &&
-    !conv.assignedUserId
-  ) {
-    const whatsappAiEnabled = (await ctx.runQuery(
-      deps.internal.platformSettings.isChannelAiEnabledInternal,
-      { channel: "whatsapp" },
-    )) as boolean;
-    if (whatsappAiEnabled) {
-      resumingFromHuman = true;
-      await ctx.runMutation(deps.internal.conversations.setToAi, {
-        conversationId,
-      });
-      conv = await ctx.runQuery(deps.api.conversations.getById, { conversationId });
-    }
-  }
+  if (!conv || conv.status !== 'ai') return;
 
-  if (!conv || conv.status !== "ai") return;
+  const channelAiEnabled = (await ctx.runQuery(
+    deps.internal.platformSettings.isChannelAiEnabledInternal,
+    { channel: conv.channel ?? 'whatsapp' },
+  )) as boolean;
+  if (!retryMode && !channelAiEnabled) return;
 
   if (!retryMode && !resumingFromHuman) {
     const manualResume = (await ctx.runMutation(
@@ -1211,7 +1193,7 @@ export async function processInboundMessageV2(
         process.env.CHATBOT_AUTO_ASSIGN_ADVISOR_ID?.trim() || undefined,
     });
     const handoffMsg =
-      "¡Hola! 👋 Veo que ya tienes una reserva con nosotros. Te conecto con un asesor para atenderte con prioridad — un agente te escribe en breve 🤝✨";
+      '¡Hola! 👋 Veo que ya tienes una reserva con nosotros. Te conecto con un asesor para atenderte con prioridad — te escribirá en breve 🤝✨';
     await ctx.runMutation(deps.internal.messages.insertAssistantMessage, {
       conversationId,
       content: handoffMsg,
@@ -1227,8 +1209,8 @@ export async function processInboundMessageV2(
       content: `🏡 Cliente con reserva vigente o por venir: ${refLabel} · ${fmtDate(activeBooking.fechaEntrada)} → ${fmtDate(activeBooking.fechaSalida)} · ${activeBooking.status}. Escalación automática para atención operativa. La IA quedó en pausa.`,
       createdAt: t0 + 5,
       metadata: {
-        kind: "inbox_escalation_alert",
-        escalationReason: "client_has_active_booking",
+        kind: 'inbox_escalation_alert',
+        escalationReason: 'client_has_active_booking',
         bookingId: activeBooking._id,
         bookingStatus: activeBooking.status,
       },
@@ -1242,12 +1224,12 @@ export async function processInboundMessageV2(
       conversationId,
     });
     await fireUrgentWebhookIfConfigured({
-      alertReason: "client_has_active_booking",
+      alertReason: 'client_has_active_booking',
       conversationId: String(conversationId),
       contactPhone: args.phone,
       contactName: args.name,
-      lastMessage: String(latestMsg.content ?? "").slice(0, 500),
-      team: "operaciones",
+      lastMessage: String(latestMsg.content ?? '').slice(0, 500),
+      team: 'operaciones',
       extra: {
         bookingId: activeBooking._id,
         bookingStatus: activeBooking.status,
@@ -1259,10 +1241,10 @@ export async function processInboundMessageV2(
 
   const tagFlags = {
     isVip:
-      convTags.includes("cliente-importante") ||
-      convTags.includes("cliente-especial"),
-    isDifficult: convTags.includes("cliente-complicado"),
-    isReturning: convTags.includes("cliente-recurrente"),
+      convTags.includes('cliente-importante') ||
+      convTags.includes('cliente-especial'),
+    isDifficult: convTags.includes('cliente-complicado'),
+    isReturning: convTags.includes('cliente-recurrente'),
   };
 
   const recentForBurst = (await ctx.runQuery(deps.api.messages.listRecent, {
@@ -1270,12 +1252,12 @@ export async function processInboundMessageV2(
     limit: 30,
   })) as Array<{ sender?: string; content?: string }>;
   const burstText = mergeTrailingUserBurst(recentForBurst);
-  const textForTurn = burstText || String(finalContent ?? "").trim();
+  const textForTurn = burstText || String(finalContent ?? '').trim();
 
-  const lowerText = String(textForTurn ?? "")
+  const lowerText = String(textForTurn ?? '')
     .toLowerCase()
-    .normalize("NFD")
-    .replace(/\p{M}/gu, "");
+    .normalize('NFD')
+    .replace(/\p{M}/gu, '');
 
   // ═══════════════════════════════════════════════════════════════════════
   // CLASIFICADOR MULTIFUNCIONAL — el WhatsApp NO es solo comercial. Antes de
@@ -1304,13 +1286,13 @@ export async function processInboundMessageV2(
     const t0 = Date.now();
     await ctx.runMutation(deps.internal.conversations.escalate, {
       conversationId,
-      operationalState: "requires_advisor" as const,
-      priority: "urgent" as const,
+      operationalState: 'requires_advisor' as const,
+      priority: 'urgent' as const,
       assignedUserId:
         process.env.CHATBOT_AUTO_ASSIGN_ADVISOR_ID?.trim() || undefined,
     });
     const handoffMsg =
-      "Recibí tu mensaje y ya alertamos a nuestro equipo de operaciones para atenderte de inmediato 🚨\n\nSi es una emergencia *médica o de seguridad*, por favor llama también al *123* (línea única nacional). Un asesor te contacta por aquí en minutos.";
+      'Recibí tu mensaje y ya alertamos a nuestro equipo de operaciones para atenderte de inmediato 🚨\n\nSi es una emergencia *médica o de seguridad*, por favor llama también al *123* (línea única nacional). Un asesor te contacta por aquí en minutos.';
     await ctx.runMutation(deps.internal.messages.insertAssistantMessage, {
       conversationId,
       content: handoffMsg,
@@ -1319,16 +1301,16 @@ export async function processInboundMessageV2(
     await ctx.runMutation(deps.internal.messages.insertSystemMessage, {
       conversationId,
       content:
-        "🚨🚨🚨 EMERGENCIA detectada en el mensaje del cliente. PRIORIDAD CRÍTICA — contactar de inmediato. La IA quedó en pausa.",
+        '🚨🚨🚨 EMERGENCIA detectada en el mensaje del cliente. PRIORIDAD CRÍTICA — contactar de inmediato. La IA quedó en pausa.',
       createdAt: t0 + 5,
       metadata: {
-        kind: "inbox_escalation_alert",
-        escalationReason: "emergency",
+        kind: 'inbox_escalation_alert',
+        escalationReason: 'emergency',
       },
     });
     await ctx.runMutation(deps.internal.conversations.addConversationTag, {
       conversationId,
-      tag: "emergencia",
+      tag: 'emergencia',
     });
     await deliverText({
       to: args.phone,
@@ -1339,12 +1321,12 @@ export async function processInboundMessageV2(
       conversationId,
     });
     await fireUrgentWebhookIfConfigured({
-      alertReason: "emergency",
+      alertReason: 'emergency',
       conversationId: String(conversationId),
       contactPhone: args.phone,
       contactName: args.name,
       lastMessage: textForTurn.slice(0, 500),
-      team: "operaciones",
+      team: 'operaciones',
     });
     return;
   }
@@ -1371,20 +1353,20 @@ export async function processInboundMessageV2(
     WHATSAPP_TEMPORAL_START_MESSAGE_ENABLED &&
     !retryMode &&
     (isNewConversation || isReactivatedConversation) &&
-    (deps.channel ?? "whatsapp") === "whatsapp"
+    (deps.channel ?? 'whatsapp') === 'whatsapp'
   ) {
-    const temporalCfg = await ctx.runQuery(
+    const temporalCfg = (await ctx.runQuery(
       deps.api.whatsappTemporalMessage.getActive,
       {},
-    ) as null | { active?: boolean; content?: string };
-    const content = String(temporalCfg?.content ?? "").trim();
+    )) as null | { active?: boolean; content?: string };
+    const content = String(temporalCfg?.content ?? '').trim();
     if (temporalCfg?.active === true && content.length > 0) {
       const alreadySent = (await ctx.runMutation(
         deps.internal.botSessions.markAlertFired,
         {
           conversationId,
           phone: args.phone,
-          alertReason: "whatsapp_temporal_message_start_sent",
+          alertReason: 'whatsapp_temporal_message_start_sent',
         },
       )) as boolean;
       if (alreadySent) {
@@ -1393,7 +1375,7 @@ export async function processInboundMessageV2(
           to: args.phone,
           text: content,
           wamid: args.wamid,
-          metadata: { source: "whatsapp_temporal_message_start" },
+          metadata: { source: 'whatsapp_temporal_message_start' },
         });
         temporalMessageStartSent = true;
       }
@@ -1402,18 +1384,18 @@ export async function processInboundMessageV2(
 
   if (
     WHATSAPP_DATA_CONSENT_ENABLED &&
-    (deps.channel ?? "whatsapp") === "whatsapp"
+    (deps.channel ?? 'whatsapp') === 'whatsapp'
   ) {
     const consent = (await ctx.runQuery(deps.internal.contacts.getDataConsent, {
       contactId,
     })) as null | {
-      status: "granted" | "denied" | null;
+      status: 'granted' | 'denied' | null;
       requestedAt: number | null;
       respondedAt: number | null;
       name: string;
     };
 
-    if (consent && consent.status !== "granted") {
+    if (consent && consent.status !== 'granted') {
       // `lowerText` ya viene normalizado (sin acentos, minúsculas) del burst.
       // El "no" se evalúa primero porque "no autorizo" contiene "autorizo".
       const saysDeny =
@@ -1429,24 +1411,24 @@ export async function processInboundMessageV2(
       if (saysGrant) {
         await ctx.runMutation(deps.internal.contacts.setDataConsent, {
           contactId,
-          status: "granted",
+          status: 'granted',
         });
         await ctx.runMutation(deps.internal.messages.insertSystemMessage, {
           conversationId,
           content:
-            "✅ El cliente AUTORIZÓ el tratamiento de datos (Ley 1581) por WhatsApp.",
+            '✅ El cliente AUTORIZÓ el tratamiento de datos (Ley 1581) por WhatsApp.',
           createdAt: Date.now(),
-          metadata: { kind: "data_consent", consentStatus: "granted" },
+          metadata: { kind: 'data_consent', consentStatus: 'granted' },
         });
         // FALL THROUGH: el resto de `processInboundMessageV2` corre normal y
         // `runBotTurn` envía la bienvenida o atiende la intención previa.
       } else if (saysDeny) {
         await ctx.runMutation(deps.internal.contacts.setDataConsent, {
           contactId,
-          status: "denied",
+          status: 'denied',
         });
         const denyMsg =
-          "Entiendo 🙏 Sin tu autorización para el tratamiento de datos personales no podemos continuar con la búsqueda ni ofrecerte atención personalizada. Si cambias de opinión, escríbenos cuando quieras y con gusto te ayudamos 💚";
+          'Entiendo 🙏 Sin tu autorización para el tratamiento de datos personales no podemos continuar con la búsqueda ni ofrecerte atención personalizada. Si cambias de opinión, escríbenos cuando quieras y con gusto te ayudamos 💚';
         await ctx.runMutation(deps.internal.messages.insertAssistantMessage, {
           conversationId,
           content: denyMsg,
@@ -1455,9 +1437,9 @@ export async function processInboundMessageV2(
         await ctx.runMutation(deps.internal.messages.insertSystemMessage, {
           conversationId,
           content:
-            "🚫 El cliente NO autorizó el tratamiento de datos. El bot quedó en pausa para este contacto.",
+            '🚫 El cliente NO autorizó el tratamiento de datos. El bot quedó en pausa para este contacto.',
           createdAt: Date.now() + 5,
-          metadata: { kind: "data_consent", consentStatus: "denied" },
+          metadata: { kind: 'data_consent', consentStatus: 'denied' },
         });
         await deliverText({ to: args.phone, text: denyMsg, wamid: args.wamid });
         await ctx.runMutation(deps.internal.conversations.updateLastMessageAt, {
@@ -1479,7 +1461,7 @@ export async function processInboundMessageV2(
           // 2) la solicitud de tratamiento de datos, en el mismo turno.
           if (isFirstRequest) {
             const welcomeMsg =
-              "¡Hola! 👋 Bienvenido(a) a *FincasYa* 🌿 Te ayudamos a encontrar la finca ideal para tus vacaciones, descanso o eventos especiales. 🏡✨";
+              '¡Hola! 👋 Bienvenido(a) a *FincasYa* 🌿 Te ayudamos a encontrar la finca ideal para tus vacaciones, descanso o eventos especiales. 🏡✨';
             await ctx.runMutation(
               deps.internal.messages.insertAssistantMessage,
               { conversationId, content: welcomeMsg, createdAt: Date.now() },
@@ -1490,21 +1472,21 @@ export async function processInboundMessageV2(
               wamid: args.wamid,
             });
           }
-          const def = getTemplateDef("data_consent");
+          const def = getTemplateDef('data_consent');
           if (def) {
             const firstName =
-              (consent.name || args.name || "").trim().split(/\s+/)[0] || "";
+              (consent.name || args.name || '').trim().split(/\s+/)[0] || '';
             const bodyParams = buildBodyParams(def, { nombre: firstName });
             let templateWamid: string | undefined;
             try {
               const sent = (await ctx.runAction(
                 deps.internal.ycloud.sendWhatsAppTemplate,
-                { to: args.phone, templateKey: "data_consent", bodyParams },
+                { to: args.phone, templateKey: 'data_consent', bodyParams },
               )) as { wamid?: string; status?: string };
               templateWamid = sent?.wamid;
             } catch (err) {
               console.error(
-                "inbound: error enviando plantilla de consentimiento:",
+                'inbound: error enviando plantilla de consentimiento:',
                 err,
               );
             }
@@ -1512,23 +1494,26 @@ export async function processInboundMessageV2(
               deps.internal.contacts.markDataConsentRequested,
               { contactId },
             );
-            await ctx.runMutation(deps.internal.messages.insertAssistantMessage, {
-              conversationId,
-              content: renderTemplateBody(def, bodyParams),
-              createdAt: Date.now(),
-              wamid:
-                templateWamid && templateWamid.length > 6
-                  ? templateWamid
-                  : undefined,
-              metadata: {
-                source: "data_consent_template",
-                templateName: def.name,
-                templateFooter: def.footer ?? undefined,
-                templateButtons: (
-                  def.buttons ?? (def.button ? [def.button] : [])
-                ).map((b) => ({ type: b.type, text: b.text })),
+            await ctx.runMutation(
+              deps.internal.messages.insertAssistantMessage,
+              {
+                conversationId,
+                content: renderTemplateBody(def, bodyParams),
+                createdAt: Date.now(),
+                wamid:
+                  templateWamid && templateWamid.length > 6
+                    ? templateWamid
+                    : undefined,
+                metadata: {
+                  source: 'data_consent_template',
+                  templateName: def.name,
+                  templateFooter: def.footer ?? undefined,
+                  templateButtons: (
+                    def.buttons ?? (def.button ? [def.button] : [])
+                  ).map((b) => ({ type: b.type, text: b.text })),
+                },
               },
-            });
+            );
             await ctx.runMutation(
               deps.internal.conversations.updateLastMessageAt,
               { conversationId },
@@ -1552,13 +1537,13 @@ export async function processInboundMessageV2(
     const t0 = Date.now();
     await ctx.runMutation(deps.internal.conversations.escalate, {
       conversationId,
-      operationalState: "requires_advisor" as const,
-      priority: "medium" as const,
+      operationalState: 'requires_advisor' as const,
+      priority: 'medium' as const,
       assignedUserId:
         process.env.CHATBOT_AUTO_ASSIGN_ADVISOR_ID?.trim() || undefined,
     });
     const handoffMsg =
-      "¡Hola! 👋 Veo que escribes como propietario. Te conecto con el equipo administrativo para atenderte directamente — un asesor te escribe en breve 🤝";
+      '¡Hola! 👋 Veo que escribes como propietario. Te conecto con el equipo administrativo para atenderte directamente — un asesor te escribe en breve 🤝';
     await ctx.runMutation(deps.internal.messages.insertAssistantMessage, {
       conversationId,
       content: handoffMsg,
@@ -1567,16 +1552,16 @@ export async function processInboundMessageV2(
     await ctx.runMutation(deps.internal.messages.insertSystemMessage, {
       conversationId,
       content:
-        "🏠 PROPIETARIO detectado por autodeclaración. Enrutar al equipo administrativo. La IA quedó en pausa.",
+        '🏠 PROPIETARIO detectado por autodeclaración. Enrutar al equipo administrativo. La IA quedó en pausa.',
       createdAt: t0 + 5,
       metadata: {
-        kind: "inbox_escalation_alert",
-        escalationReason: "owner_inquiry",
+        kind: 'inbox_escalation_alert',
+        escalationReason: 'owner_inquiry',
       },
     });
     await ctx.runMutation(deps.internal.conversations.addConversationTag, {
       conversationId,
-      tag: "propietario",
+      tag: 'propietario',
     });
     await deliverText({
       to: args.phone,
@@ -1615,9 +1600,7 @@ export async function processInboundMessageV2(
       selectedPropertyName?: string;
     };
     const hasMeaningfulContext =
-      !!e.selectedPropertyName ||
-      (!!e.checkIn && !!e.checkOut) ||
-      !!e.location;
+      !!e.selectedPropertyName || (!!e.checkIn && !!e.checkOut) || !!e.location;
     if (hasMeaningfulContext) {
       const ctxBits: string[] = [];
       if (e.selectedPropertyName)
@@ -1630,16 +1613,16 @@ export async function processInboundMessageV2(
       // sepa si fue de "ayer" o "hace 2 meses". Ventana global ya está
       // acotada a 90 días por `findRecentCommercialByPhone`.
       const prevDate = new Date(previousSession.updatedAt);
-      const dd = String(prevDate.getDate()).padStart(2, "0");
-      const mm = String(prevDate.getMonth() + 1).padStart(2, "0");
+      const dd = String(prevDate.getDate()).padStart(2, '0');
+      const mm = String(prevDate.getMonth() + 1).padStart(2, '0');
       const yyyy = prevDate.getFullYear();
       const dateLabel = `${dd}/${mm}/${yyyy}`;
       await ctx.runMutation(deps.internal.conversations.flagPriorityAlert, {
         conversationId,
-        alertReason: "returning_close",
-        priority: "medium" as const,
-        tag: "cliente-recurrente",
-        inboxMessage: `↩️ Cliente RECURRENTE — sesión previa del ${dateLabel} (fase: ${previousSession.phase}). Contexto guardado: ${ctxBits.join(" · ")}. Considera retomar desde ahí en lugar de empezar de cero.`,
+        alertReason: 'returning_close',
+        priority: 'medium' as const,
+        tag: 'cliente-recurrente',
+        inboxMessage: `↩️ Cliente RECURRENTE — sesión previa del ${dateLabel} (fase: ${previousSession.phase}). Contexto guardado: ${ctxBits.join(' · ')}. Considera retomar desde ahí en lugar de empezar de cero.`,
       });
     }
   }
@@ -1654,19 +1637,19 @@ export async function processInboundMessageV2(
   if (isClosingIntent) {
     await ctx.runMutation(deps.internal.conversations.flagPriorityAlert, {
       conversationId,
-      alertReason: "closing_intent",
-      priority: "urgent" as const,
-      tag: "intencion-cierre",
-      operationalState: "ready_to_book" as const,
+      alertReason: 'closing_intent',
+      priority: 'urgent' as const,
+      tag: 'intencion-cierre',
+      operationalState: 'ready_to_book' as const,
       inboxMessage: `💰 INTENCIÓN DE CIERRE detectada — el cliente expresó intención clara de reservar/pagar. Prioridad alta para cerrar la venta sin fricciones. Frase detonante: "${textForTurn.slice(0, 200)}"`,
     });
     await fireUrgentWebhookIfConfigured({
-      alertReason: "closing_intent",
+      alertReason: 'closing_intent',
       conversationId: String(conversationId),
       contactPhone: args.phone,
       contactName: args.name,
       lastMessage: textForTurn.slice(0, 500),
-      team: "ventas",
+      team: 'ventas',
     });
   }
 
@@ -1700,11 +1683,12 @@ export async function processInboundMessageV2(
     const t0 = Date.now();
     await ctx.runMutation(deps.internal.conversations.escalate, {
       conversationId,
-      assignedUserId: process.env.CHATBOT_AUTO_ASSIGN_ADVISOR_ID?.trim() || undefined,
+      assignedUserId:
+        process.env.CHATBOT_AUTO_ASSIGN_ADVISOR_ID?.trim() || undefined,
     });
     const handoffMsg = looksLikeComplaint
-      ? "Lamento la situación 🙏 Te conecto con un asesor para gestionar tu solicitud. Un agente te escribirá en breve 🤝"
-      : "Perfecto, te comunico con un asesor. Un agente te escribirá en breve ✨";
+      ? 'Lamento la situación 🙏 Te conecto con un asesor para gestionar tu solicitud. Te escribirá en breve 🤝'
+      : 'Perfecto, te comunico con un asesor. Te escribirá en breve ✨';
     await ctx.runMutation(deps.internal.messages.insertAssistantMessage, {
       conversationId,
       content: handoffMsg,
@@ -1712,52 +1696,67 @@ export async function processInboundMessageV2(
     });
     await ctx.runMutation(deps.internal.messages.insertSystemMessage, {
       conversationId,
-      content:
-        looksLikeComplaint
-          ? "🚨 El cliente pidió atención humana (posible PQRS o tema operativo). Revisar y contactar. La IA quedó en pausa."
-          : "📣 El cliente pidió hablar con un asesor. Revisar conversación y contactar. La IA quedó en pausa.",
+      content: looksLikeComplaint
+        ? '🚨 El cliente pidió atención humana (posible PQRS o tema operativo). Revisar y contactar. La IA quedó en pausa.'
+        : '📣 El cliente pidió hablar con un asesor. Revisar conversación y contactar. La IA quedó en pausa.',
       createdAt: t0 + 5,
       metadata: {
-        kind: "inbox_escalation_alert",
-        escalationReason: looksLikeComplaint ? "client_complaint" : "client_requested",
+        kind: 'inbox_escalation_alert',
+        escalationReason: looksLikeComplaint
+          ? 'client_complaint'
+          : 'client_requested',
       },
     });
-    await deliverText( {
+    await deliverText({
       to: args.phone,
       text: handoffMsg,
       wamid: args.wamid,
     });
-    await ctx.runMutation(deps.internal.conversations.updateLastMessageAt, { conversationId });
+    await ctx.runMutation(deps.internal.conversations.updateLastMessageAt, {
+      conversationId,
+    });
     await fireUrgentWebhookIfConfigured({
-      alertReason: looksLikeComplaint ? "client_complaint" : "client_requested",
+      alertReason: looksLikeComplaint ? 'client_complaint' : 'client_requested',
       conversationId: String(conversationId),
       contactPhone: args.phone,
       contactName: args.name,
       lastMessage: textForTurn.slice(0, 500),
-      team: looksLikeComplaint ? "atencion-cliente" : "ventas",
+      team: looksLikeComplaint ? 'atencion-cliente' : 'ventas',
     });
     return;
   }
 
-  const session = await ctx.runQuery(deps.internal.botSessions.getByConversation, { conversationId });
-  let currentPhase = session?.phase ?? "welcome";
+  const session = await ctx.runQuery(
+    deps.internal.botSessions.getByConversation,
+    { conversationId },
+  );
+  let currentPhase = session?.phase ?? 'welcome';
   const currentSamePhaseTurnCount = session?.samePhaseTurnCount ?? 0;
   const currentPhaseEnteredAt = session?.phaseEnteredAt ?? Date.now();
   let currentEntities = session?.entities ?? {};
 
   // Persistimos el hecho de haber enviado el mensaje temporal en `botSessions`
   // para poder reutilizarlo cuando el bot llegue al final del flujo.
-  temporalMessageWasSentForConversation = Array.isArray((session as any)?.firedAlerts)
-    ? (session as any).firedAlerts.includes("whatsapp_temporal_message_start_sent")
+  temporalMessageWasSentForConversation = Array.isArray(
+    (session as any)?.firedAlerts,
+  )
+    ? (session as any).firedAlerts.includes(
+        'whatsapp_temporal_message_start_sent',
+      )
+    : false;
+  const advisorContinuityWasSentForConversation = Array.isArray(
+    (session as any)?.firedAlerts,
+  )
+    ? (session as any).firedAlerts.includes('advisor_continuity_notice')
     : false;
 
   // Texto de TODOS los mensajes recientes del cliente (no solo el turno
   // actual). Se usa para detectar filtros de zona que el cliente dijo turnos
   // atrás (ej. "no llanos" al inicio, fechas/cupo en mensajes posteriores).
   const recentUserText = recentForBurst
-    .filter((m) => m.sender === "user")
-    .map((m) => String(m.content ?? ""))
-    .join("\n");
+    .filter((m) => m.sender === 'user')
+    .map((m) => String(m.content ?? ''))
+    .join('\n');
 
   // Si el cliente SOLO excluyó una zona ("que no sean los llanos") y aún no
   // hay un municipio concreto, eso significa "no tengo preferencia puntual,
@@ -1767,10 +1766,10 @@ export async function processInboundMessageV2(
   // exclusión de zona aplicada. (Backup determinístico — el extractor LLM
   // también lo marca, pero esto garantiza el comportamiento.)
   if (
-    !String(currentEntities.location ?? "").trim() &&
+    !String(currentEntities.location ?? '').trim() &&
     detectExcludedZoneKeywords(recentUserText).length > 0
   ) {
-    currentEntities = { ...currentEntities, location: "RECOMENDADAS" };
+    currentEntities = { ...currentEntities, location: 'RECOMENDADAS' };
   }
 
   // ── PASADÍA (plan de día, sin hospedaje) — flujo de 2 turnos ─────────────
@@ -1788,9 +1787,9 @@ export async function processInboundMessageV2(
   //
   // Solo dispara en fases tempranas (welcome / collecting / catalog_sent).
   const pasadiaPhaseOk =
-    currentPhase === "welcome" ||
-    currentPhase === "collecting" ||
-    currentPhase === "catalog_sent";
+    currentPhase === 'welcome' ||
+    currentPhase === 'collecting' ||
+    currentPhase === 'catalog_sent';
   const isPasadiaFollowUp =
     pasadiaPhaseOk && lastAssistantMsgIsPasadiaOffer(recentForBurst);
   const isPasadiaTrigger =
@@ -1800,26 +1799,26 @@ export async function processInboundMessageV2(
     // TURNO 1 — explicar condiciones + preguntar. SIN catálogo, SIN escalar.
     const tPas = Date.now();
     const pasadiaMsg = [
-      "¡Hola! ☀️ Qué buena idea planear un día de descanso.",
-      "",
-      "Te cuento que nuestros *pasadías* funcionan bajo estas condiciones:",
-      "",
-      "• 📍 *Ubicación:* disponible *únicamente en Villavicencio*.",
-      "• 📅 *Días:* entre semana, de martes a jueves.",
-      "• ⏰ *Horario:* de 9:00 a.m. a 5:00 p.m.",
-      "",
-      "El *valor* del pasadía lo confirma directamente un asesor.",
-      "",
-      "¿Quieres que te conecte con un asesor para coordinar tu *pasadía en Villavicencio*? 🤝",
-      "",
-      "O si prefieres, te ayudo a *reservar una finca para hospedaje* (con noche) en la fecha y el lugar que quieras 🏡",
-    ].join("\n");
+      '¡Hola! ☀️ Qué buena idea planear un día de descanso.',
+      '',
+      'Te cuento que nuestros *pasadías* funcionan bajo estas condiciones:',
+      '',
+      '• 📍 *Ubicación:* disponible *únicamente en Villavicencio*.',
+      '• 📅 *Días:* entre semana, de martes a jueves.',
+      '• ⏰ *Horario:* de 9:00 a.m. a 5:00 p.m.',
+      '',
+      'El *valor* del pasadía lo confirma directamente un asesor.',
+      '',
+      '¿Quieres que te conecte con un asesor para coordinar tu *pasadía en Villavicencio*? 🤝',
+      '',
+      'O si prefieres, te ayudo a *reservar una finca para hospedaje* (con noche) en la fecha y el lugar que quieras 🏡',
+    ].join('\n');
     await ctx.runMutation(deps.internal.messages.insertAssistantMessage, {
       conversationId,
       content: pasadiaMsg,
       createdAt: tPas,
     });
-    await deliverText( {
+    await deliverText({
       to: args.phone,
       text: pasadiaMsg,
       wamid: args.wamid,
@@ -1850,13 +1849,13 @@ export async function processInboundMessageV2(
       // El cliente no quiere nada más → cierre cordial breve, sin escalar.
       const tDecl = Date.now();
       const declMsg =
-        "Entiendo 🙏 El *pasadía* lo manejamos únicamente en Villavicencio. Si más adelante quieres reservar una finca para *hospedaje*, con gusto te ayudo 🏡✨";
+        'Entiendo 🙏 El *pasadía* lo manejamos únicamente en Villavicencio. Si más adelante quieres reservar una finca para *hospedaje*, con gusto te ayudo 🏡✨';
       await ctx.runMutation(deps.internal.messages.insertAssistantMessage, {
         conversationId,
         content: declMsg,
         createdAt: tDecl,
       });
-      await deliverText( {
+      await deliverText({
         to: args.phone,
         text: declMsg,
         wamid: args.wamid,
@@ -1870,10 +1869,10 @@ export async function processInboundMessageV2(
       // valor del pasadía es manual, no está en el flujo automatizado).
       const tEsc = Date.now();
       const escMsg = [
-        "¡Listo! ☀️ Te conecto con un asesor que coordina la *disponibilidad* y el *valor* de tu pasadía en Villavicencio.",
-        "",
-        "En breve te escribe para ayudarte 🤝 ✨",
-      ].join("\n");
+        '¡Listo! ☀️ Te conecto con un asesor que coordina la *disponibilidad* y el *valor* de tu pasadía en Villavicencio.',
+        '',
+        'En breve te escribe para ayudarte 🤝 ✨',
+      ].join('\n');
       await ctx.runMutation(deps.internal.conversations.escalate, {
         conversationId,
         assignedUserId:
@@ -1884,7 +1883,7 @@ export async function processInboundMessageV2(
         content: escMsg,
         createdAt: tEsc,
       });
-      await deliverText( {
+      await deliverText({
         to: args.phone,
         text: escMsg,
         wamid: args.wamid,
@@ -1892,11 +1891,11 @@ export async function processInboundMessageV2(
       await ctx.runMutation(deps.internal.messages.insertSystemMessage, {
         conversationId,
         content:
-          "☀️ El cliente confirmó interés en un PASADÍA (plan de día). Coordinar disponibilidad (solo Villavicencio, mar-jue, 9am-5pm) y el valor. La IA quedó en pausa.",
+          '☀️ El cliente confirmó interés en un PASADÍA (plan de día). Coordinar disponibilidad (solo Villavicencio, mar-jue, 9am-5pm) y el valor. La IA quedó en pausa.',
         createdAt: tEsc + 5,
         metadata: {
-          kind: "inbox_escalation_alert",
-          escalationReason: "pasadia_request",
+          kind: 'inbox_escalation_alert',
+          escalationReason: 'pasadia_request',
         },
       });
       await ctx.runMutation(deps.internal.conversations.updateLastMessageAt, {
@@ -1915,13 +1914,13 @@ export async function processInboundMessageV2(
   // El bot NO sabe leer imágenes y no debería intentar adivinar. Escalamos
   // automáticamente para que un humano verifique.
   const isMediaMessage =
-    args.type === "image" || args.type === "video" || args.type === "document";
+    args.type === 'image' || args.type === 'video' || args.type === 'document';
   const phaseRequiresHumanForMedia: Array<typeof currentPhase> = [
-    "pet_check",
-    "pet_rules_shown",
-    "quote_shown",
-    "contract",
-    "done",
+    'pet_check',
+    'pet_rules_shown',
+    'quote_shown',
+    'contract',
+    'done',
   ];
   if (isMediaMessage && phaseRequiresHumanForMedia.includes(currentPhase)) {
     // ── Imagen en fase `contract` → analizar con VISIÓN ────────────────────
@@ -1932,19 +1931,19 @@ export async function processInboundMessageV2(
     // pedir que reenvíe la cédula (sin escalar). Si el análisis falla
     // (`null`), cae al escalado genérico de abajo (fallback seguro).
     if (
-      args.type === "image" &&
-      currentPhase === "contract" &&
+      args.type === 'image' &&
+      currentPhase === 'contract' &&
       args.mediaUrl &&
-      typeof deps.classifyImage === "function"
+      typeof deps.classifyImage === 'function'
     ) {
       const kind = await deps.classifyImage(args.mediaUrl);
-      if (kind === "cedula") {
+      if (kind === 'cedula') {
         const tCed = Date.now();
         const cedMsg = [
-          "¡Recibí la foto de tu *cédula*! 📄✅",
-          "",
-          "Con esto ya tengo todo para tu contrato. Te conecto con un asesor que lo genera y te lo envía para asegurar tu reserva 🤝 ✨",
-        ].join("\n");
+          '¡Recibí la foto de tu *cédula*! 📄✅',
+          '',
+          'Con esto ya tengo todo para tu contrato. Te conecto con un asesor que lo genera y te lo envía para asegurar tu reserva 🤝 ✨',
+        ].join('\n');
         await ctx.runMutation(deps.internal.conversations.escalate, {
           conversationId,
           assignedUserId:
@@ -1958,15 +1957,15 @@ export async function processInboundMessageV2(
         await ctx.runMutation(deps.internal.messages.insertSystemMessage, {
           conversationId,
           content:
-            "🪪 El cliente envió la FOTO DE LA CÉDULA. Datos del contrato completos → generar y enviar el contrato. La IA quedó en pausa.",
+            '🪪 El cliente envió la FOTO DE LA CÉDULA. Datos del contrato completos → generar y enviar el contrato. La IA quedó en pausa.',
           createdAt: tCed + 5,
           metadata: {
-            kind: "inbox_escalation_alert",
-            escalationReason: "contract_cedula_received",
+            kind: 'inbox_escalation_alert',
+            escalationReason: 'contract_cedula_received',
             mediaUrl: args.mediaUrl ?? null,
           },
         });
-        await deliverText( {
+        await deliverText({
           to: args.phone,
           text: cedMsg,
           wamid: args.wamid,
@@ -1976,13 +1975,13 @@ export async function processInboundMessageV2(
         });
         return;
       }
-      if (kind === "comprobante") {
+      if (kind === 'comprobante') {
         const tCmp = Date.now();
         const cmpMsg = [
-          "¡Recibí tu *comprobante de pago*! 💰",
-          "",
-          "Te conecto con un asesor para verificarlo y confirmarte los siguientes pasos 🤝 ✨",
-        ].join("\n");
+          '¡Recibí tu *comprobante de pago*! 💰',
+          '',
+          'Te conecto con un asesor para verificarlo y confirmarte los siguientes pasos 🤝 ✨',
+        ].join('\n');
         await ctx.runMutation(deps.internal.conversations.escalate, {
           conversationId,
           assignedUserId:
@@ -1996,15 +1995,15 @@ export async function processInboundMessageV2(
         await ctx.runMutation(deps.internal.messages.insertSystemMessage, {
           conversationId,
           content:
-            "💰 El cliente envió un COMPROBANTE DE PAGO. Verificar el pago y continuar con la reserva. La IA quedó en pausa.",
+            '💰 El cliente envió un COMPROBANTE DE PAGO. Verificar el pago y continuar con la reserva. La IA quedó en pausa.',
           createdAt: tCmp + 5,
           metadata: {
-            kind: "inbox_escalation_alert",
-            escalationReason: "payment_receipt_received",
+            kind: 'inbox_escalation_alert',
+            escalationReason: 'payment_receipt_received',
             mediaUrl: args.mediaUrl ?? null,
           },
         });
-        await deliverText( {
+        await deliverText({
           to: args.phone,
           text: cmpMsg,
           wamid: args.wamid,
@@ -2014,22 +2013,22 @@ export async function processInboundMessageV2(
         });
         return;
       }
-      if (kind === "otro") {
+      if (kind === 'otro') {
         // No es cédula ni comprobante → pedir que reenvíe la cédula. NO se
         // escala: el bot espera la imagen correcta (el cliente la reenvía y
         // vuelve a pasar por este clasificador).
         const tOtr = Date.now();
         const otrMsg = [
-          "Mmm, esa imagen no parece tu cédula 🤔",
-          "",
-          "Para preparar tu contrato necesito una *foto clara del frente de tu cédula* 📄. ¿Me la reenvías, por favor?",
-        ].join("\n");
+          'Mmm, esa imagen no parece tu cédula 🤔',
+          '',
+          'Para preparar tu contrato necesito una *foto clara del frente de tu cédula* 📄. ¿Me la reenvías, por favor?',
+        ].join('\n');
         await ctx.runMutation(deps.internal.messages.insertAssistantMessage, {
           conversationId,
           content: otrMsg,
           createdAt: tOtr,
         });
-        await deliverText( {
+        await deliverText({
           to: args.phone,
           text: otrMsg,
           wamid: args.wamid,
@@ -2049,7 +2048,7 @@ export async function processInboundMessageV2(
         process.env.CHATBOT_AUTO_ASSIGN_ADVISOR_ID?.trim() || undefined,
     });
     const mediaHandoffMsg =
-      "Gracias por enviarnos el documento 📎 Te conecto con un asesor para revisarlo y confirmarte los siguientes pasos. Un agente te escribirá en breve 🤝 ✨";
+      'Gracias por enviarnos el documento 📎 Te conecto con un asesor para revisarlo y confirmarte los siguientes pasos. Te escribirá en breve 🤝 ✨';
     await ctx.runMutation(deps.internal.messages.insertAssistantMessage, {
       conversationId,
       content: mediaHandoffMsg,
@@ -2060,17 +2059,17 @@ export async function processInboundMessageV2(
     await ctx.runMutation(deps.internal.messages.insertSystemMessage, {
       conversationId,
       content:
-        "📎 Cliente envió archivo/foto en fase post-catálogo. Revisar (puede ser cédula, comprobante de pago o documento adicional). La IA quedó en pausa.",
+        '📎 Cliente envió archivo/foto en fase post-catálogo. Revisar (puede ser cédula, comprobante de pago o documento adicional). La IA quedó en pausa.',
       createdAt: tMedia + 5,
       metadata: {
-        kind: "inbox_escalation_alert",
-        escalationReason: "media_post_catalog",
+        kind: 'inbox_escalation_alert',
+        escalationReason: 'media_post_catalog',
         phaseAtEscalation: currentPhase,
         mediaType: args.type,
         mediaUrl: args.mediaUrl ?? null,
       },
     });
-    await deliverText( {
+    await deliverText({
       to: args.phone,
       text: mediaHandoffMsg,
       wamid: args.wamid,
@@ -2095,7 +2094,10 @@ export async function processInboundMessageV2(
   // PRIMER `replyToWamid` que encontremos en sus metadatos. Esto recupera la
   // selección del cliente aunque haya sido en un mensaje intermedio del burst.
   let resolvableReplyToWamid: string = replyToWamid;
-  if (!resolvableReplyToWamid && !(currentEntities.selectedPropertyRetailerId ?? "").trim()) {
+  if (
+    !resolvableReplyToWamid &&
+    !(currentEntities.selectedPropertyRetailerId ?? '').trim()
+  ) {
     try {
       const recentRaw = (await ctx.runQuery(deps.api.messages.listRecent, {
         conversationId,
@@ -2108,9 +2110,9 @@ export async function processInboundMessageV2(
       // Recorrer DESC desde el más reciente hasta el último mensaje del asistente.
       for (let i = recentRaw.length - 1; i >= 0; i--) {
         const m = recentRaw[i];
-        if (m.sender === "assistant") break;
-        if (m.sender === "user") {
-          const w = String(m.metadata?.replyToWamid ?? "").trim();
+        if (m.sender === 'assistant') break;
+        if (m.sender === 'user') {
+          const w = String(m.metadata?.replyToWamid ?? '').trim();
           if (w.length >= 8) {
             resolvableReplyToWamid = w;
             break;
@@ -2119,21 +2121,27 @@ export async function processInboundMessageV2(
       }
     } catch (err) {
       console.error(
-        "inbound: error escaneando replyToWamid en historial reciente (degradado):",
+        'inbound: error escaneando replyToWamid en historial reciente (degradado):',
         err,
       );
     }
   }
 
   if (resolvableReplyToWamid) {
-    const pick = await ctx.runQuery(deps.internal.ycloud.getCatalogProductByOutboundWamid, {
-      conversationId,
-      wamid: resolvableReplyToWamid,
-    });
+    const pick = await ctx.runQuery(
+      deps.internal.ycloud.getCatalogProductByOutboundWamid,
+      {
+        conversationId,
+        wamid: resolvableReplyToWamid,
+      },
+    );
     if (pick?.productRetailerId) {
-      const prop = await ctx.runQuery(deps.api.whatsappCatalogs.getPropertyByRetailerId, {
-        productRetailerId: pick.productRetailerId,
-      });
+      const prop = await ctx.runQuery(
+        deps.api.whatsappCatalogs.getPropertyByRetailerId,
+        {
+          productRetailerId: pick.productRetailerId,
+        },
+      );
       currentEntities = {
         ...currentEntities,
         selectedPropertyRetailerId: pick.productRetailerId,
@@ -2151,10 +2159,12 @@ export async function processInboundMessageV2(
     limit: 30,
   })) as Array<{ sender?: string; content?: string }>;
   const history = recentMsgs
-    .filter((m) => m.sender === "user" || m.sender === "assistant")
+    .filter((m) => m.sender === 'user' || m.sender === 'assistant')
     .map((m) => ({
-      role: (m.sender === "assistant" ? "assistant" : "user") as "user" | "assistant",
-      content: String(m.content ?? ""),
+      role: (m.sender === 'assistant' ? 'assistant' : 'user') as
+        | 'user'
+        | 'assistant',
+      content: String(m.content ?? ''),
     }));
 
   const bootstrapped = await bootstrapBotStateFromHistory({
@@ -2198,23 +2208,30 @@ export async function processInboundMessageV2(
   // Varios temas en un solo mensaje ("¿perros? ¿puedo llevar comida?") → todas las FAQs.
   if (multiFaqKeys.length >= 2 && questionLines.length > 0) {
     for (const key of multiFaqKeys.slice(0, 4)) {
-      const answer = (getFaqTextByKey(key) ?? "").trim();
-      if (answer.length > 0 && !faqChunks.includes(answer)) faqChunks.push(answer);
+      const answer = (getFaqTextByKey(key) ?? '').trim();
+      if (answer.length > 0 && !faqChunks.includes(answer))
+        faqChunks.push(answer);
     }
   } else if (questionLines.length > 0) {
     for (const q of questionLines.slice(0, 3)) {
       if (!looksLikeQuestion(q)) continue;
-      let answer = "";
+      let answer = '';
       try {
-        const ragResult = (await ctx.runAction(deps.api.knowledge.searchFaqForBot, {
-          query: q,
-        })) as { text?: string; title?: string; score?: number } | null;
-        answer = String(ragResult?.text ?? "").trim();
+        const ragResult = (await ctx.runAction(
+          deps.api.knowledge.searchFaqForBot,
+          {
+            query: q,
+          },
+        )) as { text?: string; title?: string; score?: number } | null;
+        answer = String(ragResult?.text ?? '').trim();
       } catch (err) {
-        console.error("inbound: searchFaqForBot fallo (degradado, sigue sin RAG):", err);
+        console.error(
+          'inbound: searchFaqForBot fallo (degradado, sigue sin RAG):',
+          err,
+        );
       }
       if (!answer) {
-        answer = (localFaqFallback(q) ?? "").trim();
+        answer = (localFaqFallback(q) ?? '').trim();
       }
       if (answer.length > 0 && !faqChunks.some((c) => c === answer)) {
         faqChunks.push(answer);
@@ -2223,14 +2240,15 @@ export async function processInboundMessageV2(
     // Si el RAG solo devolvió una FAQ pero el texto menciona otro tema, añadirlo.
     if (multiFaqKeys.length >= 2) {
       for (const key of multiFaqKeys) {
-        const answer = (getFaqTextByKey(key) ?? "").trim();
-        if (answer.length > 0 && !faqChunks.includes(answer)) faqChunks.push(answer);
+        const answer = (getFaqTextByKey(key) ?? '').trim();
+        if (answer.length > 0 && !faqChunks.includes(answer))
+          faqChunks.push(answer);
       }
     }
   }
 
   if (faqChunks.length > 0) {
-    faqContext = faqChunks.join("\n\n━━━━━━━━━━\n\n");
+    faqContext = faqChunks.join('\n\n━━━━━━━━━━\n\n');
   }
 
   // ── Pregunta sin respuesta en fase `contract` → escalar a un asesor ──────
@@ -2242,16 +2260,16 @@ export async function processInboundMessageV2(
   // la duda y cierra la reserva. Si SÍ hay FAQ que responde (`faqContext`
   // poblado), no escalamos — el RAG-bypass de `replies.ts` la contesta.
   if (
-    currentPhase === "contract" &&
+    currentPhase === 'contract' &&
     questionLines.length > 0 &&
-    !String(faqContext ?? "").trim()
+    !String(faqContext ?? '').trim()
   ) {
     const tCq = Date.now();
     const cqMsg = [
-      "¡Buena pregunta! 🙌",
-      "",
-      "Te conecto con un asesor que te resuelve esa duda y te ayuda a finalizar tu reserva 🤝 ✨",
-    ].join("\n");
+      '¡Buena pregunta! 🙌',
+      '',
+      'Te conecto con un asesor que te resuelve esa duda y te ayuda a finalizar tu reserva 🤝 ✨',
+    ].join('\n');
     await ctx.runMutation(deps.internal.conversations.escalate, {
       conversationId,
       assignedUserId:
@@ -2262,7 +2280,7 @@ export async function processInboundMessageV2(
       content: cqMsg,
       createdAt: tCq,
     });
-    await deliverText( {
+    await deliverText({
       to: args.phone,
       text: cqMsg,
       wamid: args.wamid,
@@ -2270,11 +2288,11 @@ export async function processInboundMessageV2(
     await ctx.runMutation(deps.internal.messages.insertSystemMessage, {
       conversationId,
       content:
-        "❓ El cliente hizo una PREGUNTA en la fase de contrato que el bot no pudo responder (sin FAQ). Contestarle la duda y ayudar a cerrar la reserva. La IA quedó en pausa.",
+        '❓ El cliente hizo una PREGUNTA en la fase de contrato que el bot no pudo responder (sin FAQ). Contestarle la duda y ayudar a cerrar la reserva. La IA quedó en pausa.',
       createdAt: tCq + 5,
       metadata: {
-        kind: "inbox_escalation_alert",
-        escalationReason: "contract_question",
+        kind: 'inbox_escalation_alert',
+        escalationReason: 'contract_question',
       },
     });
     await ctx.runMutation(deps.internal.conversations.updateLastMessageAt, {
@@ -2294,7 +2312,7 @@ export async function processInboundMessageV2(
     )) as string[];
   } catch (err) {
     console.error(
-      "inbound: getLatestCatalogRetailerIds fallo (degradado, sigue sin resolver pick vago):",
+      'inbound: getLatestCatalogRetailerIds fallo (degradado, sigue sin resolver pick vago):',
       err,
     );
   }
@@ -2307,11 +2325,11 @@ export async function processInboundMessageV2(
         query: textForTurn,
         phase: currentPhase,
       })) as { text?: string; count?: number } | null;
-      const pbText = String(pb?.text ?? "").trim();
+      const pbText = String(pb?.text ?? '').trim();
       return pbText || null;
     } catch (err) {
       console.error(
-        "inbound: searchPlaybookForBot fallo (degradado, sigue sin tono):",
+        'inbound: searchPlaybookForBot fallo (degradado, sigue sin tono):',
         err,
       );
       return null;
@@ -2331,9 +2349,9 @@ export async function processInboundMessageV2(
     contactName: args.name,
     lastCatalogRetailerIds,
     tagFlags,
-    channel: deps.channel ?? "whatsapp",
+    channel: deps.channel ?? 'whatsapp',
     resolvePropertyByName: async (name: string) => {
-      const n = String(name ?? "").trim();
+      const n = String(name ?? '').trim();
       if (!n) return null;
       return (await ctx.runQuery(
         deps.api.whatsappCatalogs.findPropertyByNameForBot,
@@ -2348,16 +2366,19 @@ export async function processInboundMessageV2(
       const rid =
         e.selectedPropertyRetailerId?.trim() ||
         inferRetailerIdFromCatalogTitle(e.selectedPropertyName) ||
-        "";
+        '';
       const cin = e.checkIn?.trim();
       const cout = e.checkOut?.trim();
       if (!rid || !cin || !cout) return null;
-      const data = (await ctx.runQuery(deps.api.whatsappCatalogs.getBotStayQuoteByRetailerId, {
-        productRetailerId: rid,
-        fechaEntrada: cin,
-        fechaSalida: cout,
-        cupo: e.cupo,
-      })) as {
+      const data = (await ctx.runQuery(
+        deps.api.whatsappCatalogs.getBotStayQuoteByRetailerId,
+        {
+          productRetailerId: rid,
+          fechaEntrada: cin,
+          fechaSalida: cout,
+          cupo: e.cupo,
+        },
+      )) as {
         text?: string;
         totals?: {
           propertyTitle?: string;
@@ -2370,17 +2391,17 @@ export async function processInboundMessageV2(
           wristbandFee?: number;
         };
       } | null;
-      const text = String(data?.text ?? "").trim();
+      const text = String(data?.text ?? '').trim();
       if (!text) return null;
       return {
         text,
         totals: data?.totals
           ? {
-              propertyTitle: String(data.totals.propertyTitle ?? "").trim(),
+              propertyTitle: String(data.totals.propertyTitle ?? '').trim(),
               nightly: Number(data.totals.nightly ?? 0),
               nightsCount: Number(data.totals.nightsCount ?? 0),
               subtotal: Number(data.totals.subtotal ?? 0),
-              appliedRule: String(data.totals.appliedRule ?? "").trim(),
+              appliedRule: String(data.totals.appliedRule ?? '').trim(),
               cupo: Number(data.totals.cupo ?? 0),
               damageDeposit: Number(data.totals.damageDeposit ?? 0),
               wristbandFee: Number(data.totals.wristbandFee ?? 0),
@@ -2391,7 +2412,13 @@ export async function processInboundMessageV2(
   });
 
   if (
-    !(await isStillThisTailUserMessage(ctx, deps, conversationId, String(insertedMsgId), now))
+    !(await isStillThisTailUserMessage(
+      ctx,
+      deps,
+      conversationId,
+      String(insertedMsgId),
+      now,
+    ))
   ) {
     return;
   }
@@ -2413,7 +2440,7 @@ export async function processInboundMessageV2(
   // hay fichas reales. Si el query devuelve vacío, NO enviamos el pre-catálogo
   // y vamos directo al mensaje de escalada — así evitamos la incoherencia
   // "te comparto opciones... no tengo opciones".
-  const deferReplyForCatalog = action.type === "send_catalog";
+  const deferReplyForCatalog = action.type === 'send_catalog';
 
   // ─── ESTADÍA LARGA (3+ noches) — alerta blanda ─────────────────────────
   // Si las fechas resueltas en este turno cubren 3 noches o más, marcamos
@@ -2424,19 +2451,16 @@ export async function processInboundMessageV2(
   {
     const ci = (result.updatedEntities as { checkIn?: string }).checkIn;
     const co = (result.updatedEntities as { checkOut?: string }).checkOut;
-    if (typeof ci === "string" && typeof co === "string") {
+    if (typeof ci === 'string' && typeof co === 'string') {
       const nights = countNights(ci, co);
       if (nights >= 3) {
-        await ctx.runMutation(
-          deps.internal.conversations.flagPriorityAlert,
-          {
-            conversationId,
-            alertReason: "long_stay_3plus",
-            priority: "medium" as const,
-            tag: "oportunidad-prioritaria",
-            inboxMessage: `🏖️ ESTADÍA LARGA detectada — ${nights} noches (${ci} → ${co}). Oportunidad comercial prioritaria; el bot sigue cualificando pero un asesor debería entrar pronto para cerrar.`,
-          },
-        );
+        await ctx.runMutation(deps.internal.conversations.flagPriorityAlert, {
+          conversationId,
+          alertReason: 'long_stay_3plus',
+          priority: 'medium' as const,
+          tag: 'oportunidad-prioritaria',
+          inboxMessage: `🏖️ ESTADÍA LARGA detectada — ${nights} noches (${ci} → ${co}). Oportunidad comercial prioritaria; el bot sigue cualificando pero un asesor debería entrar pronto para cerrar.`,
+        });
       }
     }
   }
@@ -2456,20 +2480,17 @@ export async function processInboundMessageV2(
       checkOut?: string;
     };
     if (
-      typeof e.selectedPropertyName === "string" &&
+      typeof e.selectedPropertyName === 'string' &&
       e.selectedPropertyName.trim().length > 0 &&
-      typeof e.cupo === "number" &&
+      typeof e.cupo === 'number' &&
       e.cupo > 0
     ) {
-      const parts: string[] = [
-        e.selectedPropertyName.trim(),
-        `${e.cupo}pax`,
-      ];
+      const parts: string[] = [e.selectedPropertyName.trim(), `${e.cupo}pax`];
       if (e.checkIn && e.checkOut) {
         const fmtMmDd = (ymd: string) => ymd.slice(5); // "MM-DD"
         parts.push(`${fmtMmDd(e.checkIn)}→${fmtMmDd(e.checkOut)}`);
       }
-      const dealLabel = parts.join(" · ");
+      const dealLabel = parts.join(' · ');
       await ctx.runMutation(deps.internal.contacts.setLeadDealLabel, {
         contactId: conv.contactId,
         dealLabel,
@@ -2513,16 +2534,17 @@ export async function processInboundMessageV2(
   // bypassan (ya tienen su propio mensaje y se atienden 24/7).
   if (
     result.replyText &&
-    action.type !== "escalate_human" &&
+    action.type !== 'escalate_human' &&
     !isWithinBusinessHours(Date.now()) &&
-    !temporalMessageWasSentForConversation
+    !temporalMessageWasSentForConversation &&
+    !advisorContinuityWasSentForConversation
   ) {
     const alreadyNotified = (await ctx.runMutation(
       deps.internal.botSessions.markAlertFired,
       {
         conversationId,
         phone: args.phone,
-        alertReason: "after_hours_notice",
+        alertReason: 'after_hours_notice',
       },
     )) as boolean;
     if (alreadyNotified) {
@@ -2530,30 +2552,27 @@ export async function processInboundMessageV2(
       // Si el cliente además marcó URGENTE en el mensaje, alerta blanda
       // para que un on-call vea el caso aunque sea fuera de horario.
       if (clientFlaggedUrgent(textForTurn)) {
-        await ctx.runMutation(
-          deps.internal.conversations.flagPriorityAlert,
-          {
-            conversationId,
-            alertReason: "urgent_after_hours",
-            priority: "urgent" as const,
-            tag: "urgente-fuera-horario",
-            inboxMessage: `⏰⚡ Cliente marcó URGENTE fuera de horario laboral. Mensaje: "${textForTurn.slice(0, 200)}". Considerar atención on-call.`,
-          },
-        );
+        await ctx.runMutation(deps.internal.conversations.flagPriorityAlert, {
+          conversationId,
+          alertReason: 'urgent_after_hours',
+          priority: 'urgent' as const,
+          tag: 'urgente-fuera-horario',
+          inboxMessage: `⏰⚡ Cliente marcó URGENTE fuera de horario laboral. Mensaje: "${textForTurn.slice(0, 200)}". Considerar atención on-call.`,
+        });
         await fireUrgentWebhookIfConfigured({
-          alertReason: "urgent_after_hours",
+          alertReason: 'urgent_after_hours',
           conversationId: String(conversationId),
           contactPhone: args.phone,
           contactName: args.name,
           lastMessage: textForTurn.slice(0, 500),
-          team: "operaciones",
+          team: 'operaciones',
         });
       }
     }
   }
 
   if (result.replyText && !deferReplyForCatalog) {
-    const replyWamid = String(args.wamid ?? "").trim();
+    const replyWamid = String(args.wamid ?? '').trim();
     await sendAssistantText({
       conversationId,
       to: args.phone,
@@ -2578,7 +2597,7 @@ export async function processInboundMessageV2(
     : [];
   if (!deferReplyForCatalog) {
     for (const extra of extras) {
-      const text = String(extra ?? "").trim();
+      const text = String(extra ?? '').trim();
       if (!text) continue;
       await new Promise((r) => setTimeout(r, 600));
       await sendAssistantText({
@@ -2594,21 +2613,20 @@ export async function processInboundMessageV2(
   // recibir un cierre similar al final del flujo (ej. al completar contrato).
   if (
     temporalMessageWasSentForConversation &&
-    action.type === "escalate_human" &&
-    (action as any)?.reason === "contract_complete"
+    action.type === 'escalate_human' &&
+    (action as any)?.reason === 'contract_complete'
   ) {
     const alreadyClosing = (await ctx.runMutation(
       deps.internal.botSessions.markAlertFired,
       {
         conversationId,
         phone: args.phone,
-        alertReason: "whatsapp_temporal_message_closing_sent",
+        alertReason: 'whatsapp_temporal_message_closing_sent',
       },
     )) as boolean;
 
     if (alreadyClosing) {
-      const closingText =
-        "Uno de nuestros asesores se comunicará contigo una vez nos encontremos dentro del horario laboral para continuar con tu proceso.";
+      const closingText = TEMPORAL_MESSAGE_CLOSING;
       await sendAssistantText({
         conversationId,
         to: args.phone,
@@ -2616,15 +2634,21 @@ export async function processInboundMessageV2(
         wamid: args.wamid,
         metadata:
           replyToWamid.length > 6
-            ? { source: "whatsapp_temporal_message_closing", replyToWamid }
-            : { source: "whatsapp_temporal_message_closing" },
+            ? { source: 'whatsapp_temporal_message_closing', replyToWamid }
+            : { source: 'whatsapp_temporal_message_closing' },
       });
     }
   }
 
-  if (action.type === "send_catalog") {
+  if (action.type === 'send_catalog') {
     if (
-      !(await isStillThisTailUserMessage(ctx, deps, conversationId, String(insertedMsgId), now))
+      !(await isStillThisTailUserMessage(
+        ctx,
+        deps,
+        conversationId,
+        String(insertedMsgId),
+        now,
+      ))
     ) {
       return;
     }
@@ -2633,9 +2657,7 @@ export async function processInboundMessageV2(
     // server-side `catalogPeopleCountForFilter` ya considera `eventCapacity` de
     // la finca cuando `isEvento=true`; aquí solo le pasamos el `minCapacity`
     // correcto (lo que el cliente realmente necesita acomodar).
-    const eventPeople = Number(
-      result.updatedEntities.eventPeopleCount ?? 0,
-    );
+    const eventPeople = Number(result.updatedEntities.eventPeopleCount ?? 0);
     const effectiveMinCapacity =
       action.isEvento && eventPeople > action.cupo ? eventPeople : action.cupo;
 
@@ -2651,7 +2673,7 @@ export async function processInboundMessageV2(
         )) as string[];
       } catch (err) {
         console.error(
-          "inbound: getAllCatalogRetailerIdsForConversation fallo (paginación degradada):",
+          'inbound: getAllCatalogRetailerIdsForConversation fallo (paginación degradada):',
           err,
         );
       }
@@ -2717,7 +2739,7 @@ export async function processInboundMessageV2(
       excludeLocationKeywords.length === 0 &&
       !categoryCollection;
     const deptExpansion =
-      action.location !== "RECOMENDADAS" && noZoneConstraint
+      action.location !== 'RECOMENDADAS' && noZoneConstraint
         ? departmentExpansionForMunicipality(action.location)
         : null;
 
@@ -2786,10 +2808,10 @@ export async function processInboundMessageV2(
       //
       // Caso "RECOMENDADAS" (cliente no especificó zona) NO entra acá.
       const normLoc = (s: string) =>
-        s.toLowerCase().normalize("NFD").replace(/\p{M}/gu, "");
+        s.toLowerCase().normalize('NFD').replace(/\p{M}/gu, '');
       const titlesForLocCheck = catalogPayload.productTitles ?? [];
       const requestedLocNorm = normLoc(action.location);
-      const isRecomendadas = action.location === "RECOMENDADAS";
+      const isRecomendadas = action.location === 'RECOMENDADAS';
       const someMatchRequested =
         isRecomendadas ||
         titlesForLocCheck.some((t) => normLoc(t).includes(requestedLocNorm));
@@ -2798,19 +2820,19 @@ export async function processInboundMessageV2(
       const preCatalogText = isFallbackOnly
         ? [
             `Por el momento no tengo fincas disponibles en *${action.location}* para esas fechas 😔`,
-            "",
-            "Pero te comparto algunas opciones cercanas que podrían interesarte 🏡✨",
-            "",
-            "💰 Cada tarjeta muestra el valor *por noche* en temporada actual.",
-            "👉 Cuéntame *cuál te llama la atención* y te ayudo con la reserva 🤝",
-          ].join("\n")
+            '',
+            'Pero te comparto algunas opciones cercanas que podrían interesarte 🏡✨',
+            '',
+            '💰 Cada tarjeta muestra el valor *por noche* en temporada actual.',
+            '👉 Cuéntame *cuál te llama la atención* y te ayudo con la reserva 🤝',
+          ].join('\n')
         : categoryCollection
           ? [
               `✨ Te comparto nuestras opciones de *${categoryCollection.label}* 🏡`,
-              "",
-              "💰 Cada tarjeta muestra el valor *por noche* en temporada actual.",
-              "👉 Cuéntame *cuál te llama la atención* y te ayudo con la reserva 🤝",
-            ].join("\n")
+              '',
+              '💰 Cada tarjeta muestra el valor *por noche* en temporada actual.',
+              '👉 Cuéntame *cuál te llama la atención* y te ayudo con la reserva 🤝',
+            ].join('\n')
           : result.replyText;
 
       // Hay fichas → ahora SÍ enviamos el pre-catálogo diferido + extras + fichas.
@@ -2823,7 +2845,7 @@ export async function processInboundMessageV2(
         });
       }
       for (const extra of extras) {
-        const text = String(extra ?? "").trim();
+        const text = String(extra ?? '').trim();
         if (!text) continue;
         await new Promise((r) => setTimeout(r, 600));
         await sendAssistantText({
@@ -2841,7 +2863,7 @@ export async function processInboundMessageV2(
         to: args.phone,
         productRetailerIds: ids,
         productQuoteLines: lines.length ? lines : undefined,
-        bodyText: `Fincas disponibles en ${action.location === "RECOMENDADAS" ? "nuestras zonas favoritas" : action.location}:`,
+        bodyText: `Fincas disponibles en ${action.location === 'RECOMENDADAS' ? 'nuestras zonas favoritas' : action.location}:`,
         catalogId: catalogPayload.catalogId,
         wamid: args.wamid,
         conversationId,
@@ -2863,7 +2885,7 @@ export async function processInboundMessageV2(
           wamid: wamidOut,
           productTitle: title,
         };
-        if (deps.channel === "web") {
+        if (deps.channel === 'web') {
           try {
             const prop = (await ctx.runQuery(
               deps.api.whatsappCatalogs.getPropertyByRetailerId,
@@ -2875,25 +2897,33 @@ export async function processInboundMessageV2(
               propertyName?: string;
               location?: string;
             } | null;
-            if (prop?.imageUrl?.trim()) metadata.imageUrl = prop.imageUrl.trim();
+            if (prop?.imageUrl?.trim())
+              metadata.imageUrl = prop.imageUrl.trim();
             if (prop?.slug?.trim()) metadata.slug = prop.slug.trim();
             if (prop?.propertyId) metadata.propertyId = prop.propertyId;
             if (prop?.propertyName?.trim())
               metadata.propertyName = prop.propertyName.trim();
-            if (prop?.location?.trim()) metadata.location = prop.location.trim();
+            if (prop?.location?.trim())
+              metadata.location = prop.location.trim();
           } catch (err) {
-            console.error("inbound: getPropertyByRetailerId (web catalog UI):", err);
+            console.error(
+              'inbound: getPropertyByRetailerId (web catalog UI):',
+              err,
+            );
           }
         }
-        await ctx.runMutation(deps.internal.messages.insertAssistantMessageWithMedia, {
-          conversationId,
-          content: body,
-          type: "product",
-          metadata,
-          createdAt: tBase + i * 25,
-          wamid: wamidOut,
-          whatsappStatus: wamidOut ? "sent" : undefined,
-        });
+        await ctx.runMutation(
+          deps.internal.messages.insertAssistantMessageWithMedia,
+          {
+            conversationId,
+            content: body,
+            type: 'product',
+            metadata,
+            createdAt: tBase + i * 25,
+            wamid: wamidOut,
+            whatsappStatus: wamidOut ? 'sent' : undefined,
+          },
+        );
       }
 
       // ── Mensaje de cierre del catálogo ─────────────────────────────────
@@ -2907,13 +2937,13 @@ export async function processInboundMessageV2(
       if (action.isEvento !== true) {
         const tClose = Date.now() + 50;
         const closeMsg =
-          "✨ Perfecto, estas son las *fincas disponibles*. Dime *cuál te gustó* o si quieres información adicional 🤝";
+          '✨ Perfecto, estas son las *fincas disponibles*. Dime *cuál te gustó* o si quieres información adicional 🤝';
         await ctx.runMutation(deps.internal.messages.insertAssistantMessage, {
           conversationId,
           content: closeMsg,
           createdAt: tClose,
         });
-        await deliverText( {
+        await deliverText({
           to: args.phone,
           text: closeMsg,
         });
@@ -2952,44 +2982,44 @@ export async function processInboundMessageV2(
           // Aún faltan datos del evento → preguntar SIN escalar. El bot sigue
           // activo esperando que el cliente elija finca + entregue detalles.
           const askLines: string[] = [
-            "Como es para *evento* 🎉, mientras revisas las opciones te hago un par de preguntas 👇",
-            "",
+            'Como es para *evento* 🎉, mientras revisas las opciones te hago un par de preguntas 👇',
+            '',
           ];
           if (peopleCountMissing) {
             askLines.push(
-              "👥 *Total de personas en el evento* (las que duermen + las que van solo por el día / pasadía).",
+              '👥 *Total de personas en el evento* (las que duermen + las que van solo por el día / pasadía).',
             );
           }
           if (logisticsMissing) {
             askLines.push(
-              "🎵 *Logística del evento*:",
-              "🎧 Sonido profesional / DJ / iluminación",
-              "🎸 Banda en vivo o grupos musicales",
-              "🏡 O solo el sonido básico de la finca (departir tranquilos)",
+              '🎵 *Logística del evento*:',
+              '🎧 Sonido profesional / DJ / iluminación',
+              '🎸 Banda en vivo o grupos musicales',
+              '🏡 O solo el sonido básico de la finca (departir tranquilos)',
             );
           }
           askLines.push(
-            "",
-            "Cuéntame cuál finca te gusta y estos datos para confirmarte la disponibilidad 🤝",
+            '',
+            'Cuéntame cuál finca te gusta y estos datos para confirmarte la disponibilidad 🤝',
           );
-          const eventQuestionsMsg = askLines.join("\n");
+          const eventQuestionsMsg = askLines.join('\n');
           await ctx.runMutation(deps.internal.messages.insertAssistantMessage, {
             conversationId,
             content: eventQuestionsMsg,
             createdAt: tEvent,
           });
-          await deliverText( {
+          await deliverText({
             to: args.phone,
             text: eventQuestionsMsg,
           });
-        } else if (logistics === "extra") {
+        } else if (logistics === 'extra') {
           // Logística pesada (DJ / banda / sonido pro / iluminación) →
           // escalar al asesor: el bot NO calcula sobreprecio del evento.
           const eventHandoffMsg = [
-            "Como es para *evento* 🎉, el precio final puede variar según la logística (sonido pro, banda, equipos).",
-            "",
-            "👉 Mientras revisas las opciones, te conecto con un asesor para confirmarte *precios y disponibilidad* del evento. Un agente te escribirá en breve 🤝 ✨",
-          ].join("\n");
+            'Como es para *evento* 🎉, el precio final puede variar según la logística (sonido pro, banda, equipos).',
+            '',
+            '👉 Mientras revisas las opciones, te conecto con un asesor para confirmarte *precios y disponibilidad* del evento. Te escribirá en breve 🤝 ✨',
+          ].join('\n');
           await ctx.runMutation(deps.internal.conversations.escalate, {
             conversationId,
             assignedUserId:
@@ -3003,18 +3033,18 @@ export async function processInboundMessageV2(
           await ctx.runMutation(deps.internal.messages.insertSystemMessage, {
             conversationId,
             content:
-              "🎉 Evento con logística *extra* (DJ/banda/sonido pro). El cliente recibió el catálogo + entregó detalles. Confirmar precio/condiciones del evento. La IA quedó en pausa.",
+              '🎉 Evento con logística *extra* (DJ/banda/sonido pro). El cliente recibió el catálogo + entregó detalles. Confirmar precio/condiciones del evento. La IA quedó en pausa.',
             createdAt: tEvent + 5,
             metadata: {
-              kind: "inbox_escalation_alert",
-              escalationReason: "event_after_catalog",
+              kind: 'inbox_escalation_alert',
+              escalationReason: 'event_after_catalog',
               requestedLocation: action.location,
               requestedCupo: action.cupo,
               eventPeopleCount: peopleCount,
               eventLogistics: logistics,
             },
           });
-          await deliverText( {
+          await deliverText({
             to: args.phone,
             text: eventHandoffMsg,
           });
@@ -3025,16 +3055,16 @@ export async function processInboundMessageV2(
           // y de ahí avanza a quote_shown + contract con la cotización
           // estándar (sin sobreprecio de evento, porque no aplica).
           const basicEventAckMsg = [
-            "¡Perfecto! 🎉 Para tu evento *básico* (sin sonido pro ni banda) te aplica la tarifa normal de la finca.",
-            "",
-            "Cuéntame *cuál finca te llama la atención* y seguimos con la reserva 🤝",
-          ].join("\n");
+            '¡Perfecto! 🎉 Para tu evento *básico* (sin sonido pro ni banda) te aplica la tarifa normal de la finca.',
+            '',
+            'Cuéntame *cuál finca te llama la atención* y seguimos con la reserva 🤝',
+          ].join('\n');
           await ctx.runMutation(deps.internal.messages.insertAssistantMessage, {
             conversationId,
             content: basicEventAckMsg,
             createdAt: tEvent,
           });
-          await deliverText( {
+          await deliverText({
             to: args.phone,
             text: basicEventAckMsg,
           });
@@ -3046,12 +3076,12 @@ export async function processInboundMessageV2(
       // opciones, pero las fichas reales no van a aparecer. Escalamos a humano
       // con un mensaje específico para que el cliente NO quede esperando.
       const noResultsMsg = [
-        "Por ahora no tengo opciones exactas para esos requisitos en el catálogo 🤔",
-        "",
-        "*Te conecto con un asesor* para evaluar disponibilidad especial y opciones personalizadas según tus fechas y tipo de plan 🤝",
-        "",
-        "Un agente te escribirá en breve para ayudarte ✨",
-      ].join("\n");
+        'Por ahora no tengo opciones exactas para esos requisitos en el catálogo 🤔',
+        '',
+        '*Te conecto con un asesor* para evaluar disponibilidad especial y opciones personalizadas según tus fechas y tipo de plan 🤝',
+        '',
+        'Un asesor te escribirá en breve para ayudarte ✨',
+      ].join('\n');
       await ctx.runMutation(deps.internal.conversations.escalate, {
         conversationId,
         assignedUserId:
@@ -3066,17 +3096,17 @@ export async function processInboundMessageV2(
       await ctx.runMutation(deps.internal.messages.insertSystemMessage, {
         conversationId,
         content:
-          "🚨 Catálogo vacío: el cliente pidió fincas pero los filtros (cupo + evento + zona) no devolvieron opciones. Revisar requisitos y contactar.",
+          '🚨 Catálogo vacío: el cliente pidió fincas pero los filtros (cupo + evento + zona) no devolvieron opciones. Revisar requisitos y contactar.',
         createdAt: tNoRes + 5,
         metadata: {
-          kind: "inbox_escalation_alert",
-          escalationReason: "catalog_no_results",
+          kind: 'inbox_escalation_alert',
+          escalationReason: 'catalog_no_results',
           requestedLocation: action.location,
           requestedCupo: action.cupo,
           requestedIsEvento: action.isEvento,
         },
       });
-      await deliverText( {
+      await deliverText({
         to: args.phone,
         text: noResultsMsg,
       });
@@ -3085,39 +3115,42 @@ export async function processInboundMessageV2(
       });
       return;
     }
-  } else if (action.type === "escalate_human") {
+  } else if (action.type === 'escalate_human') {
     const reason = action.reason;
     await ctx.runMutation(deps.internal.conversations.escalate, {
       conversationId,
-      assignedUserId: process.env.CHATBOT_AUTO_ASSIGN_ADVISOR_ID?.trim() || undefined,
-      ...(reason === "contract_complete" ? { priority: "urgent" as const } : {}),
+      assignedUserId:
+        process.env.CHATBOT_AUTO_ASSIGN_ADVISOR_ID?.trim() || undefined,
+      ...(reason === 'contract_complete'
+        ? { priority: 'urgent' as const }
+        : {}),
     });
     const alertCreatedAt = Date.now() + (result.replyText ? 20 : 0);
     const alertBody =
-      reason === "contract_complete"
-        ? "🚨 El cliente completó los datos del contrato por WhatsApp. Prioridad: revisar, avisar al equipo si aplica y contactar al cliente. La IA quedó en pausa."
-        : reason === "stuck_loop"
-          ? "⚠️ Escalación automática: el cliente llevaba varios turnos sin avanzar; se ofreció asesor humano. Revisar y contactar. La IA quedó en pausa."
-          : reason === "pets_exceed_limit"
-            ? "🐾 El cliente declaró más de 3 mascotas. Evaluar condiciones especiales (aseo extra, fincas con espacio, depósito ajustado). La IA quedó en pausa."
-            : reason === "catalog_no_results"
-              ? "🚨 Catálogo vacío para los filtros del cliente. Revisar requisitos (cupo / evento / zona) y proponer opciones manualmente. La IA quedó en pausa."
-              : reason === "event_after_catalog"
-                ? "🎉 Evento confirmado: cliente recibió el catálogo. Confirmar precio y condiciones del evento (logística + capacidad). La IA quedó en pausa."
-                : reason === "media_post_catalog"
-                  ? "📎 Cliente envió archivo/foto en fase post-catálogo. Revisar (cédula, comprobante, doc). La IA quedó en pausa."
-                  : reason === "client_requested"
-                    ? "📣 El cliente pidió hablar con un asesor. Revisar conversación y contactar. La IA quedó en pausa."
-                    : reason === "stage1_catalog_pick"
-                      ? "🏡 Etapa 1 — el cliente eligió una finca del catálogo. Validar disponibilidad y ampliar información. La IA quedó en pausa."
-                      : "ℹ️ Conversación pasada a asesor humano. La IA quedó en pausa.";
+      reason === 'contract_complete'
+        ? '🚨 El cliente completó los datos del contrato por WhatsApp. Prioridad: revisar, avisar al equipo si aplica y contactar al cliente. La IA quedó en pausa.'
+        : reason === 'stuck_loop'
+          ? '⚠️ Escalación automática: el cliente llevaba varios turnos sin avanzar; se ofreció asesor humano. Revisar y contactar. La IA quedó en pausa.'
+          : reason === 'pets_exceed_limit'
+            ? '🐾 El cliente declaró más de 3 mascotas. Evaluar condiciones especiales (aseo extra, fincas con espacio, depósito ajustado). La IA quedó en pausa.'
+            : reason === 'catalog_no_results'
+              ? '🚨 Catálogo vacío para los filtros del cliente. Revisar requisitos (cupo / evento / zona) y proponer opciones manualmente. La IA quedó en pausa.'
+              : reason === 'event_after_catalog'
+                ? '🎉 Evento confirmado: cliente recibió el catálogo. Confirmar precio y condiciones del evento (logística + capacidad). La IA quedó en pausa.'
+                : reason === 'media_post_catalog'
+                  ? '📎 Cliente envió archivo/foto en fase post-catálogo. Revisar (cédula, comprobante, doc). La IA quedó en pausa.'
+                  : reason === 'client_requested'
+                    ? '📣 El cliente pidió hablar con un asesor. Revisar conversación y contactar. La IA quedó en pausa.'
+                    : reason === 'stage1_catalog_pick'
+                      ? '🏡 Etapa 1 — el cliente eligió una finca del catálogo. Validar disponibilidad y ampliar información. La IA quedó en pausa.'
+                      : 'ℹ️ Conversación pasada a asesor humano. La IA quedó en pausa.';
     await ctx.runMutation(deps.internal.messages.insertSystemMessage, {
       conversationId,
       content: alertBody,
       createdAt: alertCreatedAt,
       metadata: {
-        kind: "inbox_escalation_alert",
-        escalationReason: reason ?? "generic",
+        kind: 'inbox_escalation_alert',
+        escalationReason: reason ?? 'generic',
       },
     });
   }
@@ -3135,7 +3168,7 @@ export async function processInboundMessageV2(
   // catalog_no_results, contract_question, event_after_catalog, etc.) hacen
   // `return` antes de llegar acá, así que NO se duplica la escalación.
   if (
-    action.type !== "escalate_human" &&
+    action.type !== 'escalate_human' &&
     result.replyText &&
     botPromisedHandoff(result.replyText)
   ) {
@@ -3147,14 +3180,16 @@ export async function processInboundMessageV2(
     await ctx.runMutation(deps.internal.messages.insertSystemMessage, {
       conversationId,
       content:
-        "🤖→👤 La IA prometió pasar al cliente con un asesor en su respuesta. Escalación automática para honrar la promesa — revisar conversación y contactar. La IA quedó en pausa.",
+        '🤖→👤 La IA prometió pasar al cliente con un asesor en su respuesta. Escalación automática para honrar la promesa — revisar conversación y contactar. La IA quedó en pausa.',
       createdAt: Date.now(),
       metadata: {
-        kind: "inbox_escalation_alert",
-        escalationReason: "bot_promised_handoff",
+        kind: 'inbox_escalation_alert',
+        escalationReason: 'bot_promised_handoff',
       },
     });
   }
 
-  await ctx.runMutation(deps.internal.conversations.updateLastMessageAt, { conversationId });
+  await ctx.runMutation(deps.internal.conversations.updateLastMessageAt, {
+    conversationId,
+  });
 }

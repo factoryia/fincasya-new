@@ -35,3 +35,6 @@ export const CATALOG_SEND_BATCH_WINDOW_MS =
  * WhatsApp (el cliente está acostumbrado a un "escribiendo…").
  */
 export const INBOUND_DEBOUNCE_MS = 7000;
+
+/** Ventana para continuidad de asesor: mensajes humanos recientes en inbox. */
+export const ADVISOR_ACTIVITY_WINDOW_MS = 48 * 60 * 60 * 1000;

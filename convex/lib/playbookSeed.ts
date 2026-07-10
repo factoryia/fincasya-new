@@ -1,37 +1,6 @@
-/**
- * PLAYBOOK DE TONO — ejemplos few-shot para que el bot hable como el equipo.
- * ---------------------------------------------------------------------------
- * Estos ejemplos se siembran en el RAG (namespace "playbook") y se recuperan en
- * tiempo real según el mensaje del cliente + la fase del FSM. Se inyectan en el
- * system prompt del LLM como referencia de ESTILO (ver `buildContextSystemPrompt`).
- *
- * QUÉ enseñan: el TONO, el registro y la calidez con que responde el equipo.
- * QUÉ NO enseñan (y por qué): NO datos duros (precios, direcciones, cupos) — esos
- *   vienen del catálogo / FAQ / cotización y no deben quemarse aquí porque cambian
- *   y el bot los repetiría con autoridad (alucinación). NO controlan el flujo —
- *   el FSM decide las transiciones; estos ejemplos solo colorean el fraseo.
- *
- * REGLAS DE CURACIÓN (respetar al añadir ejemplos reales del equipo):
- *   1. Anonimizar SIEMPRE: nada de teléfonos, cédulas, nombres reales, direcciones.
- *   2. Sin cifras concretas de precio/abono en la respuesta modelo.
- *   3. NUNCA la frase "un asesor te <verbo>" (el detector `botPromisedHandoff`
- *      la interpreta como promesa de handoff y ESCALA). Usa 1ª persona.
- *   4. Etiquetar la `phase` correcta — solo se recuperan ejemplos de la MISMA
- *      fase del cliente (o "any"), para no contaminar el flujo.
- *
- * Es la SEMILLA inicial (prototipo). Se amplía/reemplaza con chats reales curados
- * por el equipo. Tras editar: `bunx convex run playbook:seedFromCode`.
- */
 
-/**
- * Namespace del "playbook" de TONO en el RAG. Vive aquí (archivo sin deps) para
- * que tanto `knowledge.ts` (búsqueda del bot) como `playbook.ts` (CRUD admin) lo
- * importen sin crear ciclos.
- */
 export const PLAYBOOK_NAMESPACE = "playbook";
 
-/** Fases del FSM del bot + "any" (aplica en cualquier fase). Igual a `BotPhase`
- *  pero declarado local para no acoplar la semilla al módulo del bot. */
 export type PlaybookPhase =
   | "welcome"
   | "collecting"
