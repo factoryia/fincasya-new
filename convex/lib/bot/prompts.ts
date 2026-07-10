@@ -26,6 +26,35 @@ export function missingFieldsBundle(e: BotEntities): string | null {
   return `Para mostrarte las mejores opciones me faltan algunos datos 😊\n\n${missing.map((m) => `• ${m}`).join("\n")}`;
 }
 
+/**
+ * Lista LEGIBLE (frases naturales) de los datos que aún faltan. La usa el LLM
+ * para pedir esos datos con el TONO del equipo (en vez del bloque estático de
+ * viñetas). El FSM sigue decidiendo QUÉ falta; esto solo describe los campos.
+ */
+export function missingFieldsHuman(e: BotEntities): string[] {
+  const out: string[] = [];
+  if (!e.location)
+    out.push(
+      "a qué municipio o zona quieren ir (o si prefieren que tú les recomiendes)",
+    );
+  if (!e.checkIn || !e.checkOut) out.push("las fechas de entrada y salida");
+  if (e.cupo === undefined || e.cupo <= 0)
+    out.push("cuántas personas van en total (los niños desde 2 años cuentan)");
+  if (!normalizePlanType(e.planType))
+    out.push("si el plan es familiar, con amigos o empresarial");
+  if (e.isEvento === undefined)
+    out.push("si es solo descanso o si habrá un evento o celebración");
+  if (e.isEvento === true) {
+    if (e.eventPeopleCount === undefined || e.eventPeopleCount <= 0)
+      out.push("cuántas personas van al evento (dormir + pasadía)");
+    if (!e.eventLogistics)
+      out.push(
+        "la logística del evento (sonido/DJ, banda en vivo, o solo el sonido básico de la finca)",
+      );
+  }
+  return out;
+}
+
 /** Lista keys de los campos del catálogo que aún faltan, en orden. */
 function listMissingCatalogFields(e: BotEntities): Array<keyof BotEntities> {
   const out: Array<keyof BotEntities> = [];
@@ -269,8 +298,8 @@ export function followUpCatalogSentVagueMessage(): string {
 // ─────────────────────────────────────────────────────────────────────────────
 
 export const IDENTITY = `
-Eres Hernán, asesor comercial de FincasYa.com — plataforma de alquiler de fincas y casas campestres en Colombia.
-Tono: cercano, cálido y empático, como un asesor humano de confianza. Nunca robótico ni frío.
+Eres Hernán, experto comercial de FincasYa.com — plataforma de alquiler de fincas y casas campestres en Colombia.
+Tono: cercano, cálido y empático, como un experto humano de confianza. Nunca robótico ni frío.
 Idioma: español colombiano.
 Antes de dar una política o restricción, reconoce brevemente lo que el cliente expresó o su situación.
 Si hay una limitación, explícala con empatía y ofrece alternativa cuando exista.
@@ -282,7 +311,7 @@ Nunca inventes precios ni información técnica que no tengas en el contexto.
 export const IDENTITY_WEB = `
 Eres el asistente virtual de FincasYa.com — plataforma de alquiler de fincas y casas campestres en Colombia.
 NO te presentes con un nombre de persona (no eres "Hernán"); eres el asistente virtual del sitio.
-Tono: cercano, cálido y empático, como un asesor humano de confianza. Nunca robótico ni frío.
+Tono: cercano, cálido y empático, como un experto humano de confianza. Nunca robótico ni frío.
 Idioma: español colombiano.
 Antes de dar una política o restricción, reconoce brevemente lo que el cliente expresó o su situación.
 Si hay una limitación, explícala con empatía y ofrece alternativa cuando exista.
@@ -306,12 +335,13 @@ REGLAS GLOBALES:
 - Si el cliente pregunta algo fuera de tema (fútbol, política, etc.), redirige amablemente.
 - Nunca muestres JSON, IDs internos, ni términos técnicos al cliente.
 - Usa emojis con moderación (1-2 por mensaje como máximo).
+- El equipo de FincasYa son EXPERTOS, no "asesores". NUNCA uses la palabra "asesor" con el cliente: di "experto", "nuestro equipo de expertos" o "el equipo".
 `.trim();
 
 /**
  * Conocimiento canónico sobre mascotas (política, cargos y reglas de convivencia).
  * Es info verificada — el bot SÍ puede responder con esto cuando el cliente pregunte
- * (no debe decir "déjame confirmarlo con un asesor" para temas listados aquí).
+ * (no debe decir "déjame confirmarlo con un experto" para temas listados aquí).
  *
  * Source: copy oficial validado por Santiago/FincasYa (2026-05-08).
  */
@@ -339,7 +369,7 @@ INSTRUCCIONES PARA EL ASISTENTE AL HABLAR DE MASCOTAS:
   responde con la regla concreta de arriba — NO digas "déjame confirmarlo".
 - Si pregunta cuánto cuesta, cita los valores exactos. NO redondees ni inventes.
 - Si pregunta algo NO listado (tamaño máximo, raza específica, paseo, comida, etc.),
-  ahí sí responde "Déjame confirmarlo con un asesor para no darte un dato incorrecto."
+  ahí sí responde "Déjame confirmarlo con un experto para no darte un dato incorrecto."
 - Sé breve: 2-3 líneas con los datos pertinentes y luego retoma el siguiente paso del flujo.
 `.trim();
 
@@ -349,12 +379,12 @@ INSTRUCCIONES PARA EL ASISTENTE AL HABLAR DE MASCOTAS:
  */
 export const ANTI_HALLUCINATION_RULES = `
 REGLAS ANTI-INVENCIÓN (CRÍTICAS):
-- NO inventes precios. Solo cita precios que aparecen explícitos en este contexto. NO calcules abonos / porcentajes / cuotas inventadas (ej. "50% del total = $X"); si el cliente pregunta cómo se paga, di literalmente: "Déjame confirmarlo con un asesor para no darte un dato incorrecto." Sin hacer cálculos.
+- NO inventes precios. Solo cita precios que aparecen explícitos en este contexto. NO calcules abonos / porcentajes / cuotas inventadas (ej. "50% del total = $X"); si el cliente pregunta cómo se paga, di literalmente: "Déjame confirmarlo con un experto para no darte un dato incorrecto." Sin hacer cálculos.
 - NO inventes ubicación exacta de la finca. Solo confirma municipio. La dirección exacta se entrega después de firmar contrato y abonar 50%.
 - NO prometas servicios (jacuzzi, BBQ, internet, transporte, parqueadero, etc.) si no aparecen explícitamente en este contexto.
 - NO inventes capacidad, número de habitaciones, baños, ni cualquier detalle de la finca que no esté listado abajo.
 - NO listes ni numeres fincas usando nombres genéricos como "Finca A", "Finca B", "Opción 1", "Opción 2", etc. Las fichas reales del catálogo viajan por WhatsApp como tarjetas interactivas — el cliente las ve aparte. JAMÁS escribas una lista enumerada de fincas en texto.
-- Si el cliente pregunta algo cuya respuesta NO está en este contexto, responde literalmente: "Déjame confirmarlo con un asesor para darte el dato correcto, un momento por favor 🤝" y NADA más. El sistema se encarga de pasar la conversación al asesor automáticamente; NO sigas con el flujo después de esa frase, porque la conversación queda en humano y agregar más texto confunde al cliente.
+- Si el cliente pregunta algo cuya respuesta NO está en este contexto, responde literalmente: "Déjame confirmarlo con un experto para darte el dato correcto, un momento por favor 🤝" y NADA más. El sistema se encarga de pasar la conversación al experto automáticamente; NO sigas con el flujo después de esa frase, porque la conversación queda en humano y agregar más texto confunde al cliente.
 - NO reenvíes bloques largos que ya enviamos en mensajes anteriores. Si el cliente solo saluda o no responde el dato pedido, reformula brevemente la pregunta puntual del dato que falta — máximo 2 líneas.
 - NO digas "un momento", "déjame revisar", "te respondo en breve", "voy a procesar". El bot solo responde cuando el cliente escribe; si dices que harás algo después, el cliente queda esperando.
 - NO prometas enviar nada (catálogo, contrato, fotos) más tarde. Si lo necesitas ahora, pídelo en el mismo mensaje.
@@ -446,7 +476,7 @@ function nextStepHint(phase: BotPhase, e: BotEntities): string {
     if (missing.length === 0) return "Datos completos: el contrato está listo para procesar.";
     return `Faltan estos datos del contrato: ${missing.join(", ")}.`;
   }
-  if (phase === "done") return "Reserva en proceso, escalada a un asesor humano.";
+  if (phase === "done") return "Reserva en proceso, escalada a un experto humano.";
   return "";
 }
 
@@ -461,7 +491,7 @@ const PHASE_GOAL: Record<BotPhase, string> = {
   quote_shown:
     "Se mostró el resumen con el total; esperar confirmación del cliente para pedir los datos del contrato.",
   contract: "Recolectar nombre, cédula, correo, teléfono y dirección para el contrato.",
-  done: "Cliente entregó datos del contrato; esperando que un asesor humano lo contacte.",
+  done: "Cliente entregó datos del contrato; esperando que un experto humano lo contacte.",
 };
 
 export interface ContextSystemPromptOpts {
@@ -485,6 +515,13 @@ export interface ContextSystemPromptOpts {
    * flujo por lo que digan.
    */
   playbookContext?: string | null;
+  /**
+   * Datos que aún faltan (frases legibles de `missingFieldsHuman`). Cuando
+   * vienen, el system prompt le pide al LLM que PIDA esos datos con el tono del
+   * equipo (en 1-2 frases naturales, NO como lista de viñetas). El FSM ya
+   * decidió QUÉ falta; el LLM solo redacta el CÓMO.
+   */
+  collectingAsk?: string[] | null;
   /**
    * Etiquetas de negocio activas en el contacto. Cuando vienen, el system
    * prompt añade una sección "ETIQUETAS ACTIVAS" con instrucciones de tono
@@ -590,6 +627,25 @@ export function buildContextSystemPrompt(
     );
   }
 
+  // PEDIR DATOS FALTANTES CON TONO: el FSM ya decidió QUÉ falta; aquí el LLM
+  // redacta el CÓMO (cálido, sin viñetas). Reemplaza el bloque estático de
+  // viñetas cuando el bot debe pedir datos en la fase de recolección.
+  if (opts.collectingAsk && opts.collectingAsk.length > 0) {
+    sections.push(
+      "",
+      "TU TAREA ESTE TURNO — PEDIR LOS DATOS QUE FALTAN, con el tono cálido del equipo.",
+      "Datos que aún faltan para poder mostrarle opciones al cliente: " +
+        opts.collectingAsk.join("; ") +
+        ".",
+      "FORMATO (es WhatsApp — hazlo fácil de leer, NO un párrafo corrido):",
+      "- Abre con un saludo o reconocimiento cálido y breve (1 línea).",
+      "- Luego pide cada dato en su PROPIA LÍNEA (con salto de línea real), empezando cada una con un emoji relevante: 📍 para municipio/zona, 📅 para fechas, 👥 para personas, 🏡 para el tipo de plan (familiar/amigos/empresarial), 🎉 para si hay evento.",
+      "- Que suene natural y humano, imitando el tono de los ejemplos de arriba si los hay. NO uses viñetas con '•', NO numeres (1. 2. 3.), NO enumeres fincas.",
+      "- Cierra con 1 línea corta invitándolo a contarte.",
+      "- NO inventes datos ni des precios. NO vuelvas a pedir datos que ya conoces (ver el resumen de arriba).",
+    );
+  }
+
   // ETIQUETAS ACTIVAS DEL CONTACTO — ajustan tono / paciencia / presión de
   // cierre. Las etiquetas que implican handoff duro (cliente-grosero,
   // propietario, reserva-activa) ya las gestionó `inbound.ts`, por eso aquí
@@ -635,8 +691,8 @@ export function buildContextSystemPrompt(
     "- Cierra recordando brevemente el siguiente paso del proceso (lo de SIGUIENTE PASO de arriba), en una sola frase corta.",
     "- Máximo 3-4 líneas. Tono natural, cordial y profesional — no plantilla fría.",
     "- Si el cliente saluda o repite algo, NO reenvíes los bloques largos que ya enviamos antes; solo recuerda el siguiente paso de forma breve.",
-    "- Si ya informaste que un asesor atenderá o continuará el proceso, NO repitas esa idea en turnos siguientes; avanza con el flujo o responde solo lo que preguntó.",
-    "- NUNCA uses frases como \"aquí estoy para acompañarte mientras tu asesor retoma\" ni variantes si ya enviaste un acuse de espera en esta conversación.",
+    "- Si ya informaste que un experto atenderá o continuará el proceso, NO repitas esa idea en turnos siguientes; avanza con el flujo o responde solo lo que preguntó.",
+    "- NUNCA uses frases como \"aquí estoy para acompañarte mientras tu experto retoma\" ni variantes si ya enviaste un acuse de espera en esta conversación.",
     "- Si el cliente está molesto o dice que no entendiste, reconoce su molestia con empatía antes de continuar.",
     "- NUNCA repitas textualmente un mensaje que ya enviaste en los últimos turnos; reformula con tus palabras.",
   );
@@ -654,7 +710,7 @@ export function buildContextSystemPrompt(
 
   if (stuck) {
     sections.push(
-      "- ⚠️ El cliente lleva varios turnos sin avanzar. Sé MUY breve, pregunta solo el dato puntual que falta y, si no lo da en el siguiente turno, ofrece pasarlo con un asesor humano.",
+      "- ⚠️ El cliente lleva varios turnos sin avanzar. Sé MUY breve, pregunta solo el dato puntual que falta y, si no lo da en el siguiente turno, ofrece pasarlo con un experto humano.",
     );
   }
 
@@ -663,22 +719,22 @@ export function buildContextSystemPrompt(
 
 /** Mensaje cuando se detecta bucle de repetición y se ofrece humano. */
 export const LOOP_OFFER_HUMAN_MESSAGE =
-  `Veo que estamos dando vueltas 🙏 ¿Prefieres que te conecte con un asesor humano para terminar esto más rápido? Solo responde *sí* y te paso con alguien del equipo ✨`;
+  `Veo que estamos dando vueltas 🙏 ¿Prefieres que te conecte con un experto humano para terminar esto más rápido? Solo responde *sí* y te paso con alguien del equipo ✨`;
 
 /**
  * Mensaje cuando el cliente declara más mascotas de las que el bot maneja
  * automáticamente (ver `MAX_PETS_AUTO_HANDLING` en `entities.ts`). El bot NO
- * calcula costo ni avanza al contrato: deja que un asesor evalúe condiciones
+ * calcula costo ni avanza al contrato: deja que un experto evalúe condiciones
  * especiales (aseo extra, finca con espacio suficiente, depósito ajustado).
  */
 export function petsExceedLimitMessage(petCount: number): string {
   const n = Math.max(0, Math.floor(petCount));
   return [
-    `Para *${n} mascota${n === 1 ? "" : "s"}* necesito que un asesor te confirme las condiciones especiales 🤝`,
+    `Para *${n} mascota${n === 1 ? "" : "s"}* necesito que un experto te confirme las condiciones especiales 🤝`,
     "",
     "Nuestro bot maneja hasta *3 mascotas* automáticamente. Para grupos más grandes evaluamos caso por caso: aseo extra, disponibilidad de fincas con espacio suficiente, depósito ajustado, etc.",
     "",
-    "Un asesor te escribirá en breve para terminar tu reserva ✨",
+    "Un experto te escribirá en breve para terminar tu reserva ✨",
   ].join("\n");
 }
 

@@ -16,6 +16,10 @@ import {
 } from "./lib/ycloud/senders";
 import { CATALOG_SEND_BATCH_WINDOW_MS } from "./lib/ycloud/constants";
 import {
+  isAutomatedGreetingTemplate,
+  AUTO_TEMPLATE_METADATA_SOURCE,
+} from "./lib/ycloud/autoTemplate";
+import {
   buildSendComponents,
   getTemplateDef,
 } from "./lib/ycloud/templateCatalog";
@@ -440,7 +444,16 @@ export const recordOutboundFromWebhook = internalMutation({
     }
 
     const mt = args.messageType as YcloudMessageMediaType;
-    const metadata = { ...OUTBOUND_WEBHOOK_METADATA };
+    // La plantilla de saludo AUTOMÁTICA (WhatsApp Business/YCloud) NO es un
+    // asesor humano: se registra con otra `source` y NO marca la conversación
+    // como humana (si no, bloqueaba al bot).
+    const isAutoTemplate =
+      mt === "text" && isAutomatedGreetingTemplate(content);
+    const metadata = {
+      source: isAutoTemplate
+        ? AUTO_TEMPLATE_METADATA_SOURCE
+        : OUTBOUND_WEBHOOK_METADATA.source,
+    };
 
     if (mt === "text") {
       await ctx.runMutation(internal.messages.insertAssistantMessage, {
@@ -467,8 +480,11 @@ export const recordOutboundFromWebhook = internalMutation({
     await ctx.runMutation(internal.conversations.updateLastMessageAt, {
       conversationId,
     });
-    // Eco de celular / YCloud dashboard: siempre humano (nunca bot_automation).
-    await ctx.runMutation(internal.ycloud.markOutboundAsHuman, { phone });
+    // Eco de celular / YCloud dashboard: siempre humano (nunca bot_automation),
+    // EXCEPTO la plantilla de saludo automática (que no es un asesor).
+    if (!isAutoTemplate) {
+      await ctx.runMutation(internal.ycloud.markOutboundAsHuman, { phone });
+    }
     return { ok: true as const };
   },
 });
@@ -640,6 +656,8 @@ export const sendWhatsAppCatalogList = internalAction({
     catalogId: v.optional(v.string()),
     wamid: v.optional(v.string()),
     conversationId: v.optional(v.id("conversations")),
+    /** Sobrescribe el límite por defecto (12). Usar en envíos manuales del asesor. */
+    limit: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
     const rows = await sendCatalogToYcloud({

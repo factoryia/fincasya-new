@@ -1,6 +1,7 @@
 import { v } from "convex/values";
 import { internalMutation, internalQuery, mutation, query } from "./_generated/server";
 import { internal } from "./_generated/api";
+import { isAutomatedGreetingTemplate } from "./lib/ycloud/autoTemplate";
 
 const whatsappStatusValidator = v.union(
   v.literal("failed"),
@@ -378,6 +379,9 @@ export const hasRecentHumanAdvisorMessages = internalQuery({
       .take(80);
     for (const m of rows) {
       if (m.sender !== "assistant" || m.deletedAt != null) continue;
+      // La plantilla de saludo AUTOMÁTICA no es un asesor humano — no bloquea el
+      // bot (arregla también las que quedaron registradas antes del fix).
+      if (isAutomatedGreetingTemplate(String(m.content ?? ""))) continue;
       if (m.sentByUserId != null) return true;
       const meta = m.metadata as { source?: string } | undefined;
       if (meta?.source === "ycloud_outbound_webhook") return true;

@@ -6,8 +6,10 @@ type PlatformSettingsRow = {
   aiEnabled?: boolean;
   webAiEnabled?: boolean;
   whatsappAiEnabled?: boolean;
-  /** Si true, el bot solo responde conversaciones NUEVAS (no las antiguas). */
+  /** Legacy boolean (compat). El corte real es `botOnlyNewConversationsSince`. */
   botOnlyNewConversations?: boolean;
+  /** Corte por fecha (ms): el bot solo atiende conversaciones creadas desde aquí. */
+  botOnlyNewConversationsSince?: number;
   updatedAt?: number;
   updatedByUserId?: string;
 };
@@ -51,4 +53,12 @@ export async function isChannelAiEnabled(
 
 export function defaultConversationStatus(aiEnabled: boolean): 'ai' | 'human' {
   return aiEnabled ? 'ai' : 'human';
+}
+
+/** ¿Está activo el corte "solo conversaciones nuevas"? (hay un timestamp). */
+export async function isBotOnlyNewConversationsActive(ctx: {
+  db: any;
+}): Promise<boolean> {
+  const row = await getPlatformSettingsRow(ctx);
+  return typeof row?.botOnlyNewConversationsSince === 'number';
 }

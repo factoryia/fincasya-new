@@ -336,6 +336,8 @@ export const sendMessage = action({
           bodyText: resolved[0]?.bodyText,
           catalogId: waCatalog?.whatsappCatalogId,
           conversationId: args.conversationId,
+          // Envío manual del asesor: respetar la selección completa sin cortar a 12.
+          ...(args.sentByUserId ? { limit: productRetailerIds.length } : {}),
         });
       }
 

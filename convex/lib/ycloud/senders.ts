@@ -363,7 +363,8 @@ const BODY_WHEN_QUOTE_MISSING = "Aquí va otra opción 🏡";
 
 /**
  * Envía **una tarjeta de producto por finca** (interactive type `product`), no `product_list`.
- * Máximo `MAX_CATALOG_PRODUCTS_PER_SEND` por llamada para alinear con la política comercial.
+ * Por defecto limita a `MAX_CATALOG_PRODUCTS_PER_SEND` para envíos automáticos del bot.
+ * Pasa `limit` explícito para envíos manuales del asesor (ej. el total seleccionado).
  */
 export async function sendCatalogToYcloud(args: {
   to: string;
@@ -373,9 +374,11 @@ export async function sendCatalogToYcloud(args: {
   bodyText?: string;
   catalogId?: string;
   wamid?: string;
+  /** Máximo de fichas a enviar. Por defecto MAX_CATALOG_PRODUCTS_PER_SEND (12). */
+  limit?: number;
   onProductSent?: (row: CatalogOutboundSendRow) => void | Promise<void>;
 }): Promise<CatalogOutboundSendRow[]> {
-  const ids = args.productRetailerIds.slice(0, MAX_CATALOG_PRODUCTS_PER_SEND);
+  const ids = args.productRetailerIds.slice(0, args.limit ?? MAX_CATALOG_PRODUCTS_PER_SEND);
   if (ids.length === 0) return [];
 
   const { apiKey, wabaNumber } = requireYcloudEnv();

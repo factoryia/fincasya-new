@@ -593,9 +593,9 @@ function extractQuestionLinesArray(text: string): string[] {
 }
 
 /**
- * Frases del bot que PROMETEN pasar al cliente con un asesor. La IA, cuando
+ * Frases del bot que PROMETEN pasar al cliente con un experto. La IA, cuando
  * no sabe una respuesta o ante frustración, naturalmente dice "te conecto con
- * un asesor" / "déjame confirmarlo con un asesor" / "un asesor te contacta en
+ * un asesor" / "déjame confirmarlo con un experto" / "un experto te contacta en
  * breve" — pero si el FSM no devolvió la acción `escalate_human`, el sistema
  * antes seguía con el bot encendido y el cliente esperaba a un asesor que
  * NUNCA llegaba (bug reportado por Adriana: *"el bot avisa que va a pasar a
@@ -609,18 +609,18 @@ function extractQuestionLinesArray(text: string): string[] {
  * mensajes también matcheen.
  */
 const HANDOFF_REGEXES: RegExp[] = [
-  // "te conecto/paso/comunico (con) asesor/agente/humano/equipo"
-  /\bte\s+(?:conecto|paso|comunico|conectare|pasare|comunicare)\s+(?:con\s+)?(?:un|el|nuestro)?\s*(?:asesor|agente|humano|equipo)\b/i,
-  // "dejame / voy a / te  confirmar(lo|la) con (un) asesor"
-  /\b(?:dejame|voy\s+a|te)\s+confirma\w*\s+con\s+(?:un|el|nuestro)?\s*asesor\b/i,
-  // "un asesor/agente (humano) te <verbo conjugado>"
-  /\bun[oa]?\s+(?:asesor|agente)\s+(?:humano\s+)?te\s+(?:va\s+a\s+|puede\s+|podria\s+)?(?:responde\w*|contacta\w*|ayuda\w*|escrib\w*|atend\w*|atiend\w*|llama\w*|comunicar\w*|verifica\w*|confirma\w*|gestion\w*)\b/i,
+  // "te conecto/paso/comunico (con) asesor/experto/agente/humano/equipo"
+  /\bte\s+(?:conecto|paso|comunico|conectare|pasare|comunicare)\s+(?:con\s+)?(?:un|el|nuestro)?\s*(?:asesor|experto|experta|agente|humano|equipo)\b/i,
+  // "dejame / voy a / te  confirmar(lo|la) con (un) asesor/experto"
+  /\b(?:dejame|voy\s+a|te)\s+confirma\w*\s+con\s+(?:un|el|nuestro)?\s*(?:asesor|experto|experta)\b/i,
+  // "un asesor/experto/agente (humano) te <verbo conjugado>"
+  /\bun[oa]?\s+(?:asesor|experto|experta|agente)\s+(?:humano\s+)?te\s+(?:va\s+a\s+|puede\s+|podria\s+)?(?:responde\w*|contacta\w*|ayuda\w*|escrib\w*|atend\w*|atiend\w*|llama\w*|comunicar\w*|verifica\w*|confirma\w*|gestion\w*)\b/i,
   // "voy a conectarte/pasarte/comunicarte/escalar..."
   /\bvoy\s+a\s+(?:conectarte|pasarte|comunicarte|escalar\w*)\b/i,
-  // "me comunico con (un) asesor"
-  /\bme\s+comunico\s+con\s+(?:un|el)?\s*asesor\b/i,
-  // "escalar a/con (un) asesor"
-  /\bescalar\s+(?:a|con)\s+(?:un\s+)?asesor\b/i,
+  // "me comunico con (un) asesor/experto"
+  /\bme\s+comunico\s+con\s+(?:un|el)?\s*(?:asesor|experto|experta)\b/i,
+  // "escalar a/con (un) asesor/experto"
+  /\bescalar\s+(?:a|con)\s+(?:un\s+)?(?:asesor|experto|experta)\b/i,
 ];
 
 function botPromisedHandoff(text: string): boolean {
@@ -1070,10 +1070,10 @@ export async function processInboundMessageV2(
     });
     const handoffMsg =
       hardEscalateTag === 'cliente-grosero'
-        ? 'Te conecto con un asesor para atenderte personalmente. Te escribirá en breve 🤝'
+        ? 'Te conecto con un experto para atenderte personalmente. Te escribirá en breve 🤝'
         : hardEscalateTag === 'propietario'
-          ? '¡Hola! 👋 Te conecto con el equipo administrativo para atenderte — un asesor te escribe en breve 🤝'
-          : '¡Hola! 👋 Veo que ya tienes una reserva con nosotros. Te conecto con un asesor para atenderte con prioridad 🤝';
+          ? '¡Hola! 👋 Te conecto con nuestro equipo de expertos para atenderte — un experto te escribe en breve 🤝'
+          : '¡Hola! 👋 Veo que ya tienes una reserva con nosotros. Te conecto con un experto para atenderte con prioridad 🤝';
     await ctx.runMutation(deps.internal.messages.insertAssistantMessage, {
       conversationId,
       content: handoffMsg,
@@ -1120,14 +1120,24 @@ export async function processInboundMessageV2(
     return;
   }
 
-  // "Solo conversaciones nuevas": el bot NO responde chats antiguos. Aviso en
-  // inbox (sin etiqueta visible) para que el equipo retome manualmente.
-  if (!retryMode && !isNewConversation && conv) {
-    const botOnlyNew = (await ctx.runQuery(
-      deps.internal.platformSettings.isBotOnlyNewConversationsInternal,
+  // "Solo conversaciones nuevas" (CORTE POR FECHA): el bot NO responde chats
+  // creados ANTES del corte configurado (backlog viejo). Las conversaciones
+  // creadas desde que se activó el flag funcionan normal — incluso sus mensajes
+  // posteriores. Aviso en inbox para que el equipo retome manualmente.
+  // `retryMode` (retry manual del asesor) siempre pasa.
+  if (!retryMode && conv) {
+    const botOnlyNewSince = (await ctx.runQuery(
+      deps.internal.platformSettings.getBotOnlyNewConversationsCutoffInternal,
       {},
-    )) as boolean;
-    if (botOnlyNew) {
+    )) as number | null;
+    const convCreatedAt = Number(
+      (conv as { createdAt?: number } | null)?.createdAt ?? 0,
+    );
+    if (
+      botOnlyNewSince != null &&
+      convCreatedAt > 0 &&
+      convCreatedAt < botOnlyNewSince
+    ) {
       await ctx.runMutation(deps.internal.conversations.flagPriorityAlert, {
         conversationId,
         alertReason: 'bot_only_new_silence',
@@ -1172,13 +1182,12 @@ export async function processInboundMessageV2(
     }
   }
 
+  // El STATUS de la conversación es la fuente de verdad: si está en 'ai' (un
+  // admin la puso en "Bot", o arrancó en IA), el bot responde — AUNQUE el switch
+  // GLOBAL de IA de WhatsApp esté apagado. El global solo define el DEFAULT de
+  // las conversaciones NUEVAS y el apagado en masa (que voltea todas a 'human');
+  // NO debe bloquear una conversación que un asesor activó a mano.
   if (!conv || conv.status !== 'ai') return;
-
-  const channelAiEnabled = (await ctx.runQuery(
-    deps.internal.platformSettings.isChannelAiEnabledInternal,
-    { channel: conv.channel ?? 'whatsapp' },
-  )) as boolean;
-  if (!retryMode && !channelAiEnabled) return;
 
   if (!retryMode && !resumingFromHuman) {
     const manualResume = (await ctx.runMutation(
@@ -1230,7 +1239,7 @@ export async function processInboundMessageV2(
         process.env.CHATBOT_AUTO_ASSIGN_ADVISOR_ID?.trim() || undefined,
     });
     const handoffMsg =
-      '¡Hola! 👋 Veo que ya tienes una reserva con nosotros. Te conecto con un asesor para atenderte con prioridad — te escribirá en breve 🤝✨';
+      '¡Hola! 👋 Veo que ya tienes una reserva con nosotros. Te conecto con un experto para atenderte con prioridad — te escribirá en breve 🤝✨';
     await ctx.runMutation(deps.internal.messages.insertAssistantMessage, {
       conversationId,
       content: handoffMsg,
@@ -1329,7 +1338,7 @@ export async function processInboundMessageV2(
         process.env.CHATBOT_AUTO_ASSIGN_ADVISOR_ID?.trim() || undefined,
     });
     const handoffMsg =
-      'Recibí tu mensaje y ya alertamos a nuestro equipo de operaciones para atenderte de inmediato 🚨\n\nSi es una emergencia *médica o de seguridad*, por favor llama también al *123* (línea única nacional). Un asesor te contacta por aquí en minutos.';
+      'Recibí tu mensaje y ya alertamos a nuestro equipo de operaciones para atenderte de inmediato 🚨\n\nSi es una emergencia *médica o de seguridad*, por favor llama también al *123* (línea única nacional). Un experto te contacta por aquí en minutos.';
     await ctx.runMutation(deps.internal.messages.insertAssistantMessage, {
       conversationId,
       content: handoffMsg,
@@ -1580,7 +1589,7 @@ export async function processInboundMessageV2(
         process.env.CHATBOT_AUTO_ASSIGN_ADVISOR_ID?.trim() || undefined,
     });
     const handoffMsg =
-      '¡Hola! 👋 Veo que escribes como propietario. Te conecto con el equipo administrativo para atenderte directamente — un asesor te escribe en breve 🤝';
+      '¡Hola! 👋 Veo que escribes como propietario. Te conecto con nuestro equipo de expertos para atenderte directamente — un experto te escribe en breve 🤝';
     await ctx.runMutation(deps.internal.messages.insertAssistantMessage, {
       conversationId,
       content: handoffMsg,
@@ -1724,8 +1733,8 @@ export async function processInboundMessageV2(
         process.env.CHATBOT_AUTO_ASSIGN_ADVISOR_ID?.trim() || undefined,
     });
     const handoffMsg = looksLikeComplaint
-      ? 'Lamento la situación 🙏 Te conecto con un asesor para gestionar tu solicitud. Te escribirá en breve 🤝'
-      : 'Perfecto, te comunico con un asesor. Te escribirá en breve ✨';
+      ? 'Lamento la situación 🙏 Te conecto con un experto para gestionar tu solicitud. Te escribirá en breve 🤝'
+      : 'Perfecto, te comunico con un experto. Te escribirá en breve ✨';
     await ctx.runMutation(deps.internal.messages.insertAssistantMessage, {
       conversationId,
       content: handoffMsg,
@@ -1735,7 +1744,7 @@ export async function processInboundMessageV2(
       conversationId,
       content: looksLikeComplaint
         ? '🚨 El cliente pidió atención humana (posible PQRS o tema operativo). Revisar y contactar. La IA quedó en pausa.'
-        : '📣 El cliente pidió hablar con un asesor. Revisar conversación y contactar. La IA quedó en pausa.',
+        : '📣 El cliente pidió hablar con un experto. Revisar conversación y contactar. La IA quedó en pausa.',
       createdAt: t0 + 5,
       metadata: {
         kind: 'inbox_escalation_alert',
@@ -1846,7 +1855,7 @@ export async function processInboundMessageV2(
       '',
       'El *valor* del pasadía lo confirma directamente un asesor.',
       '',
-      '¿Quieres que te conecte con un asesor para coordinar tu *pasadía en Villavicencio*? 🤝',
+      '¿Quieres que te conecte con un experto para coordinar tu *pasadía en Villavicencio*? 🤝',
       '',
       'O si prefieres, te ayudo a *reservar una finca para hospedaje* (con noche) en la fecha y el lugar que quieras 🏡',
     ].join('\n');
@@ -1906,7 +1915,7 @@ export async function processInboundMessageV2(
       // valor del pasadía es manual, no está en el flujo automatizado).
       const tEsc = Date.now();
       const escMsg = [
-        '¡Listo! ☀️ Te conecto con un asesor que coordina la *disponibilidad* y el *valor* de tu pasadía en Villavicencio.',
+        '¡Listo! ☀️ Te conecto con un experto que coordina la *disponibilidad* y el *valor* de tu pasadía en Villavicencio.',
         '',
         'En breve te escribe para ayudarte 🤝 ✨',
       ].join('\n');
@@ -1979,7 +1988,7 @@ export async function processInboundMessageV2(
         const cedMsg = [
           '¡Recibí la foto de tu *cédula*! 📄✅',
           '',
-          'Con esto ya tengo todo para tu contrato. Te conecto con un asesor que lo genera y te lo envía para asegurar tu reserva 🤝 ✨',
+          'Con esto ya tengo todo para tu contrato. Te conecto con un experto que lo genera y te lo envía para asegurar tu reserva 🤝 ✨',
         ].join('\n');
         await ctx.runMutation(deps.internal.conversations.escalate, {
           conversationId,
@@ -2017,7 +2026,7 @@ export async function processInboundMessageV2(
         const cmpMsg = [
           '¡Recibí tu *comprobante de pago*! 💰',
           '',
-          'Te conecto con un asesor para verificarlo y confirmarte los siguientes pasos 🤝 ✨',
+          'Te conecto con un experto para verificarlo y confirmarte los siguientes pasos 🤝 ✨',
         ].join('\n');
         await ctx.runMutation(deps.internal.conversations.escalate, {
           conversationId,
@@ -2085,7 +2094,7 @@ export async function processInboundMessageV2(
         process.env.CHATBOT_AUTO_ASSIGN_ADVISOR_ID?.trim() || undefined,
     });
     const mediaHandoffMsg =
-      'Gracias por enviarnos el documento 📎 Te conecto con un asesor para revisarlo y confirmarte los siguientes pasos. Te escribirá en breve 🤝 ✨';
+      'Gracias por enviarnos el documento 📎 Te conecto con un experto para revisarlo y confirmarte los siguientes pasos. Te escribirá en breve 🤝 ✨';
     await ctx.runMutation(deps.internal.messages.insertAssistantMessage, {
       conversationId,
       content: mediaHandoffMsg,
@@ -2305,7 +2314,7 @@ export async function processInboundMessageV2(
     const cqMsg = [
       '¡Buena pregunta! 🙌',
       '',
-      'Te conecto con un asesor que te resuelve esa duda y te ayuda a finalizar tu reserva 🤝 ✨',
+      'Te conecto con un experto que te resuelve esa duda y te ayuda a finalizar tu reserva 🤝 ✨',
     ].join('\n');
     await ctx.runMutation(deps.internal.conversations.escalate, {
       conversationId,
@@ -3055,7 +3064,7 @@ export async function processInboundMessageV2(
           const eventHandoffMsg = [
             'Como es para *evento* 🎉, el precio final puede variar según la logística (sonido pro, banda, equipos).',
             '',
-            '👉 Mientras revisas las opciones, te conecto con un asesor para confirmarte *precios y disponibilidad* del evento. Te escribirá en breve 🤝 ✨',
+            '👉 Mientras revisas las opciones, te conecto con un experto para confirmarte *precios y disponibilidad* del evento. Te escribirá en breve 🤝 ✨',
           ].join('\n');
           await ctx.runMutation(deps.internal.conversations.escalate, {
             conversationId,
@@ -3115,9 +3124,9 @@ export async function processInboundMessageV2(
       const noResultsMsg = [
         'Por ahora no tengo opciones exactas para esos requisitos en el catálogo 🤔',
         '',
-        '*Te conecto con un asesor* para evaluar disponibilidad especial y opciones personalizadas según tus fechas y tipo de plan 🤝',
+        '*Te conecto con un experto* para evaluar disponibilidad especial y opciones personalizadas según tus fechas y tipo de plan 🤝',
         '',
-        'Un asesor te escribirá en breve para ayudarte ✨',
+        'un experto te escribirá en breve para ayudarte ✨',
       ].join('\n');
       await ctx.runMutation(deps.internal.conversations.escalate, {
         conversationId,
@@ -3177,7 +3186,7 @@ export async function processInboundMessageV2(
                 : reason === 'media_post_catalog'
                   ? '📎 Cliente envió archivo/foto en fase post-catálogo. Revisar (cédula, comprobante, doc). La IA quedó en pausa.'
                   : reason === 'client_requested'
-                    ? '📣 El cliente pidió hablar con un asesor. Revisar conversación y contactar. La IA quedó en pausa.'
+                    ? '📣 El cliente pidió hablar con un experto. Revisar conversación y contactar. La IA quedó en pausa.'
                     : reason === 'stage1_catalog_pick'
                       ? '🏡 Etapa 1 — el cliente eligió una finca del catálogo. Validar disponibilidad y ampliar información. La IA quedó en pausa.'
                       : 'ℹ️ Conversación pasada a asesor humano. La IA quedó en pausa.';
@@ -3194,7 +3203,7 @@ export async function processInboundMessageV2(
 
   // POST-PROCESADO de escalación implícita: la IA, cuando no sabe una
   // respuesta o ante frustración, naturalmente cae a frases tipo "te conecto
-  // con un asesor" / "déjame confirmarlo con un asesor" / "un asesor te
+  // con un experto" / "déjame confirmarlo con un experto" / "un experto te
   // contacta en breve". Si el FSM NO devolvió `escalate_human` (la mayoría de
   // los casos donde la IA hace esto vía `contextualLlmReply`), antes el
   // sistema seguía con el bot y el cliente quedaba esperando un asesor que
@@ -3217,7 +3226,7 @@ export async function processInboundMessageV2(
     await ctx.runMutation(deps.internal.messages.insertSystemMessage, {
       conversationId,
       content:
-        '🤖→👤 La IA prometió pasar al cliente con un asesor en su respuesta. Escalación automática para honrar la promesa — revisar conversación y contactar. La IA quedó en pausa.',
+        '🤖→👤 La IA prometió pasar al cliente con un experto en su respuesta. Escalación automática para honrar la promesa — revisar conversación y contactar. La IA quedó en pausa.',
       createdAt: Date.now(),
       metadata: {
         kind: 'inbox_escalation_alert',

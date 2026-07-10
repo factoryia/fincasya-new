@@ -134,7 +134,7 @@ export interface BotTurnInput {
    */
   channel?: "whatsapp" | "web";
   /**
-   * Conversación en curso (asesor humano o historial previo): no enviar
+   * Conversación en curso (experto humano o historial previo): no enviar
    * bienvenida genérica ni tratar como cliente nuevo.
    */
   resumeOngoingConversation?: boolean;
@@ -363,7 +363,7 @@ export async function runBotTurn(input: BotTurnInput): Promise<BotTurnResult> {
     extracted.checkOut = puenteRef.checkOut;
   }
 
-  // 1.4 Petición de asesor humano detectada por el LLM. El extractor clasifica
+  // 1.4 Petición de experto humano detectada por el LLM. El extractor clasifica
   // `requestsHumanAgent` analizando la intención real — más confiable que la
   // regex de `inbound.ts` (que es solo fast-path para casos obvios). Si el
   // LLM lo marca, escalamos a humano de inmediato. Esto cubre casos con
@@ -372,7 +372,7 @@ export async function runBotTurn(input: BotTurnInput): Promise<BotTurnResult> {
   if (extracted.requestsHumanAgent === true) {
     return {
       replyText:
-        "Perfecto, te comunico con un asesor 🤝 Te escribirá en breve para ayudarte ✨",
+        "Perfecto, te comunico con un experto 🤝 Te escribirá en breve para ayudarte ✨",
       action: { type: "escalate_human", reason: "client_requested" },
       nextPhase: currentPhase,
       updatedEntities: currentEntities,
@@ -563,7 +563,7 @@ export async function runBotTurn(input: BotTurnInput): Promise<BotTurnResult> {
   // (ej. heredada de ayer) el bot aceptaba el `selectedPropertyName` CRUDO sin
   // validar → un cliente podía "reservar" una finca con el Catálogo Meta
   // (WhatsApp) DESACTIVADO (`visibleInWhatsAppCatalog=false`) solo nombrándola.
-  // Ahora esa finca no resuelve → escala a un asesor. El guard
+  // Ahora esa finca no resuelve → escala a un experto. El guard
   // `!selectedPropertyRetailerId` evita re-resolver cuando ya hay finca elegida.
   let namedPropertyNotFound = false;
   if (
@@ -592,14 +592,14 @@ export async function runBotTurn(input: BotTurnInput): Promise<BotTurnResult> {
 
   // 2.65 El cliente nombró una finca puntual pero NO la pudimos ubicar (nombre
   // muy distinto / no está en catálogo). En vez de pedir municipio sin sentido
-  // (el cliente ya dijo qué finca quiere), escalamos a un asesor que la ubica.
+  // (el cliente ya dijo qué finca quiere), escalamos a un experto que la ubica.
   if (namedPropertyNotFound) {
     const fincaName = (updatedEntities.selectedPropertyName ?? "").trim();
     return {
       replyText: [
         `Veo que te interesa la finca *${fincaName}* 🏡`,
         "",
-        "Déjame conectarte con un asesor que la ubica y te confirma disponibilidad para tus fechas 🤝 ✨",
+        "Déjame conectarte con un experto que la ubica y te confirma disponibilidad para tus fechas 🤝 ✨",
       ].join("\n"),
       action: { type: "escalate_human", reason: "client_requested" },
       nextPhase: effectivePhase,
@@ -699,7 +699,7 @@ export async function runBotTurn(input: BotTurnInput): Promise<BotTurnResult> {
   // reseteaba cada turno y el anti-bucle nunca escalaba → el bot quedaba
   // pidiendo lo mismo para siempre (o peor, el LLM alucinaba un happy-path).
   // Con la excepción, el contador sube y tras 6 turnos atascado escala a un
-  // asesor humano que resuelve las fechas con el cliente.
+  // experto humano que resuelve las fechas con el cliente.
   const phaseChanged = tr.nextPhase !== effectivePhase;
   const dateHardBlock =
     tr.datesIncoherent === true ||
@@ -732,7 +732,7 @@ export async function runBotTurn(input: BotTurnInput): Promise<BotTurnResult> {
   }
 
   // 3.55 Política de mascotas: el bot maneja hasta MAX_PETS_AUTO_HANDLING (3)
-  // automáticamente. Si el cliente declara más, escalamos a un asesor humano
+  // automáticamente. Si el cliente declara más, escalamos a un experto humano
   // para que evalúe condiciones especiales (aseo extra, finca con espacio,
   // depósito ajustado). NO calculamos costo ni avanzamos al contrato — el
   // resumen automático con 30 mascotas no aplica.
@@ -755,7 +755,7 @@ export async function runBotTurn(input: BotTurnInput): Promise<BotTurnResult> {
   // logística pesada ("extra": DJ, banda en vivo, sonido pro, iluminación,
   // mariachis, grupos musicales, matrimonios, etc.). En esos casos el bot NO
   // calcula el sobreprecio del evento (depende de horario, capacidad de la
-  // fiesta, equipos extras, condiciones especiales) — el asesor es quien
+  // fiesta, equipos extras, condiciones especiales) — el experto es quien
   // confirma precio.
   //
   // En cambio, los eventos con logística "básica" (cumpleaños familiares,
@@ -786,9 +786,9 @@ export async function runBotTurn(input: BotTurnInput): Promise<BotTurnResult> {
   if (isPostCatalogEventReadyExtra) {
     return {
       replyText: [
-        "¡Perfecto! Con los datos del evento que me diste te conecto con un asesor para confirmarte el *precio final* y la *disponibilidad* del evento 🎉",
+        "¡Perfecto! Con los datos del evento que me diste te conecto con un experto para confirmarte el *precio final* y la *disponibilidad* del evento 🎉",
         "",
-        "Un asesor te escribirá en breve para finalizar los detalles 🤝 ✨",
+        "Un experto te escribirá en breve para finalizar los detalles 🤝 ✨",
       ].join("\n"),
       action: { type: "escalate_human", reason: "event_after_catalog" },
       nextPhase: effectivePhase,
@@ -808,7 +808,7 @@ export async function runBotTurn(input: BotTurnInput): Promise<BotTurnResult> {
   ) {
     return {
       replyText:
-        "Veo que llevamos varios mensajes sin avanzar 🙏 Te conecto con un asesor humano para que te termine de ayudar más rápido. En un momento te escribe ✨",
+        "Veo que llevamos varios mensajes sin avanzar 🙏 Te conecto con un experto humano para que te termine de ayudar más rápido. En un momento te escribe ✨",
       action: { type: "escalate_human", reason: "stuck_loop" },
       nextPhase: effectivePhase,
       updatedEntities,
@@ -826,7 +826,7 @@ export async function runBotTurn(input: BotTurnInput): Promise<BotTurnResult> {
   //     `pet_check` (sin mascotas) o desde `pet_rules_shown` (con mascotas).
   //     `replies.ts` arma el resumen con `buildSummaryWithTotals` usando los
   //     totals que cargamos acá. SIN esta carga, el resumen cae al fallback
-  //     "No pude calcular el valor automático... un asesor te confirma" — que
+  //     "No pude calcular el valor automático... un experto te confirma" — que
   //     es exactamente el bug reportado por la usuaria con MELGAR QUINTA
   //     TRAMONTINI: el bot pasó de pet_rules_shown a quote_shown pero NO
   //     había cotización cargada porque el trigger viejo solo miraba

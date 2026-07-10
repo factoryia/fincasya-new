@@ -1035,3 +1035,94 @@ export const retryBot = action({
     return { ok: true as const };
   },
 });
+
+/**
+ * DEV / TESTING: borra por completo la(s) conversación(es) de un número (o de
+ * una `conversationId` puntual) — mensajes + sesión del bot + la fila de
+ * conversación. Sirve para PROBAR el flag `botOnlyNewConversations`: tras
+ * correrlo, el próximo mensaje de ese número crea una conversación NUEVA
+ * (isNew=true) y el bot sí responde. El contacto se conserva (se reutiliza).
+ *
+ *   bunx convex run conversations:resetConversationForTesting '{"phone":"+573181833248"}'
+ *   bunx convex run conversations:resetConversationForTesting '{"conversationId":"ks7evw..."}'
+ */
+export const resetConversationForTesting = internalMutation({
+  args: {
+    phone: v.optional(v.string()),
+    conversationId: v.optional(v.id("conversations")),
+  },
+  handler: async (
+    ctx,
+    args,
+  ): Promise<{
+    deletedConversations: number;
+    deletedMessages: number;
+    deletedBotSessions: number;
+    conversationIds: string[];
+  }> => {
+    const convIds = new Set<string>();
+    if (args.conversationId) convIds.add(args.conversationId);
+
+    if (args.phone) {
+      const digits = args.phone.replace(/\D/g, "");
+      const variants = new Set<string>([
+        args.phone.trim(),
+        digits,
+        `+${digits}`,
+      ]);
+      const seenContacts = new Set<string>();
+      for (const p of variants) {
+        if (!p) continue;
+        const contacts = await ctx.db
+          .query("contacts")
+          .withIndex("by_phone", (q) => q.eq("phone", p))
+          .collect();
+        for (const c of contacts) {
+          if (seenContacts.has(String(c._id))) continue;
+          seenContacts.add(String(c._id));
+          const convs = await ctx.db
+            .query("conversations")
+            .withIndex("by_contact", (q) => q.eq("contactId", c._id))
+            .collect();
+          for (const cv of convs) convIds.add(String(cv._id));
+        }
+      }
+    }
+
+    let deletedMessages = 0;
+    let deletedBotSessions = 0;
+    let deletedConversations = 0;
+
+    for (const cidStr of convIds) {
+      const cid = cidStr as Id<"conversations">;
+      const msgs = await ctx.db
+        .query("messages")
+        .withIndex("by_conversation", (q) => q.eq("conversationId", cid))
+        .collect();
+      for (const m of msgs) {
+        await ctx.db.delete(m._id);
+        deletedMessages += 1;
+      }
+      const sessions = await ctx.db
+        .query("botSessions")
+        .withIndex("by_conversation", (q) => q.eq("conversationId", cid))
+        .collect();
+      for (const s of sessions) {
+        await ctx.db.delete(s._id);
+        deletedBotSessions += 1;
+      }
+      const conv = await ctx.db.get(cid);
+      if (conv) {
+        await ctx.db.delete(cid);
+        deletedConversations += 1;
+      }
+    }
+
+    return {
+      deletedConversations,
+      deletedMessages,
+      deletedBotSessions,
+      conversationIds: [...convIds],
+    };
+  },
+});

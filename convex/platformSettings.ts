@@ -75,11 +75,23 @@ export const setAiEnabled = mutation({
 //   bunx convex run platformSettings:setBotOnlyNewConversations '{"enabled":true}'
 // ─────────────────────────────────────────────────────────────────────────────
 
+/** ¿Está activo el flag? (true = hay un corte configurado). Para verificar. */
 export const isBotOnlyNewConversationsInternal = internalQuery({
   args: {},
   handler: async (ctx): Promise<boolean> => {
     const row = await getPlatformSettingsRow(ctx);
-    return row?.botOnlyNewConversations === true;
+    return typeof row?.botOnlyNewConversationsSince === 'number';
+  },
+});
+
+/** Corte por fecha (ms) o null si está apagado. Lo consulta el bot en inbound. */
+export const getBotOnlyNewConversationsCutoffInternal = internalQuery({
+  args: {},
+  handler: async (ctx): Promise<number | null> => {
+    const row = await getPlatformSettingsRow(ctx);
+    return typeof row?.botOnlyNewConversationsSince === 'number'
+      ? row.botOnlyNewConversationsSince
+      : null;
   },
 });
 
@@ -91,8 +103,11 @@ export const setBotOnlyNewConversations = internalMutation({
   handler: async (
     ctx,
     { enabled, updatedByUserId },
-  ): Promise<{ botOnlyNewConversations: boolean }> => {
+  ): Promise<{ enabled: boolean; since: number | null }> => {
     const now = Date.now();
+    // enabled → corte = AHORA (solo atiende conversaciones creadas desde ya).
+    // disabled → se limpia el corte (flag apagado).
+    const since = enabled ? now : undefined;
     const existing = await ctx.db
       .query('platformSettings')
       .withIndex('by_scope', (q) => q.eq('scope', GLOBAL_PLATFORM_SCOPE))
@@ -100,6 +115,7 @@ export const setBotOnlyNewConversations = internalMutation({
     if (existing) {
       await ctx.db.patch(existing._id, {
         botOnlyNewConversations: enabled,
+        botOnlyNewConversationsSince: since,
         updatedAt: now,
         updatedByUserId,
       });
@@ -108,11 +124,12 @@ export const setBotOnlyNewConversations = internalMutation({
         scope: GLOBAL_PLATFORM_SCOPE,
         aiEnabled: false,
         botOnlyNewConversations: enabled,
+        botOnlyNewConversationsSince: since,
         updatedAt: now,
         updatedByUserId,
       });
     }
-    return { botOnlyNewConversations: enabled };
+    return { enabled, since: since ?? null };
   },
 });
 

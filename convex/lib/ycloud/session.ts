@@ -2,6 +2,7 @@ import { SESSION_ACTIVE_TTL_MS, SESSION_REACTIVATE_TTL_MS } from "./constants";
 import {
   defaultConversationStatus,
   isChannelAiEnabled,
+  isBotOnlyNewConversationsActive,
 } from "../platformAi";
 
 export async function getOrCreateConversationForContact(
@@ -75,10 +76,20 @@ export async function getOrCreateConversationForContact(
     }
   }
 
+  // Con "solo conversaciones nuevas" activo (y la IA de WhatsApp encendida), las
+  // conversaciones NUEVAS de WhatsApp arrancan directo en modo IA — así el bot
+  // las atiende SOLO, sin toggle manual. Las viejas siguen mudas (el gate por
+  // fecha en inbound.ts las filtra). Reactivaciones NO entran aquí (son viejas).
+  const newStatus =
+    channel === "whatsapp" &&
+    aiEnabled &&
+    (await isBotOnlyNewConversationsActive(ctx))
+      ? "ai"
+      : initialStatus;
   const conversationId = await ctx.db.insert("conversations", {
     contactId,
     channel,
-    status: initialStatus,
+    status: newStatus,
     operationalState: "pending_data",
     lastMessageAt: now,
     createdAt: now,

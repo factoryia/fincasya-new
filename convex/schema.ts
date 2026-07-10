@@ -792,11 +792,14 @@ export default defineSchema({
     webAiEnabled: v.optional(v.boolean()),
     whatsappAiEnabled: v.optional(v.boolean()),
     /**
-     * Si true, el bot SOLO responde conversaciones nuevas (creadas de ahora en
-     * adelante). Las conversaciones antiguas quedan mudas para el bot (las
-     * atiende un humano). Default (ausente) = false. Ver `inbound.ts`.
+     * "Solo conversaciones nuevas" — CORTE POR FECHA. Cuando `...Since` tiene un
+     * timestamp, el bot NO responde conversaciones creadas ANTES de ese momento
+     * (backlog viejo); las creadas después funcionan normal. `undefined` = flag
+     * apagado. El boolean se conserva por compatibilidad. Ver `inbound.ts`.
      */
     botOnlyNewConversations: v.optional(v.boolean()),
+    /** Momento (ms) desde el cual el bot atiende conversaciones (corte). */
+    botOnlyNewConversationsSince: v.optional(v.number()),
     updatedAt: v.number(),
     updatedByUserId: v.optional(v.string()),
   }).index('by_scope', ['scope']),

@@ -24,6 +24,7 @@ import {
   missingFieldQuestion,
   missingFieldsBundle,
   combinedQuestionForMissing,
+  missingFieldsHuman,
   datesIncoherentMessage,
   datesInPastMessage,
   preCatalogText,
@@ -556,7 +557,7 @@ export async function generateReply(
  * Si `stayQuoteTotals` está disponible, el resumen muestra el desglose completo:
  * alojamiento, mascotas (con sub-líneas), y GRAN TOTAL. Si solo viene texto
  * formateado (legacy), se usa tal cual con un fallback. Si no hay nada, se
- * indica que el asesor confirmará el total.
+ * indica que el experto confirmará el total.
  */
 function buildContractHandoffPacket(
   entities: BotEntities,
@@ -595,7 +596,7 @@ function buildContractHandoffPacket(
  *   💳 Total estimado: $TOTAL
  *
  * El "total estimado" se rotula así (no "Total final") porque el aseo +
- * depósito tienen reglas particulares que el asesor confirma en el contrato.
+ * depósito tienen reglas particulares que el experto confirma en el contrato.
  */
 function buildSummaryWithTotals(
   entities: BotEntities,
@@ -609,7 +610,7 @@ function buildSummaryWithTotals(
   }
 
   // Sin nada → fallback. Texto pensado para NO ser contradictorio con el
-  // pedido de datos del contrato que viene después (antes decía "Un asesor te
+  // pedido de datos del contrato que viene después (antes decía "Un experto te
   // confirma el total" pero seguía pidiendo datos para contrato — mensaje
   // mixto que confundía al cliente).
   if (!stayQuoteTotals) {
@@ -684,7 +685,7 @@ function buildSummaryWithTotals(
   if (footnotes.length > 0) {
     lines.push(
       "",
-      `_(${footnotes.join(". ")}. El asesor confirma el total final en tu contrato.)_`,
+      `_(${footnotes.join(". ")}. El experto confirma el total final en tu contrato.)_`,
     );
   }
 
@@ -890,7 +891,7 @@ async function generateReplyText(input: ReplyInput): Promise<string> {
     // catálogo!" — sin que el catálogo exista (las fechas inválidas impiden
     // generarlo). Repetir la pregunta de fechas es correcto y necesario; el
     // anti-bucle de `index.ts` (con `madeProgress` bloqueado por fechas
-    // incoherentes) escala a un asesor si el cliente nunca las corrige.
+    // incoherentes) escala a un experto si el cliente nunca las corrige.
     // Fechas en el pasado: si el cliente corrige o ya vimos el bloque, usar LLM.
     if (tr.datesInPast) {
       const staticMsg = datesInPastMessage();
@@ -944,7 +945,7 @@ async function generateReplyText(input: ReplyInput): Promise<string> {
       // ignoraría el bloqueo y alucinaría "ya tengo todo, te envío el
       // catálogo" — el mismo bug que teníamos con `datesIncoherent`. Repetir
       // el recordatorio de puente es correcto; el anti-bucle de `index.ts`
-      // escala a un asesor si el cliente nunca extiende las fechas.
+      // escala a un experto si el cliente nunca extiende las fechas.
       if (entities.checkIn && entities.checkOut) {
         // "¿cómo así que un puente festivo?" → explicación clara.
         if (userAsksWhatIsPuente(incomingText)) {
@@ -969,13 +970,24 @@ async function generateReplyText(input: ReplyInput): Promise<string> {
       return respond(followUpCollectingRecapMessage(entities, tr.missingField));
     }
     if (tr.missingField) {
-      // Si faltan exactamente 2 campos del catálogo, usar pregunta natural combinada
-      // (evita el "pregunta-respuesta-pregunta-respuesta" innecesario al final).
-      const combined = combinedQuestionForMissing(entities);
-      if (combined) return respond(combined);
-      const bundle = missingFieldsBundle(entities);
-      if (bundle) return respond(bundle);
-      return respond(missingFieldQuestion(tr.missingField, entities));
+      // El FSM decide QUÉ datos faltan; la IA los pide con el TONO del equipo
+      // (playbook), no con el bloque estático de viñetas. Si la IA falla, caemos
+      // al texto estático preciso (combinada → bundle → pregunta única).
+      const staticFallback =
+        combinedQuestionForMissing(entities) ??
+        missingFieldsBundle(entities) ??
+        missingFieldQuestion(tr.missingField, entities);
+      const missingHuman = missingFieldsHuman(entities);
+      if (missingHuman.length === 0) return respond(staticFallback);
+      const r = await contextualLlmReply(
+        currentPhase,
+        entities,
+        conversationHistory,
+        incomingText,
+        { ...llmContextOpts, collectingAsk: missingHuman },
+      );
+      if (r.playbookUsed) input.onPlaybookUsed?.();
+      return r.failed ? staticFallback : r.text;
     }
     // Todos los datos listos → enviamos pre-catálogo estático SIEMPRE.
     // No usamos `respond()` (que cae al LLM si se envió antes), porque este
@@ -1153,7 +1165,7 @@ async function generateReplyText(input: ReplyInput): Promise<string> {
 
   // ── Done ─────────────────────────────────────────────────────────────────
   if (currentPhase === "done") {
-    return respond("¡Gracias! Un asesor te contactará en breve para finalizar los detalles 🤝✨");
+    return respond("¡Gracias! Un experto te contactará en breve para finalizar los detalles 🤝✨");
   }
 
   // ── Fallback genérico → LLM contextual ────────────────────────────────────
@@ -1176,13 +1188,15 @@ async function contextualLlmReply(
     faqContext?: string | null;
     fetchPlaybookContext?: () => Promise<string | null>;
     playbookContext?: string | null;
+    /** Datos faltantes (frases) para que el LLM los pida con tono. */
+    collectingAsk?: string[] | null;
     tagFlags?: ConversationTagFlags;
     channel?: "whatsapp" | "web";
     alreadyGreeted?: boolean;
     contactName?: string | null;
     onPlaybookUsed?: () => void;
   } = {},
-): Promise<{ text: string; playbookUsed: boolean }> {
+): Promise<{ text: string; playbookUsed: boolean; failed?: boolean }> {
   // Anti-bucle suave: si el cliente lleva varios turnos atascado SIN APORTAR DATOS,
   // ofrecer humano una vez. `samePhaseTurnCount` ya es "inteligente" (resetea con
   // progreso), así que aquí solo confirmamos que no se ofreció humano hace poco.
@@ -1212,6 +1226,7 @@ async function contextualLlmReply(
     samePhaseTurnCount: opts.samePhaseTurnCount,
     ragContext: opts.faqContext,
     playbookContext: playbookContext || null,
+    collectingAsk: opts.collectingAsk,
     tagFlags: opts.tagFlags,
     channel: opts.channel,
     alreadyGreeted: opts.alreadyGreeted,
@@ -1249,6 +1264,7 @@ async function contextualLlmReply(
     return {
       text: "Perdona, tuve un problema técnico. ¿Puedes repetir tu mensaje? 🙏",
       playbookUsed,
+      failed: true,
     };
   }
 }
