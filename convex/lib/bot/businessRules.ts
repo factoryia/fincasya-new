@@ -408,3 +408,80 @@ export function validateBusinessState(
     ...validateEvent(entities),
   ];
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// REGLAS DE CORTESÍA — garantizadas por código (no dependen del LLM)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Saludo según la hora de Colombia. Rangos:
+ *   05:00–11:59 buenos días · 12:00–18:59 buenas tardes · resto buenas noches.
+ */
+export function timeOfDayGreetingColombia(nowMs: number): string {
+  const hourStr = new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/Bogota",
+    hour: "2-digit",
+    hour12: false,
+  }).format(new Date(nowMs));
+  const h = parseInt(hourStr, 10);
+  if (h >= 5 && h < 12) return "buenos días";
+  if (h >= 12 && h < 19) return "buenas tardes";
+  return "buenas noches";
+}
+
+/** ¿El texto YA abre con un saludo? (hola / buenos días / buenas tardes-noches…) */
+export function startsWithGreeting(text: string): boolean {
+  const head = String(text ?? "")
+    .trim()
+    .slice(0, 60)
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/\p{M}/gu, "");
+  return /(^|[¡!\s(])(hola|buen[oa]s?\s*(dias?|tardes?|noches?)|saludos|que\s+gusto|un\s+gusto\s+saludart)/.test(
+    head,
+  );
+}
+
+export interface EnsureGreetingOpts {
+  nowMs: number;
+  /** ¿El cliente saludó en su último mensaje? (devolver el saludo es obligatorio). */
+  clientGreeted?: boolean;
+  /** ¿Es el primer mensaje del bot en esta conversación (o del día)? */
+  isFirstBotMessage?: boolean;
+}
+
+/**
+ * REGLA DE CORTESÍA GARANTIZADA: toda primera respuesta del bot (o respuesta a
+ * un saludo del cliente) debe abrir saludando, con el saludo correcto según la
+ * hora de Colombia. Es un POST-PROCESADOR determinista: se aplica al texto
+ * final venga de donde venga (LLM, template, fallback) — así la regla se
+ * cumple SIEMPRE, sin depender de que el modelo obedezca el prompt.
+ *
+ * Si el texto ya saluda, no toca nada. Si no aplica (no es primer mensaje ni
+ * el cliente saludó), no toca nada.
+ *
+ * Wiring sugerido: en el punto único de salida del reply del bot
+ * (`generateReply` wrapper o `sendAssistantText` en inbound.ts).
+ */
+export function ensureGreeting(text: string, opts: EnsureGreetingOpts): string {
+  const t = String(text ?? "").trim();
+  if (!t) return t;
+  const applies = opts.clientGreeted === true || opts.isFirstBotMessage === true;
+  if (!applies) return t;
+  if (startsWithGreeting(t)) return t;
+  const saludo = timeOfDayGreetingColombia(opts.nowMs);
+  // "¡Hola, buenas noches! 😊" + el texto original (que suele seguir con el
+  // nombre: "Señor Camilo, es un gusto…" — queda natural en secuencia).
+  return `¡Hola, ${saludo}! 😊 ${t}`;
+}
+
+/** ¿El mensaje del cliente contiene un saludo? (para decidir devolverlo). */
+export function clientMessageHasGreeting(text: string): boolean {
+  const norm = String(text ?? "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/\p{M}/gu, "");
+  return /\b(hola|buen[oa]s?\s*(dias?|tardes?|noches?)?|hey|holi|saludos|como\s+estas?n?)\b/.test(
+    norm.slice(0, 80),
+  );
+}
