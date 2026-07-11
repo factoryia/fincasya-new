@@ -8,6 +8,7 @@
 
 import type { BotEntities, BotPhase, ConversationTagFlags } from './types';
 import { countNights, normalizePlanType } from './entities';
+import { WELCOME_BUSINESS_HOURS_BLOCK } from '../businessHours';
 
 /**
  * Cuando faltan 2+ campos simultáneamente, agrupa las preguntas en UN solo mensaje.
@@ -338,10 +339,10 @@ REGLAS GLOBALES:
 - No menciones campos técnicos como "isEvento", "checkIn", "cupo".
 - Si el cliente pregunta algo fuera de tema (fútbol, política, etc.), redirige amablemente.
 - Nunca muestres JSON, IDs internos, ni términos técnicos al cliente.
-- Usa emojis con moderación (1-2 por mensaje como máximo).
+- Usa emojis para dar vida al mensaje: acompaña cada punto importante con su emoji relevante (📅, 👥, 💰, ✅, 🏡, 🐕, etc.). No exageres en líneas de texto corrido, pero en listas y secciones SÍ usa un emoji por ítem.
 - El equipo de FincasYa son EXPERTOS, no "asesores". NUNCA uses la palabra "asesor" con el cliente: di "experto", "nuestro equipo de expertos" o "el equipo".
 - TRATO AL CLIENTE (OBLIGATORIO, en TODOS los mensajes): cuando menciones al cliente por nombre, usa "señor" o "señora" + nombre completo (ej: "señor Juan Pérez", "señora María Gómez"). PROHIBIDO el nombre pelado ("Camilo", "María", "Juan"). SIEMPRE anteponer señor/señora. Cordialidad constante: "es un gusto ayudarlo", "con mucho gusto", "con respeto".
-- TRATO CERCANO (TUTEO): háblale al cliente de TÚ, como nuestros asesores reales. Ej.: "te comparto", "cuéntame qué fechas tienes", "tu plan", "te ayudamos", "quedamos atentos 🙏". NUNCA de usted: nada de "le ayudo", "su plan", "compártame", "cuéntanos", "¿qué fechas tiene?".
+- TRATO CERCANO (TUTEO): háblale al cliente de TÚ, como nuestro equipo real. Ej.: "te comparto", "cuéntame qué fechas tienes", "tu plan", "te ayudamos", "quedamos atentos 🙏". NUNCA de usted: nada de "le ayudo", "su plan", "compártame", "cuéntanos", "¿qué fechas tiene?".
 - CORDIALIDAD (OBLIGATORIO): responde siempre con calidez humana. Usa frases como "es un gusto atenderte", "con mucho gusto", "es un placer ayudarte", "¡qué bueno que nos escribes!". NO empieces solo con "Claro", "Ok" o "Listo" — combínalo con calidez: "¡Claro que sí! Es un gusto atenderte…". Nunca suenes seco ni mecánico.
 - IDENTIDAD: eres el *asistente virtual* de FincasYa. NUNCA digas que te llamas Hernán ni te presentes como una persona humana del equipo.
 - NO abras tus mensajes con "Gracias por la info", "Gracias por confirmar" ni agradecimientos de relleno — el equipo NO da las gracias en cada turno. Entra directo a lo útil (confirma lo entendido o responde). Reserva el "gracias" para cuando el cliente de verdad agradece o al cerrar.
@@ -358,29 +359,29 @@ REGLAS GLOBALES:
 export const PET_RULES_KNOWLEDGE = `
 POLÍTICA Y REGLAS DE MASCOTAS (info verificada — RESPONDER usando estos datos):
 
-Tus mascotas son bienvenidas en la mayoría de nuestras opciones de alojamiento. Algunas fincas no las permiten.
+✨🐶 Tus mascotas son bienvenidas en la mayoría de nuestras propiedades. Para garantizar una excelente estancia, ten en cuenta las siguientes condiciones: 🐾
 
 CARGOS:
-- Depósito reembolsable: $100.000 por cada mascota.
-- Tarifa de ingreso: $30.000 a partir de la 3ª mascota.
-- Limpieza adicional: si el cliente viaja con 3 o más mascotas, $70.000 (cargo único de aseo).
+💰 Depósito reembolsable: $100.000 por cada mascota 🐕
+✅️ Tarifas adicionales: A partir de la 3ª mascota, tarifa de ingreso de $30.000 por cada una.
+🧹 Limpieza adicional: si viaja con 3 o más mascotas, $70.000 (cargo único de aseo).
 
-RECOMENDACIONES / REGLAS DE CONVIVENCIA (qué pueden y qué NO pueden hacer):
-- 🚫 No ingresar las mascotas a la piscina.
-- 🐾 Evitar orina o pelaje en zonas interiores.
-- 🛋️ No subirlas a muebles ni camas.
-- 🦴 Cuidar que no muerdan implementos de la casa.
-- 💩 Recoger sus necesidades constantemente.
+📌 RECOMENDACIONES IMPORTANTES:
+• 🚫 No ingresar las mascotas a la piscina.
+• 🐾 Evitar orina o pelaje en zonas interiores.
+• 🛋️ No subirlas a muebles ni camas.
+• 🦴 Cuidar que no muerdan implementos de la casa.
+• 💩 Recoger sus necesidades constantemente.
 
-El incumplimiento de estas recomendaciones puede generar descuentos en el depósito.
+❗El incumplimiento de estas normas puede generar descuentos en el depósito de garantía.
 
 INSTRUCCIONES PARA EL ASISTENTE AL HABLAR DE MASCOTAS:
 - Si el cliente pregunta si su mascota PUEDE hacer X (entrar a la piscina, subir a muebles, etc.),
   responde con la regla concreta de arriba — NO digas "déjame confirmarlo".
 - Si pregunta cuánto cuesta, cita los valores exactos. NO redondees ni inventes.
 - Si pregunta algo NO listado (tamaño máximo, raza específica, paseo, comida, etc.),
-  ahí sí responde "Déjame confirmarlo con un experto para no darte un dato incorrecto."
-- Sé breve: 2-3 líneas con los datos pertinentes y luego retoma el siguiente paso del flujo.
+  ahí sí responde "Déjame confirmarlo con nuestro equipo para no darte un dato incorrecto 😊"
+- Usa el formato con emojis de arriba al responder. Sé cálido y breve.
 `.trim();
 
 /**
@@ -939,7 +940,7 @@ function getBogotaHour(now: Date = new Date()): number {
 
 function getTimeSlot(hour: number): TimeSlot {
   if (hour >= 5 && hour < 12) return 'morning';
-  if (hour >= 12 && hour < 18) return 'afternoon';
+  if (hour >= 12 && hour < 19) return 'afternoon';
   return 'night';
 }
 
@@ -960,8 +961,8 @@ function timeOfDayCourtesyPhrase(
   }
   if (slot === 'afternoon') {
     return gender === 'female'
-      ? 'es un gusto atenderla. ¿Cómo podemos colaborarle?'
-      : 'es un gusto atenderlo. ¿Cómo podemos colaborarle?';
+      ? 'es un gusto atenderla.'
+      : 'es un gusto atenderlo.';
   }
   return 'gracias por escribirnos. Estamos atentos para ayudarle.';
 }
@@ -1008,10 +1009,7 @@ En *FINCASYA.COM* ®️ 💻 te brindamos atención personalizada. Para agilizar
 🪅 Si es evento, fiesta familiar o reunión empresarial
 🐕 Indícanos si traes mascotas y cuántas
 📄 Si ya tienes un alquiler con nosotros, tu número de *(confirmación de reserva)*
-🏡 Si eres propietario y deseas vincular tu propiedad para alquiler o venta
-
-🕛 Horario de atención:
-✔️ 07:30 AM A 07:00 PM`;
+🏡 Si eres propietario y deseas vincular tu propiedad para alquiler o venta${WELCOME_BUSINESS_HOURS_BLOCK}`;
 }
 
 /** Alias genérico (sin nombre). Usado para chequeos de anti-repetición. */

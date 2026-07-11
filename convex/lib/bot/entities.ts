@@ -234,3 +234,13 @@ export function inferRetailerIdFromCatalogTitle(raw?: string): string | undefine
   const m = s.match(/\b([A-Z]{2,8}#\d{1,8})\b/i);
   return m ? m[1].toUpperCase() : undefined;
 }
+
+/** "esta", "esa", "la primera" — no son nombres concretos de finca. */
+export function isVaguePropertyLabel(name?: string): boolean {
+  const n = (name ?? "").trim();
+  if (!n) return true;
+  const lower = n.toLowerCase().normalize("NFD").replace(/\p{M}/gu, "");
+  return /^(esta|esa|ese|e[sa]|la primera|esta finca|esa finca|lo de arriba|quiero esta|quiero esa|la finca elegida)$/.test(
+    lower,
+  );
+}

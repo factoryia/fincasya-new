@@ -10,7 +10,7 @@
  */
 
 import type { BotPhase, BotEntities, BotAction } from "./types";
-import { firstMissingCatalogField, areDatesCoherent } from "./entities";
+import { firstMissingCatalogField, areDatesCoherent, isVaguePropertyLabel } from "./entities";
 import {
   bogotaWallClockNoon,
   shouldBlockCatalogForPuenteOneNightSatSun,
@@ -303,7 +303,19 @@ function transitionCollecting(
     }
   }
 
-  // ── Finca puntual ya resuelta ────────────────────────────────────────────
+  // ── Finca puntual ya resuelta o nombrada ─────────────────────────────────
+  // Etapa 1: si el cliente eligió/nombró una finca concreta → experto humano
+  // (sin pedir más datos ni re-enviar catálogo).
+  const concretePropertyPick =
+    (entities.selectedPropertyRetailerId ?? "").trim() ||
+    entities.catalogUserPickedReply === true ||
+    (!!(entities.selectedPropertyName ?? "").trim() &&
+      !isVaguePropertyLabel(entities.selectedPropertyName));
+
+  if (concretePropertyPick && isStage1HandoffEnabled()) {
+    return stage1CatalogPickHandoff("collecting");
+  }
+
   // El cliente nombró una finca concreta ("quiero la finca X") y `index.ts`
   // ya la resolvió a un `selectedPropertyRetailerId`. Saltamos el catálogo:
   // vamos directo al flujo de reserva de esa finca. Solo necesitamos fechas
@@ -332,12 +344,7 @@ function transitionCollecting(
         missingField: "cupo",
       };
     }
-    // Finca + fechas + cupo OK → flujo de reserva (igual que catalog_sent +
-    // finca elegida): según el estado de mascotas vamos a pet_rules_shown /
-    // quote_shown / pet_check — salvo etapa 1 (handoff al elegir finca).
-    if (isStage1HandoffEnabled()) {
-      return stage1CatalogPickHandoff("collecting");
-    }
+    // Finca + fechas + cupo OK → flujo de reserva (mascotas → cotización → contrato).
     if (entities.hasPets === true && (entities.petCount ?? 0) > 0) {
       return { nextPhase: "pet_rules_shown", action: { type: "reply_only" } };
     }

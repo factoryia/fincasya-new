@@ -27,6 +27,7 @@ import type {
 import {
   MAX_PETS_AUTO_HANDLING,
   inferRetailerIdFromCatalogTitle,
+  isVaguePropertyLabel,
   mergeEntities,
 } from "./entities";
 import { petsExceedLimitMessage } from "./prompts";
@@ -39,15 +40,6 @@ import { transition } from "./transitions";
 import { dedupeGenerateReplyResult } from "../ycloud/assistantOutbound";
 import { generateReply } from "./replies";
 import { applyPetSelectionHeuristics } from "./petHeuristic";
-
-function isVaguePropertyLabel(name?: string): boolean {
-  const n = (name ?? "").trim();
-  if (!n) return true;
-  const lower = n.toLowerCase().normalize("NFD").replace(/\p{M}/gu, "");
-  return /^(esta|esa|ese|e[sa]|la primera|esta finca|esa finca|lo de arriba|quiero esta|quiero esa|la finca elegida)$/.test(
-    lower,
-  );
-}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Tipos de entrada
@@ -480,14 +472,33 @@ export async function runBotTurn(input: BotTurnInput): Promise<BotTurnResult> {
     });
   }
 
-  // Si las fechas cambiaron en este turno, el aviso de puente vuelve a ser válido
-  // (porque el bloqueo aplicaba a las fechas anteriores).
   const datesChangedThisTurn =
     updatedEntities.checkIn !== currentEntities.checkIn ||
     updatedEntities.checkOut !== currentEntities.checkOut;
-  if (datesChangedThisTurn && currentEntities.puenteAcknowledged) {
-    updatedEntities = { ...updatedEntities, puenteAcknowledged: undefined };
+
+  // 2.45 Código de finca en texto plano (ej. "ANAPOIMA RANCHO … AN#004") → elección
+  // explícita. Debe correr ANTES del auto-rebroadcast: si no, el municipio
+  // extraído del nombre dispara un nuevo catálogo en vez de escalar al experto.
+  const retailerFromMessage = inferRetailerIdFromCatalogTitle(messageText);
+  if (retailerFromMessage) {
+    updatedEntities = mergeEntities(updatedEntities, {
+      selectedPropertyRetailerId: retailerFromMessage,
+      selectedPropertyName:
+        extracted.selectedPropertyName?.trim() ||
+        updatedEntities.selectedPropertyName ||
+        messageText.trim().slice(0, 160),
+      catalogUserPickedReply: true,
+    });
   }
+
+  const propertyPickThisTurn =
+    updatedEntities.catalogUserPickedReply === true ||
+    !!retailerFromMessage ||
+    (!!extracted.selectedPropertyName?.trim() &&
+      !isVaguePropertyLabel(extracted.selectedPropertyName)) ||
+    (!!(updatedEntities.selectedPropertyName ?? "").trim() &&
+      !isVaguePropertyLabel(updatedEntities.selectedPropertyName) &&
+      !!inferRetailerIdFromCatalogTitle(updatedEntities.selectedPropertyName));
 
   // 2.5 Auto-rebroadcast del catálogo si el cliente cambió un filtro estando ya
   // post-catálogo (ej. estaba en `catalog_sent` con cupo=22 y dice "miento es
@@ -516,6 +527,7 @@ export async function runBotTurn(input: BotTurnInput): Promise<BotTurnResult> {
   const autoRebroadcastCatalog =
     !wantsNewQuote &&
     !contractFieldsInThisTurn &&
+    !propertyPickThisTurn &&
     isPostCollectingPhase(currentPhase) &&
     catalogFiltersChanged(currentEntities, updatedEntities);
   if (autoRebroadcastCatalog) {

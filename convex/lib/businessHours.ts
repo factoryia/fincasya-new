@@ -61,6 +61,13 @@ export const ADVISOR_CONTINUITY_AFTER_HOURS = [
 export const TEMPORAL_MESSAGE_CLOSING =
   "Uno de nuestros asesores de Fincas Ya se comunicará contigo en horario laboral para continuar con tu proceso. Muchas gracias por tu paciencia 🤝";
 
+/** Bloque de horario para el mensaje de bienvenida del bot. */
+export const WELCOME_BUSINESS_HOURS_BLOCK = [
+  "",
+  "🕛 Horario de atención:",
+  `✔️ ${BUSINESS_HOURS_SCHEDULE_SHORT}`,
+].join("\n");
+
 /** Horario detallado — se muestra SOLO cuando el cliente escribe fuera de horario. */
 export const BUSINESS_HOURS_SCHEDULE_FULL = [
   "🕖 Lunes a viernes: 7:00 a. m. a 8:30 p. m.",

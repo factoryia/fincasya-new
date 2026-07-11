@@ -1853,7 +1853,7 @@ export async function processInboundMessageV2(
       '• 📅 *Días:* entre semana, de martes a jueves.',
       '• ⏰ *Horario:* de 9:00 a.m. a 5:00 p.m.',
       '',
-      'El *valor* del pasadía lo confirma directamente un asesor.',
+      'El *valor* del pasadía lo confirma directamente nuestro equipo.',
       '',
       '¿Quieres que te conecte con un experto para coordinar tu *pasadía en Villavicencio*? 🤝',
       '',
