@@ -669,6 +669,7 @@ export function buildSpecialSeasonNoticeEs(
  * ajustó las fechas). Evita repetir el bloque grande pero mantiene el
  * bloqueo del flujo del FSM hasta que las fechas cumplan el mínimo.
  */
+
 export function buildSpecialSeasonShortReminderEs(
   season: SpecialSeasonInfo,
   currentNights: number,

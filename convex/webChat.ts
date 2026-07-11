@@ -5,6 +5,7 @@ import { transcribeAudio } from "./lib/transcription";
 import { classifyContractImage } from "./lib/imageClassifier";
 import { processInboundMessageV2 } from "./lib/ycloud/inbound";
 import { findContactByPhone } from "./lib/contactLookup";
+import { isChannelAiEnabled } from "./lib/platformAi";
 
 function webPhone(sessionId: string): string {
   return `web:${sessionId.trim()}`;
@@ -19,12 +20,24 @@ export const listMessagesForSession = internalQuery({
   handler: async (ctx, args) => {
     const sid = args.sessionId.trim();
     if (sid.length < 8) {
-      return { conversationId: null, messages: [] as Array<Record<string, unknown>> };
+      return {
+        conversationId: null,
+        status: null,
+        webAiEnabled: await isChannelAiEnabled(ctx, "web"),
+        messages: [] as Array<Record<string, unknown>>,
+      };
     }
+
+    const webAiEnabled = await isChannelAiEnabled(ctx, "web");
 
     const contact = await findContactByPhone(ctx, webPhone(sid));
     if (!contact) {
-      return { conversationId: null, messages: [] as Array<Record<string, unknown>> };
+      return {
+        conversationId: null,
+        status: null,
+        webAiEnabled,
+        messages: [] as Array<Record<string, unknown>>,
+      };
     }
 
     const conversations = await ctx.db
@@ -36,7 +49,12 @@ export const listMessagesForSession = internalQuery({
     const conversation =
       conversations.find((c) => c.channel === "web") ?? conversations[0];
     if (!conversation) {
-      return { conversationId: null, messages: [] as Array<Record<string, unknown>> };
+      return {
+        conversationId: null,
+        status: null,
+        webAiEnabled,
+        messages: [] as Array<Record<string, unknown>>,
+      };
     }
 
     const limit = Math.min(Math.max(args.limit ?? 80, 1), 150);
@@ -70,6 +88,7 @@ export const listMessagesForSession = internalQuery({
     return {
       conversationId: conversation._id,
       status: conversation.status,
+      webAiEnabled,
       messages,
     };
   },

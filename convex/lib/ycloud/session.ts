@@ -1,6 +1,5 @@
 import { SESSION_ACTIVE_TTL_MS, SESSION_REACTIVATE_TTL_MS } from "./constants";
 import {
-  defaultConversationStatus,
   isChannelAiEnabled,
   isBotOnlyNewConversationsActive,
 } from "../platformAi";
@@ -12,11 +11,10 @@ export async function getOrCreateConversationForContact(
 ) {
   const now = Date.now();
   const aiEnabled = await isChannelAiEnabled(ctx, channel);
-  // WhatsApp: siempre arranca en humano aunque el bot global esté ON.
+  // Web y WhatsApp: siempre arrancan en humano aunque el bot global esté ON.
   // El bot solo toma un chat cuando un admin lo pone en modo IA (toggle del
-  // header) — nunca por un mensaje entrante del cliente.
-  const initialStatus =
-    channel === "whatsapp" ? "human" : defaultConversationStatus(aiEnabled);
+  // inbox) — nunca automáticamente por un mensaje entrante del cliente.
+  const initialStatus = "human" as const;
   const all = await ctx.db
     .query("conversations")
     .withIndex("by_contact", (q: any) => q.eq("contactId", contactId))
@@ -76,14 +74,12 @@ export async function getOrCreateConversationForContact(
     }
   }
 
-  // Con "solo conversaciones nuevas" activo (y la IA de WhatsApp encendida), las
-  // conversaciones NUEVAS de WhatsApp arrancan directo en modo IA — así el bot
-  // las atiende SOLO, sin toggle manual. Las viejas siguen mudas (el gate por
-  // fecha en inbound.ts las filtra). Reactivaciones NO entran aquí (son viejas).
+  // Con "solo conversaciones nuevas" activo (y la IA del canal encendida), las
+  // conversaciones NUEVAS de WhatsApp o web arrancan en modo IA — el bot las
+  // atiende solo, sin toggle manual. Las viejas siguen mudas (gate por fecha en
+  // inbound.ts). Reactivaciones NO entran aquí (son viejas).
   const newStatus =
-    channel === "whatsapp" &&
-    aiEnabled &&
-    (await isBotOnlyNewConversationsActive(ctx))
+    aiEnabled && (await isBotOnlyNewConversationsActive(ctx))
       ? "ai"
       : initialStatus;
   const conversationId = await ctx.db.insert("conversations", {

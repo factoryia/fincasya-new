@@ -393,6 +393,15 @@ export class InboxController {
   }
 
   /**
+   * Elimina una conversación del chat web (widget) y su contacto asociado.
+   * DELETE /api/inbox/:conversationId
+   */
+  @Delete(':conversationId')
+  async deleteConversation(@Param('conversationId') conversationId: string) {
+    return this.inboxService.deleteWebConversation(conversationId);
+  }
+
+  /**
    * Clasificar prioridad
    * PATCH /api/inbox/:conversationId/priority
    * Body: { "priority": "urgent" } | "low" | "medium" | "resolved"

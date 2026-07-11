@@ -11,9 +11,15 @@ import { recoverDatesFromUserHistory } from "./historyRecovery";
 export function conversationHasPriorEngagement(
   history: Array<{ role: "user" | "assistant"; content: string }>,
 ): boolean {
-  const userCount = history.filter((m) => m.role === "user").length;
+  // Hay "engagement previo" SOLO si alguien (bot o asesor) ya respondió.
+  // Contar mensajes del cliente NO sirve: el primer contacto suele llegar en
+  // ráfaga ("Hola" / "quiero" / "alquilar una finca" / "para villavicencio")
+  // y con `userCount >= 2` se clasificaba como conversación en curso →
+  // se saltaba la bienvenida oficial y el bot abría en frío (bug real).
+  // Los casos legítimos de reanudación (retry, volver de humano, conversación
+  // preexistente) llegan por `forceResume`, no por esta heurística.
   const assistantCount = history.filter((m) => m.role === "assistant").length;
-  return userCount >= 2 || assistantCount >= 1;
+  return assistantCount >= 1;
 }
 
 export function catalogEntitiesPresent(entities: BotEntities): boolean {

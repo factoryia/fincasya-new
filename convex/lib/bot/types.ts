@@ -153,6 +153,14 @@ export interface ExtractedEntities {
    * mensaje sea solo un saludo. Se omite si el nombre es unisex/ambiguo.
    */
   clientGender?: "male" | "female";
+  /**
+   * Clasificación LLM de si el mensaje del cliente INCLUYE un saludo (puro o
+   * junto a otra cosa): "holas", "olaaa", "buenassss", "q hubo", "hola santi",
+   * typos y variantes libres. La IA interpreta la intención — no se enumeran
+   * fraseos. Alimenta el saludo garantizado (devolver el saludo con franja
+   * horaria); el regex `burstTextContainsGreeting` queda como red de seguridad.
+   */
+  clientGreeted?: boolean;
 }
 
 /** Qué acción debe ejecutar el orquestador después de generar el reply. */

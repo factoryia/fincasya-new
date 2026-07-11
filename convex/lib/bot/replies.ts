@@ -39,6 +39,8 @@ import {
   LOOP_OFFER_HUMAN_MESSAGE,
   nextStepFriendlyQuestion,
   hasBotGreetedInHistory,
+  prependGreetingIfNeeded,
+  burstTextContainsGreeting,
 } from "./prompts";
 import {
   buildPuenteExplanationEs,
@@ -203,6 +205,12 @@ export interface ReplyInput {
   contactName?: string | null;
   /** Reanudar conversación con historial: sin bienvenida genérica. */
   resumeOngoingConversation?: boolean;
+  /**
+   * Veredicto del extractor LLM: el mensaje del cliente incluye un saludo
+   * ("holas", "q hubo", typos — la IA interpreta, no enumera). Alimenta el
+   * saludo garantizado; el regex queda como red de seguridad.
+   */
+  clientGreeted?: boolean;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -415,7 +423,61 @@ function isFirstTurnWithRealContent(
 export async function generateReply(
   input: ReplyInput,
 ): Promise<GenerateReplyResult> {
+  const result = await generateReplyUngreeted(input);
+  // SALUDO GARANTIZADO (portado de fincasya-prueba): si el cliente saludó en
+  // su mensaje y la respuesta no devuelve el saludo, se antepone el opener
+  // oficial con franja horaria. SOLO si el bot AÚN NO ha saludado en esta
+  // conversación — una vez saludó, JAMÁS se vuelve a anteponer (evita el
+  // "Hola, señora Carmen…" repetido en cada turno).
+  const botAlreadyGreeted =
+    hasBotGreetedInHistory(input.conversationHistory) ||
+    Boolean(input.resumeOngoingConversation);
+  if (botAlreadyGreeted) return result;
+  return {
+    ...result,
+    reply: prependGreetingIfNeeded(
+      result.reply,
+      input.contactName,
+      input.incomingText,
+      input.entities.clientGender,
+      new Date(),
+      input.clientGreeted,
+    ),
+  };
+}
+
+async function generateReplyUngreeted(
+  input: ReplyInput,
+): Promise<GenerateReplyResult> {
   const { currentPhase, transition: tr, entities, conversationHistory, stayQuoteBlock } = input;
+
+  // BIENVENIDA OFICIAL EN PRIMER TURNO (comportamiento de fincasya-prueba):
+  // si el bot AÚN no ha saludado y el cliente saludó — aunque haya dado
+  // intención o zona ("hola, para alquilar una finca en Bogotá") — va la
+  // bienvenida oficial COMPLETA del equipo (checklist verbatim), NO el
+  // mensaje redactado por el LLM. Solo se omite si el cliente ya dio todo
+  // y el turno envía catálogo directamente.
+  const botGreetedBefore =
+    hasBotGreetedInHistory(conversationHistory) ||
+    Boolean(input.resumeOngoingConversation);
+  const clientGreetedThisTurn =
+    input.clientGreeted === true ||
+    burstTextContainsGreeting(input.incomingText);
+  if (
+    currentPhase === "welcome" &&
+    !botGreetedBefore &&
+    clientGreetedThisTurn &&
+    tr.action.type !== "send_catalog"
+  ) {
+    return {
+      reply: buildWelcomeMessage(
+        input.contactName,
+        input.channel,
+        entities.clientGender,
+      ),
+    };
+  }
+
   let playbookUsed = false;
   const inputWithPlaybookTracking: ReplyInput = {
     ...input,

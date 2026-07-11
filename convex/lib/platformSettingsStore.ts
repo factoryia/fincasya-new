@@ -55,22 +55,6 @@ async function escalateChannelAiConversationsToHuman(
   }
 }
 
-async function restoreChannelHumanConversationsToAi(
-  ctx: { db: any },
-  channel: AiChannel,
-) {
-  const humanConversations = await ctx.db
-    .query('conversations')
-    .withIndex('by_status', (q: any) => q.eq('status', 'human'))
-    .collect();
-
-  for (const conversation of humanConversations) {
-    if (conversation.channel !== channel) continue;
-    if (conversation.assignedUserId) continue;
-    await ctx.db.patch(conversation._id, { status: 'ai' });
-  }
-}
-
 export async function upsertGlobalAiEnabled(
   ctx: { db: any },
   aiEnabled: boolean,
@@ -87,10 +71,8 @@ export async function upsertGlobalAiEnabled(
   if (!aiEnabled) {
     await escalateChannelAiConversationsToHuman(ctx, 'web');
     await escalateChannelAiConversationsToHuman(ctx, 'whatsapp');
-  } else {
-    // WhatsApp: no reactivar conversaciones en masa.
-    await restoreChannelHumanConversationsToAi(ctx, 'web');
   }
+  // Al encender: no reactivar conversaciones en masa (web ni WhatsApp).
   return settingsId;
 }
 
@@ -129,12 +111,8 @@ export async function setChannelAiEnabled(
 
   if (!aiEnabled) {
     await escalateChannelAiConversationsToHuman(ctx, channel);
-  } else {
-    // WhatsApp: no reactivar conversaciones en masa al encender el bot.
-    if (channel !== 'whatsapp') {
-      await restoreChannelHumanConversationsToAi(ctx, channel);
-    }
   }
+  // Al encender: no reactivar conversaciones en masa (igual que WhatsApp).
 
   return settingsId;
 }

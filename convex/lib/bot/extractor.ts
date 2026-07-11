@@ -192,6 +192,19 @@ Reglas estrictas:
   Ejemplos "female": "María", "Pepita", "Carolina", "Luz", "Adriana".
   Si el nombre es unisex, iniciales, un negocio, o no permite inferir el género
   con seguridad (ej. "Alex", "Cris", "Guadalupe"), OMITE el campo (no adivines).
+- clientGreeted: true | false — true si el mensaje del cliente INCLUYE un saludo,
+  puro o acompañado de otra cosa. INTERPRETA LA INTENCIÓN — el cliente saluda de
+  mil formas y NO hay que adivinar fraseos exactos; entiende el sentido:
+    "hola", "holas", "olaaa", "hoal" (typo), "buenas", "buenassss", "q hubo",
+    "qué más", "hey", "holi", "buen día", "buenas tardes", "hola santi",
+    "hola buenas noches, quiero una finca", "saludos", "cómo están", etc.
+  Ejemplos false (NO es saludo): "del 19 al 20 de julio", "somos 10 personas",
+  "cuánto vale la finca", "sí muchas gracias", "gracias", "ok", cualquier
+  mensaje que solo da datos, agradece o pregunta algo sin saludar.
+  ⚠️ Es una propiedad del MENSAJE ACTUAL, NO de la persona ni del historial:
+  NO lo marques porque el cliente haya saludado en mensajes anteriores del
+  historial — SOLO si el "Mensaje actual del cliente" saluda.
+  Omite el campo si es false — solo ponlo cuando sea true.
 - requestsHumanAgent: true | false — true SOLO si el cliente pide EXPLÍCITAMENTE hablar
   con un humano / asesor / agente / persona real, o expresa que el bot no le sirve.
   Ejemplos true: "quiero hablar con un asesor", "pásame con alguien real", "necesito
@@ -294,6 +307,13 @@ function sanitizeExtracted(p: ExtractedEntities): ExtractedEntities {
   ) {
     p = { ...p };
     delete p.clientGender;
+  }
+
+  // clientGreeted: solo boolean `true` es útil (el prompt pide omitir el false).
+  // Cualquier otra cosa (string, null) → omitir; el regex de respaldo decide.
+  if (p.clientGreeted !== undefined && p.clientGreeted !== true) {
+    p = { ...p };
+    delete p.clientGreeted;
   }
 
   // Normalizar `excludedRegions`: el LLM puede devolver minúsculas, duplicados

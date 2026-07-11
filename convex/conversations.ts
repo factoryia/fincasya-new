@@ -1,6 +1,6 @@
 import { v } from "convex/values";
 import type { Id } from "./_generated/dataModel";
-import { action, internalMutation, mutation, query } from "./_generated/server";
+import { action, internalAction, internalMutation, mutation, query } from "./_generated/server";
 import { internal, api } from "./_generated/api";
 import {
   DEFAULT_OPERATIONAL_STATE,
@@ -577,7 +577,8 @@ export const setConversationTags = mutation({
   },
 });
 
-/** Volver a modo IA (respuesta automática). Limpia etiquetas "Requiere asesor" / validar dispo. */
+/** Volver a modo IA (respuesta automática). Limpia etiquetas "Requiere asesor" / validar dispo.
+ *  Dispara el bot automáticamente: lee el contexto y responde sin esperar otro mensaje del cliente. */
 export const setToAiPublic = mutation({
   args: { conversationId: v.id("conversations") },
   handler: async (ctx, args) => {
@@ -596,6 +597,9 @@ export const setToAiPublic = mutation({
     }
     await ctx.db.patch(args.conversationId, patch);
     await markBotResumeFromHumanIfNeeded(ctx, args.conversationId, prev?.status);
+    await ctx.scheduler.runAfter(0, internal.conversations.resumeBotAfterHuman, {
+      conversationId: args.conversationId,
+    });
   },
 });
 
@@ -1033,6 +1037,203 @@ export const retryBot = action({
     );
 
     return { ok: true as const };
+  },
+});
+
+/**
+ * Reanuda el bot automáticamente al pasar de human→ai desde el panel.
+ * Lee el último mensaje del cliente y ejecuta el pipeline completo del bot,
+ * para que el bot responda sin esperar otro mensaje.
+ *
+ * SOLO responde si el último mensaje del cliente es RECIENTE (< 2 horas).
+ * Si es viejo, no hace nada: el bot queda en modo ai esperando que el cliente
+ * escriba de nuevo. Así no se responde a mensajes de hace días/semanas.
+ */
+const RESUME_MAX_AGE_MS = 2 * 60 * 60 * 1000;
+
+export const resumeBotAfterHuman = internalAction({
+  args: { conversationId: v.id("conversations") },
+  handler: async (ctx, args) => {
+    const conv = await ctx.runQuery(api.conversations.getById, {
+      conversationId: args.conversationId,
+    });
+    if (!conv || conv.status !== "ai") return;
+
+    const contact = await ctx.runQuery(api.contacts.getById, {
+      contactId: conv.contactId,
+    });
+    if (!contact?.phone) return;
+
+    const channel = (conv.channel ?? "whatsapp") as "whatsapp" | "web";
+
+    const latestMsg = (await ctx.runQuery(api.messages.getLatestUserMessage, {
+      conversationId: args.conversationId,
+      scanLimit: 50,
+    })) as {
+      _id: Id<"messages">;
+      content?: string;
+      type?: string;
+      mediaUrl?: string;
+      createdAt?: number;
+      _creationTime?: number;
+    } | null;
+
+    if (!latestMsg) return;
+
+    const msgAge = Date.now() - (latestMsg.createdAt ?? latestMsg._creationTime ?? 0);
+    if (msgAge > RESUME_MAX_AGE_MS) return;
+
+    const msgType = (latestMsg?.type as string | undefined) ?? "text";
+    const text = String(latestMsg?.content ?? "").trim();
+    const hasMedia =
+      Boolean(latestMsg?.mediaUrl) &&
+      msgType !== "text" &&
+      msgType !== "product";
+    if (!text && !hasMedia) return;
+
+    const { runBotTurn } = await import("./lib/bot/index");
+    const { processInboundMessageV2 } = await import("./lib/ycloud/inbound");
+    const { transcribeAudio } = await import("./lib/transcription");
+    const { classifyContractImage } = await import("./lib/imageClassifier");
+
+    await processInboundMessageV2(
+      ctx,
+      {
+        eventId: `resume_${args.conversationId}_${Date.now()}`,
+        phone: contact.phone,
+        name: contact.name ?? "Cliente",
+        text,
+        type: (latestMsg?.type as
+          | "text"
+          | "image"
+          | "audio"
+          | "video"
+          | "document"
+          | undefined) ?? "text",
+        mediaUrl: latestMsg?.mediaUrl,
+        retryMode: true,
+        existingMessageId: latestMsg!._id,
+        conversationId: args.conversationId,
+      },
+      {
+        internal,
+        api,
+        transcribeAudio,
+        classifyImage: classifyContractImage,
+        runBotTurn,
+        channel,
+        deliverText:
+          channel === "web"
+            ? async () => {}
+            : async (payload) => {
+                await ctx.runAction(internal.ycloud.sendWhatsAppMessage, payload);
+              },
+        deliverCatalog:
+          channel === "web"
+            ? async (payload) =>
+                payload.productRetailerIds.map((productRetailerId) => ({
+                  productRetailerId,
+                  ok: true,
+                }))
+            : async (payload) =>
+                (await ctx.runAction(internal.ycloud.sendWhatsAppCatalogList, {
+                  to: payload.to,
+                  productRetailerIds: payload.productRetailerIds,
+                  productQuoteLines: payload.productQuoteLines,
+                  bodyText: payload.bodyText,
+                  catalogId: payload.catalogId,
+                  wamid: payload.wamid,
+                  conversationId: payload.conversationId,
+                })) as Array<{
+                  productRetailerId: string;
+                  wamid?: string;
+                  ok?: boolean;
+                }>,
+      },
+    );
+  },
+});
+
+/** Elimina una conversación web y sus datos asociados (mensajes, sesión bot, contacto web). */
+export const deleteWebConversation = mutation({
+  args: { conversationId: v.id("conversations") },
+  handler: async (ctx, args) => {
+    const conv = await ctx.db.get(args.conversationId);
+    if (!conv) throw new Error("Conversación no encontrada");
+    if (conv.channel !== "web") {
+      throw new Error("Solo se pueden eliminar conversaciones del chat web");
+    }
+
+    const contact = await ctx.db.get(conv.contactId);
+    const phone = String(contact?.phone ?? "").trim();
+    if (!phone.toLowerCase().startsWith("web:")) {
+      throw new Error("Contacto de chat web inválido");
+    }
+
+    const msgs = await ctx.db
+      .query("messages")
+      .withIndex("by_conversation", (q) =>
+        q.eq("conversationId", args.conversationId),
+      )
+      .collect();
+    for (const m of msgs) await ctx.db.delete(m._id);
+
+    const sessions = await ctx.db
+      .query("botSessions")
+      .withIndex("by_conversation", (q) =>
+        q.eq("conversationId", args.conversationId),
+      )
+      .collect();
+    for (const s of sessions) await ctx.db.delete(s._id);
+
+    const auditEvents = await ctx.db
+      .query("conversationAuditEvents")
+      .withIndex("by_conversation", (q) =>
+        q.eq("conversationId", args.conversationId),
+      )
+      .collect();
+    for (const e of auditEvents) await ctx.db.delete(e._id);
+
+    const opEvents = await ctx.db
+      .query("conversationOperationalStateEvents")
+      .withIndex("by_conversation", (q) =>
+        q.eq("conversationId", args.conversationId),
+      )
+      .collect();
+    for (const e of opEvents) await ctx.db.delete(e._id);
+
+    const catalogWamids = await ctx.db
+      .query("ycloudCatalogMessageWamids")
+      .withIndex("by_conversation", (q) =>
+        q.eq("conversationId", args.conversationId),
+      )
+      .collect();
+    for (const row of catalogWamids) await ctx.db.delete(row._id);
+
+    const contractTokens = await ctx.db
+      .query("contractFillTokens")
+      .withIndex("by_conversation", (q) =>
+        q.eq("conversationId", args.conversationId),
+      )
+      .collect();
+    for (const t of contractTokens) await ctx.db.delete(t._id);
+
+    await ctx.db.delete(args.conversationId);
+
+    const notes = await ctx.db
+      .query("contactNotes")
+      .withIndex("by_contact", (q) => q.eq("contactId", conv.contactId))
+      .collect();
+    for (const note of notes) await ctx.db.delete(note._id);
+
+    if (contact) await ctx.db.delete(contact._id);
+
+    return {
+      ok: true as const,
+      deletedMessages: msgs.length,
+      deletedBotSessions: sessions.length,
+      deletedContact: !!contact,
+    };
   },
 });
 

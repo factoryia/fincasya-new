@@ -2213,15 +2213,19 @@ export async function processInboundMessageV2(
       content: String(m.content ?? ''),
     }));
 
+  // OJO: NO usar `!isNewConversation` como señal de "conversación en curso".
+  // `isNewConversation` solo es true para el mensaje que CREÓ la conversación;
+  // en una ráfaga de primer contacto ("Hola," + "quiero alquilar una finca"),
+  // el turno que responde lo dispara un mensaje posterior → isNew=false → se
+  // forzaba modo resume y el bot se saltaba la bienvenida oficial y el saludo
+  // (bug real). Las conversaciones viejas con historial las detecta
+  // `conversationHasPriorEngagement` (¿algún assistant respondió antes?).
   const bootstrapped = await bootstrapBotStateFromHistory({
     currentPhase,
     currentEntities,
     conversationHistory: history,
     recentUserText,
-    forceResume:
-      retryMode ||
-      resumingFromHuman ||
-      (!isNewConversation && !isReactivatedConversation),
+    forceResume: retryMode || resumingFromHuman,
   });
   currentPhase = bootstrapped.phase;
   currentEntities = bootstrapped.entities;

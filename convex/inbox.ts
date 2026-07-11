@@ -147,6 +147,12 @@ export const sendMessage = action({
           eventType: "message_sent",
           userId: args.sentByUserId,
         });
+        // Un asesor humano tomó control: si la conversación estaba en modo IA,
+        // pasarla a humano para que el bot no interrumpa al cliente siguiente.
+        // Es el mismo comportamiento que markOutboundAsHuman para WhatsApp.
+        await ctx.runMutation(internal.conversations.escalate, {
+          conversationId: args.conversationId,
+        });
       }
     };
 

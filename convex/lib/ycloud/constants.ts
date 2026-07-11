@@ -12,7 +12,7 @@ export const FALLBACK_CATALOG_ID = "1356998359824441";
  * Si el query del catálogo devuelve menos de este número, se mandan todas las
  * que haya (no se rellena artificialmente).
  */
-export const MAX_CATALOG_PRODUCTS_PER_SEND = 12;
+export const MAX_CATALOG_PRODUCTS_PER_SEND = 20;
 
 /** Pausa entre fichas de catálogo WhatsApp — evita que Meta las agrupe en "Catálogo enviado". */
 export const CATALOG_BETWEEN_SENDS_MS = 1500;

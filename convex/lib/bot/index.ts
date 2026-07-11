@@ -31,6 +31,7 @@ import {
 } from "./entities";
 import { petsExceedLimitMessage } from "./prompts";
 import { stage1CatalogPickHandoffMsg } from "../businessHours";
+import { getFaqTextByKey, localFaqMatchesForText } from "../faqSeed";
 import { extractEntities } from "./extractor";
 import { recoverDatesFromUserHistory, recoverRelativeDatesFromText, recoverRelativeDatesFromUserHistory } from "./historyRecovery";
 import { detectPuenteReference } from "../colombiaPublicHolidays";
@@ -719,12 +720,50 @@ export async function runBotTurn(input: BotTurnInput): Promise<BotTurnResult> {
   const phaseEnteredAt = phaseChanged ? now : (currentPhaseEnteredAt ?? now);
 
   // 3.54 Etapa 1 (piloto): al elegir finca, handoff a humano con copy fijo.
+  // REGLA DEL EQUIPO (como fincasya-prueba): si el cliente trae una DUDA o
+  // menciona un tema FAQ en el MISMO mensaje del pick ("llevo una mascota,
+  // me gusta casa herrera"), se responde la duda PRIMERO con el copy oficial
+  // y DESPUÉS va el mensaje de entrega al experto — nunca ignorar la duda.
   if (
     tr.action.type === "escalate_human" &&
     tr.action.reason === "stage1_catalog_pick"
   ) {
+    const faqBubbles: string[] = [];
+    const faqFromQuestion = String(input.faqContext ?? "").trim();
+    if (faqFromQuestion.length >= 30) {
+      // El cliente hizo una pregunta explícita: inbound ya resolvió la FAQ
+      // (RAG o fallback) — se envía literal.
+      faqBubbles.push(faqFromQuestion);
+    } else {
+      // Mención sin pregunta ("llevo una mascota…"): matcheo determinístico
+      // de temas FAQ sobre el texto del turno. La política de mascotas solo
+      // aplica si el cliente CONFIRMÓ que lleva (no por decir "sin mascotas").
+      for (const key of localFaqMatchesForText(messageText).slice(0, 2)) {
+        if (
+          key === "faq:mascotas-politica" &&
+          updatedEntities.hasPets !== true
+        ) {
+          continue;
+        }
+        const answer = (getFaqTextByKey(key) ?? "").trim();
+        if (answer && !faqBubbles.includes(answer)) faqBubbles.push(answer);
+      }
+    }
+
+    const handoff = stage1CatalogPickHandoffMsg(Date.now());
+    if (faqBubbles.length > 0) {
+      return {
+        replyText: faqBubbles[0],
+        additionalMessages: [...faqBubbles.slice(1), handoff],
+        action: tr.action,
+        nextPhase: effectivePhase,
+        updatedEntities,
+        samePhaseTurnCount,
+        phaseEnteredAt,
+      };
+    }
     return {
-      replyText: stage1CatalogPickHandoffMsg(Date.now()),
+      replyText: handoff,
       action: tr.action,
       nextPhase: effectivePhase,
       updatedEntities,
@@ -868,6 +907,7 @@ export async function runBotTurn(input: BotTurnInput): Promise<BotTurnResult> {
       tagFlags: input.tagFlags,
       channel: input.channel,
       resumeOngoingConversation,
+      clientGreeted: extracted.clientGreeted,
     }),
   );
 

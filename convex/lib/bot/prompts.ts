@@ -330,11 +330,9 @@ export function identityForChannel(_channel?: 'whatsapp' | 'web'): string {
 
 export const GLOBAL_RULES = `
 REGLAS GLOBALES:
-- SIEMPRE que inicie una conversación, saluda con el titulo Señor/Señora
 - Sé breve pero humano: 2-4 líneas salvo que el cliente pida detalles.
 - Primero demuestra que entendiste lo que el cliente acaba de decir; luego responde o pide el dato.
 - Si hay restricción (mínimo de noches, temporada, cupo, etc.), muestra empatía antes de la política y ofrece alternativa si existe.
-- Usa el nombre del cliente cuando lo tengas disponible.
 - No repitas saludos si ya saludaste antes en esta conversación.
 - No repitas preguntas que el cliente ya respondió.
 - No menciones campos técnicos como "isEvento", "checkIn", "cupo".
@@ -342,10 +340,11 @@ REGLAS GLOBALES:
 - Nunca muestres JSON, IDs internos, ni términos técnicos al cliente.
 - Usa emojis con moderación (1-2 por mensaje como máximo).
 - El equipo de FincasYa son EXPERTOS, no "asesores". NUNCA uses la palabra "asesor" con el cliente: di "experto", "nuestro equipo de expertos" o "el equipo".
+- TRATO AL CLIENTE (OBLIGATORIO, en TODOS los mensajes): cuando menciones al cliente por nombre, usa "señor" o "señora" + nombre completo (ej: "señor Juan Pérez", "señora María Gómez"). PROHIBIDO el nombre pelado ("Camilo", "María", "Juan"). SIEMPRE anteponer señor/señora. Cordialidad constante: "es un gusto ayudarlo", "con mucho gusto", "con respeto".
 - TRATO CERCANO (TUTEO): háblale al cliente de TÚ, como nuestros asesores reales. Ej.: "te comparto", "cuéntame qué fechas tienes", "tu plan", "te ayudamos", "quedamos atentos 🙏". NUNCA de usted: nada de "le ayudo", "su plan", "compártame", "cuéntanos", "¿qué fechas tiene?".
 - CORDIALIDAD (OBLIGATORIO): responde siempre con calidez humana. Usa frases como "es un gusto atenderte", "con mucho gusto", "es un placer ayudarte", "¡qué bueno que nos escribes!". NO empieces solo con "Claro", "Ok" o "Listo" — combínalo con calidez: "¡Claro que sí! Es un gusto atenderte…". Nunca suenes seco ni mecánico.
 - IDENTIDAD: eres el *asistente virtual* de FincasYa. NUNCA digas que te llamas Hernán ni te presentes como una persona humana del equipo.
-- OBLIGATORIO — SALUDO CON TÍTULO: cuando te dé el nombre con "Señor" o "Señora" adelante (ej. "Señora Adriana"), SIEMPRE abre tu respuesta dirigiéndote así ("¡Hola Señora Adriana! ..." o "Señora Adriana, ..."), aunque ya hayas saludado antes en la conversación. El título Señor/Señora es OBLIGATORIO en el saludo; el resto del mensaje SIEMPRE tuteando ("Señora Adriana, ¿qué fechas tienes?"). Si te doy solo el nombre (sin título), úsalo sin inventar el género.
+- NO abras tus mensajes con "Gracias por la info", "Gracias por confirmar" ni agradecimientos de relleno — el equipo NO da las gracias en cada turno. Entra directo a lo útil (confirma lo entendido o responde). Reserva el "gracias" para cuando el cliente de verdad agradece o al cerrar.
 - Habla como EQUIPO de FincasYa (nosotros): "te ayudamos", "te enviamos", "te recomendamos", "quedamos atentos", "tenemos", "manejamos". La 1ª persona ("te comparto") también es natural. Lo esencial: SIEMPRE tuteando al cliente.
 `.trim();
 
@@ -737,19 +736,19 @@ export function buildContextSystemPrompt(
     );
   }
 
-  const greetingName = respectfulGreetingName(
+  const formalName = formalSalutationName(
     opts.contactName,
     entities.clientGender,
   );
-  if (greetingName) {
+  if (formalName) {
     sections.push(
-      `- OBLIGATORIO: ABRE tu respuesta dirigiéndote a la clienta/al cliente como "${greetingName}" (el título Señor/Señora es obligatorio en el saludo), y sigue TUTEANDO en el resto ("${greetingName}, ¿qué fechas tienes?"). Hazlo aunque ya hayas saludado antes. Nunca de usted.`,
+      `- El cliente se llama ${formalName}. SIEMPRE úsalo con "señor" o "señora" + nombre completo — NUNCA solo el primer nombre. PROHIBIDO el nombre pelado. Ejemplo correcto: "${formalName}, ¿qué fechas tienes?". Ejemplo INCORRECTO: "${firstNameForGreeting(opts.contactName)}, ¿qué fechas tienes?". Hazlo en TODOS tus mensajes, no solo en el saludo.`,
     );
   }
 
   if (stuck) {
     sections.push(
-      '- ⚠️ El cliente lleva varios turnos sin avanzar. Sé MUY breve, pregunta solo el dato puntual que falta y, si no lo da en el siguiente turno, ofrece pasarlo con un experto humano.',
+      '- ⚠️ El cliente lleva varios turnos sin avanzar. Sé MUY breve y pregunta SOLO el dato puntual que falta — UNA SOLA pregunta, máximo 1-2 líneas. PROHIBIDO mencionar expertos, handoffs o decir que los conectarás con alguien: eso lo decide el sistema automáticamente si no hay avance.',
     );
   }
 
@@ -845,93 +844,174 @@ export function nextStepFriendlyQuestion(
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
- * Extrae el primer nombre "saludable" del contactName que YCloud nos pasa
- * (suele venir del perfil de WhatsApp del cliente). Devuelve `null` cuando el
- * valor no es usable como saludo personalizado, para que el copy caiga al
- * "¡Hola!" genérico sin romperse.
- *
- * Reglas:
- *   - Trim + descartar vacío.
- *   - Descartar si parece teléfono o solo dígitos/símbolos (`+57 321...`).
- *   - Limpiar caracteres no alfabéticos (emojis, comillas raras) preservando
- *     tildes, ñ, apóstrofes y guiones (D'Costa, José-María).
- *   - Tomar SOLO el primer token (los apellidos no se usan en saludo).
- *   - Capitalizar (Adriana, José, María) con locale `es-CO`.
- *   - Longitud útil: 2..20 caracteres. Fuera de eso → null (probable basura).
+ * Nombre completo usable para saludar (title case). Si solo hay un nombre, se
+ * usa ese. Descarta telefonos y basura.
  */
-export function firstNameForGreeting(rawName?: string | null): string | null {
+export function fullNameForGreeting(rawName?: string | null): string | null {
   const raw = String(rawName ?? '').trim();
   if (!raw) return null;
-  // Teléfonos o cadenas sin letras → descartar.
   if (/^[\d+\-\s()]+$/.test(raw)) return null;
   const cleaned = raw
     .replace(/[^\p{L}\p{N}\s'\-.]/gu, '')
     .replace(/\s+/g, ' ')
     .trim();
   if (!cleaned) return null;
-  const firstWord = cleaned.split(' ')[0];
-  if (firstWord.length < 2 || firstWord.length > 20) return null;
-  return (
-    firstWord.charAt(0).toLocaleUpperCase('es-CO') +
-    firstWord.slice(1).toLocaleLowerCase('es-CO')
-  );
+  const words = cleaned.split(' ').filter((w) => w.length >= 2);
+  if (words.length === 0) return null;
+  const firstWord = words[0] ?? '';
+  if (firstWord.length < 2 || firstWord.length > 30) return null;
+  return words
+    .map(
+      (w) =>
+        w.charAt(0).toLocaleUpperCase('es-CO') +
+        w.slice(1).toLocaleLowerCase('es-CO'),
+    )
+    .join(' ');
+}
+
+/** Primer nombre (para heurística de género y compatibilidad). */
+export function firstNameForGreeting(rawName?: string | null): string | null {
+  const full = fullNameForGreeting(rawName);
+  if (!full) return null;
+  return full.split(' ')[0] ?? null;
 }
 
 /**
- * Construye el mensaje de bienvenida, personalizado con el primer nombre del
- * cliente cuando es usable. Si no hay nombre o no es válido, cae al saludo
- * genérico ("¡Hola!").
- *
- * Mantenemos `WELCOME_MESSAGE` (sin nombre) como alias para el chequeo de
- * anti-repetición y para call sites legacy.
+ * Heurística de género por terminación del primer nombre (es-CO): -o → hombre,
+ * -a → mujer. Nombres ambiguos o atípicos → null.
  */
+export function inferGenderFromFirstName(
+  first: string,
+): 'male' | 'female' | null {
+  const f = first.toLowerCase().normalize('NFD').replace(/\p{M}/gu, '');
+  const FEMALE = new Set([
+    'isabel', 'raquel', 'maribel', 'flor', 'leidy', 'ingrid',
+    'yeimmi', 'beatriz', 'luz', 'carmen', 'pilar', 'rocio',
+  ]);
+  const MALE = new Set([
+    'camilo', 'garcia', 'nicolas', 'lucas', 'jonas', 'elias',
+    'matias', 'tobias', 'josue', 'noe',
+  ]);
+  if (FEMALE.has(f)) return 'female';
+  if (MALE.has(f)) return 'male';
+  if (/[o]$/.test(f) || /(os|el|an|in|on)$/.test(f)) return 'male';
+  if (/a$/.test(f)) return 'female';
+  return null;
+}
+
 /**
- * Nombre para saludar al cliente de forma respetuosa pero cercana:
- * "Señora Adriana" / "Señor Juan" — el TÍTULO (según el género que infiere la
- * IA en `clientGender`) combinado con TUTEO en el resto del mensaje. Si la IA
- * no pudo determinar el género (nombre unisex/ambiguo), usa solo el nombre, sin
- * título. Si no hay nombre usable, devuelve null.
+ * Trato formal para saludo: "señor Juan Pérez" / "señora María Gómez".
+ * SIEMPRE lleva título — nunca nombre pelado.
  */
+export function formalSalutationName(
+  contactName?: string | null,
+  gender?: 'male' | 'female' | null,
+): string | null {
+  const fullName = fullNameForGreeting(contactName);
+  if (!fullName) return null;
+  const first = fullName.split(' ')[0] ?? '';
+  const effective = gender ?? inferGenderFromFirstName(first);
+  const title = effective === 'female' ? 'señora' : 'señor';
+  return `${title} ${fullName}`;
+}
+
+/** @deprecated Usar formalSalutationName en saludos nuevos. */
 export function respectfulGreetingName(
   contactName?: string | null,
   gender?: 'male' | 'female' | null,
 ): string | null {
-  const first = firstNameForGreeting(contactName);
-  if (!first) return null;
-  const hon =
-    gender === 'male' ? 'Señor' : gender === 'female' ? 'Señora' : null;
-  return hon ? `${hon} ${first}` : first;
+  return formalSalutationName(contactName, gender);
 }
 
+const BOGOTA_TZ = 'America/Bogota';
+
+type TimeSlot = 'morning' | 'afternoon' | 'night';
+
+function getBogotaHour(now: Date = new Date()): number {
+  return Number(
+    now.toLocaleString('en-US', {
+      timeZone: BOGOTA_TZ,
+      hour: 'numeric',
+      hour12: false,
+    }),
+  );
+}
+
+function getTimeSlot(hour: number): TimeSlot {
+  if (hour >= 5 && hour < 12) return 'morning';
+  if (hour >= 12 && hour < 18) return 'afternoon';
+  return 'night';
+}
+
+/** Saludo según hora en Colombia: Buenos días / Buenas tardes / Buenas noches. */
+export function timeOfDayGreeting(now: Date = new Date()): string {
+  const slot = getTimeSlot(getBogotaHour(now));
+  if (slot === 'morning') return 'Buenos días';
+  if (slot === 'afternoon') return 'Buenas tardes';
+  return 'Buenas noches';
+}
+
+function timeOfDayCourtesyPhrase(
+  slot: TimeSlot,
+  gender: 'male' | 'female' | null,
+): string {
+  if (slot === 'morning') {
+    return 'gracias por comunicarse con nosotros. ¿En qué podemos ayudarle?';
+  }
+  if (slot === 'afternoon') {
+    return gender === 'female'
+      ? 'es un gusto atenderla. ¿Cómo podemos colaborarle?'
+      : 'es un gusto atenderlo. ¿Cómo podemos colaborarle?';
+  }
+  return 'gracias por escribirnos. Estamos atentos para ayudarle.';
+}
+
+/**
+ * Apertura oficial del saludo: "Hola, señor Juan Pérez. Buenos días, ..."
+ */
+export function buildGreetingOpener(
+  contactName?: string | null,
+  gender?: 'male' | 'female' | null,
+  now: Date = new Date(),
+): string {
+  const hour = getBogotaHour(now);
+  const slot = getTimeSlot(hour);
+  const timeGreeting = timeOfDayGreeting(now);
+  const fullName = fullNameForGreeting(contactName);
+  const first = fullName?.split(' ')[0] ?? '';
+  const effectiveGender = gender ?? (first ? inferGenderFromFirstName(first) : null);
+  const courtesy = timeOfDayCourtesyPhrase(slot, effectiveGender);
+
+  if (fullName) {
+    const title = effectiveGender === 'female' ? 'señora' : 'señor';
+    return `Hola, ${title} ${fullName}. ${timeGreeting}, ${courtesy}`;
+  }
+  return `Hola. ${timeGreeting}, ${courtesy}`;
+}
+
+/** Mensaje de bienvenida oficial (verbatim del equipo). */
 export function buildWelcomeMessage(
   contactName?: string | null,
   _channel?: 'whatsapp' | 'web',
   gender?: 'male' | 'female' | null,
+  now: Date = new Date(),
 ): string {
-  const name = respectfulGreetingName(contactName, gender);
-  const opener = name
-    ? `¡Hola ${name}! 👋 Es un gusto atenderte. Soy el *asistente virtual de FincasYa* 🏡✨`
-    : `¡Hola! 👋 Es un gusto atenderte. Soy el *asistente virtual de FincasYa* 🏡✨`;
+  const opener = buildGreetingOpener(contactName, gender, now);
   return `${opener}
 
-Tenemos opciones espectaculares de fincas listas para ti 🤩 y queremos ayudarte a encontrar la ideal según tu plan.
+En *FINCASYA.COM* ®️ 💻 te brindamos atención personalizada. Para agilizar tu proceso, indícanos por favor la siguiente información:
 
-Para agilizar tu proceso, cuéntanos por favor:
 📅 Fecha probable de ingreso y salida
 📍 Municipio o zona de preferencia (o con gusto te recomendamos)
-👥 Número de personas en total
-🫂 Si es plan familiar, con amigos o empresarial
+👥 Número de personas entre adultos y niños
+🫂 Si es grupo de familia, amigos o empresarial
 🪅 Si es evento, fiesta familiar o reunión empresarial
-🐕 Si traes mascotas, cuéntanos cuántas
-📄 Si ya tienes una reserva con nosotros, tu número de confirmación (CR)
-🏡 Si eres propietario y deseas vincular tu finca para alquiler o venta
+🐕 Indícanos si traes mascotas y cuántas
+📄 Si ya tienes un alquiler con nosotros, tu número de *(confirmación de reserva)*
+🏡 Si eres propietario y deseas vincular tu propiedad para alquiler o venta
 
-Con esto te enviamos opciones disponibles, fotos, precios y promociones ajustadas a lo que buscas 🔥
-
-🕛 Horarios de atención: 07:30 AM a 07:00 PM
-
-Quedamos atentos para ayudarte a reservar tu finca perfecta ✨
-`;
+🕛 Horario de atención:
+✔️ 07:30 AM A 07:00 PM`;
 }
 
 /** Alias genérico (sin nombre). Usado para chequeos de anti-repetición. */
@@ -945,11 +1025,103 @@ export function buildShortGreeting(
   contactName?: string | null,
   _channel?: 'whatsapp' | 'web',
   gender?: 'male' | 'female' | null,
+  now: Date = new Date(),
 ): string {
-  const name = respectfulGreetingName(contactName, gender);
-  return name
-    ? `👋 ¡Hola ${name}! Es un gusto atenderte — soy el *asistente virtual de FincasYa*.`
-    : `👋 ¡Hola! Es un gusto atenderte — soy el *asistente virtual de FincasYa*.`;
+  return buildGreetingOpener(contactName, gender, now);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// SALUDO GARANTIZADO POR CÓDIGO (portado de fincasya-prueba, copys.ts).
+// Post-procesador determinista sobre el texto final del bot: si el cliente
+// saludó en su mensaje y la respuesta no abre devolviendo el saludo, se le
+// antepone el opener oficial con franja horaria. No depende del LLM.
+// ─────────────────────────────────────────────────────────────────────────────
+
+function normalizeGreetingText(text: string): string {
+  return String(text ?? '')
+    .trim()
+    .replace(/^[¿¡\s]+/g, '')
+    .replace(/[!?.…]+\s*$/gu, '')
+    .trim()
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/\p{M}/gu, '');
+}
+
+const TIME_GREETING_RE =
+  /^(buen[oa]s?\s*d[ií]as|buenas?\s*tardes|buenas?\s*noches)\b/;
+
+const GREETINGS_RE =
+  /^(hola|hoal|holaa+|buenas|buen\s*d[ií]a|buenos|hey|hi|hello|saludos|ola|holi)\W*$/i;
+
+/** Mensaje que incluye un saludo (puro o compuesto: "hola buenos dias"). */
+export function isGreetingMessage(text: string): boolean {
+  const t = normalizeGreetingText(text);
+  if (!t) return false;
+  if (GREETINGS_RE.test(t)) return true;
+  if (TIME_GREETING_RE.test(t)) return true;
+  if (/^(hola|buenas|hey|hi|hello|saludos|ola|holi)\s+/.test(t)) {
+    const rest = t.replace(/^(hola|buenas|hey|hi|hello|saludos|ola|holi)\s+/, '');
+    if (GREETINGS_RE.test(rest) || TIME_GREETING_RE.test(rest)) return true;
+  }
+  return false;
+}
+
+/**
+ * ¿La ráfaga del cliente contiene un saludo? El burst de `inbound.ts` llega
+ * unido con '\n' (un mensaje por línea) — se evalúa cada línea por separado,
+ * igual que prueba evalúa cada mensaje del burst.
+ */
+export function burstTextContainsGreeting(incomingText: string): boolean {
+  return String(incomingText ?? '')
+    .split('\n')
+    .some((line) => isGreetingMessage(line));
+}
+
+/** Evita duplicar el saludo horario si la respuesta ya lo incluye. */
+export function replyAlreadyOpensWithTimeGreeting(reply: string): boolean {
+  const head = reply.slice(0, 160).toLowerCase();
+  return (
+    /buenos\s*d[ií]as|buenas\s*tardes|buenas\s*noches/.test(head) ||
+    /^¡?hola,?\s+(señor|señora)/i.test(head)
+  );
+}
+
+/** Quita un "Hola señor X" / "¡Hola!" generado por el LLM para no duplicar. */
+export function stripRedundantHolaPrefix(reply: string): string {
+  return reply
+    .replace(/^¡?\s*hola,?\s+(don|doña|señor|señora)\s+[^!.\n]+[!.]?\s*/i, '')
+    .replace(/^¡?\s*hola!?,?\s*/i, '')
+    .trim();
+}
+
+/**
+ * Antepone el saludo oficial con franja horaria si el cliente saludó en su
+ * mensaje y la respuesta aún no lo devuelve. Aplicar SOLO a la primera
+ * burbuja del turno.
+ *
+ * `llmSaysGreeted`: veredicto del extractor LLM (`clientGreeted`) — la IA
+ * interpreta el saludo en cualquier forma ("holas", "q hubo", typos). El
+ * regex `burstTextContainsGreeting` queda como red de seguridad si el LLM
+ * no lo marcó (o falló).
+ */
+export function prependGreetingIfNeeded(
+  reply: string,
+  contactName?: string | null,
+  incomingText: string = '',
+  gender?: 'male' | 'female' | null,
+  now: Date = new Date(),
+  llmSaysGreeted?: boolean,
+): string {
+  const greeted =
+    llmSaysGreeted === true || burstTextContainsGreeting(incomingText);
+  if (!greeted) return reply;
+  if (replyAlreadyOpensWithTimeGreeting(reply)) {
+    return reply;
+  }
+  const opener = buildGreetingOpener(contactName, gender, now);
+  const body = stripRedundantHolaPrefix(reply);
+  return body ? `${opener}\n\n${body}` : opener;
 }
 
 /** Pregunta específica según qué campo falta. */
@@ -1144,7 +1316,7 @@ export function collectingSystemPrompt(
     '',
     'FASE ACTUAL: Recolectando datos para buscar fincas.',
     missingField
-      ? `DATO QUE FALTA: ${missingField}. Tu respuesta debe pedir SOLO ese dato, de forma natural.`
+      ? `DATO QUE FALTA: ${missingField}. Tu respuesta debe pedir SOLO ese dato, de forma natural, en 1-2 líneas. PROHIBIDO ABSOLUTAMENTE: mencionar expertos, decir "te conectamos con alguien", ofrecer handoffs o hablar de disponibilidad — eso viene después cuando ya tengas todos los datos.`
       : 'Ya tienes todos los datos. Confirma al cliente que vas a buscarle las fincas.',
     '',
     'Datos ya recolectados:',

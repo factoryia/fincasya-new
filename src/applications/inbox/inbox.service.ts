@@ -416,6 +416,12 @@ export class InboxService {
     return { ok: true };
   }
 
+  async deleteWebConversation(conversationId: string) {
+    return this.convexService.mutation('conversations:deleteWebConversation', {
+      conversationId,
+    });
+  }
+
   async setPriority(
     conversationId: string,
     priority: 'urgent' | 'low' | 'medium' | 'resolved',
