@@ -194,7 +194,7 @@ export function isWithinBusinessHours(nowMs: number): boolean {
 export const AFTER_HOURS_NOTICE = [
   "",
   "",
-  `📅 Nuestro horario de atención es de Lunes a Viernes, de 7:00 AM a 5:00 PM, y Sábados de 7:00 AM a 3:00 PM (hora Colombia).`,
+  `📅 Nuestro horario de atención es ${BUSINESS_HOURS_SCHEDULE_SHORT} (hora Colombia).`,
   "",
   "Si nos escribes fuera de este horario, tu mensaje seguirá siendo recibido con normalidad 🙌",
   "Puedes continuar enviando la información de tu viaje o reserva para ir avanzando en el proceso.",
