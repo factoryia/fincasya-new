@@ -800,6 +800,20 @@ export default defineSchema({
     botOnlyNewConversations: v.optional(v.boolean()),
     /** Momento (ms) desde el cual el bot atiende conversaciones (corte). */
     botOnlyNewConversationsSince: v.optional(v.number()),
+    /**
+     * KILL-SWITCH de mensajería automática programada (timeline check-in,
+     * recordatorios de reserva). DEFAULT = APAGADO: solo `true` explícito
+     * envía. Los crons corren pero no envían nada mientras esté apagado.
+     * Incidente origen: recordatorio de salida a las 4:00 AM (2026-07-13);
+     * queda apagado hasta que el cliente apruebe las plantillas.
+     */
+    scheduledMessagingEnabled: v.optional(v.boolean()),
+    /**
+     * Apagado FINO por tipo de mensaje: keys de momento deshabilitadas
+     * (ej. "tourist_departure", "owner_week_reminder", "booking_reminder_email").
+     * Se aplica aunque el switch global esté encendido.
+     */
+    scheduledMessagesDisabled: v.optional(v.array(v.string())),
     updatedAt: v.number(),
     updatedByUserId: v.optional(v.string()),
   }).index('by_scope', ['scope']),

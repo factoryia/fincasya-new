@@ -19,6 +19,9 @@
 const AUTO_REPLY_TEMPLATE_MARKERS = [
   "gracias por comunicarte con fincasya",
   "en breve te brindaremos",
+  // Plantilla de campaña/bienvenida corta: "¡Hola! 👋 Bienvenido(a) a *FincasYa* 🌿…"
+  // Sin este marker, ese saliente cuenta como asesor humano y silencia al bot.
+  "bienvenido(a) a *fincasya*",
 ];
 
 /** True si el contenido es la plantilla de saludo automática (no un humano). */

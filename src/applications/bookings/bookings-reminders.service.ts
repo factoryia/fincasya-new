@@ -14,12 +14,38 @@ export class BookingsRemindersService {
   ) {}
 
   /**
-   * Cron job que se ejecuta todos los días a las 8:00 AM
+   * Cron job que se ejecuta todos los días a las 8:00 AM HORA COLOMBIA.
+   *
+   * ⚠️ Sin `timeZone`, NestJS usa la hora del SERVIDOR (el contenedor corre en
+   * UTC): "8 AM" eran las 3:00 AM en Colombia y los clientes recibían
+   * recordatorios de madrugada (incidente 2026-07-13).
    */
-  @Cron(CronExpression.EVERY_DAY_AT_8AM)
+  @Cron(CronExpression.EVERY_DAY_AT_8AM, { timeZone: 'America/Bogota' })
   async handleCron() {
+    // KILL-SWITCH del panel: mensajería automática apagada (global) o este
+    // tipo ("booking_reminder_email") deshabilitado → no enviar nada.
+    try {
+      const automation = (await this.convexService.query(
+        'platformSettings:getAutomationSettings',
+        {},
+      )) as {
+        scheduledMessagingEnabled?: boolean;
+        scheduledMessagesDisabled?: string[];
+      };
+      if (automation?.scheduledMessagingEnabled === false) {
+        this.logger.warn('Mensajería automática APAGADA (switch global) — recordatorios de reserva omitidos.');
+        return;
+      }
+      if ((automation?.scheduledMessagesDisabled ?? []).includes('booking_reminder_email')) {
+        this.logger.warn('Recordatorio de reserva (email) deshabilitado desde el panel — omitido.');
+        return;
+      }
+    } catch (e) {
+      this.logger.warn(`No se pudo leer la config de automatización (sigo con el envío): ${(e as Error).message}`);
+    }
+
     this.logger.log('Iniciando proceso de recordatorios de reserva (3 días antes)...');
-    
+
     try {
       // Calcular el rango de fechas para dentro de 3 días
       const threeDaysFromNow = addDays(new Date(), 3);
