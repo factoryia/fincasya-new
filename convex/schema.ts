@@ -802,9 +802,10 @@ export default defineSchema({
     botOnlyNewConversationsSince: v.optional(v.number()),
     /**
      * KILL-SWITCH de mensajería automática programada (timeline check-in,
-     * recordatorios de reserva). `undefined` = encendido (compat). Cuando es
-     * `false`, los crons corren pero NINGÚN mensaje automático se envía.
-     * Incidente origen: recordatorio de salida a las 4:00 AM (2026-07-13).
+     * recordatorios de reserva). DEFAULT = APAGADO: solo `true` explícito
+     * envía. Los crons corren pero no envían nada mientras esté apagado.
+     * Incidente origen: recordatorio de salida a las 4:00 AM (2026-07-13);
+     * queda apagado hasta que el cliente apruebe las plantillas.
      */
     scheduledMessagingEnabled: v.optional(v.boolean()),
     /**

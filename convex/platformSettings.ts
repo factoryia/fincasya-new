@@ -168,10 +168,14 @@ function buildAutomationSettingsResponse(
   row: Awaited<ReturnType<typeof getPlatformSettingsRow>>,
 ) {
   return {
-    /** undefined/true = encendido; solo `false` apaga (compatibilidad). */
+    /**
+     * DEFAULT = APAGADO: solo `true` explícito enciende. Decisión del cliente
+     * (2026-07-13): los mensajes automáticos quedan deshabilitados hasta que
+     * las plantillas sean revisadas y aprobadas; se encienden desde el panel.
+     */
     scheduledMessagingEnabled:
       (row as { scheduledMessagingEnabled?: boolean } | null)
-        ?.scheduledMessagingEnabled !== false,
+        ?.scheduledMessagingEnabled === true,
     scheduledMessagesDisabled:
       (row as { scheduledMessagesDisabled?: string[] } | null)
         ?.scheduledMessagesDisabled ?? [],
