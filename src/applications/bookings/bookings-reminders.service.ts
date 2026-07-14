@@ -14,9 +14,13 @@ export class BookingsRemindersService {
   ) {}
 
   /**
-   * Cron job que se ejecuta todos los días a las 8:00 AM
+   * Cron job que se ejecuta todos los días a las 8:00 AM HORA COLOMBIA.
+   *
+   * ⚠️ Sin `timeZone`, NestJS usa la hora del SERVIDOR (el contenedor corre en
+   * UTC): "8 AM" eran las 3:00 AM en Colombia y los clientes recibían
+   * recordatorios de madrugada (incidente 2026-07-13).
    */
-  @Cron(CronExpression.EVERY_DAY_AT_8AM)
+  @Cron(CronExpression.EVERY_DAY_AT_8AM, { timeZone: 'America/Bogota' })
   async handleCron() {
     this.logger.log('Iniciando proceso de recordatorios de reserva (3 días antes)...');
     

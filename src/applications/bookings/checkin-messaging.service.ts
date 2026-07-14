@@ -101,8 +101,14 @@ export class CheckinMessagingService {
     private readonly guestListPdfService: GuestListPdfService,
   ) {}
 
-  /** Cron diario: dispara cada momento del timeline cuyo día aplique hoy. */
-  @Cron(CronExpression.EVERY_DAY_AT_9AM)
+  /**
+   * Cron diario: dispara cada momento del timeline cuyo día aplique hoy.
+   *
+   * ⚠️ Sin `timeZone`, NestJS usa la hora del SERVIDOR (el contenedor corre en
+   * UTC): "9 AM" eran las 4:00 AM en Colombia — el recordatorio de salida le
+   * llegó a una clienta a las 4:00 a.m. (incidente 2026-07-13).
+   */
+  @Cron(CronExpression.EVERY_DAY_AT_9AM, { timeZone: 'America/Bogota' })
   async handleDailyCron() {
     this.logger.log('Iniciando motor de mensajería de check-in (timeline §3)...');
     const windows = this.computeDailyWindows(new Date());
