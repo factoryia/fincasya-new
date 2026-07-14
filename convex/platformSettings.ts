@@ -151,3 +151,120 @@ export const setChannelAiEnabledPublic = mutation({
     return buildAiSettingsResponse(row);
   },
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// KILL-SWITCH de mensajería automática programada (timeline check-in +
+// recordatorios de reserva). Origen: incidente del recordatorio a las 4:00 AM
+// (2026-07-13). El gate duro vive en `checkinMessaging.runScheduledMoment` y
+// en los crons de Nest — esto es solo la configuración.
+//
+// Keys válidas para el apagado fino: las de `templateCatalog.ts`
+// (tourist_departure, tourist_checkin_start, tourist_checkin_pending,
+// tourist_travel_tomorrow, owner_arrival_tomorrow, owner_week_reminder) +
+// "booking_reminder_email" (recordatorio de reserva por correo, Nest/Brevo).
+// ─────────────────────────────────────────────────────────────────────────────
+
+function buildAutomationSettingsResponse(
+  row: Awaited<ReturnType<typeof getPlatformSettingsRow>>,
+) {
+  return {
+    /** undefined/true = encendido; solo `false` apaga (compatibilidad). */
+    scheduledMessagingEnabled:
+      (row as { scheduledMessagingEnabled?: boolean } | null)
+        ?.scheduledMessagingEnabled !== false,
+    scheduledMessagesDisabled:
+      (row as { scheduledMessagesDisabled?: string[] } | null)
+        ?.scheduledMessagesDisabled ?? [],
+    updatedAt: row?.updatedAt ?? null,
+  };
+}
+
+/** Config de mensajería automática (para el panel admin, vía API Nest). */
+export const getAutomationSettings = query({
+  args: {},
+  handler: async (ctx) => {
+    const row = await getPlatformSettingsRow(ctx);
+    return buildAutomationSettingsResponse(row);
+  },
+});
+
+/** Igual pero interna (para el motor de envíos). */
+export const getAutomationSettingsInternal = internalQuery({
+  args: {},
+  handler: async (ctx) => {
+    const row = await getPlatformSettingsRow(ctx);
+    return buildAutomationSettingsResponse(row);
+  },
+});
+
+/** Switch GLOBAL de mensajes automáticos (autorización en API Nest). */
+export const setScheduledMessagingEnabled = mutation({
+  args: {
+    enabled: v.boolean(),
+    updatedByUserId: v.optional(v.string()),
+  },
+  handler: async (ctx, { enabled, updatedByUserId }) => {
+    const now = Date.now();
+    const existing = await ctx.db
+      .query('platformSettings')
+      .withIndex('by_scope', (q) => q.eq('scope', GLOBAL_PLATFORM_SCOPE))
+      .unique();
+    if (existing) {
+      await ctx.db.patch(existing._id, {
+        scheduledMessagingEnabled: enabled,
+        updatedAt: now,
+        updatedByUserId,
+      });
+    } else {
+      await ctx.db.insert('platformSettings', {
+        scope: GLOBAL_PLATFORM_SCOPE,
+        aiEnabled: false,
+        scheduledMessagingEnabled: enabled,
+        updatedAt: now,
+        updatedByUserId,
+      });
+    }
+    const row = await getPlatformSettingsRow(ctx);
+    return buildAutomationSettingsResponse(row);
+  },
+});
+
+/** Apagado FINO por tipo de mensaje (autorización en API Nest). */
+export const setScheduledMessageTypeDisabled = mutation({
+  args: {
+    key: v.string(),
+    disabled: v.boolean(),
+    updatedByUserId: v.optional(v.string()),
+  },
+  handler: async (ctx, { key, disabled, updatedByUserId }) => {
+    const now = Date.now();
+    const existing = await ctx.db
+      .query('platformSettings')
+      .withIndex('by_scope', (q) => q.eq('scope', GLOBAL_PLATFORM_SCOPE))
+      .unique();
+    const current = new Set(
+      ((existing as { scheduledMessagesDisabled?: string[] } | null)
+        ?.scheduledMessagesDisabled ?? []) as string[],
+    );
+    if (disabled) current.add(key.trim());
+    else current.delete(key.trim());
+    const list = Array.from(current);
+    if (existing) {
+      await ctx.db.patch(existing._id, {
+        scheduledMessagesDisabled: list,
+        updatedAt: now,
+        updatedByUserId,
+      });
+    } else {
+      await ctx.db.insert('platformSettings', {
+        scope: GLOBAL_PLATFORM_SCOPE,
+        aiEnabled: false,
+        scheduledMessagesDisabled: list,
+        updatedAt: now,
+        updatedByUserId,
+      });
+    }
+    const row = await getPlatformSettingsRow(ctx);
+    return buildAutomationSettingsResponse(row);
+  },
+});

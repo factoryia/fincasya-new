@@ -22,8 +22,30 @@ export class BookingsRemindersService {
    */
   @Cron(CronExpression.EVERY_DAY_AT_8AM, { timeZone: 'America/Bogota' })
   async handleCron() {
+    // KILL-SWITCH del panel: mensajería automática apagada (global) o este
+    // tipo ("booking_reminder_email") deshabilitado → no enviar nada.
+    try {
+      const automation = (await this.convexService.query(
+        'platformSettings:getAutomationSettings',
+        {},
+      )) as {
+        scheduledMessagingEnabled?: boolean;
+        scheduledMessagesDisabled?: string[];
+      };
+      if (automation?.scheduledMessagingEnabled === false) {
+        this.logger.warn('Mensajería automática APAGADA (switch global) — recordatorios de reserva omitidos.');
+        return;
+      }
+      if ((automation?.scheduledMessagesDisabled ?? []).includes('booking_reminder_email')) {
+        this.logger.warn('Recordatorio de reserva (email) deshabilitado desde el panel — omitido.');
+        return;
+      }
+    } catch (e) {
+      this.logger.warn(`No se pudo leer la config de automatización (sigo con el envío): ${(e as Error).message}`);
+    }
+
     this.logger.log('Iniciando proceso de recordatorios de reserva (3 días antes)...');
-    
+
     try {
       // Calcular el rango de fechas para dentro de 3 días
       const threeDaysFromNow = addDays(new Date(), 3);

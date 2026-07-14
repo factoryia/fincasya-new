@@ -154,6 +154,29 @@ export class InboxService {
     });
   }
 
+  /** Kill-switch de mensajes automáticos programados (panel Automatizaciones). */
+  async getAutomationSettings() {
+    return this.convexService.query('platformSettings:getAutomationSettings', {});
+  }
+
+  async setScheduledMessagingEnabled(enabled: boolean, updatedByUserId?: string) {
+    return this.convexService.mutation(
+      'platformSettings:setScheduledMessagingEnabled',
+      { enabled, updatedByUserId },
+    );
+  }
+
+  async setScheduledMessageTypeDisabled(
+    key: string,
+    disabled: boolean,
+    updatedByUserId?: string,
+  ) {
+    return this.convexService.mutation(
+      'platformSettings:setScheduledMessageTypeDisabled',
+      { key, disabled, updatedByUserId },
+    );
+  }
+
   /**
    * Mensaje temporal automático WhatsApp (configurado por admin).
    * GET: devuelve configuración + flag `active` calculado.

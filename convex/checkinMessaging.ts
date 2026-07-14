@@ -909,6 +909,27 @@ export const sendTemplateToBooking = action({
 // Motor: ejecutar un momento del timeline (lo llama el cron de NestJS)
 // ─────────────────────────────────────────────────────────────────────────────
 
+/**
+ * Ventana de "horario decente" para mensajes automáticos (hora Colombia).
+ * Blindaje de última línea: aunque un cron/retry/deploy dispare esto a
+ * deshoras, NUNCA se envía un mensaje automático fuera de esta franja
+ * (incidente 2026-07-13: recordatorio de salida a las 4:00 AM por cron en UTC).
+ */
+const DECENT_HOURS_START = 8; // 8:00 AM
+const DECENT_HOURS_END = 20; // 8:00 PM
+
+function isWithinDecentHoursColombia(nowMs: number): boolean {
+  const hour = parseInt(
+    new Intl.DateTimeFormat("en-US", {
+      timeZone: "America/Bogota",
+      hour: "2-digit",
+      hour12: false,
+    }).format(new Date(nowMs)),
+    10,
+  );
+  return hour >= DECENT_HOURS_START && hour < DECENT_HOURS_END;
+}
+
 export const runScheduledMoment = action({
   args: {
     key: v.string(),
@@ -921,6 +942,27 @@ export const runScheduledMoment = action({
     const def = getTemplateDef(args.key);
     if (!def) throw new Error(`Plantilla desconocida: ${args.key}`);
     const key = args.key as CheckinTemplateKey;
+
+    // ─── KILL-SWITCH + BLINDAJE (antes de tocar cualquier reserva) ────────
+    // El dryRun se permite siempre (es solo lectura, útil para probar).
+    if (!args.dryRun) {
+      const automation = (await ctx.runQuery(
+        internal.platformSettings.getAutomationSettingsInternal,
+        {},
+      )) as { scheduledMessagingEnabled: boolean; scheduledMessagesDisabled: string[] };
+      if (!automation.scheduledMessagingEnabled) {
+        console.log(`[checkinMessaging] mensajería automática APAGADA (switch global) — momento ${args.key} omitido`);
+        return { candidates: 0, planned: 0, sent: 0, failed: 0, skipped: "global_switch_off" };
+      }
+      if (automation.scheduledMessagesDisabled.includes(args.key)) {
+        console.log(`[checkinMessaging] tipo ${args.key} deshabilitado desde el panel — omitido`);
+        return { candidates: 0, planned: 0, sent: 0, failed: 0, skipped: "type_disabled" };
+      }
+      if (!isWithinDecentHoursColombia(Date.now())) {
+        console.error(`[checkinMessaging] intento de envío FUERA de horario decente (8am-8pm CO) — momento ${args.key} pospuesto. Revisar quién lo disparó.`);
+        return { candidates: 0, planned: 0, sent: 0, failed: 0, skipped: "outside_decent_hours" };
+      }
+    }
 
     const dateField =
       key === "tourist_departure" ? "fechaSalida" : "fechaEntrada";

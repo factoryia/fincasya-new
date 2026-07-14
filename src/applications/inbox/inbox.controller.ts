@@ -84,6 +84,43 @@ export class InboxController {
     return this.inboxService.getAiSettings();
   }
 
+  /** Config del kill-switch de mensajes automáticos (panel Automatizaciones). */
+  @Get('automation-settings')
+  async getAutomationSettings() {
+    return this.inboxService.getAutomationSettings();
+  }
+
+  /** Switch global de mensajes automáticos programados. */
+  @Patch('automation-settings')
+  @Roles(UserRole.ADMIN)
+  async setScheduledMessagingEnabled(
+    @Body() body: { enabled: boolean; updatedByUserId?: string },
+  ) {
+    if (typeof body?.enabled !== 'boolean') {
+      throw new BadRequestException('enabled debe ser boolean');
+    }
+    return this.inboxService.setScheduledMessagingEnabled(
+      body.enabled,
+      body?.updatedByUserId,
+    );
+  }
+
+  /** Apagado fino por tipo (tourist_departure, booking_reminder_email, …). */
+  @Patch('automation-settings/type')
+  @Roles(UserRole.ADMIN)
+  async setScheduledMessageTypeDisabled(
+    @Body() body: { key: string; disabled: boolean; updatedByUserId?: string },
+  ) {
+    if (!body?.key?.trim() || typeof body?.disabled !== 'boolean') {
+      throw new BadRequestException('key (string) y disabled (boolean) son requeridos');
+    }
+    return this.inboxService.setScheduledMessageTypeDisabled(
+      body.key.trim(),
+      body.disabled,
+      body?.updatedByUserId,
+    );
+  }
+
   @Get('whatsapp-temporal-message')
   async getWhatsappTemporalMessage() {
     return this.inboxService.getWhatsappTemporalMessageSettings();
